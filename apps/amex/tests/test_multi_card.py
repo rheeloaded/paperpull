@@ -1115,6 +1115,18 @@ def page_of(browser):
         ctx.close()
 
 
+@pytest.mark.parametrize("text,account,named", [
+    ("Account Ending 1-11111", "Alpha Card (11111)", True),
+    ("Account Ending 1-22222", "Alpha Card (11111)", False),
+    ("Card Number XXXX-XXXXXX-11111 Prepared for", "Alpha Card (11111)", True),
+    ("Reference 111112", "Alpha Card (11111)", False),
+    ("", "Alpha Card (11111)", False),
+    ("Account Ending 1-11111", "Alpha Card", False),
+])
+def test_a_pdf_names_its_card_by_the_digits_it_ends_in(text, account, named):
+    assert site.names_card(text, account) is named
+
+
 def test_a_list_none_of_whose_downloads_shows_stops_before_the_switch(page_of, monkeypatch):
     """A button that does not show reads as gone from the start, so with every
     Download hidden there is nothing to hold, and the old list would be taken

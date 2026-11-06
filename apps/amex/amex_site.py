@@ -1119,12 +1119,27 @@ def select_card(page, card: dict) -> bool:
     return True
 
 
+def card_digits(account: str) -> str:
+    """The digits a record's `account` gives its card by."""
+    m = re.search(r"\((\d+)\)", account or "")
+    return m.group(1) if m else re.sub(r"\D", "", account or "")
+
+
+def names_card(text: str, account: str) -> bool:
+    """Whether a PDF's text names the card of `account`, by the digits it
+    ends in. A statement prints them after "Account Ending" on its first
+    page, and a year-end summary beside its sections, as 127 statements and a
+    summary of one account did. More digits may come before them, as the
+    number on the card has, and none may come after."""
+    digits = card_digits(account)
+    return bool(digits) and re.search(re.escape(digits) + r"(?!\d)", text or "") is not None
+
+
 def ensure_card(page, account: str) -> bool:
     """Ensure that the page is on the card matching `account`."""
     if not account:
         return True
-    m = re.search(r"\((\d+)\)", account)
-    digits = m.group(1) if m else re.sub(r"\D", "", account)
+    digits = card_digits(account)
     if not digits:
         return False
     current_digits = _current_card_digits(page)

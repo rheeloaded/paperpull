@@ -564,6 +564,26 @@ def test_a_first_list_that_comes_after_the_press_is_never_taken_for_the_next_car
     assert noted_whole(tmp_path) is False
 
 
+@pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
+def test_a_pdf_of_another_card_is_never_called_done(attached, serve, tmp_path, capsys, width):
+    """The press draws the old list again as new rows before the next card's
+    comes. What was held has gone and a list shows, so the waits are met by
+    the wrong one, and two cards' year-end summaries share their date. The
+    PDF says whose it is, so it goes to review and nothing is called done
+    under the wrong card."""
+    amex = serve(old_list_on_press=True, list_ms=1500)
+    their_tab(attached, amex, width)
+    code, out = run_all(config(tmp_path, attached), capsys)
+
+    kept = saved(tmp_path)
+    done = [r for r in kept.values() if r["state"] == State.COMPLETED.value]
+    assert done and all(r["card"] == digits_of(r["account"]) for r in done), kept
+    held = [r for r in kept.values() if r["state"] == State.NEEDS_MANUAL_REVIEW.value]
+    assert held and all(r["card"] != digits_of(r["account"]) for r in held), kept
+    assert "so it may be another card's" in folded(out)
+    assert list((tmp_path / "out").rglob("Manual Review/*.pdf"))
+
+
 def test_a_list_that_never_goes_stops_the_run_in_a_narrow_window(attached, serve, tmp_path, capsys):
     """The list comes after the wait for the old one has run out, in the
     window where the first copy is the hidden one. The run stops with the

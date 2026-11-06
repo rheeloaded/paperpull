@@ -755,6 +755,29 @@ class App:
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
 
+        # However a page redraws, what a switch waited for says only that a
+        # list came, so on a sign-in filed by card the PDF itself has to name
+        # its card. One that does not is kept for a person to look at, and
+        # nothing is called done. With one card no record names a card.
+        if doc.account and not site.names_card(receipt_pdf.pdf_text(out_path), doc.account):
+            quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                     self.config["max_path_length"])
+            try:
+                out_path.replace(quarantine)
+            except OSError:
+                quarantine = out_path
+            doc.pdf_path, doc.pdf_filename = str(quarantine), quarantine.name
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes=f"The PDF does not name {doc.account}")
+            self._write_row(doc, "Card not named", "Needs Manual Review")
+            self.write_failure('validate the saved pdf', 'the saved pdf did not validate')
+            self.stats["manual_review"] += 1
+            print(f"  !! The PDF does not name {doc.account}, so it may be another card's. "
+                  "Moved to Manual Review.\n"
+                  "     Delete it there to have the next run try again.")
+            site.close_file_type_dialog(page, quiet=True)
+            return
+
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
         self._record(doc, State.COMPLETED)

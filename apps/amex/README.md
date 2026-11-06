@@ -97,6 +97,12 @@ on with the other cards. A card the switcher holds but
 does not show, in a collapsed group say, cannot be chosen, so the run names it
 and stops, and with one card shown it does not go the one-card way.
 
+Each PDF saved for a card has to name that card by its last digits, as a
+statement does on its first page and a year-end summary beside its sections. One
+that does not is moved to Manual Review, since it may be another card's, and is
+not called done. Delete it there to have the next run try again. With one card
+nothing is checked, and files stay as they were.
+
 With statements filed by card, a Resume after a list that was not read whole
 takes nothing, since the card the switcher shows may not be the list on show.
 Run Pilot or Run All instead, which read each card again.
