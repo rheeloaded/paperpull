@@ -4,8 +4,9 @@ A sign-in whose accounts all sat under viewOnlyAccounts read as no accounts,
 and Discover ended clean with `Documents known: 0` (#137). Any answer the app
 could not read did the same, so a Resume after it found nothing left to do.
 Now a refused answer, an answer of another shape, or a row with no id stops
-the list. Discover records nothing and leaves the listing noted as stopped,
-and a download that reads the day's list stops once with the list unread.
+the list. Discover records nothing new and leaves the listing noted as
+stopped. A download reads one account's one day, so a refusal there leaves the
+id the record keeps to try, and costs no other document its turn.
 """
 import io
 import json
@@ -17,7 +18,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from paperpull_core import listing
 from paperpull_core import storage as core_storage
 import schwab_docs as docs
 import schwab_site as site
@@ -55,6 +55,11 @@ ACCOUNTS_THAT_STOP = {
         brokerage=[{"id": "11112222", "nickName": "Trading"}],
         view_only={"id": "33334444"}),
     "rows saying accountId": accounts_answer(view_only=[{"accountId": "12345678"}]),
+    "accounts only in a list nothing shows": {"status": 200, "body": {
+        "accountSelectorData": {
+            "brokerageAccountList": {"brokerageAccounts": [], "viewOnlyAccounts": []},
+            "accountsData": {"accountDetails": [{"id": "12345678"}]}},
+        "profile": {"accounts": [{"id": "12345678"}]}}},
     "a row with no id beside a good one": accounts_answer(
         brokerage=[{"id": "11112222", "nickName": "Trading"}],
         view_only=[{"nickName": "SchwabOne"}]),
@@ -124,18 +129,18 @@ def test_a_documents_answer_that_cannot_be_read_stops_the_list(monkeypatch, answ
 
 @pytest.mark.parametrize("documents", [{}, {"documents": None}, {"documents": []}],
                          ids=["no key", "null", "empty"])
-def test_a_day_with_no_documents_is_no_stop(monkeypatch, documents):
-    """A day's list with nothing on it is an answer, so a document no longer
-    listed still goes on to the id its record keeps."""
+def test_a_list_with_no_documents_is_no_stop(monkeypatch, documents):
     monkeypatch.setattr(site, "_gateway_call",
                         gateway(ONE_ACCOUNT, {"status": 200, "body": documents}))
     assert site.collect_documents(PAGE) == []
 
 
-def test_an_empty_list_beside_a_list_with_rows_is_no_stop(monkeypatch):
+@pytest.mark.parametrize("empty", [None, [], {}], ids=["null", "list", "object"])
+@pytest.mark.parametrize("full, other", [("brokerageAccounts", "viewOnlyAccounts"),
+                                         ("viewOnlyAccounts", "brokerageAccounts")])
+def test_an_empty_list_beside_a_list_with_rows_is_no_stop(monkeypatch, full, other, empty):
     answer = {"status": 200, "body": {"accountSelectorData": {"brokerageAccountList": {
-        "brokerageAccounts": [{"id": "11112222", "nickName": "Trading"}],
-        "viewOnlyAccounts": None}}}}
+        full: [{"id": "11112222", "nickName": "Trading"}], other: empty}}}}
     monkeypatch.setattr(site, "_gateway_call", gateway(answer, ONE_DOCUMENT))
     assert [a["account_id"] for a in site.list_accounts(PAGE)] == ["11112222"]
 
@@ -160,6 +165,22 @@ def test_discover_stops_with_nothing_recorded_and_the_list_not_whole(
     assert not json.loads((out / "discovery.json").read_text(encoding="utf-8"))
     assert note_of(out)["complete"] is False
     assert list((out / "Diagnostics").glob("failure-*.json"))
+    assert "12345678" not in said and "11112222" not in said
+
+
+def test_a_stopped_discover_keeps_what_an_earlier_one_found(tmp_path, monkeypatch):
+    cfg, out = setup_app(tmp_path, monkeypatch)
+    monkeypatch.setattr(site, "_gateway_call", gateway(ONE_ACCOUNT, ONE_DOCUMENT))
+    docs.main(["--config", str(cfg), "--discover"])
+    known = (out / "discovery.json").read_text(encoding="utf-8")
+
+    monkeypatch.setattr(site, "_gateway_call", gateway(
+        ACCOUNTS_THAT_STOP["refused"], ONE_DOCUMENT))
+    with pytest.raises(SystemExit):
+        docs.main(["--config", str(cfg), "--discover"])
+
+    assert (out / "discovery.json").read_text(encoding="utf-8") == known
+    assert note_of(out)["complete"] is False
 
 
 def test_a_whole_list_after_a_stop_is_noted_whole(tmp_path, monkeypatch):
@@ -176,35 +197,91 @@ def test_a_whole_list_after_a_stop_is_noted_whole(tmp_path, monkeypatch):
     assert note_of(out)["complete"] is True
 
 
-@pytest.mark.parametrize("answer", DOCUMENTS_THAT_STOP.values(), ids=DOCUMENTS_THAT_STOP.keys())
-def test_a_list_that_stops_while_downloading_stops_once_with_the_list_unread(
-        tmp_path, monkeypatch, capsys, answer):
+def two_documents_found(tmp_path, monkeypatch):
     cfg, out = setup_app(tmp_path, monkeypatch)
     two = {"status": 200, "body": {"documents": [
         {**ONE_DOCUMENT["body"]["documents"][0], "documentId": f"DOC-{n}",
          "date": f"{n:02d}/15/2031"} for n in (9, 10)]}}
     monkeypatch.setattr(site, "_gateway_call", gateway(ONE_ACCOUNT, two))
     docs.main(["--config", str(cfg), "--discover"])
+    return cfg, out
 
-    reads = []
 
-    def refused(_page, url, _headers, post_body=None):
-        reads.append(url)
-        return answer
+def states(out: Path) -> list:
+    progress = json.loads((out / "progress.json").read_text(encoding="utf-8"))
+    return sorted(rec["state"] for rec in progress.values())
 
+
+@pytest.mark.parametrize("answer", DOCUMENTS_THAT_STOP.values(), ids=DOCUMENTS_THAT_STOP.keys())
+def test_a_days_list_that_will_not_answer_leaves_the_id_the_record_keeps(
+        tmp_path, monkeypatch, answer):
+    """A run that lists nothing still saves what the records say how to ask
+    for, as it did before a refusal had a name."""
+    cfg, out = two_documents_found(tmp_path, monkeypatch)
     fetched = []
-    monkeypatch.setattr(site, "_gateway_call", refused)
-    monkeypatch.setattr(site, "fetch_pdf", lambda _p, doc: fetched.append(doc) or (200, pdf()))
-    capsys.readouterr()
+    monkeypatch.setattr(site, "_gateway_call", gateway(ONE_ACCOUNT, answer))
+    monkeypatch.setattr(site, "fetch_pdf", lambda _p, doc: (
+        fetched.append(doc["documentId"]) or (200, pdf())))
 
-    with pytest.raises(listing.ListNotRead):
-        app = docs.App(docs.build_parser().parse_args(["--config", str(cfg), "--resume"]))
-        app.cmd_resume()
+    docs.main(["--config", str(cfg), "--resume"])
 
-    assert len(reads) == 1
-    assert not fetched
-    assert not json.loads((out / "progress.json").read_text(encoding="utf-8"))
-    assert "could not be read again" in capsys.readouterr().out
+    assert fetched == ["DOC-10", "DOC-9"]
+    assert states(out) == ["Completed", "Completed"]
+
+
+def test_a_document_that_will_not_come_costs_the_next_one_nothing(tmp_path, monkeypatch):
+    """One account's day may be refused while the rest answer, so a run goes
+    on past it, and the one refused waits in Manual Review for the next run."""
+    cfg, out = two_documents_found(tmp_path, monkeypatch)
+    monkeypatch.setattr(site, "_gateway_call",
+                        gateway(ONE_ACCOUNT, DOCUMENTS_THAT_STOP["refused"]))
+    monkeypatch.setattr(site, "fetch_pdf", lambda _p, doc: (
+        (403, b"") if doc["documentId"] == "DOC-10" else (200, pdf())))
+
+    docs.main(["--config", str(cfg), "--resume"])
+
+    assert states(out) == ["Completed", "Needs Manual Review"]
+
+
+@pytest.mark.parametrize("documents", [{}, {"documents": None}, {"documents": []}],
+                         ids=["no key", "null", "empty"])
+def test_a_document_no_longer_listed_goes_on_to_the_id_its_record_keeps(
+        tmp_path, monkeypatch, documents):
+    cfg, out = two_documents_found(tmp_path, monkeypatch)
+    fetched = []
+    monkeypatch.setattr(site, "_gateway_call",
+                        gateway(ONE_ACCOUNT, {"status": 200, "body": documents}))
+    monkeypatch.setattr(site, "fetch_pdf", lambda _p, doc: (
+        fetched.append(doc["documentId"]) or (200, pdf())))
+
+    docs.main(["--config", str(cfg), "--resume"])
+
+    assert fetched == ["DOC-10", "DOC-9"]
+
+
+@pytest.mark.parametrize("accounts, documents, listed", [
+    (ACCOUNTS_THAT_STOP["refused"], ONE_DOCUMENT, 0),
+    (ONE_ACCOUNT, DOCUMENTS_THAT_STOP["refused"], 1),
+], ids=["accounts", "documents"])
+def test_diagnose_keeps_what_the_page_shows_when_the_list_stops(
+        tmp_path, monkeypatch, accounts, documents, listed):
+    cfg, out = setup_app(tmp_path, monkeypatch)
+    monkeypatch.setattr(site, "_gateway_call", gateway(accounts, documents))
+    monkeypatch.setattr(site, "goto_documents", lambda _page: True)
+    monkeypatch.setattr(site, "looks_signed_out", lambda _page: False)
+    monkeypatch.setattr(site, "detect_security_challenge", lambda _page: "")
+    monkeypatch.setattr(site, "read_page_ui", lambda _page: {
+        "selectedAccount": "", "chips": [], "dateRange": "", "rows": [], "buttons": ["Statements"]})
+    page = SimpleNamespace(url=PAGE.url, title=lambda: "Statements",
+                           screenshot=lambda **_kw: None)
+    monkeypatch.setattr(docs.App, "page", lambda app: page)
+
+    docs.main(["--config", str(cfg), "--diagnose"])
+
+    info = json.loads(next(out.rglob("diagnose-documents.json")).read_text(encoding="utf-8"))
+    assert info["error"] == "the list stopped"
+    assert len(info["accounts_api"]) == listed
+    assert info["controls"] and "rendered" in info
 
 
 def test_the_documents_page_is_asked_at_its_retail_address_first(monkeypatch):

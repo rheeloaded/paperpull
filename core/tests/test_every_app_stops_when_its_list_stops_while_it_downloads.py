@@ -116,6 +116,11 @@ ITS_OWN = {
         "two shapes of row, and a stop there would stop every later run at the same row. "
         "A refusal once something on the row was pressed stops the run (Run.presses), "
         "and a stop of the list on the way to the row (_reach_row) reaches the run",
+    ("schwab", "listed_alike", ("list_documents",)):
+        "one account's one day, asked only to find the id a record keeps has moved. The "
+        "id the record keeps is still tried, and a document that will not come goes to "
+        "review by itself, so a day refused for one account costs the others nothing. "
+        "The whole list is Discover's to read",
     ("shelbycounty", "goto_documents", ("settled_here",)):
         "the opener's answer, which every caller in the download path turns into "
         "ListStopped itself (_back_to_parcel)",

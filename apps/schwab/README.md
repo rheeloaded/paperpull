@@ -33,10 +33,11 @@ controls entirely. The one click it ever makes is on a "Continue session" or
 
 Accounts come from two lists in that answer, brokerage accounts and view-only
 accounts, and an account in both is read once. An accounts or documents answer
-the app cannot read stops the list with nothing recorded, rather than read as
-an empty one, and a day's list that stops during a download run stops the run
-once with the list unread. A Discover has been run on a view-only account, and
-a download from one has not been seen yet, so start one with a pilot.
+the app cannot read stops a Discover with nothing recorded, rather than read as
+an empty list. During downloads a day's list that will not answer leaves the id
+the record keeps to try, and a document that will not come goes to Manual
+Review by itself. A Discover has been run on a view-only account, and a download
+from one has not been seen yet, so start one with a pilot.
 
 Download identifiers are opaque and not stable, so a document is identified by
 what it is (type, name, date, account) plus its position among identical
