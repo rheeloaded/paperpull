@@ -30,6 +30,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -554,6 +555,91 @@ def test_every_invoice_of_an_order_split_into_several_moves(tmp_path, monkeypatc
     invoices = office.progress.data["Order 5555"]["invoices"]
     assert [Path(e["file"]).parent for e in invoices[:2]] == [office.docs / "Statements"] * 2
     assert all(Path(e["file"]).is_file() for e in invoices[:2])
+
+
+@pytest.mark.parametrize("key", ["Tax 2024", "Statement:2026-09-12:Monthly Statement"],
+                         ids=["a plain key", "a key of category, date and title"])
+def test_companion_files_of_a_document_move(tmp_path, monkeypatch, key):
+    """A document app with companion files (.xls, .pdf) in its invoices moves
+    them to the documents folder, with no order number. What follows the first
+    colon of a document's key is not one."""
+    office = Office(tmp_path)
+    first = office.saved("Tax 2024")
+    second = first.with_name("2026-09-12 Testco Monthly Statement (2 of 2).xls")
+    second.write_bytes(b"dummy xls content")
+    rec = office.progress.data.pop("Tax 2024")
+    office.progress.data[key] = rec
+    rec["invoices"] = [{"file": str(first), "kept": True}, {"file": str(second), "kept": True}]
+    office.build(documents=True)
+    moving(monkeypatch)
+    code, said = office.rename()
+    assert code == 0 and "Moved 2 file(s)" in said, said
+    office.progress.save()
+    invoices = office.progress.data[key]["invoices"]
+    assert [Path(e["file"]).parent for e in invoices] == [office.docs / "Statements"] * 2
+    assert all(Path(e["file"]).is_file() for e in invoices)
+    assert Path(invoices[1]["file"]).read_bytes() == b"dummy xls content"
+
+
+def lists(tmp_path, record: dict):
+    """An app with one record listing two files, and the two."""
+    first, second = tmp_path / "a (1 of 2).pdf", tmp_path / "a (2 of 2).pdf"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    record = dict(record, pdf_path=str(first), invoices=[{"file": str(first), "kept": True},
+                                                         {"file": str(second), "kept": True}])
+    return first, second, record
+
+
+@pytest.mark.parametrize("documents", [False, True], ids=["a rename", "a move"])
+def test_a_document_is_found_by_the_row_naming_its_file(tmp_path, documents):
+    first, second, rec = lists(tmp_path, {})
+    row = {"PDF Full Path": str(first), "PDF Filename": first.name,
+           "Document Title": "Form", "Document Date": "2026-09-12"}
+    app = SimpleNamespace(progress=SimpleNamespace(data={"Tax:2026-09-12:Form": rec}))
+    extra = renaming._invoices_alone(app, [row], documents=documents)
+    assert [r["PDF Full Path"] for r in extra] == [str(second)]
+    assert extra[0]["Order or Receipt Number"] == ""
+    assert extra[0]["Document Title"] == "Form"
+
+
+def test_a_document_takes_nothing_from_another_documents_row(tmp_path):
+    """No row names this document's file, and a row with no number is not its
+    own for having no number either."""
+    _first, _second, rec = lists(tmp_path, {})
+    row = {"PDF Full Path": str(tmp_path / "another.pdf"), "PDF Filename": "another.pdf",
+           "Document Title": "Another", "Document Date": "2026-09-12"}
+    app = SimpleNamespace(progress=SimpleNamespace(data={"Tax 2024": rec}))
+    assert renaming._invoices_alone(app, [row], documents=False) == []
+    assert all(r.get("Document Title") != "Another"
+               for r in renaming._invoices_alone(app, [row], documents=True))
+
+
+def test_an_order_takes_nothing_from_a_row_of_another_order(tmp_path):
+    """A row naming an order's file may be another order's (_Known.record_for).
+    A Rename leaves such an order's invoices alone, rather than give them the
+    other purchase's date."""
+    first, _second, rec = lists(tmp_path, {"order_number": "111", "purchase_date": "2026-09-01"})
+    row = {"PDF Full Path": str(first), "PDF Filename": first.name,
+           "Order or Receipt Number": "222", "Purchase Date": "2026-09-12"}
+    app = SimpleNamespace(progress=SimpleNamespace(data={"Online:111": rec}))
+    assert renaming._invoices_alone(app, [row], documents=False) == []
+    moved = renaming._invoices_alone(app, [row], documents=True)
+    assert [(r["Order or Receipt Number"], r["Purchase Date"]) for r in moved] == [("111", "2026-09-01")]
+
+
+@pytest.mark.parametrize("name,document,row", [
+    ("a.pdf", True, True), ("a.xls", True, True), ("a.xlsx", True, True), ("a.csv", True, True),
+    ("A.XLS", True, True), ("a.txt", False, False), ("a.zip", False, False),
+    ("a.pdf.renaming", False, True), ("a.xls.renaming", False, False),
+    ("a.txt.renaming", False, False), ("a.pdf.delivering", False, True),
+    ("a.xls.delivering", False, False)])
+def test_what_an_app_holds_by_how_a_file_ends(tmp_path, name, document, row):
+    path = tmp_path / name
+    path.write_bytes(b"a file")
+    held = {"PDF Full Path": str(path), "Processing Status": "Completed"}
+    assert (renaming.held_document(str(path), [tmp_path]) is not None) == document
+    assert (renaming.held_row(held, [tmp_path]) is not None) == row
 
 
 @pytest.mark.skipif(os.name != "nt", reason="only Windows keeps a read-only file from being deleted, "

@@ -4581,6 +4581,10 @@ def _indexed_files(root: Path):
     return found
 
 
+# What the Move takes, the core's renaming.VALID_DOC_EXTS.
+DOCUMENT_ENDINGS = (".pdf", ".xls", ".xlsx", ".csv")
+
+
 def _documents_left(meta: dict, account: str) -> int:
     """How many documents an account's records name that are saved and
     checked, and are in a folder of their kind in its own folder or in a
@@ -4613,7 +4617,7 @@ def _documents_left(meta: dict, account: str) -> int:
         files = [main] + [e.get("file") for e in (invoices if isinstance(invoices, list) else ())
                           if isinstance(e, dict) and e.get("kept", True)]
         for raw in files:
-            if not isinstance(raw, str) or not raw.strip().lower().endswith(".pdf"):
+            if not isinstance(raw, str) or not raw.strip().lower().endswith(DOCUMENT_ENDINGS):
                 continue
             path = Path(raw.strip())
             path = path if path.is_absolute() else root / path

@@ -142,9 +142,9 @@ NOT_HELD = "not a PDF in a folder this app files documents in"
 
 
 def held_document(text: str, folders) -> Optional[Path]:
-    """The file a row's path names, when it is a PDF in one of `folders`,
-    the folders the app files documents in (Paths.filing_folders), and
-    None for anything else.
+    """The file a row's path names, when it is a document (VALID_DOC_EXTS) in
+    one of `folders`, the folders the app files documents in
+    (Paths.filing_folders), and None for anything else.
 
     An app writes its own index, but an index can name anything. An empty
     path reads as the folder the app runs in, which exists. An index copied
@@ -154,7 +154,7 @@ def held_document(text: str, folders) -> Optional[Path]:
     climbing out of them through "..", a file somewhere else, one in Logs,
     or, with the output folder set to the app's own folder, the app's
     config file. None of those is a document this app holds, and neither
-    is a file no longer on disk, one that is not a PDF, or a link, which a
+    is a file no longer on disk, one of any other kind, or a link, which a
     rename would move in place of the file it leads to."""
     return _held(text, _real(folders))
 
@@ -184,6 +184,9 @@ def _held_row(row: dict, real_folders: List[Path],
 # The temporary name apply gives a file trading names with others
 # (_rename_ring), once or, for a file put aside again, more than once.
 _ASIDE = re.compile(r"\.pdf(\.renaming\d*)+$")
+# What a document ends in. A Wealthfront tax form can come with a workbook or
+# a table beside its PDF, and those go where the PDF goes (_invoices_alone).
+VALID_DOC_EXTS = (".pdf", ".xls", ".xlsx", ".csv")
 
 
 def _real(folders) -> List[Path]:
@@ -209,7 +212,7 @@ def _held(text: str, real_folders: List[Path], staged: bool = False,
     text = _text(text)
     if not text:
         return None
-    ends = (".pdf", ".pdf.delivering") if staged else (".pdf",)
+    ends = VALID_DOC_EXTS + (".pdf.delivering",) if staged else VALID_DOC_EXTS
     try:
         path = Path(text).resolve()
         name = path.name.lower()
@@ -1445,9 +1448,17 @@ def run_for(app, apply_changes: bool = False, say=print,
         saved = current.record_for(row, saved=True) or {}
         record = dict(record, **{k: saved.get(k, "") for k in (*_AS_SAVED, *as_saved)})
         summary = _text(record.get("summary")) or _first(row, _SUMMARY_KEYS)
-        return build_pdf_filename(_first(row, _DATE_KEYS), summary,
+        raw = (row.get("PDF Full Path") or "").strip()
+        orig_ext = Path(raw).suffix if raw else ""
+        name = build_pdf_filename(_first(row, _DATE_KEYS), summary,
                                   _first(row, _TYPE_KEYS), part=_part_of(row),
                                   record=record)
+        if orig_ext and orig_ext.lower() != ".pdf" and orig_ext.lower() in VALID_DOC_EXTS:
+            if isinstance(name, FileName):
+                name = FileName(Path(name).stem + orig_ext, name.folder)
+            else:
+                name = Path(name).stem + orig_ext
+        return name
 
     rule = told_apart or told_apart_by
     before = tuple(told_apart_before)
@@ -1501,7 +1512,7 @@ def run_for(app, apply_changes: bool = False, say=print,
         "", which leaves it where it is, for one not saved and checked."""
         raw = (row.get("PDF Full Path") or "").strip()
         home = homes.home(Path(raw)) if raw else None
-        if home is None or not raw.lower().endswith(".pdf"):
+        if home is None or not raw.lower().endswith(VALID_DOC_EXTS):
             return ""
         if only is not None and _same_file(raw) not in only:
             return ""
@@ -1678,7 +1689,14 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
     (_part_of). A move keeps every name, so it needs neither. An invoice
     another purchase's rows, record, list of invoices or notes name as well
     keeps its name, as any file does whose purchase cannot be told
-    (_Known.record_for)."""
+    (_Known.record_for).
+
+    A document can list its files the same way, the workbook that came with
+    a Wealthfront tax form. It has no order, so its row is the one naming its
+    pdf_path, and each file's row carries no number and is the document's
+    through the record's list. Told apart by its ending or a " (2)", such a
+    file goes with a rename whether or not its name still gives its part
+    (_LISTED)."""
     named = {_same_file((r.get("PDF Full Path") or "").strip()) for r in rows
              if (r.get("PDF Full Path") or "").strip()}
     extra = []
@@ -1692,11 +1710,21 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
         number = str(rec.get("order_number") or str(key).partition(":")[2]).strip()
         main = _text(rec.get("pdf_path"))
         where = _same_file(main) if main else ""
-        theirs = [r for r in rows if (r.get("Order or Receipt Number") or "").strip() == number]
+        theirs = [r for r in rows
+                  if (r.get("Order or Receipt Number") or "").strip() == number] if number else []
         own = next((r for r in theirs
                     if where and _same_file((r.get("PDF Full Path") or "").strip()) == where
                     and _one_file((r.get("PDF Full Path") or "").strip(), main)),
                    theirs[0] if theirs else None)
+        # What follows the first colon of a document's key is no order number,
+        # and on a row it made the document's own file nobody's. A purchase
+        # keeps to its own rows, since one naming its file may be another's.
+        if own is None and where and not rec.get("order_number"):
+            own = next((r for r in rows
+                        if _same_file((r.get("PDF Full Path") or "").strip()) == where
+                        and _one_file((r.get("PDF Full Path") or "").strip(), main)), None)
+            if own is not None:
+                number = ""
         for raw in invoices:
             if _same_file(raw) in named:
                 continue
@@ -1705,8 +1733,8 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
                 "Order or Receipt Number": number,
                 "Purchase Date": str((own or {}).get("Purchase Date")
                                      or rec.get("purchase_date") or ""),
-                "Processing Status": "Completed", "Notes": ""})
-            if not documents and (own is None or _part_of(row) is None):
+                "Processing Status": "Completed", "Notes": "", _LISTED: not number})
+            if not documents and (own is None or (number and _part_of(row) is None)):
                 continue
             named.add(_same_file(raw))
             extra.append(row)
@@ -1767,6 +1795,10 @@ def _record_key(row: dict):
 
 _PART = re.compile(r"\((\d+) of (\d+)\)", re.IGNORECASE)
 
+# On a row _invoices_alone builds for a file a document's record lists. It is
+# never written to the index.
+_LISTED = "Listed By Its Document"
+
 # The " (2)" unique_path puts after a name, and after what told it apart, when
 # both are taken.
 _NUMBERED = re.compile(r" \(\d+\)$")
@@ -1783,10 +1815,11 @@ def _part_of(row: dict):
     Names told apart was lost, "... Invoice (1 of 2) 1234.pdf" renamed to
     "... Invoice.pdf". Anything else after it is not a part, and nothing
     after it is for a row with no order number, a document's, which is
-    read only at the very end as it always was."""
+    read only at the very end as it always was, but for the " (2)" of a file
+    a document's record lists (_LISTED)."""
     name = (row.get("PDF Filename") or "").strip()
     stem, ext = os.path.splitext(name)
-    found = list(_PART.finditer(stem)) if ext.lower() == ".pdf" else []
+    found = list(_PART.finditer(stem)) if ext.lower() in VALID_DOC_EXTS else []
     if not found:
         return None
     last = found[-1]
@@ -1795,7 +1828,8 @@ def _part_of(row: dict):
         number = (row.get("Order or Receipt Number") or "").strip()
         told = sanitize_component(number).strip(" .").lower() if number else ""
         # An order number may itself end with what reads as a count.
-        if not told or not {rest, _NUMBERED.sub("", rest)} & {"", " " + told}:
+        if (not (told or row.get(_LISTED))
+                or not {rest, _NUMBERED.sub("", rest)} & {"", " " + told}):
             return None
     return (int(last.group(1)), int(last.group(2)))
 
@@ -1951,6 +1985,11 @@ class _Known:
             return None
         named = [n for n, spelled in self._by_file.get(where, {}).items()
                  if any(_one_file(s, raw) for s in spelled)]
+        # A file only one record's list names is that record's, as the
+        # workbook of a Wealthfront tax form is (_invoices_alone).
+        if not named and len(owners) == 1:
+            named = [n for n, spelled in self._claims.get(where, {}).items()
+                     if any(_one_file(s, raw) for s in spelled)]
         if named:
             # Several records of one document naming one file is a rename's
             # own view at work. Robinhood and Newrez show it a copy of a
