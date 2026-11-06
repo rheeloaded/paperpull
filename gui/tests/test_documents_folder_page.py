@@ -205,6 +205,31 @@ def test_the_page_counts_the_documents_the_move_would_take(apps, tmp_path):
     assert app_module.api_documents("Chase Statements")["left"] == 2
 
 
+def test_a_file_left_behind_keeps_the_move_on_offer(apps, tmp_path):
+    """A workbook held open in a spreadsheet stays behind when its PDF moves.
+    It is one document left, so the page goes on offering the Move, and a file
+    the Move does not take is not counted."""
+    chase = apps["Chase Statements"]
+    docs = tmp_path / "Documents"
+    (docs / "Tax Documents").mkdir(parents=True)
+    moved = docs / "Tax Documents" / "form.pdf"
+    moved.write_bytes(b"%PDF- form")
+    (chase / "Tax Documents").mkdir()
+    sheet = chase / "Tax Documents" / "form (2 of 3).xls"
+    sheet.write_bytes(b"a workbook")
+    other = chase / "Tax Documents" / "form (3 of 3).txt"
+    other.write_bytes(b"something else")
+    (chase / "progress.json").write_text(json.dumps({"form": {
+        "downloaded_ok": True, "pdf_path": str(moved),
+        "invoices": [{"file": str(moved), "kept": True}, {"file": str(sheet), "kept": True},
+                     {"file": str(other), "kept": True}]}}), encoding="utf-8")
+    assert save({"app": "Chase Statements", "folder": str(docs)})["left"] == 1
+
+
+def test_the_panel_counts_what_the_move_takes():
+    assert app_module.DOCUMENT_ENDINGS == renaming.VALID_DOC_EXTS
+
+
 def test_an_unknown_account_is_refused(apps):
     with pytest.raises(HTTPException) as e:
         save({"app": "Chase Statements", "account": "nobody", "folder": ""})

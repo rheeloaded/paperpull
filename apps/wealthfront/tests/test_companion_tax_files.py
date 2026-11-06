@@ -278,6 +278,57 @@ def test_a_move_after_a_rename_takes_them_from_where_the_rename_left_them(tmp_pa
     assert bodies_listed(stored(app, doc)) == bodies
 
 
+def test_two_forms_of_one_name_each_keep_their_files_through_every_rename(tmp_path, monkeypatch):
+    """The second form's name is taken, so its PDF has a " (2)" and its workbook
+    does as well, once a Rename has written the part first. It goes on following
+    its PDF."""
+    app = make_app(tmp_path, pattern="")
+    first, first_bodies = download(app, monkeypatch, ["form.pdf", "a.xls"], a_form("First Form"))
+    second, second_bodies = download(app, monkeypatch, ["other.pdf", "b.xls"], a_form("Second Form"))
+    assert files(tmp_path)[second_bodies[1]].endswith(" (2) (2 of 2).xls")
+
+    rename(app)
+    code, said = rename(app)
+    assert code == 0 and DONE in said, said
+
+    storage.set_filename_patterns({"filename_pattern_statements": ANOTHER})
+    code, said = rename(app)
+    assert code == 0 and "Renamed 4 file(s)" in said, said
+    after = files(tmp_path)
+    folder = "out/Tax Documents/Wealthfront/2031/"
+    assert all(path.startswith(folder) for path in after.values()), after
+    assert set(after) == set(first_bodies + second_bodies)
+    assert bodies_listed(stored(app, first)) == first_bodies
+    assert bodies_listed(stored(app, second)) == second_bodies
+    code, said = rename(app)
+    assert code == 0 and DONE in said, said
+    assert files(tmp_path) == after
+
+
+def test_a_pattern_with_no_part_keeps_the_files_together(tmp_path, monkeypatch):
+    """Under such a pattern a name no longer says which file of the form it
+    is. They still go together, told apart by their endings or a " (2)"."""
+    plain = "{provider}/{date:yyyy-mm-dd}[ {kind}]"
+    app = make_app(tmp_path)
+    doc, bodies = download(app, monkeypatch, ["form.pdf", "corrected.pdf", "gain_loss.xls"])
+    storage.set_filename_patterns({"filename_pattern_statements": plain})
+    code, said = rename(app)
+    assert code == 0 and "Renamed 3 file(s)" in said, said
+    code, said = rename(app)
+    assert code == 0 and DONE in said, said
+
+    storage.set_filename_patterns({"filename_pattern_statements": ANOTHER})
+    code, said = rename(app)
+    assert code == 0 and "Renamed 3 file(s)" in said, said
+    after = files(tmp_path)
+    assert set(after) == set(bodies)
+    assert all(path.startswith("out/Tax Documents/Wealthfront/2031/") for path in after.values()), after
+    assert after[bodies[2]].endswith(".xls")
+    assert bodies_listed(stored(app, doc)) == bodies
+    code, said = rename(app)
+    assert code == 0 and DONE in said, said
+
+
 def test_a_file_of_another_kind_stays_and_the_move_goes_on(tmp_path, monkeypatch):
     """A Rename holds only what an app can name. Such a file is kept where it
     was saved and the record goes on naming it there."""

@@ -603,6 +603,18 @@ def test_a_document_is_found_by_the_row_naming_its_file(tmp_path, documents):
     assert extra[0]["Document Title"] == "Form"
 
 
+def test_a_document_takes_nothing_from_another_documents_row(tmp_path):
+    """No row names this document's file, and a row with no number is not its
+    own for having no number either."""
+    _first, _second, rec = lists(tmp_path, {})
+    row = {"PDF Full Path": str(tmp_path / "another.pdf"), "PDF Filename": "another.pdf",
+           "Document Title": "Another", "Document Date": "2026-09-12"}
+    app = SimpleNamespace(progress=SimpleNamespace(data={"Tax 2024": rec}))
+    assert renaming._invoices_alone(app, [row], documents=False) == []
+    assert all(r.get("Document Title") != "Another"
+               for r in renaming._invoices_alone(app, [row], documents=True))
+
+
 def test_an_order_takes_nothing_from_a_row_of_another_order(tmp_path):
     """A row naming an order's file may be another order's (_Known.record_for).
     A Rename leaves such an order's invoices alone, rather than give them the
@@ -619,7 +631,7 @@ def test_an_order_takes_nothing_from_a_row_of_another_order(tmp_path):
 @pytest.mark.parametrize("name,document,row", [
     ("a.pdf", True, True), ("a.xls", True, True), ("a.xlsx", True, True), ("a.csv", True, True),
     ("A.XLS", True, True), ("a.txt", False, False), ("a.zip", False, False),
-    ("a.xls.renaming", False, True), ("a.xlsx.renaming2", False, True),
+    ("a.pdf.renaming", False, True), ("a.xls.renaming", False, False),
     ("a.txt.renaming", False, False), ("a.pdf.delivering", False, True),
     ("a.xls.delivering", False, False)])
 def test_what_an_app_holds_by_how_a_file_ends(tmp_path, name, document, row):

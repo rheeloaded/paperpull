@@ -167,9 +167,9 @@ def held_row(row: dict, folders, path_key: str = "PDF Full Path") -> Optional[Pa
     also leaves a form that failed its check so, when moving that one to
     Manual Review fails, and that row says it needs review.
 
-    It also holds a document Rename left under the temporary name it gives a
-    file trading names with others (apply), ending ".pdf.renaming" and perhaps
-    a number. Rename points a row there when the file's own name holds another
+    It also holds a PDF Rename left under the temporary name it gives a file
+    trading names with others (apply), ending ".pdf.renaming" and perhaps a
+    number. Rename points a row there when the file's own name holds another
     file by then, and the next Rename finishes it. Left out as not held, it
     stayed there for good."""
     return _held_row(row, _real(folders), path_key)
@@ -183,7 +183,7 @@ def _held_row(row: dict, real_folders: List[Path],
 
 # The temporary name apply gives a file trading names with others
 # (_rename_ring), once or, for a file put aside again, more than once.
-_ASIDE = re.compile(r"\.(?:pdf|xlsx?|csv)(\.renaming\d*)+$")
+_ASIDE = re.compile(r"\.pdf(\.renaming\d*)+$")
 # What a document ends in. A Wealthfront tax form can come with a workbook or
 # a table beside its PDF, and those go where the PDF goes (_invoices_alone).
 VALID_DOC_EXTS = (".pdf", ".xls", ".xlsx", ".csv")
@@ -1694,7 +1694,9 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
     A document can list its files the same way, the workbook that came with
     a Wealthfront tax form. It has no order, so its row is the one naming its
     pdf_path, and each file's row carries no number and is the document's
-    through the record's list."""
+    through the record's list. Told apart by its ending or a " (2)", such a
+    file goes with a rename whether or not its name still gives its part
+    (_LISTED)."""
     named = {_same_file((r.get("PDF Full Path") or "").strip()) for r in rows
              if (r.get("PDF Full Path") or "").strip()}
     extra = []
@@ -1708,7 +1710,8 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
         number = str(rec.get("order_number") or str(key).partition(":")[2]).strip()
         main = _text(rec.get("pdf_path"))
         where = _same_file(main) if main else ""
-        theirs = [r for r in rows if (r.get("Order or Receipt Number") or "").strip() == number]
+        theirs = [r for r in rows
+                  if (r.get("Order or Receipt Number") or "").strip() == number] if number else []
         own = next((r for r in theirs
                     if where and _same_file((r.get("PDF Full Path") or "").strip()) == where
                     and _one_file((r.get("PDF Full Path") or "").strip(), main)),
@@ -1730,8 +1733,8 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
                 "Order or Receipt Number": number,
                 "Purchase Date": str((own or {}).get("Purchase Date")
                                      or rec.get("purchase_date") or ""),
-                "Processing Status": "Completed", "Notes": ""})
-            if not documents and (own is None or _part_of(row) is None):
+                "Processing Status": "Completed", "Notes": "", _LISTED: not number})
+            if not documents and (own is None or (number and _part_of(row) is None)):
                 continue
             named.add(_same_file(raw))
             extra.append(row)
@@ -1792,6 +1795,10 @@ def _record_key(row: dict):
 
 _PART = re.compile(r"\((\d+) of (\d+)\)", re.IGNORECASE)
 
+# On a row _invoices_alone builds for a file a document's record lists. It is
+# never written to the index.
+_LISTED = "Listed By Its Document"
+
 # The " (2)" unique_path puts after a name, and after what told it apart, when
 # both are taken.
 _NUMBERED = re.compile(r" \(\d+\)$")
@@ -1808,7 +1815,8 @@ def _part_of(row: dict):
     Names told apart was lost, "... Invoice (1 of 2) 1234.pdf" renamed to
     "... Invoice.pdf". Anything else after it is not a part, and nothing
     after it is for a row with no order number, a document's, which is
-    read only at the very end as it always was."""
+    read only at the very end as it always was, but for the " (2)" of a file
+    a document's record lists (_LISTED)."""
     name = (row.get("PDF Filename") or "").strip()
     stem, ext = os.path.splitext(name)
     found = list(_PART.finditer(stem)) if ext.lower() in VALID_DOC_EXTS else []
@@ -1820,7 +1828,8 @@ def _part_of(row: dict):
         number = (row.get("Order or Receipt Number") or "").strip()
         told = sanitize_component(number).strip(" .").lower() if number else ""
         # An order number may itself end with what reads as a count.
-        if not told or not {rest, _NUMBERED.sub("", rest)} & {"", " " + told}:
+        if (not (told or row.get(_LISTED))
+                or not {rest, _NUMBERED.sub("", rest)} & {"", " " + told}):
             return None
     return (int(last.group(1)), int(last.group(2)))
 
