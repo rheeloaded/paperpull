@@ -1875,7 +1875,7 @@ def survey(page, dwell_ms: int = 2000) -> dict:
     """What the page the person left open looks like, and on the statements
     page what its list call answers, downloading nothing. The page is
     reloaded once to hear the call, and its Statements heading opened when
-    it is shut, the one press a run makes too."""
+    it is shut, as a run opens it too."""
     report = {"pages": [], "responses": [], "mapped": True}
     try:
         page.wait_for_timeout(dwell_ms)
