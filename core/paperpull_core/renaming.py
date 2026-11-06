@@ -142,9 +142,9 @@ NOT_HELD = "not a PDF in a folder this app files documents in"
 
 
 def held_document(text: str, folders) -> Optional[Path]:
-    """The file a row's path names, when it is a PDF in one of `folders`,
-    the folders the app files documents in (Paths.filing_folders), and
-    None for anything else.
+    """The file a row's path names, when it is a document (VALID_DOC_EXTS) in
+    one of `folders`, the folders the app files documents in
+    (Paths.filing_folders), and None for anything else.
 
     An app writes its own index, but an index can name anything. An empty
     path reads as the folder the app runs in, which exists. An index copied
@@ -154,7 +154,7 @@ def held_document(text: str, folders) -> Optional[Path]:
     climbing out of them through "..", a file somewhere else, one in Logs,
     or, with the output folder set to the app's own folder, the app's
     config file. None of those is a document this app holds, and neither
-    is a file no longer on disk, one that is not a PDF, or a link, which a
+    is a file no longer on disk, one of any other kind, or a link, which a
     rename would move in place of the file it leads to."""
     return _held(text, _real(folders))
 
@@ -167,9 +167,9 @@ def held_row(row: dict, folders, path_key: str = "PDF Full Path") -> Optional[Pa
     also leaves a form that failed its check so, when moving that one to
     Manual Review fails, and that row says it needs review.
 
-    It also holds a PDF Rename left under the temporary name it gives a file
-    trading names with others (apply), ending ".pdf.renaming" and perhaps a
-    number. Rename points a row there when the file's own name holds another
+    It also holds a document Rename left under the temporary name it gives a
+    file trading names with others (apply), ending ".pdf.renaming" and perhaps
+    a number. Rename points a row there when the file's own name holds another
     file by then, and the next Rename finishes it. Left out as not held, it
     stayed there for good."""
     return _held_row(row, _real(folders), path_key)
@@ -183,9 +183,10 @@ def _held_row(row: dict, real_folders: List[Path],
 
 # The temporary name apply gives a file trading names with others
 # (_rename_ring), once or, for a file put aside again, more than once.
-_ASIDE = re.compile(r"\.(?:pdf|xlsx?|csv)(\.renaming\d*)+$", re.IGNORECASE)
+_ASIDE = re.compile(r"\.(?:pdf|xlsx?|csv)(\.renaming\d*)+$")
+# What a document ends in. A Wealthfront tax form can come with a workbook or
+# a table beside its PDF, and those go where the PDF goes (_invoices_alone).
 VALID_DOC_EXTS = (".pdf", ".xls", ".xlsx", ".csv")
-_EXT_PAT = r"\.(?:pdf|xlsx?|csv)"
 
 
 def _real(folders) -> List[Path]:
@@ -211,7 +212,7 @@ def _held(text: str, real_folders: List[Path], staged: bool = False,
     text = _text(text)
     if not text:
         return None
-    ends = tuple(f"{ext}.delivering" for ext in VALID_DOC_EXTS) + VALID_DOC_EXTS if staged else VALID_DOC_EXTS
+    ends = VALID_DOC_EXTS + (".pdf.delivering",) if staged else VALID_DOC_EXTS
     try:
         path = Path(text).resolve()
         name = path.name.lower()
@@ -1205,9 +1206,9 @@ def _follow_invoices(invoices, moved: Callable[[str], Optional[str]]) -> Optiona
 # order it saved in several, Target's "Also saved a.pdf, b.pdf" and Amazon's
 # "Also saved: a.pdf, b.pdf". Every name ends ".pdf", so a name with a comma
 # in it is read whole.
-_ALSO_SAVED = re.compile(rf"(?P<head>Also saved:? )(?P<names>.+?{_EXT_PAT}(?:, .+?{_EXT_PAT})*)"
-                         r"(?=$|;|\. )", re.IGNORECASE)
-_NEXT_NAME = re.compile(r"(?<=\.pdf), |(?<=\.xls), |(?<=\.xlsx), |(?<=\.csv), ", re.IGNORECASE)
+_ALSO_SAVED = re.compile(r"(?P<head>Also saved:? )(?P<names>.+?\.pdf(?:, .+?\.pdf)*)"
+                         r"(?=$|;|\. )")
+_NEXT_NAME = re.compile(r"(?<=\.pdf), ")
 
 
 def _plain_name(name: str) -> bool:
@@ -1688,7 +1689,12 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
     (_part_of). A move keeps every name, so it needs neither. An invoice
     another purchase's rows, record, list of invoices or notes name as well
     keeps its name, as any file does whose purchase cannot be told
-    (_Known.record_for)."""
+    (_Known.record_for).
+
+    A document can list its files the same way, the workbook that came with
+    a Wealthfront tax form. It has no order, so its row is the one naming its
+    pdf_path, and each file's row carries no number and is the document's
+    through the record's list."""
     named = {_same_file((r.get("PDF Full Path") or "").strip()) for r in rows
              if (r.get("PDF Full Path") or "").strip()}
     extra = []
@@ -1707,10 +1713,15 @@ def _invoices_alone(app, rows, documents: bool = True) -> List[dict]:
                     if where and _same_file((r.get("PDF Full Path") or "").strip()) == where
                     and _one_file((r.get("PDF Full Path") or "").strip(), main)),
                    theirs[0] if theirs else None)
-        if own is None and where:
+        # What follows the first colon of a document's key is no order number,
+        # and on a row it made the document's own file nobody's. A purchase
+        # keeps to its own rows, since one naming its file may be another's.
+        if own is None and where and not rec.get("order_number"):
             own = next((r for r in rows
                         if _same_file((r.get("PDF Full Path") or "").strip()) == where
                         and _one_file((r.get("PDF Full Path") or "").strip(), main)), None)
+            if own is not None:
+                number = ""
         for raw in invoices:
             if _same_file(raw) in named:
                 continue
@@ -1965,6 +1976,8 @@ class _Known:
             return None
         named = [n for n, spelled in self._by_file.get(where, {}).items()
                  if any(_one_file(s, raw) for s in spelled)]
+        # A file only one record's list names is that record's, as the
+        # workbook of a Wealthfront tax form is (_invoices_alone).
         if not named and len(owners) == 1:
             named = [n for n, spelled in self._claims.get(where, {}).items()
                      if any(_one_file(s, raw) for s in spelled)]

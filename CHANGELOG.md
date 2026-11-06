@@ -97,6 +97,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   finished build beside it is the one started. With no finished build on the
   computer, a launch through Playwright still starts Playwright's own folder
   as it always did.
+- **Wealthfront keeps the files of a tax form together (#142).** A 1099 can
+  come with a workbook or a corrected copy beside its PDF. Those went to the
+  top of Tax Documents while the PDF went to the folders a naming pattern
+  names, nothing recorded them, and a Rename or Move to Documents Folder left
+  them behind. They are now saved beside the PDF, the record lists them, and
+  a Rename or a Move takes them along, with a `.xls`, `.xlsx` or `.csv`
+  keeping its ending. A file of any other kind stays where it was saved. A
+  form with nothing to download no longer leaves empty folders. Files earlier
+  runs saved stay where they are, since no record names them. Contributed by
+  @appchamp. Before merging, the Rename and the Move were made to work on a
+  record's real key, and an order's invoices were kept off the new path.
 
 ## [0.60.2] - 2026-11-04
 

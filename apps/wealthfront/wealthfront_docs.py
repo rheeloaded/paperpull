@@ -546,9 +546,18 @@ class App:
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        out_path = unique_path(folder, filename, self.config["max_path_length"], make=False)
-        if out_path.name != filename:
-            self.stats["duplicate_filenames"] += 1
+        out_path = None
+
+        def saving_to() -> Path:
+            """Where a download that has arrived goes, asked only then, since
+            asking makes the folders a naming pattern names and a form with
+            nothing to download left them empty."""
+            nonlocal out_path
+            if out_path is None:
+                out_path = unique_path(folder, filename, self.config["max_path_length"])
+                if out_path.name != filename:
+                    self.stats["duplicate_filenames"] += 1
+            return out_path
 
         # Tax rows carry no href: their "Download" button opens a dialog that
         # lists the actual PDF link(s). Resolve those now.
@@ -593,7 +602,7 @@ class App:
                     except Exception as nav_err:
                         if "download is starting" not in str(nav_err).lower():
                             log.info("navigation note: %s", nav_err)
-                receipt_pdf.save_download(dl.value, out_path)
+                receipt_pdf.save_download(dl.value, saving_to())
                 saved = True
             except Exception as e:
                 log.info("Direct URL download did not fire (%s); trying the row button", e)
@@ -606,8 +615,8 @@ class App:
             # statement name in the output folder, indistinguishable from a
             # real download until it is opened.
             try:
-                if out_path.exists() and (out_path.stat().st_size == 0
-                                          or out_path.read_bytes()[:5] != b"%PDF-"):
+                if out_path is not None and out_path.exists() and (
+                        out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):
                     out_path.unlink()
             except OSError:
                 pass
@@ -626,7 +635,7 @@ class App:
                 with page.expect_download(timeout=45000) as dl:
                     control.click()
                 download = dl.value
-                receipt_pdf.save_download(download, out_path)
+                receipt_pdf.save_download(download, saving_to())
                 saved = True
             except Exception as e:
                 log.warning("Row-button download failed: %s", e)
@@ -635,7 +644,7 @@ class App:
             # empty shell save_as created and never filled. It must not be left
             # behind wearing a real statement's name.
             try:
-                if out_path.exists() and out_path.stat().st_size == 0:
+                if out_path is not None and out_path.exists() and out_path.stat().st_size == 0:
                     out_path.unlink()
             except OSError:
                 pass
@@ -684,7 +693,6 @@ class App:
 
         # A form set can include corrected versions (idx=1, ...). Save those
         # alongside the primary file so nothing is silently dropped.
-        extra_names: List[str] = []
         extra_paths: List[Path] = []
         for n, href in enumerate(extra_hrefs, start=2):
             try:
@@ -706,22 +714,22 @@ class App:
                 ext = Path(suggested).suffix.lower() or ".pdf"
                 stem = f"{out_path.stem} ({n} of {len(extra_hrefs) + 1})"
                 extra_path = unique_path(out_path.parent, stem + ext,
-                                         self.config["max_path_length"],
-                                         make=False)
+                                         self.config["max_path_length"])
                 receipt_pdf.save_download(download, extra_path)
                 if receipt_pdf.is_zip(extra_path) and ext not in (".zip", ".xlsx"):
                     opened = receipt_pdf.open_zip(extra_path)
                     extra_path = opened.pdf or opened.kept or extra_path
                 print(f"  + additional file: {extra_path.name}")
-                extra_names.append(extra_path.name)
                 extra_paths.append(extra_path)
                 self.stats["new_files"].append(str(extra_path))
             except Exception as e:
                 log.warning("Extra tax file %s failed: %s", href, e)
 
-        if extra_names:
+        # The list is what a Rename or a move reads and keeps up to date, so
+        # the files of a form stay together (renaming._invoices_alone).
+        if extra_paths:
             doc.notes = (doc.notes + "; " if doc.notes else "") + \
-                f"form set has {len(extra_hrefs) + 1} files; Also saved: " + ", ".join(extra_names)
+                f"form set has {len(extra_hrefs) + 1} files"
             doc.invoices = [{"file": str(out_path), "kept": True}] + [
                 {"file": str(p), "kept": True} for p in extra_paths]
 
