@@ -20,8 +20,9 @@ tester's checking and credit card statements, not yet on savings. Sign in,
 open Statements & Documents in that window, and leave it open.
 
 READ-ONLY: the two presses are the statements page's Statements heading, when
-the page leaves it shut and a statement is to be downloaded, to open its
-list the way a person would, and one Download PDF link, when every link's
+the page leaves it shut and a statement is to be downloaded or Diagnose
+looks at the page, and again after a long run reloads it, to open its list
+the way a person would, and one Download PDF link, when every link's
 address is a script, to learn how the page asks for a PDF. Login and
 Discover press nothing. It
 reloads the statements page to hear its list, at the start and every five
@@ -1026,8 +1027,8 @@ class App:
             print("  What it noticed:")
             for line in said[:6]:
                 print("    - %s" % line)
-        print("  Read it through, then attach it to this provider's issue on")
-        print("  GitHub. It is the one thing that saves a round of guessing.")
+        print("  Read it through, then attach it to a new issue on GitHub.")
+        print("  It is the one thing that saves a round of guessing.")
 
     def write_survey(self, stopped=None) -> None:
         """The survey Diagnose is safe to send, on the same list of what may
