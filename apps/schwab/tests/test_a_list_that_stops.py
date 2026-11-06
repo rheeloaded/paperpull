@@ -182,7 +182,7 @@ def test_a_list_that_stops_while_downloading_stops_once_with_the_list_unread(
     cfg, out = setup_app(tmp_path, monkeypatch)
     two = {"status": 200, "body": {"documents": [
         {**ONE_DOCUMENT["body"]["documents"][0], "documentId": f"DOC-{n}",
-         "date": f"{n:02d}/30/2026"} for n in (9, 10)]}}
+         "date": f"{n:02d}/15/2031"} for n in (9, 10)]}}
     monkeypatch.setattr(site, "_gateway_call", gateway(ONE_ACCOUNT, two))
     docs.main(["--config", str(cfg), "--discover"])
 
