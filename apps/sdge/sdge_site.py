@@ -11,8 +11,8 @@ CLICKED HERE:
     draws it as #billHistoryTable, one `tr` per bill carrying the bill's
     invoice id ("ISU" and twelve digits) as its `invoiceid` attribute and
     the statement date, "Sep 12, 2026", in the column headed Statement
-    Date, after a control column and before Due Date. The rows are read
-    from the page as drawn, and this app sends no list request of its own.
+    Date, the header's first, before Due Date. The rows are read from the
+    page as drawn, and this app sends no list request of its own.
   * A bill's PDF is a plain GET of
     /portal/BillingHistory/DownloadBillPdf?invoiceId=<id> on the same host,
     which the page's own "View Your Detailed Bill PDF" link opens in a new
@@ -707,11 +707,15 @@ def shows_more(around) -> bool:
 
 def numbers_in_place(rows) -> bool:
     """Whether every row carrying a hidden row number carries its own place
-    among the rows read, counted from 1. A row with no such number is not
-    asked. Rows numbered from 11 are a second page, and a gap is a bill the
-    table did not draw."""
-    return all(not r.get("number") or str(r["number"]).lstrip("0") == str(place)
-               for place, r in enumerate(rows or [], 1))
+    among the rows read, counted from 1 at either end, since the live page
+    has shown nine rows and nothing says which way it counts them. A row
+    with no such number is not asked. Rows numbered from 11 are a second
+    page, and a gap is a bill the table did not draw."""
+    numbers = [str(r.get("number") or "") for r in rows or []]
+
+    def counted(places) -> bool:
+        return all(not n or n.lstrip("0") == str(p) for n, p in zip(numbers, places))
+    return counted(range(1, len(numbers) + 1)) or counted(range(len(numbers), 0, -1))
 
 
 def _whole_table(seen: dict, docs: List[RawDoc]) -> None:

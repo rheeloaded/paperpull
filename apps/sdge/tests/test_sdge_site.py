@@ -408,10 +408,12 @@ class ListReady(unittest.TestCase):
         def rows(*numbers):
             return [{"number": n} for n in numbers]
         for good in (rows("1", "2", "3"), rows("01", "02", "03"), rows("001"), rows(), None,
-                     rows("", "", ""), rows("1", "", "3"), rows("", "2")):
+                     rows("", "", ""), rows("1", "", "3"), rows("", "2"),
+                     rows("3", "2", "1"), rows("03", "02", "01")):
             self.assertTrue(site.numbers_in_place(good), good)
         for bad in (rows("0", "1", "2"), rows("2", "3"), rows("11", "12"), rows("1", "2", "4"),
-                    rows("1", "1", "2"), rows("3", "2", "1"), rows("1", "", "2"), rows("10")):
+                    rows("1", "1", "2"), rows("1", "", "2"), rows("10"),
+                    rows("12", "11"), rows("4", "2", "1"), rows("2", "1", "3")):
             self.assertFalse(site.numbers_in_place(bad), bad)
 
     def test_numbers_that_do_not_run_from_1_stop_with_what_was_read(self):
