@@ -93,6 +93,12 @@ ACCOUNTS = {"123456789": {"type": "Brokerage", "name": "BrokerageLink"},
             "12345": {"type": "WPS", "name": "SOME EMPLOYER RETIREMENT SAVINGS PLAN"}}
 
 
+def alone(rows):
+    """Every row the first of its title and date, as a document no other
+    shares them with is numbered."""
+    return [(0, True) for _ in rows]
+
+
 def test_a_statement_row_carries_kind_account_date_and_what_the_download_needs():
     d = {"id": "YzoyMDI2LTA4LTMx", "type": "PI Monthly/Quarterly Statement", "acctNum": "123456789",
          "periodStartDate": 1785556800, "periodEndDate": 1788148800, "generatedDate": 1788148800,
@@ -112,6 +118,11 @@ def test_a_trade_confirmation_row_files_as_a_confirmation():
 
 
 def test_collect_asks_one_year_at_a_time_only_for_wanted_kinds_and_only_years_in_scope(monkeypatch):
+    class Clock(site._dt):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2031, 11, 7)
+    monkeypatch.setattr(site, "_dt", Clock)
     calls = []
     monkeypatch.setattr(site, "list_accounts", lambda page: ACCOUNTS)
     def fake_list(page, doc_type, year):
@@ -120,10 +131,11 @@ def test_collect_asks_one_year_at_a_time_only_for_wanted_kinds_and_only_years_in
                  "periodEndDate": 1788148800, "formatTypes": {"formatType": {"isPDF": True}}}]
     monkeypatch.setattr(site, "list_kind", fake_list)
     monkeypatch.setattr(site, "list_tax_year", lambda page, y: (calls.append(("TAX", y)), [])[1])
-    rows = site.collect_documents(None, keep=lambda y: y in ("2026", "2025"),
+    rows = site.collect_documents(None, keep=lambda y: y in ("2031", "2030"),
                                   config={"document_types": ["Statement", "Tax Document"]})
-    assert calls == [("STMT", 2026), ("STMT", 2025), ("TAX", 2025)]     # no TC, no current tax year
-    assert [r["item_id"] for r in rows] == ["STMT-2026", "STMT-2025"]
+    # No TC and no current tax year. A form of 2029 can be dated in 2030.
+    assert calls == [("STMT", 2031), ("STMT", 2030), ("TAX", 2030), ("TAX", 2029)]
+    assert [r["item_id"] for r in rows] == ["STMT-2031", "STMT-2030"]
 
 
 def test_the_pdf_comes_back_from_base64_and_a_deflated_one_is_inflated(monkeypatch):
@@ -146,10 +158,12 @@ def test_download_resolves_the_id_fresh_and_refuses_a_non_pdf(monkeypatch, tmp_p
     monkeypatch.setattr(site, "fetch_pdf", fake_fetch)
     out = tmp_path / "x.pdf"
     assert site.download_document(None, "Trade Confirmation", "2026-09-15", out, item_hint="stale",
-                                  client_hint="STMT|Brokerage", account="BrokerageLink 6789")
+                                  client_hint="STMT|Brokerage", account="BrokerageLink 6789",
+                                  number_rows=alone)
     assert seen == {"item_id": "fresh", "doc_type": "TC", "acct_type": "Brokerage"} and out.read_bytes().startswith(b"%PDF")
     monkeypatch.setattr(site, "fetch_pdf", lambda *a: b"<html>sign in</html>")
-    assert not site.download_document(None, "Statement", "2026-08-31", tmp_path / "y.pdf", account="BrokerageLink 6789")
+    assert not site.download_document(None, "Statement", "2031-08-31", tmp_path / "y.pdf",
+                                      account="BrokerageLink 6789", number_rows=alone)
     assert not (tmp_path / "y.pdf").exists()
 
 
@@ -185,13 +199,13 @@ def test_json_bodies_are_recorded_as_shape_not_values():
 
 
 def test_a_consolidated_statement_without_acct_num_labels_as_combined():
-    d = {"id": "YzoyMDI2LTEwLTMw", "type": "PI Monthly/Quarterly Statement",
-         "periodStartDate": 1785556800, "periodEndDate": 1788148800, "generatedDate": 1788148800,
+    d = {"id": "consolidated-one", "type": "PI Monthly/Quarterly Statement",
+         "periodStartDate": 1943323200, "periodEndDate": 1945915200, "generatedDate": 1945915200,
          "formatTypes": {"formatType": {"isPDF": True}}}
     r = site._row("Statement", "Statement", d, ACCOUNTS, "STMT")
     assert r["account"] == "Combined"
     assert r["title"] == "Monthly Statement"
-    assert r["date"] == "2026-08-31"
+    assert r["date"] == "2031-08-31"
     assert r["category"] == "Statement"
 
 
@@ -241,17 +255,17 @@ def test_nested_tax_form_extracts_details_correctly():
 
 def test_resolve_item_matches_combined_statement_with_or_without_account_name(monkeypatch):
     d = {"id": "fresh-combined", "type": "PI Monthly/Quarterly Statement",
-         "periodStartDate": 1785556800, "periodEndDate": 1788148800, "generatedDate": 1788148800,
+         "periodStartDate": 1943323200, "periodEndDate": 1945915200, "generatedDate": 1945915200,
          "formatTypes": {"formatType": {"isPDF": True}}}
     monkeypatch.setattr(site, "list_accounts", lambda page: ACCOUNTS)
     monkeypatch.setattr(site, "list_kind", lambda page, doc_type, y: [d])
 
     # Caller passes account="Combined"
-    res1 = site.resolve_item(None, "Monthly Statement", "2026-08-31", "Combined")
+    res1 = site.resolve_item(None, "Monthly Statement", "2031-08-31", "Combined", number_rows=alone)
     assert res1 is not None and res1["item_id"] == "fresh-combined"
 
     # Caller passes legacy empty account=""
-    res2 = site.resolve_item(None, "Monthly Statement", "2026-08-31", "")
+    res2 = site.resolve_item(None, "Monthly Statement", "2031-08-31", "", number_rows=alone)
     assert res2 is not None and res2["item_id"] == "fresh-combined"
 
 
@@ -270,7 +284,7 @@ def test_resolve_item_resolves_tax_form_from_title_year(monkeypatch):
     }
     monkeypatch.setattr(site, "list_accounts", lambda page: ACCOUNTS)
     monkeypatch.setattr(site, "list_tax_year", lambda page, y: [d] if y == 2025 else [])
-    res = site.resolve_item(None, "2025 Form 5498", "2026-05-15", "BrokerageLink 6789")
+    res = site.resolve_item(None, "2025 Form 5498", "2026-05-15", "BrokerageLink 6789", number_rows=alone)
     assert res is not None
     assert res["item_id"] == "doc-5498-abc"
 

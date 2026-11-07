@@ -27,18 +27,27 @@ STATUS, mapped 2026-09-18 against a signed-in session.
                     seconds, midnight Eastern), formatTypes.formatType.isPDF}
                  A window wider than a year answers 400, so one call per year.
     * tax forms  dpservice.fidelity.com/.../financial-documents/taxform
-                 body {taxYear} -> taxSeason.taxFormDetails.taxFormDetail[].
-                 UNVERIFIED. The account this was mapped against has no tax
-                 forms yet, so the row fields are read defensively and the
-                 download's docType for a tax form is a guess ("TAX").
+                 body {taxYear} -> taxSeason.taxFormDetails.taxFormDetail[]
+                 of {docName, acctDetails.acctDetail[] of {acctNum, acctType,
+                 nickname}, docDetail {docId, docType, docPeriodStartDate,
+                 docPeriodEndDate, docGeneratedDate}}. A contributor's Discover
+                 listed forms in this shape (#144). The call goes by tax year,
+                 and a form can be dated in the year after it.
     * download   .../financial-documents/download (v2)
                  body {id, formatType: "PDF", docType, acctType}
                  -> document.docDetail.{content (base64), contentType,
                     deflated}. The decoded content starts with %PDF even
                     when deflated says "Y". Both are handled.
+                 A tax form goes to the v1 download on dpservice with docType
+                 "TF", as the contributor reports (#145). UNVERIFIED. Nobody
+                 has shown a form downloading that way yet, and its answer is
+                 read as a statement's is.
 
   IDENTITY is kind + account + period end date, never the id. The id is
   stored as a hint and looked up fresh from a new listing at download time.
+  Whether an id outlasts a session is not known. Documents sharing a title
+  and a date are numbered across accounts (App._numbered), so the fresh
+  listing is numbered the same way to find a document's own row.
 
   The workplace plan (a 401(k), acctType WPS) is listed by the accounts call
   but its statements are on NetBenefits, not in this document center, so
@@ -89,8 +98,9 @@ API = {
     "list": "https://digitalservices.fidelity.com/ftgw/dp/retail-am-financialdoc/v1/accounts/communications/financial-documents/statements",
     "taxforms": "https://dpservice.fidelity.com/ftgw/dp/retail-am-financialdoc/v1/accounts/communications/financial-documents/taxform",
     "download": "https://digitalservices.fidelity.com/ftgw/dp/retail-am-financialdoc/v2/accounts/communications/financial-documents/download",
-    "tax_download": "https://dpservice.fidelity.com/ftgw/dp/retail-am-financialdoc/v1/accounts/communications/financial-documents/download",
 }
+# A tax form's download sits beside the tax form list, on its host and its v1.
+API["tax_download"] = API["taxforms"].rsplit("/", 1)[0] + "/download"
 # The page's own app identity. Not a credential, the same for every
 # customer, and the API answers 400 without it.
 APP_HEADERS = {
@@ -107,12 +117,21 @@ KINDS = {
 }
 FIRST_YEAR = 2016        # the oldest year the document center's picker offers
 
+# The account of a statement covering several accounts, which the hub lists
+# with no account number. Records from before this name keep no account.
+COMBINED = "Combined"
+
 LOGIN_URL_MARKERS = ["/login", "/logon", "/signin", "/sign-in", "/mfa",
                      "/verify", "/onboarding"]
 
 
 class SessionExpired(RuntimeError):
     """Fidelity answered with a sign-in page instead of the thing asked for."""
+
+
+class NotToldApart(Exception):
+    """A fresh listing does not say which row is this document, so nothing
+    is fetched for it. The run's loop fails that document and goes on."""
 
 
 def is_safe_url(url: str) -> bool:
@@ -395,7 +414,7 @@ def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str,
         if explicit_name:
             label = explicit_name
         elif not num:
-            label = "Combined"
+            label = COMBINED
         else:
             tail = num[-4:] if len(num) >= 4 else num
             label = f"Account {tail}"
@@ -423,19 +442,38 @@ def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str,
         if ty and str(ty).isdigit():
             start = f"{ty}-01-01"
     is_tax = doc_type in ("TAX", "TF")
+    # The year the hub lists it under, which its date may not be in.
+    listed_year = str(_first(d, "taxYear", "year") or year or "") if is_tax else ""
     return {
         "title": title, "date": date, "account": label, "category": category,
+        "tax_year": listed_year if listed_year.isdigit() else "",
         "item_id": str(_first(d, "id", "docId", "documentId", "taxFormId") or dd.get("docId") or ""),
         "client_id": ("TF|" if is_tax else doc_type + "|") + acct_type,        # what the download call needs
         "period_start": start, "href": API["tax_download"] if is_tax else API["download"],
     }
 
 
+def _rows_of(items: List[dict], kind: str, category: str, accounts: dict, doc_type: str,
+             year: int) -> List[dict]:
+    """The documents of one answer. Discover and a download's fresh listing
+    both read an answer here, so both number the same rows."""
+    rows = []
+    for d in items:
+        fmt = ((d.get("formatTypes") or {}).get("formatType") or {})
+        if fmt and fmt.get("isPDF") is False:
+            continue
+        r = _row(kind, category, d, accounts, doc_type, year=year)
+        if r:
+            rows.append(r)
+    return rows
+
+
 def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[dict]:
     """Every statement, trade confirmation and tax form the hub lists, one
     year at a time, newest first. `keep` is the run's scope predicate over
     year labels, so a scoped run does not ask for years it will throw away.
-    Which kinds are asked for follows document_types in the config."""
+    Which kinds are asked for follows document_types in the config. A year
+    that will not answer raises, so the list is never noted as whole."""
     wanted = set((config or {}).get("document_types") or [c for _, c in KINDS.values()])
     accounts = list_accounts(page)
     this_year = _dt.now().year
@@ -447,49 +485,73 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
         for y in years:
             items = list_kind(page, doc_type, y)
             log.info("%s %d: %d", kind, y, len(items))
-            for d in items:
-                fmt = ((d.get("formatTypes") or {}).get("formatType") or {})
-                if fmt and fmt.get("isPDF") is False:
-                    continue
-                r = _row(kind, category, d, accounts, doc_type, year=y)
-                if r:
-                    rows.append(r)
+            rows.extend(_rows_of(items, kind, category, accounts, doc_type, y))
     if "Tax Document" in wanted:
-        for y in years:
-            if y >= this_year:
-                continue                      # a tax year is listed once it has ended
-            try:
-                items = list_tax_year(page, y)
-            except RuntimeError as e:
-                log.info("tax forms %d: %s", y, e)
+        # A tax year is listed once it has ended, and its forms can be dated
+        # in the next one, so a scope that holds a year asks the year before.
+        for y in range(this_year - 1, FIRST_YEAR - 1, -1):
+            if keep is not None and not (keep(str(y)) or keep(str(y + 1))):
                 continue
+            items = list_tax_year(page, y)
             log.info("tax forms %d: %d", y, len(items))
-            for d in items:
-                r = _row("Tax Form", "Tax Document", d, accounts, "TAX", year=y)
-                if r:
-                    rows.append(r)
+            rows.extend(_rows_of(items, "Tax Form", "Tax Document", accounts, "TAX", y))
     return rows
 
 
-def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0) -> Optional[dict]:
-    """The document's current id, from a fresh listing of its year."""
+def tax_year_of(title: str, listed="") -> int:
+    """A tax form's tax year, from what the listing gave, or else the one
+    year its title names that the hub could list. A form's number is shaped
+    like a year, so "1099-R 2025" is 2025, never 1099. Zero when neither
+    says."""
+    if listed and str(listed).isdigit():
+        return int(listed)
+    named = {int(y) for y in re.findall(r"(?<!\d)\d{4}(?!\d)", title or "")}
+    named = [y for y in named if FIRST_YEAR <= y < _dt.now().year]
+    return named[0] if len(named) == 1 else 0
+
+
+def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0,
+                 item_id: str = "", tax_year: int = 0, *, number_rows,
+                 twins: int = 1) -> Optional[dict]:
+    """The document's own row of a fresh listing of its year, or None when
+    the listing no longer shows it.
+
+    `number_rows` numbers the listing as Discover numbered it, the stored
+    ids first, so a row answers to `occurrence` and no two documents can
+    come to one row. `occurrence` counts across accounts and was never a
+    place within one. An id may not outlast a session, so a row found by
+    its number and not by `item_id` is taken only when the listing shows as
+    many documents alike as the app knows (`twins`). Anything less raises
+    NotToldApart rather than guess."""
     year = int(date[:4])
     accounts = list_accounts(page)
-    doc_type = next((k for k, (kind, _) in KINDS.items()
-                     if kind == title or (k == "STMT" and title.endswith("Statement"))), None)
+    doc_type = None if tax_year else next(
+        (k for k, (kind, _) in KINDS.items()
+         if kind == title or (k == "STMT" and title.endswith("Statement"))), None)
     if doc_type:
         items = list_kind(page, doc_type, year)
         kind, category = KINDS[doc_type]
     else:
-        m = re.match(r"^(\d{4})\b", title)
-        tax_year = int(m.group(1)) if m else year
-        items = list_tax_year(page, tax_year) if tax_year < _dt.now().year else []
+        year = tax_year_of(title, tax_year) or year
+        items = list_tax_year(page, year) if year < _dt.now().year else []
         doc_type, kind, category = "TAX", "Tax Form", "Tax Document"
-        year = tax_year
-    matches = [r for r in (_row(kind, category, d, accounts, doc_type, year=year) for d in items)
-               if r and r["title"] == title and r["date"] == date and
-                  (r["account"] == account or (not account and r["account"] == "Combined"))]
-    return matches[occurrence] if occurrence < len(matches) else None
+    rows = _rows_of(items, kind, category, accounts, doc_type, year)
+    numbers = number_rows(rows)
+    alike = [i for i, r in enumerate(rows) if r["title"] == title and r["date"] == date
+             and r["account"] == (account or COMBINED)]
+    mine = [i for i in alike if numbers[i][0] == occurrence]
+    if not mine:
+        # The stored id is left as the way to it, unless another document
+        # holds that row now.
+        if item_id and any(r["item_id"] == item_id for r in rows):
+            raise NotToldApart("Its stored id is now another document's")
+        return None
+    row, sure = rows[mine[0]], numbers[mine[0]][1]
+    if sum(r["item_id"] == row["item_id"] for r in rows) > 1:
+        raise NotToldApart("Two rows of the list carry its id")
+    if not sure or (row["item_id"] != item_id and len(alike) != twins):
+        raise NotToldApart("The list does not say which of the documents alike this is")
+    return row
 
 
 def fetch_pdf(page, item_id: str, doc_type: str, acct_type: str) -> bytes:
@@ -518,11 +580,14 @@ def fetch_pdf(page, item_id: str, doc_type: str, acct_type: str) -> bytes:
 
 
 def download_document(page, title: str, date: str, out_path: Path, occurrence: int = 0,
-                      item_hint: str = "", client_hint: str = "", account: str = "") -> bool:
+                      item_hint: str = "", client_hint: str = "", account: str = "",
+                      tax_year: int = 0, *, number_rows, twins: int = 1) -> bool:
     """Save one document. Looks it up again by kind, account and date
     first, and falls back to the stored id only when the listing no longer
-    shows it."""
-    found = resolve_item(page, title, date, account, occurrence) if account else None
+    shows it. Which row is its own is resolve_item's to say, and it raises
+    NotToldApart when that cannot be told."""
+    found = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
+                         tax_year=tax_year, number_rows=number_rows, twins=twins)
     item_id = (found or {}).get("item_id") or item_hint
     client = (found or {}).get("client_id") or client_hint or "STMT|Brokerage"
     if not item_id:
