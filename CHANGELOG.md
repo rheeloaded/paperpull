@@ -9,6 +9,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Changed
+- **The control panel looks and reads like a Mac app.** It is set in the
+  computer's own font, San Francisco on a Mac and Segoe UI on Windows, so
+  the two bundled Atkinson Hyperlegible files are gone. Accounts,
+  Spreadsheets, File names and Settings sit in a sidebar, a bar along the
+  top on a narrow window. Colors are Apple's, with a blue of its own in dark
+  mode, and every text color is checked to 4.5:1 against what it sits on.
+  A status is a colored dot and its words, each provider has the symbol of
+  its kind, a bank's building or a shop's bag, instead of a letter, and
+  Settings is drawn in groups the way System Settings draws them.
+- **Accounts puts what needs you first.** The page has one blue button, the
+  one for the next step, and each row's own is gray. Once anything has run,
+  the providers never run fold under one Not started line, and a list
+  longer than eight gets a search box. Overdue reads in amber, as a new
+  document that is likely waiting, instead of a failure's red. Escape gives
+  focus back to the More button, and Settings names each provider and
+  person as Accounts does, instead of by folder.
+
 ### Fixed
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
