@@ -1,20 +1,20 @@
-"""Discover credit-card statement downloader (local, supervised).
+"""Discover Bank statement downloader (local, supervised).
 
 Usage:
-    python discovercard_docs.py --login       verify connection to your browser
-    python discovercard_docs.py --discover    list available documents
-    python discovercard_docs.py --pilot       download the 5 newest, then stop
-    python discovercard_docs.py --all         download everything in scope
-    python discovercard_docs.py --resume      continue an interrupted run
-    python discovercard_docs.py --verify      re-validate every saved PDF
-    python discovercard_docs.py --diagnose    dump page structure (no downloads)
-    python discovercard_docs.py --dry-run     plan filenames, save nothing
+    python discoverbank_docs.py --login       verify connection to your browser
+    python discoverbank_docs.py --discover    list available documents
+    python discoverbank_docs.py --pilot       download the 5 newest, then stop
+    python discoverbank_docs.py --all         download everything in scope
+    python discoverbank_docs.py --resume      continue an interrupted run
+    python discoverbank_docs.py --verify      re-validate every saved PDF
+    python discoverbank_docs.py --diagnose    dump page structure (no downloads)
+    python discoverbank_docs.py --dry-run     plan filenames, save nothing
 
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N  --type Statement
 
 READ-ONLY: this tool only reads the Documents area and downloads PDFs that
-Discover already generated. It never transfers funds, trades, rebalances,
+Discover Bank already generated. It never transfers funds, trades, rebalances,
 or changes any account setting. Everything stays on this machine; nothing is
 sent to any external service.
 """
@@ -41,7 +41,7 @@ from typing import List, Optional
 
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
-import discovercard_site as site
+import discoverbank_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
@@ -51,7 +51,7 @@ from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
-log = logging.getLogger("discovercard_docs")
+log = logging.getLogger("discoverbank_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 
@@ -241,8 +241,9 @@ class App:
             # host, never a substring, since "provider.com" in an address also
             # matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
-            discovercard = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = discovercard[0] if discovercard else tabs.new_tab(ctx)
+            discoverbank = [p for p in live if site.is_safe_url(p.url or "")]
+            doc_pages = [p for p in discoverbank if "documents" in (p.url or "").lower()]
+            self._work_page = doc_pages[0] if doc_pages else (discoverbank[0] if discoverbank else tabs.new_tab(ctx))
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self.requests
@@ -349,14 +350,29 @@ class App:
             return False
         return True
 
-    def _record_discover_doc(self, d: dict) -> int:
-        """Record one collected statement. Returns 1 if new.
+    def _record_discover_doc(self, d) -> int:
+        """Record one collected statement. Returns 1 if new."""
+        if isinstance(d, site.RawDoc):
+            title = d.title or "Statement"
+            date = (d.date_text or "").strip()
+            href = d.href or ""
+            account = re.sub(r"\s+", " ", (d.account or "")).strip()
+            doc_id = href
+            period = d.text or ""
+            corrected = False
+            ambiguous = False
+            occurrence = int(d.row_index or 0)
+        else:
+            title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
+            date = (d.get("date") or d.get("date_text") or "").strip()
+            href = d.get("href", "")
+            account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
+            doc_id = d.get("documentId", "") or href
+            period = d.get("period") or ""
+            corrected = bool(d.get("corrected"))
+            ambiguous = bool(d.get("ambiguous"))
+            occurrence = int(d.get("occurrence", 0) or 0)
 
-        A record is {date, href, period, documentId, title}, where `date` is
-        the statement's closing date and `documentId` is the statement's own
-        URL as the page published it - see discovercard_site.statement_links.
-        """
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
             return 0
@@ -367,28 +383,17 @@ class App:
             self.stats["skipped_out_of_scope"] += 1
             return 0
         self.stats.setdefault("cards", {})
-        date = (d.get("date") or "").strip()
         floor = self.args.start_date or self.config.get("default_start_date")
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        # `account` is the card, when the page names one. On the account this
-        # was built against there is a single card and the page names none, so
-        # this is normally empty and the closing date alone identifies a
-        # statement. A multi-card login is UNVERIFIED: if one exists, the
-        # card's last four arrives with the download (Discover puts it in the
-        # served filename) rather than from the page, so it cannot be known
-        # here. Statements would then share a filename and be numbered apart
-        # by unique_path rather than overwriting - visible, not silent.
-        account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
-        doc_id = d.get("documentId", "")
-        if d.get("corrected"):
+        if corrected:
             # keep it next to the original in a sorted listing, but distinct
             summary = f"{summary} (Corrected)"
         if account:
             full_summary = f"{summary} - {account}"
             self.stats["cards"][account] = self.stats["cards"].get(account, 0) + 1
-        elif d.get("ambiguous"):
+        elif ambiguous:
             # Two documents Discover describes identically on the same date. We
             # will not invent a difference between them: the filename carries
             # a traceable id fragment instead of a guessed card name.
@@ -396,16 +401,23 @@ class App:
         else:
             full_summary = summary
         doc = Document(title=title, category=category, summary=full_summary,
-                       date=date, period=(d.get("period") or ""),
+                       date=date, period=period,
+                       href=href,
                        confidence=confidence, account=account,
                        date_text=date, document_id=doc_id,
-                       occurrence=int(d.get("occurrence", 0) or 0),
-                       ambiguous=bool(d.get("ambiguous")))
-        if self.discovery.get(doc.key) is None:
+                       occurrence=occurrence,
+                       ambiguous=ambiguous)
+        existing = self.discovery.get(doc.key)
+        if existing is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
+        elif existing.get("account") != doc.account or existing.get("summary") != full_summary:
+            existing["account"] = doc.account
+            existing["title"] = doc.title
+            existing["summary"] = full_summary
+            self.discovery.update(doc.key, existing, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False, finish: bool = True) -> int:
@@ -422,15 +434,9 @@ class App:
             self.check_session(page)
             if not site.ensure_statements(page):
                 if not site.looks_moved_to_capital_one(page):
-                    print("Could not open your Discover statements. Sign in and open")
-                    print("Statements & Documents in the browser, then try again.")
-                    print("If it shows no statements yet, there is nothing to download")
-                    print("until the first one is posted.")
-                    # Nothing was listed, so this run stops here rather than finish
-                    # clean, as a Resume after it does (paperpull_core.listing).
-                    # The page counts as open only once it shows a statement, so an
-                    # account with none yet stops here until one is posted, and is
-                    # told why.
+                    print("Could not open your Discover Bank statements. Sign in and open")
+                    print("Statements at https://bank.discover.com/web/deposits/documents/statements,")
+                    print("then try again.")
                     raise SystemExit(0)
                 print("Your Discover account has moved to Capital One.")
                 print()
@@ -447,10 +453,6 @@ class App:
                 print("Anything you already downloaded from Discover is untouched,")
                 print("and this app's history is kept, so it never downloads again")
                 print("what it saved.")
-                # A moved account has no Discover pages left to list, which no
-                # sign-in and no later run changes. So its list is the whole of
-                # it with nothing in it, noted as read whole below, and neither
-                # this run nor a Resume after it stops for want of the list.
                 moved = True
 
         if moved:
@@ -464,17 +466,16 @@ class App:
             # reliable than scraping on Ally and USAA, so that is the intended
             # destination - but nothing here guesses at an endpoint that has not
             # been observed.
-            # Read Discover's own document API by driving the page (one card at a
-            # time, every year the picker offers) and capturing what it fetches.
+            # Read Discover Bank's own document API by driving the page and capturing what it fetches.
             # Row scraping stays as the fallback if that ever answers nothing.
-            raw = site.discovercard_collect_via_api(page)
+            raw = site.discoverbank_collect(page)
             if raw:
-                log.info("Discover: %d document(s) read from the API", len(raw))
+                log.info("Discover Bank: %d document(s) read from the API", len(raw))
             else:
-                log.info("Discover: API returned nothing - falling back to scraping")
-                print("  Discover's document API returned nothing; reading the page instead.")
+                log.info("Discover Bank: API returned nothing - falling back to scraping")
+                print("  Discover Bank's document API returned nothing; reading the page instead.")
                 raw = site.discovercard_collect(page)
-                log.info("Discover: collected %d document rows", len(raw))
+                log.info("Discover Bank: collected %d document rows", len(raw))
         passed_over = list(getattr(raw, "passed_over", ()))
         if passed_over:
             # An account or a year the dropdowns offered and the page's text
@@ -518,10 +519,10 @@ class App:
             dates = sorted(d.date for d in docs if d.date)
             if dates:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
-            cards = self.stats.get("cards") or {}
-            if cards:
-                print(f"\n  Cards seen ({len(cards)}):")
-                for name, n in sorted(cards.items(), key=lambda kv: -kv[1]):
+            accts = self.stats.get("accounts") or self.stats.get("cards") or {}
+            if accts:
+                print(f"\n  Accounts seen ({len(accts)}):")
+                for name, n in sorted(accts.items(), key=lambda kv: -kv[1]):
                     print(f"    {n:4}  {name}")
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
@@ -581,7 +582,7 @@ class App:
         a new tab shares, so with no tab of the person's on the site the
         documents page is opened in a tab of this run's own
         (tabs.on_its_site)."""
-        return tabs.on_its_site(self, site.is_safe_url, "Discover",
+        return tabs.on_its_site(self, site.is_safe_url, "Discover Bank",
                                 self._open_documents)
 
     def _open_documents(self, page):
@@ -641,16 +642,14 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Reach the statements page (reuse the signed-in tab); discovercard_download
-        # sets the year, opens the card and clicks the row's "Saves document"
-        # link, keeping the browser's download event (or the PDF's bytes if it
-        # opens in a tab instead).
+        # Reach the statements page (reuse the signed-in tab); discoverbank_download
+        # fetches the document PDF via authenticated API.
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
-        saved = site.discovercard_download(page, page.context, doc.account, doc.date,
-                                   out_path, doc.occurrence, doc.document_id,
-                                   title=doc.title)
+        href = doc.href or doc.document_id
+        saved = site.discoverbank_download(page, page.context, doc.account, doc.date,
+                                           out_path, href=href)
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF (see the log)")
@@ -908,7 +907,7 @@ class App:
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
             requests=self._requests,
-            provider='Discover', text=text, extra=extra)
+            provider='Discover Bank', text=text, extra=extra)
         if not path:
             return
         self.stats["failure_files"] = 1
@@ -943,11 +942,11 @@ class App:
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
             requests=self._requests,
-            provider='Discover')
+            provider='Discover Bank')
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
-        words = words_for('Discover', site)
+        words = words_for('Discover Bank', site)
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
@@ -1097,7 +1096,7 @@ class App:
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
         record_session(self.page(), site, self.paths.diagnostics,
-                       provider='Discover',
+                       provider='Discover Bank',
                        owner=self.config.get("owner", ""))
 
     def write_run_summary(self):
@@ -1106,7 +1105,7 @@ class App:
         dates = sorted(d for d in s["dates"] if d)
         new_files = s.get("new_files", [])
         atomic_write_text(self.paths.run_summary, "\n".join([
-            "Discover Documents - run summary",
+            "Discover Bank Documents - run summary",
             "=" * 40,
             f"Run start:                 {s['started']}",
             f"Run end:                   {s['ended']}",
@@ -1146,7 +1145,7 @@ class App:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="Local supervised Discover document downloader (read-only)")
+        description="Local supervised Discover Bank document downloader (read-only)")
     for name, help_text in [
             ("login", "verify connection to your signed-in browser"),
             ("discover", "list available documents; writes discovery.json"),

@@ -1,135 +1,62 @@
-"""ALL Discover selectors, URLs, and page behavior live here.
+"""ALL Discover Bank selectors, URLs, and page behavior live here.
 
 When Discover changes its site, repair this file only.
 
-SCOPE: Discover **credit cards** only (Discover it, Discover it Miles/Chrome/
-Student, Discover More). Discover Bank deposit accounts, personal loans,
-student loans and home loans are separate portals and are out of scope.
+SCOPE: Discover **Bank** deposit accounts (Checking, Savings, Money Market, CD).
+Discover credit cards, personal loans, student loans and home loans are separate
+portals and are out of scope. card.discover.com and cards.discover.com are strictly rejected.
 
-SAFETY (this is a credit-card account):
+SAFETY (this is a banking deposit account):
   This module is strictly READ-ONLY. It opens the statements/documents area,
   reads the list of documents, and downloads the PDFs Discover already
   generated. It must NEVER activate any control that pays a bill, sets up
-  autopay, moves money, transfers a balance, takes a cash advance, redeems
-  Cashback Bonus or rewards, freezes or replaces a card, requests a
-  credit-line increase, disputes a charge, applies for a product, or changes
-  any setting. The guard is FORBIDDEN_CONTROL_RE; every click path checks it,
-  and a control must ALSO look like a document action (SAFE_DOC_CONTROL_RE)
-  before it may be clicked. Dropdowns are controls too - see
-  MONEY_CONTROL_RE - and there is deliberately no code here that submits a
-  form or confirms a dialog.
-
-A REAL BROWSER, ALWAYS: this app asks for an installed Edge or Chrome
-(prefer_real=True), like the Walmart, Verizon and Chase apps. Discover's
-bot-detection posture has not been measured, and that is precisely the reason:
-a tripped check on a card account can mean a step-up verification loop or a
-temporary lock, so the first contact is never from an obviously-automated
-browser. Do not "just try" the bundled Chromium to find out.
-
-WHAT THE LIVE PROBE ESTABLISHED (2026-08-19):
-  * The page is "Activity & Statements" at
-      card.discover.com/cardmembersvcs/statements/app/activity
-    hash-routed: #/recent, #/current, #/stmt_YYYYMMDD. page.goto WORKS and
-    keeps the session, so this app pastes the URL first - the opposite of the
-    Ally and Chase apps, where only clicking the app's own nav worked.
-  * There is NO <select> anywhere. The "Show me" period chooser is a
-    link-based dropdown, which is why a select-based lookup finds nothing.
-  * It does not need to be opened. Every period's row, each with its own PDF
-    link, is already in the DOM on plain page load (24 links before any
-    interaction, the same 24 after opening the chooser). Discovery is
-    therefore ONE READ with nothing clicked and nothing swept - no accordions
-    and no per-year sweep, which is all the Chase app's machinery existed for.
-  * A statement is served directly:
-        GET /cardmembersvcs/statements/app/stmtPDF?view=true&date=YYYYMMDD
-          -> 200 application/pdf
-             content-disposition: inline;
-               filename=Discover-Statement-20250115-1234.pdf
-    where date is the statement's CLOSING date. The bytes are fetched with the
-    context's own cookies, using the href READ FROM THE PAGE - not a URL built
-    from a template, so a change to the query string cannot silently fetch the
-    wrong period. The served filename also carries the card's last four, which
-    is the only place a single-card login states them.
-  * The neighboring "Download" control opens a MODAL DIALOG (a transactions
-    export, not the statement PDF), and "Print" opens a popup. Neither is used:
-    answering a dialog is exactly what this project never does.
-  * History observed: 24 statements, the oldest .. the newest - about two
-    years. Older statements are not reachable from this page and are not
-    guessed at.
-  * Discover shows an inactivity "stay logged in?" modal. Of that modal only
-    the keep-alive control is ever clicked (dismiss_timeout). Elsewhere a run
-    presses only what reaches the statements when the address does not
-    (click_documents_nav), the site's own nav control (Activity, Statements
-    or Documents, through is_safe_control) and then, when that opens a
-    submenu, its link reading Statements or Tax Forms whole, and a "Show
-    more" or a period in the page's own fallback (expand_all, _select_option,
-    through the blocklist).
-
-STILL UNVERIFIED:
-  * A login with MORE THAN ONE Discover card. This account has one, so no card
-    chooser was observed and none is coded for. If one exists, the last four in
-    each served filename is the handle to tell statements apart - do not infer
-    a card from row position. Attributing by position rather than by what the
-    document itself says filed one card's statements under another during the
-    Chase build, and the output looked entirely plausible.
-  * Whether Discover blocks the bundled Chromium. This app uses a real browser
-    regardless; see above.
-
-OUT OF SCOPE: tax documents. Discover Bank issues 1099-INT for deposit
-accounts, which this app does not cover; a card account's only tax-ish
-document is an occasional 1099-C or 1099-MISC. `document_types` in config
-lists Statement only, so a stray one is classified and then skipped rather
-than half-filed.
+  autopay, moves money, transfers funds, deposits checks, orders checks,
+  freezes or replaces a debit card, closes an account, or changes any setting.
+  The guard is FORBIDDEN_CONTROL_RE; every click path checks it, and a control
+  must ALSO look like a document action (SAFE_DOC_CONTROL_RE) before it may be
+  clicked. Dropdowns are controls too - see MONEY_CONTROL_RE and
+  is_forbidden_control_context - allowing Checking/Savings account options in
+  dropdown context while refusing payment/transfer widgets.
 """
-# Site layer verified working against the live site: 2026-08-19
-# (discovery of 24 statements spanning about two years, and one PDF
-# fetched and checked: 4 pages, card ...1234, %PDF-1.7).
 from __future__ import annotations
 
+import base64
 import html as _html
 import json
 import logging
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlparse, urlsplit
 
 from paperpull_core import intake
 from paperpull_core import controls as _controls
 from paperpull_core import redirects
-from paperpull_core.urls import is_safe_url as _host_allows
-from paperpull_core.controls import click_next_page as _click_next_page
+from paperpull_core.controls import (
+    AUTH_CONTROL_RE,
+    SETTINGS_CONTROL_RE,
+    click_next_page as _click_next_page,
+)
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.characters import whole_json
 
-log = logging.getLogger("discovercard_docs.site")
+log = logging.getLogger("discoverbank_docs.site")
 
-BASE = "https://card.discover.com"
+BASE = "https://bank.discover.com"
 PUBLIC = "https://www.discover.com"
+
+ALLOWED_HOSTS = ("bank.discover.com", "www.discover.com")
+FORBIDDEN_HOSTS = ("card.discover.com", "cards.discover.com")
+
 URLS = {
-    "home": f"{BASE}/cardmembersvcs/achome/homepage",
     "login": f"{PUBLIC}/",
-    # CONFIRMED 2026-08-19. "Activity & Statements", hash-routed within one
-    # page: #/recent (transactions to date), #/current, #/stmt_YYYYMMDD.
-    # page.goto works and keeps the session - Discover does NOT need the
-    # click-only navigation Ally and Chase did.
-    #
-    # #/recent is the right landing route: the statement index is present on
-    # any of them, and #/recent is the page's own default.
-    "documents": f"{BASE}/cardmembersvcs/statements/app/activity#/recent",
-    "documents_alt": f"{BASE}/cardmembersvcs/statements/app/activity",
-    # kept only as a last resort if the route above is ever retired
-    "documents_alt2": f"{BASE}/cardmembersvcs/statements/app/statement",
-    "statements": f"{BASE}/cardmembersvcs/statements",
+    "documents": f"{BASE}/web/deposits/documents/statements",
 }
-# Only the two CONFIRMED routes. The speculative ones were removed after a
-# live run ended on Discover's logoff page: a bad path under /cardmembersvcs/
-# may end the session, and even if that run was really an inactivity timeout
-# (it could not be told apart afterwards), guessing paths on a bank while
-# signed in is not worth the doubt. If both of these stop working, click the
-# app's own nav - that is the fallback below, not more guesses.
-DOCUMENT_URL_CANDIDATES = [URLS["documents"], URLS["documents_alt"]]
+DOCUMENT_URL_CANDIDATES = [URLS["documents"]]
 
 # Confirmed live: a signed-out session lands on
 #   portal.discover.com/customersvcs/universalLogin/logoff_confirmed
@@ -148,46 +75,53 @@ LOGIN_URL_MARKERS = ["/logon", "/login", "/signin", "/sign-in", "/auth/logon",
 # HARD SAFETY GUARD - never click anything matching this. Tuned for a bank.
 # ---------------------------------------------------------------------------
 FORBIDDEN_CONTROL_RE = re.compile(
-    # money movement
-    r"(transfer|deposit|withdraw|wire\b|move\s+money|send\s+money|zelle|"
-    r"pay\b|payment|pay\s+bills?|bill\s*pay|autopay|auto-?pay|schedule\s+payment|"
-    r"pay\s+card|make\s+a\s+payment|"
-    # card-specific products and offers. Discover's own names matter here:
-    # its rewards currency is "Cashback Bonus" (and "Miles" on Discover it
-    # Miles), its card-lock feature is "Freeze It", and its shopping portal is
-    # "Discover Deals" - none of which the Chase vocabulary would have caught.
-    r"balance\s+transfer|cash\s+advance|credit\s+line|credit\s+limit|"
-    r"redeem|rewards?\b|points\b|miles\b|cash\s*back|cashback|"
-    r"offers?\b|deals?\b|refer\s+a\s+friend|"
-    r"discover\s+deals|shop\s+(with|through)|book\s+travel|"
-    r"credit\s+scorecard|fico|spend\s+analyzer|"
-    # applications and account changes
-    r"apply|open\s+(a|an|another|new)\b[\w\s]{0,24}\baccount\b|"
-    r"open\s+\w{0,12}\s*account\b|get\s+(a\s+)?(quote|started|loan|card)|"
-    r"add\s+(funds|card|authorized)|authorized\s+user|"
-    r"dispute|report\s+(a\s+)?(problem|fraud|lost|stolen)|"
-    r"lock\s+card|unlock\s+card|freeze|freeze\s*it|activate|replace\s+card|"
-    r"close\s+account|report\s+lost|report\s+stolen|"
-    r"request\b|increase\b|"
-    # settings
-    # Verb families with their endings. The stem-only version this replaces
-    # let "Save Changes", "Document Removal" and "Updates" walk through.
-    # Leading \b matters as much as the trailing one: without it "edit"
-    # matches inside "Credit" and "chang" inside "Exchange", which
-    # refused "Credit Card Statement", a document rather than a control.
-    r"\bchang(e|es|ed|ing)\b|\bedit(s|ed|ing)?\b|\bupdat(e|es|ed|ing)\b|"
-    r"\bset\s+up\b|\benabl|\bdisabl|\bdelet|\bremov(e|es|ed|ing|al)\b|"
-    r"^\s*save\s*$|\bsave\s+(changes?|settings?|preferences?|profile)\b|"
-    r"appl(y|ies|ied|ication)|\boptions?\b|\bsettings?\b|"
-    r"\bpreferences?\b|manage|turn\s+(on|off)|opt\s*(in|out)|"
-    r"beneficiar|payee|contact\s+info|password|username|"
-    r"paperless|delivery\s+preference|alerts?\s+settings|"
-    # anything that commits
-    r"send\b|submit|confirm|continue|next|agree|accept|sign\b|authorize)", re.I)
+    r"\b(transfer|withdraw|wire|zelle|send\s+money|move\s+money|deposit|"
+    r"pay\s+bills?|bill\s*pay|make\s+a?\s*payment|autopay|order\s+checks?|"
+    r"open\b|apply\b|close\s+account|freeze|lock\s+card|replace\s+card|overdraft|"
+    r"dispute\b|delete\b|manage\b|profile|link\s+account|"
+    r"settings?\b|edit\s+profile|manage\s+alerts?|change\s+password)\b",
+    re.I,
+)
 
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(download|view|open|print|pdf|statement|document|1099|1098|5498|"
-    r"tax|e-?statement|year.?end)", re.I)
+    r"\b(statements?|tax\s+forms?|documents?|year\s+\d{4}|accordion|"
+    r"pdf|download|expand|(?:checking|savings|money\s*market|\bcd\b)\s*(?:\([^\)]*\)|\bstatement\b))",
+    re.I,
+)
+
+
+def is_safe_url(url: str) -> bool:
+    if not url:
+        return False
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    if parsed.scheme != "https":
+        return False
+    if parsed.username or parsed.password:
+        return False
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    if port not in (None, 443):
+        return False
+    host = (parsed.hostname or "").lower()
+    if host in FORBIDDEN_HOSTS or "card.discover.com" in host or "cards.discover.com" in host:
+        return False
+    return host in ALLOWED_HOSTS
+
+
+def is_safe_control(name: str) -> bool:
+    if not name:
+        return False
+    cleaned = name.strip()
+    if FORBIDDEN_CONTROL_RE.search(cleaned):
+        return False
+    if SETTINGS_CONTROL_RE.search(cleaned) or AUTH_CONTROL_RE.search(cleaned):
+        return False
+    return bool(SAFE_DOC_CONTROL_RE.search(cleaned))
 
 SECURITY_CHALLENGE_MARKERS = [
     "enter the code we sent", "enter your verification code", "verification code",
@@ -320,8 +254,8 @@ def looks_public_or_error(page) -> bool:
     url = (page.url or "").lower()
     if any(m in url for m in PUBLIC_OR_ERROR_MARKERS):
         return True
-    # the public site is a different host from the signed-in card portal
-    if url.startswith("https://www.discover.com/") and "/cardmembersvcs" not in url:
+    # The public marketing site is on www.discover.com without a login marker
+    if url.startswith("https://www.discover.com/") and not any(m in url for m in LOGIN_URL_MARKERS):
         return True
     return False
 
@@ -388,27 +322,6 @@ def detect_security_challenge(page) -> Optional[str]:
     return None
 
 
-def is_safe_control(name: str) -> bool:
-    """A control may be clicked only if it looks like a document action AND
-    matches nothing in the forbidden list."""
-    name = (name or "").strip()
-    if not name:
-        return False
-    if FORBIDDEN_CONTROL_RE.search(name):
-        return False
-    # The shared core guard is consulted as well as this app's own blocklist.
-    # A repo-wide review found each app had drifted its own way and every one
-    # of them let settings controls through ("Save Changes", "Document
-    # Removal", "Turn off"). Centralizing it means the next gap is fixed once
-    # rather than nineteen times.
-    try:
-        from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
-        if SETTINGS_CONTROL_RE.search(name) or AUTH_CONTROL_RE.search(name):
-            return False
-    except Exception:
-        pass
-    return bool(SAFE_DOC_CONTROL_RE.search(name))
-
 
 def dismiss_timeout(page) -> None:
     """Discover shows an inactivity modal with a keep-alive button. Clicking it
@@ -439,16 +352,19 @@ DOCUMENTS_NAV_RE = re.compile(
 
 
 def on_documents_page(page) -> bool:
-    """Are we on the statements page?
+    """Are we on the deposit statements page?
 
-    The test is whether the page publishes statement PDF links - not whether
-    it says "Statements" anywhere. A page that merely has the word on it, or a
-    public 404 that happens to render a nav, does not count.
+    Checks for deposit document URL paths and key deposit statements page elements.
     """
     try:
-        if looks_public_or_error(page):
+        if looks_public_or_error(page) or looks_signed_out(page):
             return False
-        return page.locator(STMT_PDF_SEL).count() > 0
+        url = (page.url or "").lower()
+        if "/web/deposits/documents" in url:
+            return True
+        if page.locator('button[class*="_dropdown_"], [data-testid*="document"], button[class*="card-item-btn"]').count() > 0:
+            return True
+        return False
     except Exception:
         return False
 
@@ -625,12 +541,79 @@ def next_page(page) -> bool:
 @dataclass
 class RawDoc:
     title: str
-    account: str = ""
     date_text: str = ""
     href: str = ""
     text: str = ""
-    row_index: int = -1
+    account: str = ""
+    row_index: int = 0
     kind: str = "doc"
+
+    def get(self, key: str, default=None):
+        if key == "date":
+            return self.date_text or default
+        if key == "documentId":
+            return self.href or default
+        return getattr(self, key, default)
+
+    def __getitem__(self, key: str):
+        val = self.get(key)
+        if val is None:
+            raise KeyError(key)
+        return val
+
+
+def parse_statements_api(json_data: list, account_label: str) -> List[RawDoc]:
+    docs: List[RawDoc] = []
+    if not isinstance(json_data, list):
+        return docs
+    acc_lower = (account_label or "").lower()
+
+    for i, item in enumerate(json_data):
+        if not isinstance(item, dict):
+            continue
+        stmt_date = (item.get("statementDate") or "")[:10]  # YYYY-MM-DD
+        name = item.get("name", "")
+        binary_href = ""
+        for link in item.get("links", []):
+            if isinstance(link, dict) and link.get("rel") == "binary":
+                binary_href = link.get("href", "")
+                break
+        if binary_href and binary_href.startswith("/"):
+            binary_href = urljoin(BASE, binary_href)
+        if not binary_href or not is_safe_url(binary_href):
+            continue
+
+        href_lower = binary_href.lower()
+        if "~osa~" in href_lower or "-osa" in href_lower:
+            account_clean = "Savings"
+            account_name = account_label if (account_label and "savings" in acc_lower) else (account_label or "Savings")
+        elif "~oc~" in href_lower or "-oc" in href_lower:
+            account_clean = "Checking"
+            account_name = account_label if (account_label and "checking" in acc_lower) else (account_label or "Checking")
+        elif "money market" in acc_lower or "~mm~" in href_lower:
+            account_clean = "Money Market"
+            account_name = account_label or "Money Market"
+        elif "cd" in acc_lower or "certificate" in acc_lower or "~cd~" in href_lower:
+            account_clean = "CD"
+            account_name = account_label or "CD"
+        elif "savings" in acc_lower:
+            account_clean = "Savings"
+            account_name = account_label or "Savings"
+        else:
+            account_clean = "Checking"
+            account_name = account_label or "Checking"
+
+        docs.append(
+            RawDoc(
+                title=f"{account_clean} Statement",
+                date_text=stmt_date,
+                href=binary_href,
+                text=name,
+                account=account_name,
+                row_index=i,
+            )
+        )
+    return docs
 
 
 # ---------------------------------------------------------------------------
@@ -731,9 +714,8 @@ _ACCOUNT_HINT_RE = re.compile(
 # document picker, and its OPTIONS alone give it away wherever it appears, so
 # they are checked against the same pattern.
 PRODUCT_PICKER_RE = re.compile(
-    r"bank\s+account|student\s+loans?|personal\s+loans?|home\s+loans?|"
-    r"mortgage|auto\s+loans?|certificate\s+of\s+deposit|"
-    r"select\s+an?\s+account", re.I)
+    r"credit\s+cards?|student\s+loans?|personal\s+loans?|home\s+loans?|"
+    r"mortgage|auto\s+loans?", re.I)
 
 # Re-exported because the tests and the rest of this module refer to them.
 MONEY_CONTROL_RE = _controls.MONEY_CONTROL_RE
@@ -747,9 +729,15 @@ def is_forbidden_control_context(identity: Optional[str],
                                  options: Optional[List[str]] = None) -> bool:
     """This provider's controls, judged by the shared rules. Fails CLOSED on
     an unreadable identity, exactly as the core does."""
-    return _controls.is_forbidden_context(identity or "", FORBIDDEN_CONTROL_RE,
+    if not identity:
+        return True
+    opts = options or []
+    for opt in opts:
+        if PRODUCT_PICKER_RE.search(opt or ""):
+            return True
+    return _controls.is_forbidden_context(identity, FORBIDDEN_CONTROL_RE,
                                           extra_res=_EXTRA_RES,
-                                          options=options or ())
+                                          options=opts)
 
 
 def is_money_control(identity: str) -> bool:
@@ -861,6 +849,223 @@ def _select_option(page, sel, label: str) -> bool:
         return False
 
 
+_STATEMENTS_FETCH_JS = """async (url) => {
+  const ppTarget = new URL(url, location.href);
+  if (ppTarget.protocol !== "https:" || ppTarget.hostname !== "bank.discover.com" || ppTarget.username || ppTarget.password || (ppTarget.port && ppTarget.port !== "443")) throw new Error("Refusing an off-host document request");
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) return [];
+  return await res.json();
+}"""
+
+_DOWNLOAD_BYTES_JS = """async (url) => {
+  const ppTarget = new URL(url, location.href);
+  if (ppTarget.protocol !== "https:" || ppTarget.hostname !== "bank.discover.com" || ppTarget.username || ppTarget.password || (ppTarget.port && ppTarget.port !== "443")) throw new Error("Refusing an off-host document request");
+  const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/pdf' } });
+  if (r.status !== 200) {
+    const text = await r.text();
+    return { ok: false, status: r.status, b64: '', text: text.slice(0, 300) };
+  }
+  let s = '';
+  const bytes = await ppRead(r);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk)
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  return { ok: true, status: r.status, b64: btoa(s), text: '' };
+}"""
+
+
+def list_deposit_accounts(page) -> List[dict]:
+    """Inspects account dropdown to return all deposit accounts."""
+    try:
+        # Check React fiber first for instant, non-invasive option discovery
+        fiber_options = page.evaluate("""() => {
+            const btn = document.querySelector("button[class*='_dropdown_']");
+            if (!btn) return null;
+            const key = Object.keys(btn).find(k => k.startsWith("__reactFiber"));
+            if (!key) return null;
+            let curr = btn[key];
+            while (curr) {
+                if (curr.memoizedProps && Array.isArray(curr.memoizedProps.options)) {
+                    return curr.memoizedProps.options.map((o, i) => ({
+                        index: i,
+                        text: o.label || '',
+                        id: o.id || o.value || ''
+                    }));
+                }
+                curr = curr.return;
+            }
+            return null;
+        }""")
+        if fiber_options:
+            results = []
+            for opt in fiber_options:
+                txt = opt.get("text", "")
+                if txt and not FORBIDDEN_CONTROL_RE.search(txt) and is_safe_control(txt):
+                    results.append(opt)
+            if results:
+                return results
+
+        btn = page.locator('button[class*="_dropdown_"]').first
+        if btn.count() == 0:
+            return []
+        txt = (btn.inner_text() or "").strip()
+        aria = btn.get_attribute("aria-label") or ""
+        combined = f"{txt} {aria}".strip()
+        if FORBIDDEN_CONTROL_RE.search(combined):
+            log.warning("Dropdown button matches forbidden words: %r", combined)
+            return []
+        if btn.get_attribute("aria-expanded") != "true":
+            btn.click()
+            page.wait_for_timeout(300)
+        options = page.locator('[role="option"], ul[role="listbox"] li')
+        results = []
+        for i in range(options.count()):
+            opt_text = options.nth(i).inner_text().strip()
+            if not FORBIDDEN_CONTROL_RE.search(opt_text) and is_safe_control(opt_text):
+                results.append({"index": i, "text": opt_text})
+        if btn.get_attribute("aria-expanded") == "true":
+            btn.click()
+        return results
+    except Exception as e:
+        log.warning("list_deposit_accounts failed: %s", e)
+        return []
+
+
+def discoverbank_collect(page) -> Listed:
+    """Collects statements across all available deposit accounts."""
+    all_docs: List[RawDoc] = []
+    seen_hrefs = set()
+
+    # 1. First, check if accounts and their IDs can be extracted directly from React fiber
+    try:
+        acct_options = page.evaluate("""() => {
+            const btn = document.querySelector("button[class*='_dropdown_']");
+            if (!btn) return [];
+            const key = Object.keys(btn).find(k => k.startsWith("__reactFiber"));
+            if (!key) return [];
+            let curr = btn[key];
+            while (curr) {
+                if (curr.memoizedProps && Array.isArray(curr.memoizedProps.options)) {
+                    return curr.memoizedProps.options.map(o => ({
+                        label: o.label || '',
+                        id: o.id || o.value || ''
+                    }));
+                }
+                curr = curr.return;
+            }
+            return [];
+        }""")
+    except Exception as e:
+        log.warning("Could not read React fiber account options: %s", e)
+        acct_options = []
+
+    # If accounts were found in React fiber, fetch statements directly for each account
+    if acct_options:
+        log.info("Discovered %d account(s) from React state: %s",
+                 len(acct_options), [a.get("label") for a in acct_options])
+        for acct in acct_options:
+            acct_id = acct.get("id")
+            acct_label = acct.get("label", "")
+            if not acct_id:
+                continue
+            if not is_safe_control(acct_label) or FORBIDDEN_CONTROL_RE.search(acct_label):
+                log.warning("Skipping unsafe account option %r", acct_label)
+                continue
+            url = f"https://bank.discover.com/bank/deposits/servicing/documents/v1/accounts/{acct_id}/statements"
+            try:
+                raw_json = intake.evaluate(page, _STATEMENTS_FETCH_JS, url)
+                if isinstance(raw_json, list):
+                    docs = parse_statements_api(raw_json, acct_label)
+                    for d in docs:
+                        if d.href not in seen_hrefs:
+                            seen_hrefs.add(d.href)
+                            all_docs.append(d)
+            except Exception as e:
+                log.warning("Direct fetch failed for account %s (%s): %s", acct_label, acct_id, e)
+
+        if all_docs:
+            return _listed(all_docs)
+
+    # 2. Fallback: discover endpoints from performance entries and cycle dropdown if needed
+    accounts = list_deposit_accounts(page)
+
+    # First discover any statement endpoints already present in browser performance entries
+    try:
+        endpoints = page.evaluate("""() => {
+            return Array.from(new Set(
+                performance.getEntriesByType('resource')
+                    .map(r => r.name)
+                    .filter(url => 
+                        url.startsWith('https://bank.discover.com/bank/deposits/') &&
+                        url.includes('/statements') && 
+                        !url.includes('bankprod2')
+                    )
+            ));
+        }""")
+    except Exception as e:
+        log.warning("Could not read performance entries: %s", e)
+        endpoints = []
+
+    # If performance entries do not cover all accounts, cycle the dropdown to load them
+    if accounts and len(endpoints) < len(accounts):
+        for acc in accounts:
+            idx = acc["index"]
+            label = acc["text"]
+            if not is_safe_control(label) or FORBIDDEN_CONTROL_RE.search(label):
+                log.warning("Refusing to switch to unsafe account control: %r", label)
+                continue
+            try:
+                btn = page.locator('button[class*="_dropdown_"]').first
+                if btn.count() > 0:
+                    if btn.get_attribute("aria-expanded") != "true":
+                        btn.click()
+                        page.wait_for_timeout(300)
+                    options = page.locator('[role="option"], ul[role="listbox"] li')
+                    if options.count() > idx:
+                        options.nth(idx).click()
+                        page.wait_for_timeout(1000)
+            except Exception as e:
+                log.warning("Could not switch to account %s (idx %d): %s", label, idx, e)
+
+        try:
+            endpoints = page.evaluate("""() => {
+                return Array.from(new Set(
+                    performance.getEntriesByType('resource')
+                        .map(r => r.name)
+                        .filter(url => 
+                            url.startsWith('https://bank.discover.com/bank/deposits/') &&
+                            url.includes('/statements') && 
+                            !url.includes('bankprod2')
+                        )
+                ));
+            }""")
+        except Exception:
+            pass
+
+    for ep in endpoints:
+        try:
+            raw_json = intake.evaluate(page, _STATEMENTS_FETCH_JS, ep)
+            if isinstance(raw_json, list):
+                label = ""
+                for a in accounts:
+                    txt = a.get("text", "")
+                    if ("~osa~" in ep.lower() or "-osa" in ep.lower()) and "savings" in txt.lower():
+                        label = txt
+                        break
+                    elif ("~oc~" in ep.lower() or "-oc" in ep.lower()) and "checking" in txt.lower():
+                        label = txt
+                        break
+                docs = parse_statements_api(raw_json, label)
+                for d in docs:
+                    if d.href not in seen_hrefs:
+                        seen_hrefs.add(d.href)
+                        all_docs.append(d)
+        except Exception as e:
+            log.warning("API statement collection failed for %s: %s", ep, e)
+
+    return _listed(all_docs)
+
+
 def discovercard_collect(page) -> Listed:
     """Every statement Discover still has: a list of {account, date, title}.
 
@@ -938,8 +1143,46 @@ def discovercard_collect(page) -> Listed:
 def _write_if_pdf(data: bytes, out_path: Path) -> bool:
     if not data or b"%PDF-" not in data[:1024]:
         return False
-    out_path.write_bytes(data)
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = out_path.with_suffix(f".tmp.{os.getpid()}")
+    try:
+        tmp_path.write_bytes(data)
+        os.replace(tmp_path, out_path)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
     return True
+
+
+def discoverbank_download(
+    page, ctx, account: str, date: str, out_path: Path, href: str = "", **kw
+) -> bool:
+    """Downloads statement PDF via authenticated fetch, verifying %PDF- signature."""
+    href = href or kw.get("document_id", "")
+    if href and href.startswith("/"):
+        href = urljoin(BASE, href)
+    if not href:
+        log.warning("No download URL provided for %s %s", account, date)
+        return False
+
+    if not is_safe_url(href):
+        log.warning("Refusing to download from unsafe URL: %s", href)
+        return False
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    result = intake.evaluate(page, _DOWNLOAD_BYTES_JS, href)
+
+    if not isinstance(result, dict) or not result.get("ok") or not result.get("b64"):
+        err = result.get("text") if isinstance(result, dict) else "unknown error"
+        log.error("Failed to fetch statement bytes from %s: %s", href, err)
+        return False
+
+    pdf_bytes = intake.decode(result["b64"])
+    return _write_if_pdf(pdf_bytes, out_path)
 
 
 # ===========================================================================
@@ -1307,18 +1550,3 @@ def discovercard_collect_via_api(page) -> List[dict]:
     return recs
 
 
-# ---------------------------------------------------------------------------
-# Host allowlist. Added repo-wide after a review found this app would fetch or
-# navigate to whatever URL a stored record or a page attribute contained, using
-# the live signed-in session. Parsed, never a string prefix, so a lookalike
-# host cannot walk through.
-# ---------------------------------------------------------------------------
-ALLOWED_HOSTS = {'discover.com'}
-
-
-def is_safe_url(url: str) -> bool:
-    """True only for an https URL on one of this provider's own hosts.
-
-    The check itself lives in the core, so all of them answer the same way.
-    This app keeps the hosts, which is the part that really is its own."""
-    return _host_allows(url, ALLOWED_HOSTS)
