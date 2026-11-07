@@ -13,6 +13,14 @@ Statement Date cell blank, that was the Due Date beside it. The date is now
 read only from the column headed Statement Date, and a blank one stops the
 list.
 
+A list that may be partial stops too. The live table says nothing of how
+many bills it holds, so rows that have not settled, anything near the table
+that looks like a pager or a show-more control, and hidden row numbers that
+do not run from 1 to the rows read all stop it. The shape headed "the live
+table" below comes from the words of the pull request that reported it, and
+every other shape around it is invented, since this project cannot see the
+page.
+
 The browser is started as a program of its own with a debugging port, the
 way login.bat leaves one open, and the app attaches to it over CDP exactly
 as it does at home. My Energy Center and another site are made-up host
@@ -23,6 +31,7 @@ invented.
 import json
 import sys
 import threading
+from datetime import date, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -57,8 +66,8 @@ DUE_FIRST = """<tr invoiceid="{inv}">{control}<td>{due}</td><td>{statement}</td>
 
 BILLING_HISTORY = """<!doctype html><html><head><title>Billing History</title></head><body>
 <main><h1>Billing History</h1>
-<table id="billHistoryTable"><thead>%(head)s</thead>
-<tbody>%(rows)s</tbody></table></main></body></html>"""
+%(before)s<table id="billHistoryTable"><thead>%(head)s</thead>
+<tbody>%(rows)s</tbody>%(foot)s</table>%(after)s</main></body></html>"""
 
 ONE_ROW = ("<tr><th></th><th>Statement Date</th><th>Due Date</th><th>Amount Due</th>"
            "<th>Status</th></tr>")
@@ -121,6 +130,130 @@ TABLES["numbered column"] = (LIVE_HEAD.replace("<tr>", "<tr><th>#</th>"), LIVE_R
 # A hidden first cell that is not a row number is not passed over.
 TABLES["hidden first cell with words"] = (
     LIVE_HEAD, LIVE_ROW, lambda n: '<td style="display:none;">row %d</td>' % (n + 1))
+# A number a person can see, or one in a header cell, is not the hidden cell
+# the live table draws, so it stays a column and the row is one too wide.
+TABLES["number shown"] = (LIVE_HEAD, LIVE_ROW, lambda n: "<td>%d</td>" % (n + 1))
+TABLES["hidden number in a header cell"] = (
+    LIVE_HEAD, LIVE_ROW, lambda n: '<th style="display:none;">%d</th>' % (n + 1))
+# A hidden number as tall as every row, drawn in the first row only. Passed
+# over, the rows below it would read as lining up.
+TABLES["hidden tall number"] = (
+    LIVE_HEAD, LIVE_ROW,
+    lambda n: '<td rowspan="3" style="display:none;">1</td>' if n == 0 else "")
+# A hidden cell two columns wide is no row number, under a header that has
+# those two columns, so its digits are not asked to run from 1.
+TABLES["hidden wide cell"] = (
+    LIVE_HEAD.replace("<tr>", '<tr><th colspan="2">Reference</th>'), LIVE_ROW,
+    lambda n: '<td colspan="2" style="display:none;">77</td>')
+# The three shapes the review measured, each a real # column with one cell
+# that has no header. Passing the first cell over put the Due Date under
+# Statement Date, on a clean exit.
+NUMBER = TABLES["hidden row number"][2]
+HASH_HEAD = LIVE_HEAD.replace("<tr>", "<tr><th>#</th>")
+TABLES["hash with a headerless details cell"] = (
+    HASH_HEAD.replace("<th>Details</th>", ""), LIVE_ROW, NUMBER)
+TABLES["hash with one more cell"] = (
+    HASH_HEAD, LIVE_ROW.replace("</tr>", "<td></td></tr>"), NUMBER)
+TABLES["hash with one row wider"] = (
+    HASH_HEAD, lambda n: LIVE_ROW.replace("</tr>", "<td></td></tr>") if n == 2 else LIVE_ROW,
+    NUMBER)
+# Rows numbered as a second page would be, and with a bill left out.
+TABLES["numbers from eleven"] = (
+    LIVE_HEAD, LIVE_ROW, lambda n: '<td style="display:none;">%d</td>' % (n + 11))
+TABLES["a gap in the numbers"] = (
+    LIVE_HEAD, LIVE_ROW, lambda n: '<td style="display:none;">%d</td>' % (1, 2, 4)[n])
+
+PAGER = ('<nav aria-label="Bill pages"><ul class="pagination"><li class="active"><a href="#">1</a>'
+         '</li><li><a href="#">2</a></li><li><a href="#">3</a></li></ul></nav>')
+
+# An element with nothing in it still takes up room with this.
+SIZED = ' style="display:block;height:20px;"'
+
+# Each way something near the table says there may be more bills than it
+# shows, as what is set on the page. All invented.
+MORE_NEAR = {
+    "a pager after the table": {"after": PAGER},
+    "a pager above the table": {"before": PAGER},
+    "a pager in the footer": {"foot": '<tfoot><tr><td colspan="7">%s</td></tr></tfoot>' % PAGER},
+    "a pager deep in wrappers": {"after": "<div><div><div><div>%s</div></div></div></div>" % PAGER},
+    "a Next link alone": {"after": '<p><a href="#">Next</a></p>'},
+    "an arrow with only a label": {"after": '<a href="#" aria-label="Next page"%s></a>' % SIZED},
+    "an arrow with only a title": {"after": '<a href="#" title="Next page"%s></a>' % SIZED},
+    "a Next button": {"after": '<button type="button">Next</button>'},
+    "a Next input": {"after": '<input type="submit" value="Next">'},
+    "a Next span that is a button": {"after": '<span role="button">Next</span>'},
+    "a Next span that is a link": {"after": '<span role="link">Next</span>'},
+    "a Next div with a handler": {"after": '<div onclick="void 0">Next</div>'},
+    "a class named as a pagination": {"after": '<div class="bill-pagination"%s></div>' % SIZED},
+    "an id named as a pagination": {"after": '<div id="billPagination"%s></div>' % SIZED},
+    "a class named as a pager": {"after": '<div class="bill-pager"%s></div>' % SIZED},
+    "an id named as a pager": {"after": '<div id="billPager"%s></div>' % SIZED},
+    "a label named as a pagination": {"after": '<div aria-label="Pagination"%s></div>' % SIZED},
+    "page numbers alone": {"after": '<p><a href="#">1</a> <a href="#">2</a></p>'},
+    "a Show more button": {"after": '<button type="button">Show more</button>'},
+    "a Load more input": {"after": '<input type="button" value="Load more">'},
+    "a Show more span": {"after": '<span class="link">Show more</span>'},
+    "a Show more row": {"tail": '<tr><td colspan="7"><a href="#">Show more</a></td></tr>'},
+    "a line of what is shown": {"after": "<p>Showing 1 to 3 of 24 bills</p>"},
+}
+
+# What is not near the table, not drawn, or a bill's own.
+NOT_MORE_NEAR = {
+    "a pager the page hides": {"after": '<div style="display:none;">%s</div>' % PAGER},
+    "a pager with nothing in it": {"after": '<ul class="pagination"></ul>'},
+    "a Show more out of sight": {"after": '<button style="visibility:hidden;">Show more</button>'},
+    "a Next link far below": {"after": '<div style="height:600px;"></div><a href="#">Next</a>'},
+    "a Next link far above": {"before": '<a href="#">Next</a><div style="height:600px;"></div>'},
+    "a View all link beside the table": {
+        "before": '<div style="display:flex;"><div style="flex:1;">',
+        "after": '</div><aside style="width:200px;"><a href="#">View all</a></aside></div>'},
+    "a detail row's own link": {
+        "detail": lambda n: ('<tr><td colspan="7"><a href="#">Show more</a></td></tr>'
+                             if n == 0 else "")},
+}
+
+# Draws the first three rows now and the rest a second and a half later, the
+# gap the review's probe measured.
+LATE_BATCH = """<script>
+const body = document.querySelector('#billHistoryTable tbody');
+const late = Array.from(body.rows).slice(3);
+late.forEach((tr) => tr.remove());
+setTimeout(() => late.forEach((tr) => body.appendChild(tr)), 1500);
+</script>"""
+
+
+def drawn(day):
+    return "%s %d, %d" % (day.strftime("%b"), day.day, day.year)
+
+
+def invented_days(count):
+    return [date(2031, 12, 20) - timedelta(days=30 * n) for n in range(count)]
+
+
+def invented_bills(count):
+    """Bills a month apart, each as BILLS holds it."""
+    return [("ISU%012d" % (301 + n), drawn(day), drawn(day + timedelta(days=10)))
+            for n, day in enumerate(invented_days(count))]
+
+
+def invented_listed(count):
+    """Those bills as a Discover lists them."""
+    return [("ISU%012d" % (301 + n), day.isoformat()) for n, day in enumerate(invented_days(count))]
+
+
+# The pull request counts 25 rows in the table body, nine bills and their
+# detail rows. How the sixteen detail rows fall among the bills, and what
+# they hold, is invented.
+def live_details(n):
+    links = ('<tr class="detail"><td colspan="7"><a href="#">View Your Detailed Bill PDF</a>'
+             "</td></tr>")
+    usage = '<tr class="detail"><td colspan="7">Days in Billing Cycle 30</td></tr>'
+    return links + usage if n < 7 else links
+
+
+# The two controls sdge_site.py names on this page, drawn above the table.
+LIVE_ABOVE = ('<select id="accountList"><option value="1">Account one</option></select>'
+              '<p><a id="downloadBillingHisotry" href="#">Download billing history (Excel)</a></p>')
 
 DASHBOARD = """<!doctype html><html><head><title>My Energy Center</title></head><body>
 <main><h1>Welcome back</h1><p>Your account at a glance.</p></main></body></html>"""
@@ -140,6 +273,10 @@ class FakeMec:
         self.blank = ""
         # Which of the TABLES the bill table is drawn as.
         self.table = "one row"
+        self.bills = BILLS
+        # Anything else on the page, as the keys of MORE_NEAR name it.
+        self.before = self.after = self.foot = self.tail = ""
+        self.detail = lambda n: ""
 
 
 SITE = FakeMec()
@@ -163,10 +300,13 @@ class _Handler(BaseHTTPRequestHandler):
         SITE.seen.append((host, path))
         if host == MEC_HOST and path == site.DOCUMENTS_PATH:
             head, row, control = TABLES[SITE.table]
-            self._page(BILLING_HISTORY % {"head": head, "rows": "".join(
-                row.format(inv=inv, control=control(n),
-                           statement="" if inv == SITE.blank else statement, due=due)
-                for n, (inv, statement, due) in enumerate(BILLS))})
+            self._page(BILLING_HISTORY % {
+                "head": head, "before": SITE.before, "after": SITE.after, "foot": SITE.foot,
+                "rows": "".join(
+                    (row(n) if callable(row) else row).format(
+                        inv=inv, control=control(n),
+                        statement="" if inv == SITE.blank else statement, due=due) + SITE.detail(n)
+                    for n, (inv, statement, due) in enumerate(SITE.bills)) + SITE.tail})
         elif host == MEC_HOST and path == "/portal/Dashboard/index":
             self._page(DASHBOARD)
         elif host == ELSEWHERE_HOST and path == "/inbox":
@@ -212,8 +352,11 @@ def address(server, host, path):
 
 @pytest.fixture(autouse=True)
 def fake_mec(server, monkeypatch):
-    """My Energy Center is the made-up site, on plain http."""
+    """My Energy Center is the made-up site, on plain http. Its rows stand
+    still, so the wait for them to settle is cut short, and the test of
+    rows drawn in two batches puts the shipped wait back."""
     SITE.reset()
+    monkeypatch.setattr(site, "ROWS_QUIET_MS", 200)
     documents = address(server, MEC_HOST, site.DOCUMENTS_PATH)
     for name in ("DOCUMENTS_URL", "STATEMENTS_URL", "BILLING_URL"):
         monkeypatch.setattr(site, name, documents)
@@ -222,6 +365,9 @@ def fake_mec(server, monkeypatch):
         monkeypatch.setitem(site.URLS, name, documents)
     monkeypatch.setattr(site, "is_safe_url", lambda url: urlsplit(url or "").hostname == MEC_HOST)
     return SITE
+
+
+SHIPPED_QUIET_MS = site.ROWS_QUIET_MS
 
 
 def config_for(tmp_path, cdp_url):
@@ -245,6 +391,16 @@ def discover(tmp_path, cdp_url, capsys):
     return ended, capsys.readouterr().out
 
 
+def resume(tmp_path, cdp_url, capsys):
+    """A Resume on the same folder."""
+    try:
+        ended = ("returned", app_mod.main(["--resume", "--config",
+                                           str(config_for(tmp_path, cdp_url))]))
+    except SystemExit as e:
+        ended = ("exit", e.code)
+    return ended, capsys.readouterr().out
+
+
 def folded(out):
     return " ".join(out.split())
 
@@ -261,6 +417,18 @@ def discovered(tmp_path):
     path = tmp_path / "out" / "discovery.json"
     found = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     return sorted((r["document_id"], r["date"]) for r in found.values())
+
+
+def read_whole(tmp_path):
+    """What the run's own note says of the last listing."""
+    note = tmp_path / "out" / "last-listing.json"
+    return json.loads(note.read_text(encoding="utf-8"))["complete"]
+
+
+def on_their_tab(cdp_url, server):
+    theirs = testkit.open_tab(cdp_url, address(server, MEC_HOST, "/portal/Dashboard/index"),
+                              "My Energy Center")
+    testkit.keep_only(cdp_url, {theirs})
 
 
 def tabs_on(cdp_url, host):
@@ -333,13 +501,15 @@ def test_a_blank_statement_date_stops_the_list_and_takes_no_due_date(attached, s
 
 
 @pytest.mark.parametrize("table", ["two rows", "row headers", "hidden row number",
-                                   "second cells hidden", "numbered column"])
+                                   "second cells hidden", "numbered column", "hidden wide cell"])
 def test_the_statement_date_column_is_found_in_other_table_shapes(table, attached, server,
                                                                   tmp_path, capsys):
     """Statement Date as the first cell of the header's second row, the
     second column of the table since the control column's header spans
     both rows, and each row's control cell drawn as a header cell of its
-    row. Every bill is listed by its Statement Date either way."""
+    row. Every bill is listed by its Statement Date either way. A hidden
+    cell two columns wide is no row number, so its digits stop nothing, and
+    taking the colspan check out stops this list on them."""
     SITE.table = table
     theirs = testkit.open_tab(attached, address(server, MEC_HOST, "/portal/Dashboard/index"),
                               "My Energy Center")
@@ -354,13 +524,20 @@ def test_the_statement_date_column_is_found_in_other_table_shapes(table, attache
 DUE_DATES = {"2026-10-01", "2026-09-01", "2026-10-14"}
 
 
-@pytest.mark.parametrize("table", ["rowspan zero", "tall cell", "hidden first cell with words"])
+@pytest.mark.parametrize("table", ["rowspan zero", "tall cell", "hidden first cell with words",
+                                   "number shown", "hidden number in a header cell",
+                                   "hidden tall number", "hash with a headerless details cell",
+                                   "hash with one more cell", "hash with one row wider"])
 def test_a_table_whose_rows_may_not_line_up_stops_rather_than_misdate(table, attached, server,
                                                                       tmp_path, capsys):
     """A header cell of rowspan 0, or a row's cell as tall as every row, can
     put a Due Date in the Statement Date column of what is read, though the
     browser draws it under Due Date. Each bill was dated by its Due Date.
-    The list now stops, and no bill is dated by its Due Date."""
+    The list now stops, and no bill is dated by its Due Date. It stops too
+    on a first cell that is not the live table's hidden number, one a person
+    can see, a header cell, a tall cell or one holding words. And on a real
+    # column with one cell that has no header, where passing the first cell
+    over dated bills by their Due Date on a clean exit."""
     SITE.table = table
     theirs = testkit.open_tab(attached, address(server, MEC_HOST, "/portal/Dashboard/index"),
                               "My Energy Center")
@@ -371,6 +548,134 @@ def test_a_table_whose_rows_may_not_line_up_stops_rather_than_misdate(table, att
     assert ended == ("exit", 1), folded(out)
     assert "stopped partway" in out, folded(out)
     assert not {date for _id, date in discovered(tmp_path)} & DUE_DATES, folded(out)
+
+
+def test_the_live_table_lists_all_nine_bills(attached, server, tmp_path, capsys):
+    """Billing History as the pull request describes it, seven header cells,
+    25 rows in the table body, nine bills and their detail rows, each bill
+    led by its hidden number, no table plugin, no info line and no pager.
+    Nothing near it may read as a pager, or every run stops."""
+    SITE.table, SITE.bills = "hidden row number", invented_bills(9)
+    SITE.detail, SITE.before = live_details, LIVE_ABOVE
+    assert 9 + sum(live_details(n).count("<tr") for n in range(9)) == 25
+    on_their_tab(attached, server)
+
+    ended, out = discover(tmp_path, attached, capsys)
+
+    assert ended == ("returned", 0), folded(out)
+    assert discovered(tmp_path) == invented_listed(9), folded(out)
+    assert read_whole(tmp_path) is True
+    assert panel_reads(out)["stopped"] == 0, folded(out)
+
+
+@pytest.mark.parametrize("shape", sorted(MORE_NEAR))
+def test_a_pager_or_a_show_more_control_near_the_table_stops_the_list(shape, attached, server,
+                                                                      tmp_path, capsys):
+    """The table shows some of the bills and says so only by what is near
+    it. This ended clean with the list noted whole, and the rest were never
+    known. The list now stops, keeping the bills it read."""
+    SITE.table = "hidden row number"
+    for name, value in MORE_NEAR[shape].items():
+        setattr(SITE, name, value)
+    on_their_tab(attached, server)
+
+    ended, out = discover(tmp_path, attached, capsys)
+
+    assert ended == ("exit", 1), folded(out)
+    assert "shows a pager or a show-more control" in folded(out), folded(out)
+    assert discovered(tmp_path) == LISTED, folded(out)
+    assert read_whole(tmp_path) is False
+
+
+@pytest.mark.parametrize("shape", sorted(NOT_MORE_NEAR))
+def test_what_is_hidden_far_off_or_a_bills_own_stops_nothing(shape, attached, server, tmp_path,
+                                                             capsys):
+    """A pager a page keeps hidden, or a link that is not by the table, says
+    nothing of it, and a stop here would be every run's."""
+    SITE.table = "hidden row number"
+    for name, value in NOT_MORE_NEAR[shape].items():
+        setattr(SITE, name, value)
+    on_their_tab(attached, server)
+
+    ended, out = discover(tmp_path, attached, capsys)
+
+    assert ended == ("returned", 0), folded(out)
+    assert discovered(tmp_path) == LISTED, folded(out)
+    assert read_whole(tmp_path) is True
+
+
+def test_a_hidden_first_cell_with_words_stays_a_column(attached, server, tmp_path, capsys):
+    """Only digits are a row number. A hidden cell of words is a column, so
+    its row is one too wide, and the list says so. Passed over as a number,
+    it would stop for another reason and hide what the page had changed."""
+    SITE.table = "hidden first cell with words"
+    on_their_tab(attached, server)
+
+    ended, out = discover(tmp_path, attached, capsys)
+
+    assert ended == ("exit", 1), folded(out)
+    assert "does not line up" in folded(out), folded(out)
+
+
+def test_the_failure_file_says_what_the_wait_for_rows_found(attached, server, tmp_path, capsys):
+    """A run that stops writes down the wait it took, from the journal the
+    app hands to the site layer, so a repair can see how the rows came."""
+    SITE.table, SITE.after = "hidden row number", PAGER
+    on_their_tab(attached, server)
+
+    ended, out = discover(tmp_path, attached, capsys)
+
+    assert ended == ("exit", 1), folded(out)
+    [written] = (tmp_path / "out").rglob("failure-*.json")
+    assert "a further bill row" in written.read_text(encoding="utf-8")
+
+
+def test_a_resume_after_a_pager_saves_nothing_and_reads_as_stopped(attached, server, tmp_path,
+                                                                   capsys):
+    """The stop goes through the app's own listing, so a Resume on what was
+    kept reads the same list, stops there, and is not called finished."""
+    SITE.table, SITE.after = "hidden row number", PAGER
+    on_their_tab(attached, server)
+    discover(tmp_path, attached, capsys)
+
+    ended, out = resume(tmp_path, attached, capsys)
+
+    assert ended[0] == "exit", folded(out)
+    assert panel_reads(out)["stopped"] == 1, folded(out)
+    assert read_whole(tmp_path) is False
+    assert not list((tmp_path / "out").rglob("*.pdf")), folded(out)
+
+
+def test_rows_drawn_in_two_batches_are_read_once_they_settle(attached, server, tmp_path, capsys,
+                                                             monkeypatch):
+    """Three rows, and the rest a second and a half later, with the wait the
+    app ships. The wait for rows ends on the first one, so three of twelve
+    were read as the whole list."""
+    monkeypatch.setattr(site, "ROWS_QUIET_MS", SHIPPED_QUIET_MS)
+    SITE.table, SITE.bills, SITE.after = "hidden row number", invented_bills(12), LATE_BATCH
+    on_their_tab(attached, server)
+
+    ended, out = discover(tmp_path, attached, capsys)
+
+    assert ended == ("returned", 0), folded(out)
+    assert discovered(tmp_path) == invented_listed(12), folded(out)
+
+
+@pytest.mark.parametrize("table", ["numbers from eleven", "a gap in the numbers"])
+def test_hidden_numbers_that_do_not_run_from_1_stop_the_list(table, attached, server, tmp_path,
+                                                             capsys):
+    """Rows numbered from 11 are a second page, and a gap is a bill the
+    table did not draw. Both read as the whole list, and now the bills read
+    are kept and the list stops."""
+    SITE.table = table
+    on_their_tab(attached, server)
+
+    ended, out = discover(tmp_path, attached, capsys)
+
+    assert ended == ("exit", 1), folded(out)
+    assert "hidden row numbers do not run from 1 to 3" in folded(out), folded(out)
+    assert discovered(tmp_path) == LISTED, folded(out)
+    assert read_whole(tmp_path) is False
 
 
 def test_diagnose_writes_the_header_a_date_is_read_by(attached, server, tmp_path, capsys,
