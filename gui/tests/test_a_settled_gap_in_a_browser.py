@@ -92,6 +92,10 @@ def _clean_all(gaps_left):
 def apps(tmp_path, monkeypatch):
     for name in ("APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME"):
         monkeypatch.setenv(name, str(tmp_path / "settings"))
+    # On macOS the settings file is under ~/Library, which none of the
+    # variables above move, so the file itself is pointed into tmp_path, or
+    # this would write the person's own settings.json.
+    monkeypatch.setattr(app_module, "_settings_path", lambda: tmp_path / "settings" / "settings.json")
     app_module._write_settings({"terms_accepted": app_module.TERMS_VERSION})
     root = tmp_path / "apps"
     monkeypatch.setenv("APPS_ROOT", str(root))
