@@ -374,8 +374,9 @@ function renderHome() {
       '. Nothing is ever downloaded twice, so getting new is always safe.</p></div>' +
       (targets.length > 1 ? '<button type="button" class="btn btn-p starts" data-do="queue">Get new for all ' +
         targets.length + ', one by one</button>' :
-        actButton(targets[0], {label: 'Get new', run: continues(targets[0]) ? 'resume' : 'all', primary: true,
-                               scope: present(targets[0]).act.scope})) + '</section>';
+        // With no dates, as a round runs each account. See startQueue.
+        actButton(targets[0], {label: 'Get new', run: continues(targets[0]) ? 'resume' : 'all', primary: true})) +
+      '</section>';
   } else if (n && !groups.needs.length && !groups.ok.length) {
     html += '<section class="card summary" aria-label="Summary"><div class="icon due">' + sv(P.lock, 24) + '</div>' +
       '<div class="text"><p class="big">Next, sign in to your first provider</p><p class="muted">Open one below and press ' +
@@ -1014,11 +1015,12 @@ function renderRunbar() {
 // -- a round of runs, Get new for all -----------------------------------------------
 let QUEUE = null;
 function startQueue() {
-  const items = queueTargets().map(r => {
-    const p = present(r);
-    return {key: keyOf(r), provider: r.provider + (whoOf(r) ? ' (' + whoOf(r) + ')' : ''),
-            action: continues(r) ? 'resume' : 'all', scope: p.act.scope || {year: '', start: '', end: ''}, said: ''};
-  });
+  // With no dates. The summary's buttons are for getting what's new, so a gap
+  // row runs its whole list, the only run that can say no run fills the gap
+  // (#149). Only the row's own Look for them looks in the gap's dates.
+  const items = queueTargets().map(r => ({
+    key: keyOf(r), provider: r.provider + (whoOf(r) ? ' (' + whoOf(r) + ')' : ''),
+    action: continues(r) ? 'resume' : 'all', scope: {year: '', start: '', end: ''}, said: ''}));
   if (!items.length) return;
   QUEUE = {items, i: 0, held: false, finished: false};
   queueRun();
