@@ -10,6 +10,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **Venmo reads both tabs of its newer Statements page.** Some accounts get a
+  page where a month has a Wallet tab and, with a Balance account, a Balance
+  tab, with only the open tab on the page. The app stopped at the first month
+  of such an account, and simply letting it through would have called a month
+  empty while its Balance tab held transactions. It now reads both, saves each
+  tab that holds transactions as its own statement, the Balance tab as
+  `<month end> Venmo Balance Statement.pdf`, and calls a month empty only when
+  neither does. That page also says a month has no transactions when Venmo
+  could not load it, so on the Wallet tab those words count only when Venmo's
+  own answer says the same. A Balance tab that will not open stops the list,
+  unless Venmo's answer says there is no Balance account, and a Balance month
+  past the ten transactions that tab can show goes to review rather than be
+  saved with some missing. All of it comes from Venmo's public page code, and
+  no run has met this page yet.
 - **SDG&E reads its Billing History again.** Since November 6 each bill
   row on My Energy Center starts with a cell the page hides, holding the
   row's number, and the header has no cell above it. Read cell by cell,
