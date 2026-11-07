@@ -372,7 +372,9 @@ function renderHome() {
   const n = ROWS.length;
   $('h-sub').textContent = n ? many(n, 'account') + ' · checked against how often each provider sends a document' : '';
   const groups = {needs: [], ok: [], new: []};
-  for (const r of ROWS) groups[groupOf(r)].push(r);
+  // A provider whose first run is going now stands with what needs a look,
+  // so its progress is never folded away under Not started.
+  for (const r of ROWS) groups[r.running && groupOf(r) === 'new' ? 'needs' : groupOf(r)].push(r);
   let html = '';
   const targets = queueTargets();
   if (targets.length) {

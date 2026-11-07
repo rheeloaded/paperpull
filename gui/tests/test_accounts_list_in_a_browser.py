@@ -190,3 +190,20 @@ def test_overdue_reads_as_a_new_one_likely_not_a_failure(one_stopped):
         "present(Object.assign({}, ROWS[0], {state: 'overdue', age_days: 60, cadence_days: 30,"
         " running: null, needs_setup: false, runnable: true})).chip.cls")
     assert cls == "due"
+
+
+def test_a_first_run_going_now_is_never_folded_away(browser, base, tmp_path, monkeypatch):
+    """A provider never run before whose first run is going, here or in
+    another tab, stays in sight with its progress, while the rest fold."""
+    _apps(tmp_path, monkeypatch, stopped=True)
+    app_module._RUNS[(NAMES[1], "primary")] = {"action": "all", "started": "2026-11-07T10:00:00"}
+    context, tab = _open(browser, base)
+    try:
+        row = tab.locator("#view-home .acct[data-key^='%s']" % NAMES[1])
+        assert row.evaluate("a => a.checkVisibility()")
+        assert row.evaluate("a => !a.closest('#h-more')")
+        assert "Running in another tab" in row.inner_text()
+        assert "Not started (8)" in tab.locator("#h-more summary").inner_text()
+    finally:
+        app_module._RUNS.clear()
+        context.close()

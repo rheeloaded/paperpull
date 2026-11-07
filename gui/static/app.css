@@ -550,8 +550,9 @@ body.docked .dock { display: flex; }
   .brand { padding: 0; margin-right: auto; }
   .nav { order: 3; flex-direction: row; width: 100%; overflow-x: auto; gap: 2px; scrollbar-width: none; }
   .nav a, .top-right > a { min-height: 40px; padding: 0 var(--s3); white-space: nowrap; }
-  .top-right { margin: 0; padding: 0; flex-direction: row; align-items: center; gap: 6px; }
-  .serverbar { flex-direction: row; margin: 0; }
+  .top-right { margin: 0; padding: 0; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center;
+               gap: 6px; min-width: 0; max-width: 100%; }
+  .serverbar { flex-direction: row; flex-wrap: wrap; margin: 0; min-width: 0; max-width: 100%; }
   .serverbar .btn { width: auto; }
   .content { min-height: 0; }
 }
