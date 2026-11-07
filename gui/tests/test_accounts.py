@@ -674,3 +674,121 @@ def test_a_run_that_ended_by_itself_before_its_page_closed_keeps_its_code(base, 
     assert log[0]["exit_code"] == 0 and log[0]["closed"] is False
     assert log[0]["result"]["new_files"] == 1
     assert _rows()[("Bank Statements", "primary")]["last_outcome"] == ""
+
+
+# -- a gap a whole run could not fill (#149) ---------------------------------------
+#
+# A gap in the middle of a history counts toward "may have something new" on
+# the home page, and Get new for all runs its account. When a whole, clean
+# Run All has read the provider's list and the gap is still there, the
+# provider does not offer those documents, and no number of runs changes it.
+# Such a run notes the gaps it left, and only those exact gaps are settled.
+# One that appears afterwards, from a history put back, say, still counts.
+
+def _gapped(newest_days_ago=5, hole=4):
+    """Saved records one every 30 days with the one at `hole` missing, which
+    status.py reads as a gap of one document."""
+    recs = _records(newest_days_ago)
+    del recs["doc-%d" % hole]
+    return recs
+
+
+def _clean_all(**more):
+    entry = {"action": "all", "account": "primary", "started": "2026-11-06T16:00:00",
+             "ended": "2026-11-06T16:01:00", "exit_code": 0, "closed": False,
+             "result": {"manual_review": 0, "failed": 0, "validation_failures": 0,
+                        "new_files": 0, "stopped": 0},
+             "scope": [], "redownload": False, "saved": []}
+    entry.update(more)
+    return entry
+
+
+def _gap_keys_now(bank):
+    row = _rows()[("Bank Statements", "primary")]
+    return app_module._gap_keys(app_module._status_module().scan_install(bank)["gaps"]), row
+
+
+def test_a_clean_run_all_notes_the_gaps_it_left_and_settles_them(base, root):
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    assert _rows()[("Bank Statements", "primary")]["state"] == "gap"
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+    _plan(bank)
+    out = run(base, {"app": "Bank Statements", "action": "all"})
+    assert events(out, "done") == ["0"]
+    entry = app_module._read_run_log(bank)[0]
+    keys, row = _gap_keys_now(bank)
+    assert keys and entry["gaps_left"] == keys
+    assert row["state"] == "gap" and row["settled"] is True
+
+
+def test_a_gap_that_appears_after_the_run_is_not_settled(root):
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    _log(bank, _clean_all(gaps_left=[]))
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] == "gap" and row["settled"] is False
+
+
+@pytest.mark.parametrize("change", [
+    {"action": "pilot"}, {"action": "resume"}, {"scope": ["--year", "2026"]},
+    {"redownload": True}, {"exit_code": 1}, {"closed": True},
+    {"result": {"stopped": 1}}, {"result": {"list_not_read": 1}},
+    {"result": {"failed": 2}}, {"gaps_left": None}])
+def test_only_a_whole_clean_run_all_settles_a_gap(root, change):
+    """A pilot takes only the newest few, a scoped run reads part of the
+    history, and a run that stopped, failed or was closed may not have read
+    the list at all, so none of them says a gap cannot be filled."""
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    keys, _row = _gap_keys_now(bank)
+    entry = _clean_all(**dict({"gaps_left": keys}, **change))
+    assert app_module._whole_clean_run(entry) is (change == {"gaps_left": None})
+    _log(bank, entry)
+    # A run that failed, stopped or was closed leaves the row stopped, which
+    # comes first; every other leaves it a gap. Neither is settled.
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+
+
+def test_the_newest_whole_run_is_the_one_that_settles(root):
+    """An older whole run that left the gap does not settle it once a newer
+    whole run has noted different gaps."""
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    keys, _row = _gap_keys_now(bank)
+    _log(bank, _clean_all(gaps_left=[]), _clean_all(gaps_left=keys))
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+    _log(bank, _clean_all(gaps_left=keys), _clean_all(gaps_left=[]))
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+
+
+def test_only_a_gap_row_is_ever_settled(root):
+    """An account that is due, or whose run stopped, keeps its place in the
+    queue whatever gaps a run left, since a new document may be waiting."""
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped(newest_days_ago=45)), encoding="utf-8")
+    keys, row = _gap_keys_now(bank)
+    _log(bank, _clean_all(gaps_left=keys))
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] in ("due", "overdue") and row["settled"] is False
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    _log(bank, {"action": "all", "exit_code": 1, "ended": "2026-11-06T17:00:00",
+                "result": {"stopped": 1}}, _clean_all(gaps_left=keys))
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] == "stopped" and row["settled"] is False
+
+
+def test_two_series_never_share_a_gap_key():
+    """An account "A|B" with summary "C" and an account "A" with summary
+    "B|C", on the same dates, are two series and two keys."""
+    one = {"account": "A|B", "summary": "C", "after": date(2020, 1, 31), "before": date(2020, 3, 31)}
+    two = dict(one, account="A", summary="B|C")
+    assert len(app_module._gap_keys([one, two])) == 2
+    assert app_module._gap_keys([one]) != app_module._gap_keys([two])
+
+
+def test_the_home_queue_leaves_out_a_settled_row():
+    js = (Path(app_module.__file__).resolve().parent / "static" / "app.js").read_text(encoding="utf-8")
+    start = js.index("function queueTargets()")
+    body = js[start:js.index("\n}\n", start)]
+    assert "!r.settled" in body

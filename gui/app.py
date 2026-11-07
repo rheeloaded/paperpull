@@ -1428,6 +1428,71 @@ def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
     return status if status in STATE_ORDER else "unknown"
 
 
+# What in a run's result says it may not have read the provider's whole list
+# or taken everything on it, so the gaps it left say nothing about whether the
+# provider offers those documents.
+_UNSETTLING = ("stopped", "list_not_read", "failed", "validation_failures",
+               "manual_review", "wrong_document")
+
+
+def _gap_keys(gaps) -> list:
+    """Each gap status.py found, as one string per series and dates, sorted.
+    What a whole run leaves is noted in these terms and compared in them. A
+    JSON list, so no account or summary holding a separator can make one
+    series' gap read as another's."""
+    keys = set()
+    for g in gaps or []:
+        if isinstance(g, dict):
+            keys.add(json.dumps([str(_jsonable(g.get(k)) or "")
+                                 for k in ("account", "summary", "after", "before")]))
+    return sorted(keys)
+
+
+def _whole_clean_run(entry) -> bool:
+    """A Run All over the whole history that finished on its own with nothing
+    stopped, failed or set aside. Only such a run has read everything the
+    provider lists and taken all of it. A Pilot takes the newest few, a
+    scoped run part of the history, and Download again is a restore."""
+    if not isinstance(entry, dict) or entry.get("action") != "all":
+        return False
+    if entry.get("exit_code") != 0 or entry.get("closed") or entry.get("redownload"):
+        return False
+    if entry.get("scope"):
+        return False
+    result = entry.get("result")
+    if not isinstance(result, dict):
+        return False
+    return not any(result.get(k) for k in _UNSETTLING)
+
+
+def _settled(state: str, gaps, log: list) -> bool:
+    """Whether a gap row is one a run cannot fill (#149). It is when the
+    newest whole, clean Run All noted every gap the row shows now as left
+    after it had read the provider's list and taken all of it. A gap that
+    appears afterwards, from a history put back, say, still counts, and a
+    row that is due, stopped or anything but a gap is never settled, since
+    a new document may be waiting there."""
+    if state != "gap":
+        return False
+    now = _gap_keys(gaps)
+    if not now:
+        return False
+    last = next((e for e in log if _whole_clean_run(e)), None)
+    left = last.get("gaps_left") if last else None
+    if not isinstance(left, list):
+        return False
+    return set(now) <= {str(k) for k in left}
+
+
+def _gaps_left(root: Path) -> list:
+    """The gaps an account's archive shows now, for a whole run's log entry."""
+    mod = _status_module()
+    if mod is None:
+        return None
+    row = mod.scan_install(root)
+    return _gap_keys((row or {}).get("gaps"))
+
+
 def _owner_of(meta: dict, account: str) -> str:
     """The account holder's name as the account's config gives it, or ""."""
     config = Path(meta["dir"]) / ("config.json" if account == "primary"
@@ -1459,12 +1524,16 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
     outcome = _last_outcome(last)
     running = _RUNS.get((name, account))
+    state = _account_state(row, outcome, gaps, known)
     return {
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
         "gets": cards.get(slug, {}).get("documents", ""),
         "kind": (row or {}).get("kind") or kind,
-        "state": _account_state(row, outcome, gaps, known),
+        "state": state,
+        # A gap a whole, clean run could not fill, left out of "may have
+        # something new" on the home page (#149).
+        "settled": _settled(state, (row or {}).get("gaps"), log),
         "documents": (row or {}).get("documents") or 0,
         "newest": _jsonable((row or {}).get("newest")),
         # When the app last finished a run at all, from its own run
@@ -1590,7 +1659,8 @@ def account_rows() -> list:
                 row = {
                     "app": name, "account": account, "provider": provider, "owner": "",
                     "gets": cards.get(slug, {}).get("documents", ""), "kind": kind,
-                    "state": "nostatus", "documents": 0, "newest": None, "checked": None,
+                    "state": "nostatus", "settled": False, "documents": 0, "newest": None,
+                    "checked": None,
                     "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
                     "last_run": None, "last_outcome": "", "runs": [], "latest": [],
                     "running": dict(running) if running else None,
@@ -3687,13 +3757,22 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             if root is None:
                 return
             try:
-                _note_run(root, {
+                entry = {
                     "action": action, "account": account,
                     "started": _RUNS.get((app, account), {}).get("started", ""),
                     "ended": datetime.now().isoformat(timespec="seconds"),
                     "exit_code": code, "closed": closed, "result": result,
                     "scope": list(scope_flags), "redownload": bool(redownload),
-                    "saved": _saved_this_run(root, started) if saved is None else saved})
+                    "saved": _saved_this_run(root, started) if saved is None else saved}
+                if _whole_clean_run(entry):
+                    # The gaps a whole run could not fill, which settles
+                    # them on the home page (_settled). A scan that fails
+                    # notes none, and the gaps keep counting.
+                    try:
+                        entry["gaps_left"] = _gaps_left(root)
+                    except Exception:
+                        pass
+                _note_run(root, entry)
             except Exception:
                 pass
         try:
