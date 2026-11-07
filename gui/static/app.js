@@ -316,7 +316,9 @@ async function loadAccounts() {
 
 // -- every account -------------------------------------------------------------------
 function queueTargets() {
-  return (ROWS || []).filter(r => r.runnable && !r.needs_setup && !r.running && (
+  // A gap a whole run could not fill is left out (r.settled, #149). Its row
+  // still offers Look for them.
+  return (ROWS || []).filter(r => r.runnable && !r.needs_setup && !r.running && !r.settled && (
     (r.state === 'stopped' && !(r.last_run && r.last_run.redownload)) ||
     ['overdue', 'due', 'gap', 'never'].includes(r.state)));
 }

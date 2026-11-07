@@ -106,6 +106,12 @@ document. The panel never says an account is signed in, since nothing short
 of a run can know that. When several accounts may have something new,
 **Get new for all** runs them one after another, and pauses at one that does
 not finish, so you can sign in again and try it once more, or skip it.
+A Possible gap that a whole Run All has already been through is left out of
+that count. When such a run ends clean, having read the provider's whole list
+and taken everything on it, it notes in `panel-runs.json` the gaps still
+there, since the provider does not offer those documents. Only those gaps
+are left out; one that shows up later still counts, and the account's own
+row still says Possible gap and offers to look for them.
 
 Each run the panel starts is noted in `panel-runs.json` in the account's
 folder, the newest twenty, with how it ended and the names of the files it
