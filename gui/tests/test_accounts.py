@@ -794,11 +794,12 @@ def _gone(name):
     _note_says('{"complete": false, "at": "2031-01-15T09:00:00"}'),
     _note_says('{"complete": "true"}'), _note_says('{"at": "2031-01-15T09:00:00"}'),
     _note_says("[true]"), _note_says("not json"), _gone("last-listing.json"),
-    _list_says("{}"), _list_says("[]"), _list_says("not json"), _list_says('{"doc-0": "a row"}'),
-    _gone("discovery.json")],
+    _list_says("{}"), _list_says("[]"), _list_says('["doc-0"]'), _list_says("not json"),
+    _list_says('{"doc-0": "a row"}'), _gone("discovery.json")],
     ids=["no-record", "discovered", "failed", "pdf-saved", "set-aside", "list-stopped",
          "note-says-text", "note-says-nothing", "note-a-list", "note-not-json", "no-note",
-         "nothing-listed", "list-a-list", "list-not-json", "row-not-a-record", "no-list"])
+         "nothing-listed", "list-empty-list", "list-a-list", "list-not-json", "row-not-a-record",
+         "no-list"])
 def test_a_clean_run_that_left_something_or_cannot_say_settles_nothing(base, root, leave):
     """First Horizon's real Run All listed 10, saved 9, left one for the next
     run, ended clean and settled. A run's result does not say so, so its
@@ -844,10 +845,12 @@ def test_a_later_run_that_left_something_undoes_an_earlier_one(base, root):
     assert _rows()[("Bank Statements", "primary")]["settled"] is False
 
 
-@pytest.mark.parametrize("state", app_module._NOTHING_TO_TAKE)
+@pytest.mark.parametrize("state", ["Completed", "PDF Verified", "No Receipt Available", "Canceled",
+                                   "No Longer Listed"])
 def test_a_listed_document_with_nothing_to_take_is_not_left(base, root, state):
     """Each state, on a record no file was saved for. Dated as a saved
-    document is, so it moves no gap."""
+    document is, so it moves no gap. Written out here, so a state taken off
+    the panel's list fails rather than takes its own case with it."""
     bank = _took_it_all(root)
     recs = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
     recs["extra"] = {"date": recs["doc-0"]["date"], "state": state, "downloaded_ok": False}
