@@ -1463,6 +1463,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
         "gets": cards.get(slug, {}).get("documents", ""),
+        "group": cards.get(slug, {}).get("group", ""),
         "kind": (row or {}).get("kind") or kind,
         "state": _account_state(row, outcome, gaps, known),
         "documents": (row or {}).get("documents") or 0,
@@ -1589,7 +1590,8 @@ def account_rows() -> list:
                 running = _RUNS.get((name, account))
                 row = {
                     "app": name, "account": account, "provider": provider, "owner": "",
-                    "gets": cards.get(slug, {}).get("documents", ""), "kind": kind,
+                    "gets": cards.get(slug, {}).get("documents", ""),
+                    "group": cards.get(slug, {}).get("group", ""), "kind": kind,
                     "state": "nostatus", "documents": 0, "newest": None, "checked": None,
                     "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
                     "last_run": None, "last_outcome": "", "runs": [], "latest": [],

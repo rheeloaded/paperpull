@@ -109,15 +109,23 @@ function whoOf(r) { return r.owner || (r.account !== 'primary' ? r.account : '')
 function subOf(r) {
   return [whoOf(r), r.gets || (r.kind === 'RECEIPT' ? 'Receipts' : 'Statements')].filter(Boolean).join(' · ');
 }
-function tint(name) {
-  let h = 0;
-  for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return 't' + (h % 5);
+// Each provider's symbol is its kind's, from its group in providers.json, so
+// the symbol says something true about the row. A provider with no card has
+// a plain document.
+const GLYPHS = {
+  banks: '<path d="M3 10h18M12 3l9 5H3z"/><path d="M5.5 10v8M10 10v8M14 10v8M18.5 10v8M3 21h18"/>',
+  shopping: '<path d="M5 8h14l-1.2 12H6.2z"/><path d="M9 8V6.5a3 3 0 0 1 6 0V8"/>',
+  bills: '<path d="M13 2.5L4.5 13.5H11l-1 8 8.5-11H12z"/>',
+  pay: '<rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6.5 9.5h.01M17.5 14.5h.01"/>',
+  investing: '<path d="M3.5 20h17"/><path d="M4.5 15.5l4.5-4.5 3.5 3 7-7.5"/><path d="M15 6.5h4.5V11"/>',
+  loans: '<path d="M4 11l8-7 8 7"/><path d="M6 9.5V20h12V9.5"/><path d="M10 20v-5h4v5"/>',
+  insurance: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M12 9v6M9 12h6"/>',
+};
+function glyph(group, big) {
+  return '<span class="tile-mono' + (big ? ' lg' : '') + '" aria-hidden="true">' +
+    sv(GLYPHS[group] || P.file, big ? 28 : 20, 1.7) + '</span>';
 }
-function mono(r, big) {
-  return '<span class="tile-mono ' + tint(r.provider) + (big ? ' lg' : '') + '" aria-hidden="true">' +
-    esc((r.provider || '?').charAt(0).toUpperCase()) + '</span>';
-}
+function mono(r, big) { return glyph(r.group, big); }
 const ACTION_WORDS = {login: 'Sign in', discover: "Check what's there", pilot: 'Try the newest few',
   all: 'Get new documents', resume: 'Continue', verify: 'Check saved files', diagnose: 'Support report',
   record: 'Record steps', rename: 'Rename preview', rename_apply: 'Apply renames', review_names: 'Review names'};
@@ -366,7 +374,7 @@ function renderHome() {
   const targets = queueTargets();
   if (targets.length) {
     const names = targets.map(r => r.provider + (whoOf(r) ? ' (' + whoOf(r) + ')' : ''));
-    html += '<section class="card summary" aria-label="Summary"><div class="icon due">' + sv(P.download, 24) + '</div>' +
+    html += '<section class="card summary" aria-label="Summary">' +
       '<div class="text"><p class="big">' + esc(many(targets.length, 'account')) + ' may have something new</p>' +
       '<p class="muted">' + esc(names.slice(0, 5).join(', ') + (names.length > 5 ? ' and ' + (names.length - 5) + ' more' : '')) +
       '. Nothing is ever downloaded twice, so getting new is always safe.</p></div>' +
@@ -375,11 +383,11 @@ function renderHome() {
         actButton(targets[0], {label: 'Get new', run: continues(targets[0]) ? 'resume' : 'all', primary: true,
                                scope: present(targets[0]).act.scope})) + '</section>';
   } else if (n && !groups.needs.length && !groups.ok.length) {
-    html += '<section class="card summary" aria-label="Summary"><div class="icon due">' + sv(P.lock, 24) + '</div>' +
+    html += '<section class="card summary" aria-label="Summary">' +
       '<div class="text"><p class="big">Next, sign in to your first provider</p><p class="muted">Open one below and press ' +
       'Open sign-in window. You sign in yourself, and PaperPull then saves what that provider keeps online.</p></div></section>';
   } else if (n && !groups.needs.length) {
-    html += '<section class="card summary" aria-label="Summary"><div class="icon ok">' + sv(P.check, 24, 2.4) + '</div>' +
+    html += '<section class="card summary" aria-label="Summary">' +
       '<div class="text"><p class="big">Everything is up to date</p><p class="muted">Nothing is past its usual date. ' +
       'Getting new is still safe at any time.</p></div></section>';
   }
@@ -539,7 +547,6 @@ function openMenu(btn) {
   const k = keyOf(r), sample = inSample();
   let html = '<div class="menu" role="menu" aria-label="More for ' + esc(r.provider) + '">';
   if (VIEW !== 'account') html += menuItem('nav', k, P.chevron, 'Open ' + r.provider, 'Sign in, choose dates and see recent runs');
-  html += '<div class="grp">Your files</div>';
   if (!SERVER) html += menuItem('restore', k, P.restore, 'Restore deleted files', 'Fetch again the PDFs you deleted, for dates you choose', sample);
   html += menuItem('rename', k, P.pencil, 'Rename existing files', 'Match them to your File names setting, with a preview first');
   // Only a receipt provider has Review Names (META.apps[app].reviews_names).
@@ -548,11 +555,11 @@ function openMenu(btn) {
   }
   html += menuItem('run', k, P.shield, 'Check saved files', 'Re-check every PDF already saved. Downloads nothing');
   if (!SERVER && !sample) html += menuItem('reveal', k, P.folder, 'Open folder', 'Where ' + whose(r.provider) + ' files are saved');
-  html += '<div class="rule"></div><div class="grp">Get help</div>' +
+  html += '<div class="rule" role="separator"></div>' +
     menuItem('support', k, P.report, 'Make a support report', "Reads " + whose(r.provider) + " page and saves a file with no account details, to attach to an issue") +
     menuItem('record', k, P.record, 'Record steps for support', 'Watches while you click your way to a document. Downloads nothing and records no typing');
   if (!sample) {
-    html += '<div class="rule"></div><div class="grp">This provider</div>' +
+    html += '<div class="rule" role="separator"></div>' +
       menuItem('person', k, P.person, 'Add another person', 'Their own sign-in window, folder and download history') +
       menuItem('remove', k, P.box, 'Remove from PaperPull', 'Moves its folder to Removed. Nothing is deleted');
   }
@@ -1361,7 +1368,7 @@ function renderTiles() {
     (!q || [p.provider, p.slug, p.documents, p.category].some(t => String(t || '').toLowerCase().includes(q))));
   box.innerHTML = shown.map(p => '<label class="ptile"><input type="checkbox" value="' + esc(p.slug) + '"' +
     (p.installed ? ' disabled checked' : W.picked.has(p.slug) ? ' checked' : '') + '>' +
-    '<span class="tile-mono ' + tint(p.provider) + '" aria-hidden="true">' + esc(p.provider.charAt(0)) + '</span><span><b>' + esc(p.provider) + '</b>' +
+    glyph(p.group) + '<span><b>' + esc(p.provider) + '</b>' +
     (p.documents ? '<span class="gets">' + esc(p.documents) + '</span>' : '') +
     (p.tested === false ? '<span class="tag warn">Not run on a real account yet</span>' : '') +
     (p.note ? '<span class="tag plain">' + esc(p.note) + '</span>' : '') +

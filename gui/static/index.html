@@ -14,16 +14,17 @@ __CSS__
   <div class="top-in">
     <a class="brand" href="#/"><img src="/favicon.ico" alt="">PaperPull<span class="ver">v__VERSION__</span><span id="serverbadge" class="badge" hidden>Server</span></a>
     <nav class="nav" aria-label="Main" id="mainnav">
-      <a href="#/" data-nav="home">Accounts</a>
-      <a href="#/sheets" data-nav="sheets">Spreadsheets</a>
-      <a href="#/names" data-nav="names">File names</a>
+      <a href="#/" data-nav="home"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 13l2.5-7.5A2 2 0 0 1 7.4 4h9.2a2 2 0 0 1 1.9 1.5L21 13"/><path d="M3 13v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5h-5.5a3.5 3.5 0 0 1-7 0z"/></svg>Accounts</a>
+      <a href="#/sheets" data-nav="sheets"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M3 15h18M9 9.5V20"/></svg>Spreadsheets</a>
+      <a href="#/names" data-nav="names"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13.5h6M9 17h4"/></svg>File names</a>
     </nav>
     <div class="top-right">
       __SERVER_BAR__
-      <a href="#/settings" data-nav="settings">Settings</a>
+      <a href="#/settings" data-nav="settings"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
     </div>
   </div>
 </header>
+<div class="content">
 <div id="samplebar" class="samplebar" hidden>
   <span><b>Sample archive.</b> Every document here is invented. Nothing signs in and nothing
   downloads, and your own archive is untouched.</span>
@@ -259,6 +260,7 @@ __CSS__
   <div class="stack" style="gap:20px">
     <section class="card pad stack" aria-labelledby="g-folder" id="g-foldercard">
       <h2 id="g-folder">Your PaperPull folder</h2>
+      <div class="group">
       <p class="mono small" id="root" style="word-break:break-all"></p>
       <p class="hint" id="rootwhy"></p>
       <div id="existing" class="stack" hidden>
@@ -266,10 +268,11 @@ __CSS__
         <input id="rootinput" type="text" spellcheck="false" placeholder="C:\Users\you\Documents\PaperPull">
         <div class="row-actions"><button class="btn btn-s" type="button" data-do="save-root">Use this folder</button>
           <span class="hint" id="rootmsg" role="status"></span></div>
-      </div>
+      </div></div>
     </section>
     <section class="card pad stack" aria-labelledby="g-docs" id="g-docscard">
       <h2 id="g-docs">Documents folder</h2>
+      <div class="group">
       <p class="hint">Where statements, tax documents and receipts go, in folders of their kind, such as a folder
         Google Drive, Paperless or another program watches. Each download is checked in the provider's own folder
         first, and when a run ends, what it saved moves there. The provider's records, Manual Review, logs and browser
@@ -304,7 +307,7 @@ __CSS__
           <button class="btn btn-p" type="button" id="dcmovebtn" data-do="dc-move" disabled>Move</button>
           <span class="hint" id="dcstate" role="status"></span></div>
         <pre class="log short" id="dclog" hidden></pre>
-      </div>
+      </div></div>
     </section>
     <section class="card pad stack" aria-labelledby="hxhead" id="stmove">
       <div id="movebox" class="stack">
@@ -320,27 +323,30 @@ __CSS__
     </section>
     <section class="card pad stack" aria-labelledby="g-sample" id="g-samplecard">
       <h2 id="g-sample">Sample archive</h2>
+      <div class="group">
       <p class="hint">Invented statements and receipts, so you can try Accounts and both spreadsheets before you
         point this at a real account. Nothing is downloaded and nothing of yours is touched.</p>
       <div class="row-actions"><button class="btn btn-s" type="button" id="g-sampleopen" data-do="open-sample">Open the sample</button>
-        <button class="btn btn-s" type="button" id="g-sampleleave" data-do="leave-sample" hidden>Leave the sample</button></div>
+        <button class="btn btn-s" type="button" id="g-sampleleave" data-do="leave-sample" hidden>Leave the sample</button></div></div>
     </section>
     <section class="card pad stack" aria-labelledby="g-look">
       <h2 id="g-look">Light or dark</h2>
+      <div class="group">
       <div class="seg" role="radiogroup" aria-labelledby="g-look">
         <label><input type="radio" name="theme" value="system">Follow this computer</label>
         <label><input type="radio" name="theme" value="light">Light</label>
         <label><input type="radio" name="theme" value="dark">Dark</label></div>
-      <p class="hint">Remembered in this browser only.</p>
+      <p class="hint">Remembered in this browser only.</p></div>
     </section>
     <section class="card pad stack" aria-labelledby="g-about">
       <h2 id="g-about">About PaperPull</h2>
+      <div class="group">
       <p>PaperPull <span id="g-ver">v__VERSION__</span>. It only reads your accounts. It never pays, moves money
         or changes anything at a provider, and you always sign in yourself.</p>
       <p class="row-actions small"><a href="https://paperpull.net/guide.html" target="_blank" rel="noopener">How to use it</a>
         <span class="sep-dot" aria-hidden="true">·</span><a href="https://github.com/rheeloaded/paperpull#readme" target="_blank" rel="noopener">README</a>
         <span class="sep-dot" aria-hidden="true">·</span><a href="https://github.com/rheeloaded/paperpull/issues" target="_blank" rel="noopener">Report a problem</a>
-        <span class="sep-dot" aria-hidden="true">·</span><a href="https://paperpull.net/terms.html" target="_blank" rel="noopener">Terms of Use</a></p>
+        <span class="sep-dot" aria-hidden="true">·</span><a href="https://paperpull.net/terms.html" target="_blank" rel="noopener">Terms of Use</a></p></div>
     </section>
   </div>
 </section>
@@ -354,6 +360,7 @@ __CSS__
 <footer class="foot">
   __FOOTER__
 </footer>
+</div>
 
 <!-- the server's sign-in window ----------------------------------------- -->
 <aside id="dock" class="dock" aria-labelledby="dock-title">
