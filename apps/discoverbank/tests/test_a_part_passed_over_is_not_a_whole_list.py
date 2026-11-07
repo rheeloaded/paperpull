@@ -23,8 +23,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
-import discovercard_docs as app_mod
-import discovercard_site as site
+import discoverbank_docs as app_mod
+import discoverbank_site as site
 from paperpull_core import listing
 
 ACCOUNTS = ("Example Card ending 0001", "Other Card ending 0002")
