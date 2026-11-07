@@ -89,6 +89,7 @@ API = {
     "list": "https://digitalservices.fidelity.com/ftgw/dp/retail-am-financialdoc/v1/accounts/communications/financial-documents/statements",
     "taxforms": "https://dpservice.fidelity.com/ftgw/dp/retail-am-financialdoc/v1/accounts/communications/financial-documents/taxform",
     "download": "https://digitalservices.fidelity.com/ftgw/dp/retail-am-financialdoc/v2/accounts/communications/financial-documents/download",
+    "tax_download": "https://dpservice.fidelity.com/ftgw/dp/retail-am-financialdoc/v1/accounts/communications/financial-documents/download",
 }
 # The page's own app identity. Not a credential, the same for every
 # customer, and the API answers 400 without it.
@@ -373,15 +374,32 @@ def _first(d: dict, *keys):
     return ""
 
 
-def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str) -> Optional[dict]:
-    num = str(d.get("acctNum") or "")
-    date = epoch_date(_first(d, "periodEndDate", "generatedDate", "availableDate", "date"))
+def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str,
+         year: Optional[int] = None) -> Optional[dict]:
+    dd = d.get("docDetail") or {}
+    acct_list = (d.get("acctDetails") or {}).get("acctDetail") or []
+    first_acct = acct_list[0] if isinstance(acct_list, list) and acct_list else (acct_list if isinstance(acct_list, dict) else {})
+    num = str(_first(d, "acctNum", "accountNumber", "accountNum", "acctNo") or first_acct.get("acctNum") or "")
+    date = epoch_date(_first(d, "periodEndDate", "generatedDate", "availableDate", "date", "formDate", "issueDate") or dd.get("docPeriodEndDate") or dd.get("docGeneratedDate"))
     if not date:
-        date = parse_date(str(_first(d, "periodEndDate", "generatedDate", "availableDate", "date")))
+        date = parse_date(str(_first(d, "periodEndDate", "generatedDate", "availableDate", "date", "formDate", "issueDate") or dd.get("docPeriodEndDate") or dd.get("docGeneratedDate")))
+    if not date and doc_type == "TAX":
+        ty = _first(d, "taxYear", "year") or (str(year) if year else "")
+        if ty and str(ty).isdigit():
+            date = f"{ty}-12-31"
     if not date:
         return None
     label = account_label(num, accounts)
-    acct_type = (accounts.get(num) or {}).get("type") or "Brokerage"
+    if not label:
+        explicit_name = str(_first(d, "accountName", "accountDisplayName", "acctName") or first_acct.get("nickname") or "").strip()
+        if explicit_name:
+            label = explicit_name
+        elif not num:
+            label = "Combined"
+        else:
+            tail = num[-4:] if len(num) >= 4 else num
+            label = f"Account {tail}"
+    acct_type = (accounts.get(num) or {}).get("type") or first_acct.get("acctType") or "Brokerage"
     title = kind
     if doc_type == "STMT" and d.get("periodStartDate") and d.get("periodEndDate"):
         # The hub calls every one "PI Monthly/Quarterly Statement". The
@@ -392,14 +410,24 @@ def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str) -> Op
         except (TypeError, ValueError):
             pass
     if doc_type == "TAX":
-        name = str(_first(d, "formName", "taxFormName", "formType", "type", "description") or "Tax Form")
-        title = name
-    start = epoch_date(d.get("periodStartDate")) if d.get("periodStartDate") else ""
+        name = str(_first(d, "docName", "formName", "taxFormName", "formType", "taxFormType",
+                          "type", "description", "documentName") or "Tax Form")
+        ty = _first(d, "taxYear", "year") or (str(year) if year else "")
+        if ty and str(ty) not in name:
+            title = f"{ty} {name}"
+        else:
+            title = name
+    start = epoch_date(d.get("periodStartDate") or dd.get("docPeriodStartDate"))
+    if not start and doc_type == "TAX":
+        ty = _first(d, "taxYear", "year") or (str(year) if year else "")
+        if ty and str(ty).isdigit():
+            start = f"{ty}-01-01"
+    is_tax = doc_type in ("TAX", "TF")
     return {
         "title": title, "date": date, "account": label, "category": category,
-        "item_id": str(_first(d, "id", "docId", "documentId")),
-        "client_id": doc_type + "|" + acct_type,        # what the download call needs
-        "period_start": start, "href": API["download"],
+        "item_id": str(_first(d, "id", "docId", "documentId", "taxFormId") or dd.get("docId") or ""),
+        "client_id": ("TF|" if is_tax else doc_type + "|") + acct_type,        # what the download call needs
+        "period_start": start, "href": API["tax_download"] if is_tax else API["download"],
     }
 
 
@@ -423,7 +451,7 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
                 fmt = ((d.get("formatTypes") or {}).get("formatType") or {})
                 if fmt and fmt.get("isPDF") is False:
                     continue
-                r = _row(kind, category, d, accounts, doc_type)
+                r = _row(kind, category, d, accounts, doc_type, year=y)
                 if r:
                     rows.append(r)
     if "Tax Document" in wanted:
@@ -437,7 +465,7 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
                 continue
             log.info("tax forms %d: %d", y, len(items))
             for d in items:
-                r = _row("Tax Form", "Tax Document", d, accounts, "TAX")
+                r = _row("Tax Form", "Tax Document", d, accounts, "TAX", year=y)
                 if r:
                     rows.append(r)
     return rows
@@ -453,17 +481,24 @@ def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0)
         items = list_kind(page, doc_type, year)
         kind, category = KINDS[doc_type]
     else:
-        items = list_tax_year(page, year) if year < _dt.now().year else []
+        m = re.match(r"^(\d{4})\b", title)
+        tax_year = int(m.group(1)) if m else year
+        items = list_tax_year(page, tax_year) if tax_year < _dt.now().year else []
         doc_type, kind, category = "TAX", "Tax Form", "Tax Document"
-    matches = [r for r in (_row(kind, category, d, accounts, doc_type) for d in items)
-               if r and r["title"] == title and r["date"] == date and r["account"] == account]
+        year = tax_year
+    matches = [r for r in (_row(kind, category, d, accounts, doc_type, year=year) for d in items)
+               if r and r["title"] == title and r["date"] == date and
+                  (r["account"] == account or (not account and r["account"] == "Combined"))]
     return matches[occurrence] if occurrence < len(matches) else None
 
 
 def fetch_pdf(page, item_id: str, doc_type: str, acct_type: str) -> bytes:
     """The PDF bytes for one document, through the page."""
-    j = _post(page, API["download"], {"id": item_id, "formatType": "PDF",
-                                      "docType": doc_type, "acctType": acct_type})
+    is_tax = doc_type in ("TF", "TAX")
+    url = API["tax_download"] if is_tax else API["download"]
+    req_doc_type = "TF" if is_tax else doc_type
+    j = _post(page, url, {"id": item_id, "formatType": "PDF",
+                          "docType": req_doc_type, "acctType": acct_type})
     dd = (j.get("document") or {}).get("docDetail") or {}
     content = dd.get("content") or ""
     if not content:
