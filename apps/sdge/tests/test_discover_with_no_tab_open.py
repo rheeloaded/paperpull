@@ -102,7 +102,7 @@ TABLES = {
                   if n == 0 else ""),
 }
 
-# Billing History as My Energy Center drew it on 2026-11-06: seven header
+# Billing History as My Energy Center drew it on 2026-11-06, seven header
 # cells with Details last, and each bill row led by a cell of its own,
 # hidden by an inline style, holding the row's number. A person sees seven
 # columns. Read cell by cell, every row was one wider than the header and
@@ -114,7 +114,7 @@ LIVE_ROW = """<tr invoiceid="{inv}" class="shown">{control}<td>{statement}</td><
 TABLES["hidden row number"] = (LIVE_HEAD, LIVE_ROW,
                                lambda n: '<td style="display:none;">%02d</td>' % (n + 1))
 # The live table with a narrow screen's rule hiding each table's second
-# cell: the Due Date header, and in each row the Statement Date, since the
+# cell, the Due Date header, and in each row the Statement Date, since the
 # row number comes first. Read with every hidden cell passed over, both are
 # six columns wide and each bill would sit under Statement Date with its Due
 # Date. Only the row number is passed over, so each bill is still dated by
