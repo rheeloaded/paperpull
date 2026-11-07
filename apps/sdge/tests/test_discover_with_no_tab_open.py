@@ -93,6 +93,35 @@ TABLES = {
                   if n == 0 else ""),
 }
 
+# Billing History as My Energy Center drew it on 2026-11-06: seven header
+# cells with Details last, and each bill row led by a cell of its own,
+# hidden by an inline style, holding the row's number. A person sees seven
+# columns. Read cell by cell, every row was one wider than the header and
+# the list stopped on its first bill.
+LIVE_HEAD = ("<tr><th>Statement Date</th><th>Due Date</th><th>Days in Billing Cycle</th>"
+             "<th>Current Charges</th><th>Amount Due</th><th>Status</th><th>Details</th></tr>")
+LIVE_ROW = """<tr invoiceid="{inv}" class="shown">{control}<td>{statement}</td><td>{due}</td>
+<td>30</td><td>$12.34</td><td>$12.34</td><td>Billed</td><td class="details-control"></td></tr>"""
+TABLES["hidden row number"] = (LIVE_HEAD, LIVE_ROW,
+                               lambda n: '<td style="display:none;">%02d</td>' % (n + 1))
+# The live table with a narrow screen's rule hiding each table's second
+# cell: the Due Date header, and in each row the Statement Date, since the
+# row number comes first. Read with every hidden cell passed over, both are
+# six columns wide and each bill would sit under Statement Date with its Due
+# Date. Only the row number is passed over, so each bill is still dated by
+# the cell under Statement Date in the page's own layout.
+TABLES["second cells hidden"] = (
+    LIVE_HEAD.replace("<th>Due Date</th>", '<th style="display:none;">Due Date</th>'),
+    LIVE_ROW.replace("<td>{statement}</td>", '<td style="display:none;">{statement}</td>'),
+    TABLES["hidden row number"][2])
+# A header with a column of its own for the row number, over the same
+# hidden cells, keeps that column, as it always did.
+TABLES["numbered column"] = (LIVE_HEAD.replace("<tr>", "<tr><th>#</th>"), LIVE_ROW,
+                             TABLES["hidden row number"][2])
+# A hidden first cell that is not a row number is not passed over.
+TABLES["hidden first cell with words"] = (
+    LIVE_HEAD, LIVE_ROW, lambda n: '<td style="display:none;">row %d</td>' % (n + 1))
+
 DASHBOARD = """<!doctype html><html><head><title>My Energy Center</title></head><body>
 <main><h1>Welcome back</h1><p>Your account at a glance.</p></main></body></html>"""
 
@@ -303,7 +332,8 @@ def test_a_blank_statement_date_stops_the_list_and_takes_no_due_date(attached, s
     assert "2026-10-14" not in out
 
 
-@pytest.mark.parametrize("table", ["two rows", "row headers"])
+@pytest.mark.parametrize("table", ["two rows", "row headers", "hidden row number",
+                                   "second cells hidden", "numbered column"])
 def test_the_statement_date_column_is_found_in_other_table_shapes(table, attached, server,
                                                                   tmp_path, capsys):
     """Statement Date as the first cell of the header's second row, the
@@ -324,7 +354,7 @@ def test_the_statement_date_column_is_found_in_other_table_shapes(table, attache
 DUE_DATES = {"2026-10-01", "2026-09-01", "2026-10-14"}
 
 
-@pytest.mark.parametrize("table", ["rowspan zero", "tall cell"])
+@pytest.mark.parametrize("table", ["rowspan zero", "tall cell", "hidden first cell with words"])
 def test_a_table_whose_rows_may_not_line_up_stops_rather_than_misdate(table, attached, server,
                                                                       tmp_path, capsys):
     """A header cell of rowspan 0, or a row's cell as tall as every row, can
