@@ -10,10 +10,13 @@ Everything is under tmp_path. Runs start a stand-in app with this Python,
 the way the packaged build runs every app, and the stand-in does what a
 file beside it says.
 """
+import ast
 import asyncio
+import functools
 import http.client
 import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -67,6 +70,7 @@ if saved:
         encoding="utf-8")
 counts = {"manual_review": 0, "failed": 0, "validation_failures": 0,
           "new_files": len(saved), "stopped": plan.get("stopped", 0)}
+counts.update(plan.get("counts", {}))
 print("PAPERPULL_RUN_RESULT " + (mark + " " if mark else "") + json.dumps(counts), flush=True)
 sys.exit(plan.get("code", 0))
 '''
@@ -680,10 +684,10 @@ def test_a_run_that_ended_by_itself_before_its_page_closed_keeps_its_code(base, 
 #
 # A gap in the middle of a history counts toward "may have something new" on
 # the home page, and Get new for all runs its account. When a whole, clean
-# Run All has read the provider's list and the gap is still there, the
-# provider does not offer those documents, and no number of runs changes it.
-# Such a run notes the gaps it left, and only those exact gaps are settled.
-# One that appears afterwards, from a history put back, say, still counts.
+# Run All has read the provider's list, left nothing on it to take, and the
+# gap is still there, no number of such runs changes it. Such a run notes the
+# gaps it left, and only those exact gaps are settled. One that appears
+# afterwards, from a history put back, say, still counts.
 
 def _gapped(newest_days_ago=5, hole=4):
     """Saved records one every 30 days with the one at `hole` missing, which
@@ -703,6 +707,36 @@ def _clean_all(**more):
     return entry
 
 
+def _listed(bank, recs, **more):
+    """What a Run All leaves beside progress.json when it took all of its
+    list, that list in discovery.json under the same keys, with `more` added
+    to it, and the note that it was read to its end."""
+    rows = {k: {"date": r["date"], "category": "Statement", "state": r["state"]}
+            for k, r in recs.items()}
+    (bank / "discovery.json").write_text(json.dumps(dict(rows, **more)), encoding="utf-8")
+    (bank / "last-listing.json").write_text(
+        json.dumps({"complete": True, "at": "2031-01-15T09:00:00"}), encoding="utf-8")
+
+
+def _took_it_all(root, **more):
+    """A bank whose gap a run has left, with the list that run read."""
+    bank = root / "Bank Statements"
+    recs = _gapped()
+    (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    _listed(bank, recs, **more)
+    return bank
+
+
+def _the_hole():
+    return (date.today() - timedelta(days=5 + 30 * 4)).isoformat()
+
+
+def _run_all(port, bank, account="primary"):
+    out = run(port, {"app": "Bank Statements", "action": "all", "account": account})
+    assert events(out, "done") == ["0"]
+    return app_module._read_run_log(bank)[0]
+
+
 def _gap_keys_now(bank):
     row = _rows()[("Bank Statements", "primary")]
     return app_module._gap_keys(app_module._status_module().scan_install(bank)["gaps"]), row
@@ -713,13 +747,192 @@ def test_a_clean_run_all_notes_the_gaps_it_left_and_settles_them(base, root):
     (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
     assert _rows()[("Bank Statements", "primary")]["state"] == "gap"
     assert _rows()[("Bank Statements", "primary")]["settled"] is False
+    _listed(bank, _gapped())
     _plan(bank)
-    out = run(base, {"app": "Bank Statements", "action": "all"})
-    assert events(out, "done") == ["0"]
-    entry = app_module._read_run_log(bank)[0]
+    entry = _run_all(base, bank)
     keys, row = _gap_keys_now(bank)
     assert keys and entry["gaps_left"] == keys
     assert row["state"] == "gap" and row["settled"] is True
+
+
+def _listed_no_record(bank):
+    """First Horizon, Bilt, Simmons and Alpaca, whose run leaves a document
+    turned off on the page with no record and finishes clean."""
+    rows = json.loads((bank / "discovery.json").read_text(encoding="utf-8"))
+    rows["doc-4"] = {"date": _the_hole(), "category": "Statement", "state": "Discovered"}
+    (bank / "discovery.json").write_text(json.dumps(rows), encoding="utf-8")
+
+
+def _a_record_saying(state):
+    def leave(bank):
+        _listed_no_record(bank)
+        recs = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
+        recs["doc-4"] = {"date": _the_hole(), "state": state, "downloaded_ok": False}
+        (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    return leave
+
+
+def _note_says(text):
+    def leave(bank):
+        (bank / "last-listing.json").write_text(text, encoding="utf-8")
+    return leave
+
+
+def _list_says(text):
+    def leave(bank):
+        (bank / "discovery.json").write_text(text, encoding="utf-8")
+    return leave
+
+
+def _gone(name):
+    return lambda bank: (bank / name).unlink()
+
+
+@pytest.mark.parametrize("leave", [
+    _listed_no_record, _a_record_saying("Discovered"), _a_record_saying("Failed"),
+    _a_record_saying("PDF Saved"), _a_record_saying("Needs Manual Review"),
+    _note_says('{"complete": false, "at": "2031-01-15T09:00:00"}'),
+    _note_says('{"complete": "true"}'), _note_says('{"at": "2031-01-15T09:00:00"}'),
+    _note_says("[true]"), _note_says("not json"), _gone("last-listing.json"),
+    _list_says("{}"), _list_says("[]"), _list_says("not json"), _list_says('{"doc-0": "a row"}'),
+    _gone("discovery.json")],
+    ids=["no-record", "discovered", "failed", "pdf-saved", "set-aside", "list-stopped",
+         "note-says-text", "note-says-nothing", "note-a-list", "note-not-json", "no-note",
+         "nothing-listed", "list-a-list", "list-not-json", "row-not-a-record", "no-list"])
+def test_a_clean_run_that_left_something_or_cannot_say_settles_nothing(base, root, leave):
+    """First Horizon's real Run All listed 10, saved 9, left one for the next
+    run, ended clean and settled. A run's result does not say so, so its
+    records are read, and records that do not show it all count as left."""
+    bank = _took_it_all(root)
+    leave(bank)
+    _plan(bank)
+    entry = _run_all(base, bank)
+    assert app_module._whole_clean_run(entry) and "gaps_left" not in entry
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] == "gap" and row["settled"] is False
+    # An answer, not an error the run's note swallowed.
+    assert app_module._nothing_left(bank, {}) is False
+
+
+def test_records_that_will_not_read_say_nothing_was_taken(root):
+    """A progress.json that is not records leaves no row to run from the
+    panel, so its check is asked itself."""
+    bank = _took_it_all(root)
+    assert app_module._nothing_left(bank, {}) is True
+    (bank / "progress.json").write_text("[]", encoding="utf-8")
+    assert app_module._nothing_left(bank, {}) is False
+
+
+def test_a_run_that_counts_documents_left_unsaved_settles_nothing(base, root):
+    """Alpaca counts documents that share a type and a date and lists none
+    of them, so its records show nothing, and its count is all there is."""
+    bank = _took_it_all(root)
+    _plan(bank, counts={"alike": 2})
+    entry = _run_all(base, bank)
+    assert entry["result"]["alike"] == 2
+    assert app_module._whole_clean_run(entry) and "gaps_left" not in entry
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+
+
+def test_a_later_run_that_left_something_undoes_an_earlier_one(base, root):
+    bank = _took_it_all(root)
+    _plan(bank)
+    assert _run_all(base, bank)["gaps_left"]
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+    _listed_no_record(bank)
+    assert "gaps_left" not in _run_all(base, bank)
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+
+
+@pytest.mark.parametrize("state", app_module._NOTHING_TO_TAKE)
+def test_a_listed_document_with_nothing_to_take_is_not_left(base, root, state):
+    """Each state, on a record no file was saved for. Dated as a saved
+    document is, so it moves no gap."""
+    bank = _took_it_all(root)
+    recs = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
+    recs["extra"] = {"date": recs["doc-0"]["date"], "state": state, "downloaded_ok": False}
+    (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    _listed(bank, recs)
+    _plan(bank)
+    assert _run_all(base, bank)["gaps_left"]
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+
+
+def test_a_document_saved_once_stays_taken_whatever_its_record_says_since(base, root):
+    """downloaded_ok is kept for good, and a later try that failed does not
+    put back what was saved."""
+    bank = _took_it_all(root)
+    recs = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
+    recs["doc-0"]["state"] = "Failed"
+    (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    _plan(bank)
+    assert _run_all(base, bank)["gaps_left"]
+
+
+def _config(bank, **settings):
+    (bank / "config.json").write_text(json.dumps(dict({"output_dir": "."}, **settings)),
+                                      encoding="utf-8")
+
+
+@pytest.mark.parametrize("row,settings", [
+    ({"category": "Statement"}, {"default_start_date": "AFTER"}),
+    ({"category": "Statement", "date": ""}, {"default_start_date": "AFTER"}),
+    ({"category": "Other Document"}, {"document_types": ["Statement", "Tax Document"]})],
+    ids=["before-the-floor", "no-date-under-a-floor", "type-not-wanted"])
+def test_a_document_the_persons_own_settings_leave_out_is_not_left(base, root, row, settings):
+    """A gap the person chose to leave out may settle, as the run did not
+    look there. The list of an earlier run with other settings still names
+    such a document, since discovery.json never forgets."""
+    after = (date.fromisoformat(_the_hole()) + timedelta(days=1)).isoformat()
+    bank = _took_it_all(root, **{"doc-4": dict({"date": _the_hole(), "state": "Discovered"}, **row)})
+    _config(bank, **{k: after if v == "AFTER" else v for k, v in settings.items()})
+    _plan(bank)
+    assert _run_all(base, bank)["gaps_left"]
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+
+
+@pytest.mark.parametrize("settings", [
+    {}, {"default_start_date": ""}, {"default_start_date": 2031}, {"default_start_date": "2000-01-01"},
+    {"document_types": []}, {"document_types": "Statement"}, {"document_types": ["Tax Document", "Statement"]}])
+def test_settings_that_do_not_leave_a_document_out_leave_it_left(base, root, settings):
+    """A setting that does not plainly leave it out, or one the config file
+    does not hold, which the app's own defaults may answer otherwise."""
+    bank = _took_it_all(root, **{"doc-4": {"date": _the_hole(), "category": "Tax Document",
+                                           "state": "Discovered"}})
+    _config(bank, **settings)
+    _plan(bank)
+    assert "gaps_left" not in _run_all(base, bank)
+    # An answer, not an error the run's note swallowed.
+    assert app_module._nothing_left(bank, settings) is False
+
+
+def test_a_config_that_will_not_read_leaves_nothing_out(base, root):
+    bank = _took_it_all(root, **{"doc-4": {"date": _the_hole(), "category": "Statement",
+                                           "state": "Discovered"}})
+    meta = {"script_name": "bank_docs.py", "dir": str(bank)}
+    for text in ("not json", "[]"):
+        (bank / "config.json").write_text(text, encoding="utf-8")
+        assert app_module._took_everything(meta, "primary", bank, {}) is False
+
+
+def test_a_second_person_is_held_to_their_own_settings(base, root):
+    """The first person's floor says nothing of what the second person's
+    run left."""
+    bank = root / "Bank Statements"
+    second = root / "Bank Statements - second"
+    recs = _gapped()
+    (second / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    _listed(second, recs, **{"doc-4": {"date": _the_hole(), "category": "Statement",
+                                       "state": "Discovered"}})
+    floor = (date.fromisoformat(_the_hole()) + timedelta(days=1)).isoformat()
+    _config(bank, default_start_date=floor)
+    _plan(bank)
+    assert "gaps_left" not in _run_all(base, second, account="second")
+    _config(bank)
+    (bank / "config.second.json").write_text(
+        json.dumps({"output_dir": "../Bank Statements - second", "default_start_date": floor}),
+        encoding="utf-8")
+    assert _run_all(base, second, account="second")["gaps_left"]
 
 
 def test_a_gap_that_appears_after_the_run_is_not_settled(root):
@@ -746,7 +959,7 @@ def test_only_a_whole_clean_run_all_settles_a_gap(root, change):
     assert app_module._whole_clean_run(entry) is (change == {"gaps_left": None})
     _log(bank, entry)
     # A run that failed, stopped or was closed leaves the row stopped, which
-    # comes first; every other leaves it a gap. Neither is settled.
+    # comes first, and every other leaves it a gap. Neither is settled.
     assert _rows()[("Bank Statements", "primary")]["settled"] is False
 
 
@@ -792,3 +1005,106 @@ def test_the_home_queue_leaves_out_a_settled_row():
     start = js.index("function queueTargets()")
     body = js[start:js.index("\n}\n", start)]
     assert "!r.settled" in body
+
+
+# -- what the panel reads of every app, held to the apps ------------------------------
+
+REPO = Path(app_module.__file__).resolve().parents[1]
+
+
+@functools.lru_cache(maxsize=None)
+def _document_apps():
+    """Each app that files documents, with its own modules parsed. Only
+    these have gaps (status.find_gaps)."""
+    apps = {}
+    for spec in sorted((REPO / "apps").glob("*/storage.py")):
+        if re.search(r"kind\s*=\s*RECEIPT", spec.read_text(encoding="utf-8")):
+            continue
+        trees = [ast.parse(py.read_text(encoding="utf-8")) for py in spec.parent.glob("*.py")
+                 if py.name != "storage.py"]
+        apps[spec.parent.name] = trees
+    assert len(apps) > 60
+    return apps
+
+
+def _unparsed(trees, name):
+    return "\n".join(ast.unparse(node) for tree in trees for node in ast.walk(tree)
+                     if isinstance(node, ast.FunctionDef) and node.name == name)
+
+
+def test_every_app_keeps_what_it_lists_and_what_it_took_under_one_key():
+    """The panel reads a document as left when discovery.json names it and
+    progress.json holds no record of it taken under that key. That is true
+    only while each app takes its run from discovery.json, asks progress.json
+    by the key and writes it there, and calls done at least what the panel
+    calls nothing left to take. An app this fails for reads as left on every
+    run or, the other way, as taken when it is not."""
+    for name, trees in _document_apps().items():
+        done = _unparsed(trees, "_already_done")
+        assert "self.progress.get(doc.key)" in done, name
+        for state in ("COMPLETED", "PDF_VERIFIED", "NO_RECEIPT_AVAILABLE", "CANCELED"):
+            assert "State.%s.value" % state in done, (name, state)
+        assert "self.progress.update(doc.key, rec)" in _unparsed(trees, "_record"), name
+        assert "self.discovery.data.values()" in _unparsed(trees, "_select"), name
+
+
+def test_every_app_leaves_out_by_the_settings_the_panel_reads():
+    """_settings_leave_out says what each app's _in_scope does with a Run All
+    with no dates. Were an app to take what the panel reads as left out by
+    the person's settings, a document it left would read as their choice."""
+    for name, trees in _document_apps().items():
+        scope = _unparsed(trees, "_in_scope")
+        assert "if not doc_types.wanted(doc.category, self.config):" in scope, name
+        dates = scope + _unparsed(trees, "_in_dates")
+        assert "self.config.get('default_start_date')" in dates, name
+        assert ("if floor and (not doc.date or doc.date < floor):" in dates
+                or "if floor and (not day or day < floor):" in dates), name
+
+
+# What an app's log says of a document it saw and did not list.
+_SAYS_LEFT_OUT = re.compile(
+    r"left out|left alone|left for a person|waits for the next run|no usable|skipped|skipping", re.I)
+# What the same words say of something else, a run's scope, a check, a tab,
+# a page's pager, what a bill's own file is drawn with, a render that is
+# counted as a failure, and First Horizon's panel, whose list then stops.
+_SOMETHING_ELSE = re.compile(r"outside the run's scope|identity check|a tab opened|stylesheet|"
+                             r"pagination control|an earlier bill|the PDF render|panel title")
+
+
+def _says_it_left_a_document_out(trees):
+    for tree in trees:
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == "log"
+                    and node.args and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                said = node.args[0].value
+                if _SAYS_LEFT_OUT.search(said) and not _SOMETHING_ELSE.search(said):
+                    return True
+    return False
+
+
+def test_every_app_whose_list_says_it_left_a_document_out_settles_no_gap():
+    """What such a list leaves out is in no record, so the panel cannot see
+    it, and a run of that app has to settle nothing. An app that starts to
+    say so joins _LISTS_LEAVE_OUT. A list that drops a row and says nothing
+    cannot be found here or by the panel."""
+    said = {name for name, trees in _document_apps().items() if _says_it_left_a_document_out(trees)}
+    assert said == set(app_module._LISTS_LEAVE_OUT)
+
+
+@pytest.mark.parametrize("slug", sorted(app_module._LISTS_LEAVE_OUT))
+def test_a_list_that_can_leave_a_document_out_settles_nothing(root, slug):
+    bank = _took_it_all(root)
+    assert app_module._took_everything(
+        {"script_name": "bank_docs.py", "dir": str(bank)}, "primary", bank, {}) is True
+    assert app_module._took_everything(
+        {"script_name": slug + "_docs.py", "dir": str(bank)}, "primary", bank, {}) is False
+
+
+def test_a_run_of_such_an_app_notes_no_gaps(base, root):
+    bank = _took_it_all(root)
+    (bank / "bank_docs.py").rename(bank / "wellsfargo_docs.py")
+    _plan(bank)
+    entry = _run_all(base, bank)
+    assert app_module._whole_clean_run(entry) and "gaps_left" not in entry

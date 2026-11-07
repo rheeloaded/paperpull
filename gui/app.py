@@ -1429,10 +1429,28 @@ def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
 
 
 # What in a run's result says it may not have read the provider's whole list
-# or taken everything on it, so the gaps it left say nothing about whether the
-# provider offers those documents.
+# or taken everything on it, so the gaps it left say nothing about whether a
+# run could fill them.
 _UNSETTLING = ("stopped", "list_not_read", "failed", "validation_failures",
                "manual_review", "wrong_document")
+
+# What a record says of a document with nothing left to take. The first four
+# are what every app's _already_done takes as done, and No Longer Listed is
+# one the provider's list has stopped showing. A record set aside for review
+# is not here, though a run does not ask for it again, since status.py does
+# not count it as saved and it may be what the gap is missing.
+_NOTHING_TO_TAKE = ("Completed", "PDF Verified", "No Receipt Available", "Canceled",
+                    "No Longer Listed")
+
+# The apps whose list can see a document and not list it, the ones whose own
+# code counts or says so. What they leave out is in no record, so their
+# records cannot say a run took everything, and a run of theirs settles no
+# gap (_took_everything). Wells Fargo, AmFam and SBA pass over a control that
+# would not answer and say the next run takes it, and one read two ways, for a
+# person. The others pass over a row they cannot date or open.
+# gui/tests/test_accounts.py holds this to what the apps say.
+_LISTS_LEAVE_OUT = frozenset({"aafmaa", "affirm", "ally", "amfam", "applecard", "golden1", "ibkr",
+                              "sba", "statefarm", "tsp", "wellsfargo"})
 
 
 def _gap_keys(gaps) -> list:
@@ -1449,10 +1467,10 @@ def _gap_keys(gaps) -> list:
 
 
 def _whole_clean_run(entry) -> bool:
-    """A Run All over the whole history that finished on its own with nothing
-    stopped, failed or set aside. Only such a run has read everything the
-    provider lists and taken all of it. A Pilot takes the newest few, a
-    scoped run part of the history, and Download again is a restore."""
+    """A Run All with no dates set that finished on its own, with nothing
+    stopped, failed or set aside. Only such a run can settle a gap, and only
+    when it left nothing to take (_took_everything). A Pilot takes the newest
+    few, a scoped run part of the history, and Download again is a restore."""
     if not isinstance(entry, dict) or entry.get("action") != "all":
         return False
     if entry.get("exit_code") != 0 or entry.get("closed") or entry.get("redownload"):
@@ -1468,10 +1486,12 @@ def _whole_clean_run(entry) -> bool:
 def _settled(state: str, gaps, log: list) -> bool:
     """Whether a gap row is one a run cannot fill (#149). It is when the
     newest whole, clean Run All noted every gap the row shows now as left
-    after it had read the provider's list and taken all of it. A gap that
-    appears afterwards, from a history put back, say, still counts, and a
-    row that is due, stopped or anything but a gap is never settled, since
-    a new document may be waiting there."""
+    after it had read the provider's list and left nothing to take. That run
+    says nothing of what the person's own settings kept it from looking at. A
+    newest such run that noted no gaps, as one that left something notes
+    none, settles nothing. A gap that appears afterwards, from a history put
+    back, say, still counts, and a row that is due, stopped or anything but a
+    gap is never settled, since a new document may be waiting there."""
     if state != "gap":
         return False
     now = _gap_keys(gaps)
@@ -1482,6 +1502,63 @@ def _settled(state: str, gaps, log: list) -> bool:
     if not isinstance(left, list):
         return False
     return set(now) <= {str(k) for k in left}
+
+
+def _settings_leave_out(row: dict, config: dict) -> bool:
+    """Whether the person's own settings keep a listed document out of a run,
+    by the two rules of every app's _in_scope that a Run All with no dates
+    set is held to. A gap they leave out is their choice, and may settle.
+    Only what the account's config file itself says counts here."""
+    floor = config.get("default_start_date")
+    if isinstance(floor, str) and str(row.get("date") or "") < floor:
+        return True
+    types = config.get("document_types")
+    return isinstance(types, list) and bool(types) and row.get("category") not in types
+
+
+def _nothing_left(root: Path, config: dict) -> bool:
+    """Whether an account's own records say its last run left nothing to take.
+
+    A run does not report what it leaves in one way. First Horizon, Bilt,
+    Simmons and Alpaca leave a document whose Download is turned off with no
+    record at all and finish clean, and the next run takes it. So the records
+    are read. The list has to be noted as read to its end, and every document
+    in discovery.json has to have a record in progress.json saying it is
+    taken or gone, unless the person's own settings leave it out. Every app
+    keeps these under one key (gui/tests/test_accounts.py), and a key that
+    does not match reads as left. Records that cannot be read, or that say
+    nothing was listed, answer False."""
+    note = _read_json(root / "last-listing.json")
+    if not isinstance(note, dict) or note.get("complete") is not True:
+        return False
+    listed = _read_json(root / "discovery.json")
+    kept = _read_json(root / "progress.json")
+    if not isinstance(listed, dict) or not listed or not isinstance(kept, dict):
+        return False
+    for key, row in listed.items():
+        if not isinstance(row, dict):
+            return False
+        if _settings_leave_out(row, config):
+            continue
+        rec = kept.get(key)
+        if not isinstance(rec, dict):
+            return False
+        if not (rec.get("downloaded_ok") or rec.get("state") in _NOTHING_TO_TAKE):
+            return False
+    return True
+
+
+def _took_everything(meta: dict, account: str, root: Path, result) -> bool:
+    """Whether a whole, clean run left nothing to take, as far as anything
+    can tell. Documents a run counts as left unsaved, an app whose list can
+    leave a document out, or records that do not show it all, answer False,
+    and the run then settles no gap."""
+    slug = str(meta.get("script_name") or "").rsplit("_", 1)[0]
+    if slug in _LISTS_LEAVE_OUT or result.get("alike"):
+        return False
+    config = _read_json(Path(meta["dir"]) / ("config.json" if account == "primary"
+                                             else "config.%s.json" % account))
+    return _nothing_left(root, config if isinstance(config, dict) else {})
 
 
 def _gaps_left(root: Path) -> list:
@@ -3765,11 +3842,13 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                     "scope": list(scope_flags), "redownload": bool(redownload),
                     "saved": _saved_this_run(root, started) if saved is None else saved}
                 if _whole_clean_run(entry):
-                    # The gaps a whole run could not fill, which settles
-                    # them on the home page (_settled). A scan that fails
-                    # notes none, and the gaps keep counting.
+                    # The gaps a whole run that left nothing to take could
+                    # not fill, which settles them on the home page
+                    # (_settled). A run that left something, or a scan that
+                    # fails, notes none, and the gaps keep counting.
                     try:
-                        entry["gaps_left"] = _gaps_left(root)
+                        if _took_everything(meta, account, root, result):
+                            entry["gaps_left"] = _gaps_left(root)
                     except Exception:
                         pass
                 _note_run(root, entry)

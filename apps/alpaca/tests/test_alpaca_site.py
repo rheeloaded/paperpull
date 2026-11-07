@@ -1824,3 +1824,37 @@ def test_the_page_is_only_ever_loaded_at_the_documents_address():
     gotos = [c for c in ast.walk(SITE) if isinstance(c, ast.Call)
              and isinstance(c.func, ast.Attribute) and c.func.attr == "goto"]
     assert len(gotos) == 1 and ast.unparse(gotos[0].args[0]) == "DOCUMENTS_URL"
+
+
+def the_panel_reads_it_all_taken(monkeypatch, tmp_path, app):
+    """What the control panel makes of this run's real records, by its own
+    code. A run says nothing of a document it leaves, so these are what stop
+    it settling a gap (#149)."""
+    monkeypatch.syspath_prepend(str(HERE.parents[1] / "gui"))
+    panel = pytest.importorskip("app")
+    return panel._took_everything({"script_name": "alpaca_docs.py", "dir": str(tmp_path)},
+                                  "primary", app.paths.root, {})
+
+
+def test_a_turned_off_download_is_left_for_the_panel_too(tmp_path, monkeypatch):
+    """Its run lists the document, records it nowhere, goes on, and the next
+    run takes it. Each of the two reads as it is."""
+    app = discovered(tmp_path, "--all")
+    page = Center()
+    first = []
+
+    def off_once(p, loc):
+        if loc.css != "button" and not first:
+            first.append(loc.css)
+            turned_off("download")(p, loc)
+    page.on_press = off_once
+    attach(app, page)
+    app.check_session = lambda p: None
+    with everything_said():
+        app.process(app._select())
+    assert app.stats["left_for_next_run"] == 1
+    assert app.stats["manual_review"] + app.stats["failed"] == 0
+    assert the_panel_reads_it_all_taken(monkeypatch, tmp_path, app) is False
+    with everything_said():
+        app.process(app._select())
+    assert the_panel_reads_it_all_taken(monkeypatch, tmp_path, app) is True
