@@ -400,12 +400,20 @@ class ListStopped(Exception):
 # empty-table cell's text. Each cell carries the column it starts at, how
 # many it spans and how many rows it is tall, so a row's Statement Date
 # cell is the one under that header (header_layout), wherever the table
-# puts it, and a row that may not line up with the header is known. Read
-# only, and nothing on the page is changed.
+# puts it, and a row that may not line up with the header is known. Since
+# November 2026 each bill row starts with a cell the page hides, holding
+# only the row's number, with no header cell above it. That one cell is
+# passed over, and only in a row exactly one column wider than the header,
+# so a header that has a column for it keeps it. Any other hidden cell, in the header or a row, still counts
+# as a column, so a table that hides some of its real columns does not line
+# up and stops the list rather than shift a Due Date under Statement Date.
+# Read only, and nothing on the page is changed.
 _ROWS_JS = r"""() => {
   const table = document.querySelector('#billHistoryTable');
   if (!table) return null;
   const text = (cell) => (cell.textContent || '').replace(/\s+/g, ' ').trim();
+  const rowNumber = (td) => td.tagName === 'TD' && (td.colSpan || 1) === 1 && td.rowSpan === 1
+    && getComputedStyle(td).display === 'none' && /^\d+$/.test(text(td));
   // A header cell's column counts what spans down into its row from above
   // as well as what is before it, as the table itself lays them out.
   const heads = [];
@@ -421,11 +429,15 @@ _ROWS_JS = r"""() => {
       at += wide;
     }
   });
+  const headWidth = Math.max(0, ...heads.map((h) => h.at + h.wide));
   const rows = [];
   for (const tr of table.querySelectorAll('tbody tr[invoiceid]')) {
     const cells = [];
     let at = 0;
+    const width = Array.from(tr.cells).reduce((n, td) => n + (td.colSpan || 1), 0);
+    const numbered = width === headWidth + 1 && tr.cells.length > 0 && rowNumber(tr.cells[0]);
     for (const td of tr.cells) {
+      if (numbered && td === tr.cells[0]) continue;
       cells.push({text: text(td), at: at, wide: td.colSpan || 1, tall: td.rowSpan});
       at += td.colSpan || 1;
     }
