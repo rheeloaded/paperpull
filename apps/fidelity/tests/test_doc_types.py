@@ -182,3 +182,95 @@ def test_account_numbers_are_masked_in_the_survey():
 def test_json_bodies_are_recorded_as_shape_not_values():
     shape = site._shape({"accounts": [{"number": "123456789", "balance": 12.5}]})
     assert shape == {"accounts": ["1 item(s)", {"number": "string", "balance": "number"}]}
+
+
+def test_a_consolidated_statement_without_acct_num_labels_as_combined():
+    d = {"id": "YzoyMDI2LTEwLTMw", "type": "PI Monthly/Quarterly Statement",
+         "periodStartDate": 1785556800, "periodEndDate": 1788148800, "generatedDate": 1788148800,
+         "formatTypes": {"formatType": {"isPDF": True}}}
+    r = site._row("Statement", "Statement", d, ACCOUNTS, "STMT")
+    assert r["account"] == "Combined"
+    assert r["title"] == "Monthly Statement"
+    assert r["date"] == "2026-08-31"
+    assert r["category"] == "Statement"
+
+
+def test_a_tax_form_reads_tax_year_when_period_dates_are_absent():
+    d = {"id": "tax123", "formName": "Form 1099-R", "taxYear": "2025",
+         "acctNum": "123456789"}
+    r = site._row("Tax Form", "Tax Document", d, ACCOUNTS, "TAX", year=2025)
+    assert r["account"] == "BrokerageLink 6789"
+    assert r["title"] == "2025 Form 1099-R"
+    assert r["date"] == "2025-12-31"
+    assert r["period_start"] == "2025-01-01"
+    assert r["category"] == "Tax Document"
+    assert r["client_id"] == "TF|Brokerage"
+
+
+def test_a_consolidated_tax_form_without_acct_num_labels_as_combined():
+    d = {"id": "tax456", "formName": "Consolidated 1099", "taxYear": "2025"}
+    r = site._row("Tax Form", "Tax Document", d, ACCOUNTS, "TAX", year=2025)
+    assert r["account"] == "Combined"
+    assert r["title"] == "2025 Consolidated 1099"
+    assert r["date"] == "2025-12-31"
+
+
+def test_nested_tax_form_extracts_details_correctly():
+    d = {
+        "docName": "Form 5498",
+        "acctDetails": {
+            "acctDetail": [
+                {"nickname": "ROTH IRA 2025", "acctNum": "123456789", "acctType": "Brokerage"}
+            ]
+        },
+        "docDetail": {
+            "docId": "doc-5498-abc",
+            "docType": "7131",
+            "docPeriodStartDate": 1778821200,
+            "docPeriodEndDate": 1778821200,
+            "docGeneratedDate": 1778302800,
+        }
+    }
+    r = site._row("Tax Form", "Tax Document", d, ACCOUNTS, "TAX", year=2025)
+    assert r["account"] == "BrokerageLink 6789"
+    assert r["title"] == "2025 Form 5498"
+    assert r["date"] == "2026-05-15"
+    assert r["item_id"] == "doc-5498-abc"
+    assert r["client_id"] == "TF|Brokerage"
+
+
+def test_resolve_item_matches_combined_statement_with_or_without_account_name(monkeypatch):
+    d = {"id": "fresh-combined", "type": "PI Monthly/Quarterly Statement",
+         "periodStartDate": 1785556800, "periodEndDate": 1788148800, "generatedDate": 1788148800,
+         "formatTypes": {"formatType": {"isPDF": True}}}
+    monkeypatch.setattr(site, "list_accounts", lambda page: ACCOUNTS)
+    monkeypatch.setattr(site, "list_kind", lambda page, doc_type, y: [d])
+
+    # Caller passes account="Combined"
+    res1 = site.resolve_item(None, "Monthly Statement", "2026-08-31", "Combined")
+    assert res1 is not None and res1["item_id"] == "fresh-combined"
+
+    # Caller passes legacy empty account=""
+    res2 = site.resolve_item(None, "Monthly Statement", "2026-08-31", "")
+    assert res2 is not None and res2["item_id"] == "fresh-combined"
+
+
+def test_resolve_item_resolves_tax_form_from_title_year(monkeypatch):
+    d = {
+        "docName": "Form 5498",
+        "acctDetails": {
+            "acctDetail": [
+                {"nickname": "ROTH IRA 2025", "acctNum": "123456789", "acctType": "Brokerage"}
+            ]
+        },
+        "docDetail": {
+            "docId": "doc-5498-abc",
+            "docPeriodEndDate": 1778821200,
+        }
+    }
+    monkeypatch.setattr(site, "list_accounts", lambda page: ACCOUNTS)
+    monkeypatch.setattr(site, "list_tax_year", lambda page, y: [d] if y == 2025 else [])
+    res = site.resolve_item(None, "2025 Form 5498", "2026-05-15", "BrokerageLink 6789")
+    assert res is not None
+    assert res["item_id"] == "doc-5498-abc"
+
