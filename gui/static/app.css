@@ -1,10 +1,6 @@
 /* PaperPull's panel. Light by default, dark when the system asks for it or
    the person picks it in Settings. Colors are tokens here and nowhere else,
    so the two themes stay in step. Blue and teal come from the app icon. */
-@font-face { font-family: "Atkinson Hyperlegible Next"; font-weight: 200 800; font-display: swap;
-             src: url("/fonts/AtkinsonHyperlegibleNext.ttf") format("truetype"); }
-@font-face { font-family: "Atkinson Hyperlegible Mono"; font-weight: 200 800; font-display: swap;
-             src: url("/fonts/AtkinsonHyperlegibleMono.ttf") format("truetype"); }
 
 :root {
   color-scheme: light;
@@ -22,8 +18,8 @@
   --shadow: 0 12px 32px rgba(20, 23, 29, .14);
   --shadow-lg: 0 24px 64px rgba(20, 23, 29, .22);
   --focus: #9bbcf5;
-  --sans: "Atkinson Hyperlegible Next", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: "Atkinson Hyperlegible Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {

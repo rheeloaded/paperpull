@@ -320,8 +320,6 @@ ROUTES = {
                                  desktop="changes", server="changes"),
     ("GET", "/"): dict(page=True, desktop="reads", server="reads"),
     ("GET", "/favicon.ico"): dict(page=True, desktop="reads", server="reads"),
-    ("GET", "/fonts/{name}"): dict(page=True, ask="/fonts/AtkinsonHyperlegibleNext.ttf",
-                                   desktop="reads", server="reads"),
     ("GET", "/login"): dict(page=True, desktop="reads", server="reads"),
     ("POST", "/login"): dict(form=True, body={"password": PASSWORD},
                              desktop="reads", server="changes"),
@@ -518,7 +516,7 @@ def to_refuse(edition: str, page: bool) -> list:
 
 
 # The answers the same for everyone, which a browser may keep.
-ANYONES = ("/favicon.ico", "/fonts/{name}", "/screen/novnc/{rest:path}")
+ANYONES = ("/favicon.ico", "/screen/novnc/{rest:path}")
 
 
 def header_problem(path: str, answer: dict) -> str:

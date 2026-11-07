@@ -30,14 +30,6 @@ Apache License 2.0. The unmodified profile and that license are in
 `server/seccomp/`, and `server/seccomp.py` makes the modified one and says
 what it changes.
 
-The control panel's typefaces, Atkinson Hyperlegible Next and Atkinson
-Hyperlegible Mono, are unmodified copies of the variable fonts published in
-[google/fonts](https://github.com/google/fonts), made by the Atkinson
-Hyperlegible Next and Mono Project Authors for the Braille Institute, and
-licensed under the SIL Open Font License, Version 1.1. They and their
-licenses are in `gui/static/fonts/`, and the panel serves them to its own
-page only.
-
 ## Earlier contributions
 
 PaperPull was published under the MIT License from its first release on
