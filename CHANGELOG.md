@@ -13,14 +13,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **"May have something new" no longer keeps a gap a whole run could not
   fill (#149).** A gap in the middle of a history, years back say, counted
   toward the home page's "may have something new", and Get new for all ran
-  its account every time, though the provider no longer offers those
-  documents and no run could change it. A Run All over the whole history
-  that ends clean now notes the gaps still there, and the home page leaves
-  those gaps out of the count. A Pilot, a scoped run, Download again, or a
-  run that stopped, failed or set something aside notes none. A gap that
-  shows up later still counts, and the account's row still says Possible
-  gap and offers Look for them. An account that is due is unchanged, since
-  its next document may come any day.
+  its account every time, though no run filled it. Get new and Get new for
+  all now run a gap row's whole list with no dates, and the row's own Look
+  for them still looks in the gap's dates. A Run All with no dates that ends
+  clean, with its list noted as read to its end and the account's records
+  showing nothing on it left to take, notes the gaps still there, and the
+  home page leaves those gaps out of the count. A gap the person's own
+  `default_start_date` or `document_types` leave out is noted with them. A
+  Pilot, a scoped run, Download again, or a run that stopped, failed, set
+  something aside or left a document for the next run notes none, and
+  neither does a run of the eleven apps whose list can pass over a document
+  it saw, since no record would show it. A gap that shows up later still
+  counts, and the account's row still says Possible gap and offers Look for
+  them. An account that is due is unchanged, since its next document may
+  come any day. Contributed by @JasperDale420. Before merging, the summary's
+  buttons were made to run a gap row whole, and a run was made to settle
+  nothing unless its records show nothing left.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month

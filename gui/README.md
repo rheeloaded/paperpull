@@ -106,12 +106,23 @@ document. The panel never says an account is signed in, since nothing short
 of a run can know that. When several accounts may have something new,
 **Get new for all** runs them one after another, and pauses at one that does
 not finish, so you can sign in again and try it once more, or skip it.
-A Possible gap that a whole Run All has already been through is left out of
-that count. When such a run ends clean, having read the provider's whole list
-and taken everything on it, it notes in `panel-runs.json` the gaps still
-there, since the provider does not offer those documents. Only those gaps
-are left out; one that shows up later still counts, and the account's own
-row still says Possible gap and offers to look for them.
+For a row that says Possible gap, Get new in that summary and Get new for all
+run the whole list with no dates, and the row's own Look for them looks in the
+gap's dates alone.
+A Possible gap that such a whole run could not fill is left out of that count.
+The run has to be a Run All with no dates set that ends clean, the app has to
+have noted its list as read to its end, and the account's own records have to
+show that nothing on that list is left to take. It then notes in
+`panel-runs.json` the gaps still there. That does not say why they are there.
+The provider may not offer those documents, or may have sent none those months,
+and a run does not take what comes before `default_start_date` or what
+`document_types` leaves out, so a gap your own settings leave out is left out
+of the count as well. A run that left anything, a document turned off on the
+provider's page that the next run takes, say, notes no gaps, and neither does a
+run of an app whose list can pass over a document it saw, since no record would
+show that. Only the noted gaps are left out. One that shows up later still
+counts, and the account's own row still says Possible gap and offers to look
+for them.
 
 Each run the panel starts is noted in `panel-runs.json` in the account's
 folder, the newest twenty, with how it ended and the names of the files it
