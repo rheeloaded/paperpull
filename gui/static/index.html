@@ -120,7 +120,11 @@ __CSS__
     <div><h1 id="h-title" tabindex="-1">Accounts</h1><p id="h-sub"></p></div>
     <button class="btn btn-s" type="button" data-do="add-provider" id="addlink"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add a provider</button>
   </div>
+  <label class="finder" id="h-findbox" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <span class="sr">Search accounts</span><input id="h-find" type="search" autocomplete="off" spellcheck="false" placeholder="Search accounts"></label>
   <div id="h-body"></div>
+  <p class="nomatch" id="h-nomatch" role="status" hidden>No account matches that.
+    <button type="button" class="link" data-do="find-clear">Clear the search</button></p>
 </section>
 
 <!-- one account ------------------------------------------------------------ -->
@@ -278,7 +282,7 @@ __CSS__
         first, and when a run ends, what it saved moves there. The provider's records, Manual Review, logs and browser
         profile never move, so that folder only ever gets documents that passed their checks. Saving moves nothing
         already saved.</p>
-      <p class="mono small" id="drnow" style="word-break:break-all"></p>
+      <p class="small" id="drnow" style="overflow-wrap:anywhere"></p>
       <label class="field" for="drinput">One folder for every provider, as its full path</label>
       <input id="drinput" type="text" spellcheck="false" autocomplete="off">
       <p class="hint">Each provider and person gets a folder of their own inside it, named as their PaperPull folder is.
@@ -293,7 +297,7 @@ __CSS__
         <ul class="mono small" id="drownlist" style="word-break:break-all;margin:0;padding-left:20px"></ul>
       </div>
       <label class="field" for="dcpick">Provider and person<select id="dcpick"></select></label>
-      <p class="mono small" id="dcnow" style="word-break:break-all"></p>
+      <p class="small" id="dcnow" style="overflow-wrap:anywhere"></p>
       <label class="field" for="dcinput">A folder of their own instead, as its full path</label>
       <input id="dcinput" type="text" spellcheck="false" autocomplete="off">
       <div class="row-actions"><button class="btn btn-s" type="button" data-do="dc-save">Save</button>

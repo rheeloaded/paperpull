@@ -198,7 +198,7 @@ function present(r) {
       return {chip: {cls: 'bad', text: "Can't read its records"},
         say: 'Its progress.json could not be read, so nothing new is listed until it is repaired or restored from its Backups folder.',
         act: {label: 'Open', nav: true}};
-    case 'overdue': return usual(r.age_days, 'bad', 'Overdue');
+    case 'overdue': return usual(r.age_days, 'due', 'Overdue');
     case 'due': return usual(r.age_days, 'due', 'New one likely');
     case 'gap': {
       const g = r.gaps[0] || {};
@@ -331,9 +331,12 @@ function queueTargets() {
 function rowHTML(r) {
   const p = present(r);
   let chip = '<span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span>';
-  let say = '<div class="say">' + esc(p.say) + '</div>';
+  // A row never run says what it gets in its sub line, so the sentence every
+  // such row shares is left to the summary above them.
+  let say = groupOf(r) === 'new' ? '' : '<div class="say">' + esc(p.say) + '</div>';
   const port = r.shared_port ? '<div class="hint warn" style="margin-top:4px">' + esc(r.shared_port.short) + '</div>' : '';
-  let act = actButton(r, p.act);
+  // One filled button on the page, the summary's, so a row's own is gray.
+  let act = actButton(r, p.act && Object.assign({}, p.act, {primary: false}));
   if (r.running) {
     if (ours(r)) {
       chip = '<span class="chip info">Getting new now</span>';
@@ -391,13 +394,57 @@ function renderHome() {
       '<div class="text"><p class="big">Everything is up to date</p><p class="muted">Nothing is past its usual date. ' +
       'Getting new is still safe at any time.</p></div></section>';
   }
-  const section = (title, list) => list.length ? '<h2 class="section-title">' + title + '</h2><div class="card list">' +
-    list.map(rowHTML).join('') + '</div>' : '';
-  html += section('Needs a look', groups.needs) + section('Up to date', groups.ok) + section('Not started', groups.new);
+  const rows = list => '<div class="card list">' + list.map(rowHTML).join('') + '</div>';
+  const section = (title, list) => list.length ? '<div class="h-sec"><h2 class="section-title">' + title + '</h2>' +
+    rows(list) + '</div>' : '';
+  html += section('Needs a look', groups.needs) + section('Up to date', groups.ok);
+  // Once anything has run, the providers never run fold under one line, so
+  // the rows that need the person come first.
+  if (groups.new.length && (groups.needs.length || groups.ok.length)) {
+    html += '<details class="group-more h-sec" id="h-more"' + (MORE_OPEN ? ' open' : '') + '><summary>Not started (' +
+      groups.new.length + ')</summary>' + rows(groups.new) + '</details>';
+  } else html += section('Not started', groups.new);
   html += '<p class="hint">' + (inSample() ? 'This is the sample archive. ' : '') + 'Saved in <span class="mono">' +
     esc(META.apps_root) + '</span>' + (!SERVER && !inSample() ? ' · <a href="#/settings">Change in Settings</a>' : '') + '</p>';
   body.innerHTML = html;
+  $('h-findbox').hidden = n <= FIND_AT;
+  if ($('h-findbox').hidden) $('h-find').value = '';
+  applyFind();
   lockStarts();
+}
+// A search box once the list is long. It lives outside the list, which is
+// drawn again on every line of a run, so typing in it is never interrupted.
+const FIND_AT = 8;
+let MORE_OPEN = false;
+function findQuery() { return ($('h-find').value || '').trim().toLowerCase(); }
+function rowMatches(r, q) {
+  return [r.provider, whoOf(r), r.gets, r.app].some(t => String(t || '').toLowerCase().includes(q));
+}
+function applyFind() {
+  const q = findQuery();
+  let hits = 0;
+  for (const el of document.querySelectorAll('#h-body .acct')) {
+    const r = rowByKey(el.dataset.key);
+    el.hidden = Boolean(q) && !(r && rowMatches(r, q));
+    if (!el.hidden) hits++;
+  }
+  for (const sec of document.querySelectorAll('#h-body .h-sec')) sec.hidden = !sec.querySelector('.acct:not([hidden])');
+  const more = $('h-more');
+  if (more) more.open = q ? true : MORE_OPEN;
+  $('h-nomatch').hidden = !q || hits > 0;
+}
+// The person's own open or close of the folded rows is kept across redraws.
+// Taken from the click on its summary, which comes before the details opens
+// and, unlike the toggle event, before anything typed after it, and only
+// with no search, which opens them by itself.
+document.addEventListener('click', e => {
+  const more = e.target.closest('#h-more > summary') && $('h-more');
+  if (more && !findQuery()) MORE_OPEN = !more.open;
+});
+function clearFind() {
+  $('h-find').value = '';
+  applyFind();
+  $('h-find').focus();
 }
 
 // -- one account ------------------------------------------------------------------
@@ -457,7 +504,7 @@ function renderAccount() {
   if (!r.runnable) html += '<p class="callout warn" style="margin-bottom:20px">This folder does not match a provider PaperPull ships, so it will not run. Its folder must hold exactly one provider script whose name is one PaperPull ships.</p>';
   // Another account beside this one names its debugging port (#90). Said, never refused.
   if (r.shared_port) html += '<p class="callout warn" style="margin-bottom:20px">' + esc(r.shared_port.say) + '</p>';
-  const band = {stopped: 'info', attention: 'attention', unreadable: 'bad', overdue: 'bad', due: 'due', gap: 'gap', current: 'ok'}[r.state] || '';
+  const band = {stopped: 'info', attention: 'attention', unreadable: 'bad', overdue: 'due', due: 'due', gap: 'gap', current: 'ok'}[r.state] || '';
   const loginSay = SERVER
     ? 'Opens ' + whose(r.provider) + " sign-in page in the sign-in window, docked beside this page. You type your password there and PaperPull never sees it. Leave it signed in while documents download."
     : 'Opens ' + r.provider + ' in its own browser window. You type your password there and PaperPull never sees it. Leave the window open while documents download.';
@@ -575,7 +622,11 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.parts')) closePicklist();
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeMenus(); closePicklist(); }
+  if (e.key !== 'Escape') return;
+  const opener = document.querySelector('[data-do="menu"][aria-expanded="true"]');
+  closeMenus();
+  closePicklist();
+  if (opener) opener.focus();
 });
 
 // -- runs -------------------------------------------------------------------------
@@ -1935,8 +1986,10 @@ function openDocuments() {
   for (const [app, m] of Object.entries(META.apps)) {
     for (const acc of (m.accounts && m.accounts.length ? m.accounts : ['primary'])) {
       const v = app + '\n' + acc;
-      opts.push('<option value="' + esc(v) + '"' + (v === was ? ' selected' : '') + '>' +
-        esc(app + (acc === 'primary' ? '' : ', ' + acc)) + '</option>');
+      // Named as the Accounts list names them, the provider and its person.
+      const r = rowFor(app, acc);
+      const label = r ? r.provider + (whoOf(r) ? ', ' + whoOf(r) : '') : app + (acc === 'primary' ? '' : ', ' + acc);
+      opts.push('<option value="' + esc(v) + '"' + (v === was ? ' selected' : '') + '>' + esc(label) + '</option>');
     }
   }
   sel.innerHTML = opts.join('');
@@ -2126,6 +2179,7 @@ const DO = {
   'tm-go': () => tmGo(),
   'dock-close': () => closeDock(),
   'dismiss-notice': () => notice('', ''),
+  'find-clear': () => clearFind(),
   'open-sample': () => setSample(true),
   'leave-sample': () => setSample(false),
   'add-provider': () => { location.hash = '#/add'; },
@@ -2201,6 +2255,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('input', e => {
   if (e.target.id === 'w-search') { W.search = e.target.value; renderTiles(); }
+  else if (e.target.id === 'h-find') applyFind();
   else if (e.target.id === 'nmpattern') { NM_PARTS = nmParse(e.target.value); $('nmtextonly').hidden = Boolean(NM_PARTS) || !e.target.value;
     $('nmsep').disabled = $('nmdate').disabled = !NM_PARTS; renderParts(); nmChanged(); }
 });

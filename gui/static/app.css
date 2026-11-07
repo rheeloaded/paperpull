@@ -302,6 +302,8 @@ input[type=date]:focus-visible, select:focus-visible, textarea:focus-visible, in
 input[type=password]:focus, input[type=date]:focus, select:focus, textarea:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 35%, transparent); }
 input::placeholder { color: var(--muted); }
+/* On a gray fill the lighter gray falls under 4.5:1, so the darker one. */
+.finder input::placeholder, .searchbox input::placeholder { color: var(--ink-2); }
 select { padding-right: var(--s8); }
 input[readonly] { background: var(--surface-2); color: var(--ink-2); }
 input:disabled, select:disabled { opacity: .55; }
@@ -310,7 +312,8 @@ input[type=file]::file-selector-button { font: 500 14px var(--sans); min-height:
   border: 0; border-radius: 8px; background: var(--fill); color: var(--ink); cursor: pointer; }
 input[type=file]::file-selector-button:hover { background: var(--fill-2); }
 .dates { display: flex; gap: var(--s3); align-items: flex-end; flex-wrap: wrap; margin-top: var(--s3); }
-.hint { font-size: 14px; color: var(--muted); max-width: 72ch; }
+.hint { font-size: 14px; color: var(--muted); max-width: 60ch; }
+.hint .mono, .hint code { overflow-wrap: anywhere; }
 .hint.warn { color: var(--warn-text); }
 .hint.bad { color: var(--bad-text); }
 .files { list-style: none; margin: 0; padding: 0; font-family: var(--mono); font-size: 12.5px; }
@@ -388,7 +391,7 @@ pre.log.short { max-height: 220px; }
            font-size: 14px; }
 .stepper li { display: flex; align-items: center; gap: var(--s2); color: var(--muted); }
 .stepper li .n { width: 24px; height: 24px; border-radius: 12px; background: var(--fill); font-weight: 600; font-size: 13px;
-                 display: flex; align-items: center; justify-content: center; }
+                 display: flex; align-items: center; justify-content: center; color: var(--ink-2); }
 .stepper li[aria-current="step"] { color: var(--ink); font-weight: 600; }
 .stepper li[aria-current="step"] .n { background: var(--accent); color: var(--accent-ink); }
 .stepper li.done { color: var(--ink-2); }
@@ -418,7 +421,7 @@ pre.log.short { max-height: 220px; }
 .ptile:has(input:disabled) { cursor: default; opacity: .6; }
 .ptile b { display: block; font-weight: 600; }
 .ptile .gets { display: block; font-size: 13px; color: var(--muted); }
-.ptile .tag { display: inline-block; margin-top: 6px; padding: 1px 7px; border-radius: 5px; font-size: 12px; font-weight: 500; }
+.ptile .tag { display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 500; }
 .ptile .tag.warn { background: var(--warn-soft); color: var(--warn-text); }
 .ptile .tag.plain { background: var(--fill); color: var(--ink-2); }
 .tray { position: sticky; bottom: var(--s4); margin-top: var(--s6); background: var(--raised); border-radius: 12px;
