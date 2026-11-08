@@ -10,6 +10,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **An account's card says it was checked only when its list was read
+  (#148).** After a run that stopped partway with every listed document
+  already saved, a Continue found nothing to take and ended in a second,
+  reading no list and opening nothing, and the card then said "checked"
+  that day. The date came from the panel's last run that downloads, a
+  Continue among them, and for an account run only from a terminal from
+  whichever run ended last, a check of the saved files or a rename too. It
+  now comes from when a run last read the provider's whole list, which
+  every app already notes, so a run over part of the history does not move
+  it either, and the card says when the last run ended where it talks about
+  that run. Reported by JasperDale420.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month
