@@ -98,6 +98,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   form was made to come from the listing rather than its first four digits,
   and clearing manual review was taken out, since a run tries such a document
   again anyway.
+- **The panel's tests leave a Mac's own settings alone (#153).** On macOS the
+  panel finds its settings file from the home folder alone, and the panel's
+  tests moved only the folders Windows and Linux use. So running `gui/tests`
+  on a Mac in daily use wrote over the person's own settings.json, and their
+  panel showed no accounts until `apps_root` was set again. Every panel test
+  now gets a home folder and settings folders of its own, and a test that
+  writes anywhere outside the temp folders fails, naming what it wrote.
 
 ## [0.61.0] - 2026-11-06
 
