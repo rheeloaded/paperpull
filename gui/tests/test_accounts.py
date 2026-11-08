@@ -315,7 +315,7 @@ def test_a_run_that_saved_documents_never_says_nothing_new(panel, action, saved)
     o = _outcome(panel, _counted(new_files=23), saved, action)
     assert (o["tone"], o["title"]) == ("ok", "23 new documents saved")
     entry = {"action": action, "exit_code": 0, "result": _counted(new_files=23), "saved": saved}
-    assert ", 23 new files</span>" in panel.evaluate("(e) => runLine(e)", entry)
+    assert ", 23 new documents</span>" in panel.evaluate("(e) => runLine(e)", entry)
     o = _outcome(panel, _counted(new_files=23, failed=1), saved, action)
     assert o["title"] == "23 new documents saved, some need a look"
 
@@ -375,14 +375,14 @@ def test_what_did_not_happen_is_never_said_to_have(panel, action, code, refused,
 def test_a_run_that_saved_nothing_still_says_so(panel):
     o = _outcome(panel, _counted(), [])
     assert (o["tone"], o["title"]) == ("ok", "Nothing new")
-    assert _outcome(panel, _counted(failed=1), [])["title"] == "Finished, needs attention"
+    assert _outcome(panel, _counted(failed=1), [])["title"] == "Finished, some need a look"
     # A log in the run's folder can hold anything, and an odd count in it
     # is no count.
     for odd in ("23", -1, 2.5, None, [3]):
         entry = {"action": "all", "exit_code": 0, "result": {"new_files": odd}, "saved": []}
         assert ", nothing new</span>" in panel.evaluate("(e) => runLine(e)", entry), odd
     entry = {"action": "all", "exit_code": 0, "result": {}, "saved": ["a.pdf", "b.pdf"]}
-    assert ", 2 new files</span>" in panel.evaluate("(e) => runLine(e)", entry)
+    assert ", 2 new documents</span>" in panel.evaluate("(e) => runLine(e)", entry)
 
 
 def test_a_broken_log_is_no_log(root):

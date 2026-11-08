@@ -3,7 +3,7 @@
 One account's documents_dir, written into that account's config with a copy
 of the config kept first. A folder that is not a full path, a browser
 profile or inside or around one, one holding a provider's own folder, and
-one inside the folder another account keeps its records in are refused,
+one inside the folder another account keeps its download history in are refused,
 and on PaperPull Server so is one outside the data folder. The page says
 how many documents saved before are still in the account's own folder, and
 Move runs the app's own Rename with the core's move mark set.
@@ -111,8 +111,8 @@ def test_the_accounts_own_folder_clears_the_setting(apps):
     ("inside profile", "browser profile"),
     # The folder of every install holds its profiles too.
     ("holds an install", "browser profile"),
-    ("another account", "keeps its records in"),
-    ("another provider", "keeps its records in"),
+    ("another account", "keeps its download history in"),
+    ("another provider", "keeps its download history in"),
 ])
 def test_a_folder_that_cannot_hold_documents_is_refused(apps, where, says):
     chase = apps["Chase Statements"]
@@ -301,7 +301,7 @@ def test_a_folder_around_an_accounts_own_folder_is_refused(apps, tmp_path):
     for app_name in ("Target Receipts", "Chase Statements"):
         with pytest.raises(HTTPException) as e:
             save({"app": app_name, "folder": str(tmp_path / "Somewhere")})
-        assert "keeps its records and Manual Review in" in e.value.detail, e.value.detail
+        assert "keeps its download history and Manual Review in" in e.value.detail, e.value.detail
 
 
 @pytest.fixture()
@@ -564,8 +564,8 @@ def test_an_account_added_later_gets_its_folder_before_it_runs(apps, tmp_path):
     ("relative", "full path"),
     ("profile", "browser profile"),
     ("the PaperPull folder", "browser profile"),
-    ("inside a provider", "keeps its records in"),
-    ("inside Manual Review", "keeps its records in"),
+    ("inside a provider", "keeps its download history in"),
+    ("inside Manual Review", "keeps its download history in"),
 ])
 def test_a_root_that_cannot_hold_documents_is_refused(apps, where, says):
     chase = apps["Chase Statements"]
@@ -585,7 +585,7 @@ def test_a_root_that_cannot_hold_documents_is_refused(apps, where, says):
 #
 # A run fills in a person's folder in the one documents folder only when
 # their config names no documents folder at all, only for a run that
-# starts, and says so in its output. Use it for every provider names each
+# starts, and says so in its output. Apply to every account names each
 # folder it would replace before it is pressed, and applies the folder
 # saved, the one that list was made for. A config that cannot be written
 # keeps no copy and is named. Each folder in it is one folder's name, never
@@ -902,7 +902,7 @@ def test_the_folder_for_every_provider_is_never_in_a_folder_of_their_own(
 
 def test_use_it_for_every_provider_replaces_a_folder_holding_it(apps, tmp_path):
     """The folder for every provider saved inside one person's own folder by
-    an earlier version. Use it for every provider gives that person a folder
+    an earlier version. Apply to every account gives that person a folder
     inside it too, so theirs no longer holds it."""
     own = tmp_path / "Drive" / "Docs"
     chase = apps["Chase Statements"]

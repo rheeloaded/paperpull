@@ -173,5 +173,5 @@ def test_a_file_manager_that_will_not_start_is_reported_not_raised(
 def test_the_page_tells_the_tester_what_to_do_with_it():
     page = app_module.HTML
     assert "Show the file to attach" in page
-    assert "no text from your account" in page
+    assert "never text from your account" in page
     assert "checkFailure(RUN.app, RUN.account)" in page

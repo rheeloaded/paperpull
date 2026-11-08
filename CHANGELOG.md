@@ -28,6 +28,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   person as Accounts does, instead of by folder.
 
 ### Fixed
+- **The panel calls each thing by one name, and says what to do next.**
+  The same thing went by several names from page to page, and some were
+  the command line's. The panel now says provider, account, PaperPull
+  folder, Documents folder, download history and Technical details, each
+  for one thing only, and never Pilot, Run All, Resume, Discover, Login,
+  Scope or Download again, or a folder slug where a provider's name
+  belongs. Messages from PaperPull itself start with a capital, end with a
+  period and say what to do next, such as "That folder does not exist.
+  Check the path, or create the folder first."
 - **A run says where its documents went, and Open folder opens them.** A
   run's page listed the names it saved and never where, and Open folder
   opened the account's own folder, among its script, config and records,

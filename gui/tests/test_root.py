@@ -377,10 +377,10 @@ def test_the_preview_is_the_one_that_reads_as_harmless():
 
 def test_the_panel_says_what_the_two_buttons_do():
     text = app_module.HTML
-    assert "Rename preview</b> shows what this app would call" in text
-    assert "Apply renames" in text
-    assert "this app downloaded are touched" in text
-    assert "Nothing is downloaded either way" in text
+    assert "Preview</b> lists the new name of each file you already have" in text
+    assert "<b>Rename</b> then renames them" in text
+    assert "only files PaperPull saved are touched" in text
+    assert "Nothing is downloaded, and" in text
 
 
 def test_a_rename_gets_the_flags_the_app_understands(settings, tmp_path):

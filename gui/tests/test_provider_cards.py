@@ -96,5 +96,5 @@ def test_the_page_says_when_a_provider_has_not_been_run_on_a_real_account():
     page = app_module.HTML
     row = page[page.index("function renderTiles()"):]
     row = row[:row.index("\nfunction ")]
-    assert "p.tested === false" in row and "Not run on a real account yet" in row
+    assert "p.tested === false" in row and "Not tested on a real account yet" in row
     assert "esc(p.note)" in row and "esc(p.documents)" in row

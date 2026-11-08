@@ -197,7 +197,7 @@ def _open_sample() -> Path:
         return dest
     builder = _sample_builder()
     if builder is None:
-        raise HTTPException(500, "this copy of PaperPull did not ship the sample archive")
+        raise HTTPException(500, "This copy of PaperPull has no sample archive. Download PaperPull again to repair it.")
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -209,7 +209,7 @@ def _open_sample() -> Path:
         mod.build(dest)
     except Exception as e:
         shutil.rmtree(dest, ignore_errors=True)
-        raise HTTPException(500, "could not build the sample archive: %s" % e)
+        raise HTTPException(500, "Could not build the sample archive (%s)." % e)
     return dest
 
 
@@ -299,12 +299,12 @@ def _scope_flags(year: str = "", start: str = "", end: str = "") -> list:
     passed on to a subprocess command line."""
     year, start, end = (year or "").strip(), (start or "").strip(), (end or "").strip()
     if year and not _YEAR_RE.match(year):
-        raise HTTPException(400, "year must be four digits")
-    for label, value in (("start", start), ("end", end)):
+        raise HTTPException(400, "Choose a year with four digits.")
+    for label, value in (("From", start), ("To", end)):
         if value and not _DATE_RE.match(value):
-            raise HTTPException(400, f"{label} date must be YYYY-MM-DD")
+            raise HTTPException(400, f"The {label} date is not a date. Pick one from the calendar.")
     if start and end and start > end:
-        raise HTTPException(400, "start date is after end date")
+        raise HTTPException(400, "The From date is after the To date.")
     flags = []
     if year:
         flags += ["--year", year]
@@ -344,20 +344,20 @@ def _redownload_ok(action: str, scope_flags, redownload, confirmed) -> bool:
         # a new document, and the Paperless one copies each into Paperless.
         # Downloading again there would send Paperless every document in the
         # range a second time, so the server does not offer it.
-        raise HTTPException(404, "Download again is not offered on PaperPull Server. "
-                                 "Each copy would go to Paperless a second time.")
+        raise HTTPException(404, "Restore deleted files is not offered on PaperPull "
+                                 "Server, since each copy would go to Paperless a "
+                                 "second time.")
     if action not in REDOWNLOAD_ACTIONS:
-        raise HTTPException(400, "Download again works with Pilot and Run All only.")
+        raise HTTPException(400, "Restore works only with Get new documents or Try the newest few.")
     # One date alone is open at its other end, and From 1990 or To today is
     # a whole history, so it takes a year or both ends.
     chosen = {flag for flag in scope_flags if flag.startswith("--")}
     if "--year" not in chosen and not {"--start-date", "--end-date"} <= chosen:
-        raise HTTPException(400, "Download again needs a year, or both a From and a To "
-                                 "date, chosen in Scope, so a whole history is never "
-                                 "asked for again by accident.")
+        raise HTTPException(400, "Choose a year, or both a From and a To date, so a "
+                                 "whole history is never downloaded again by "
+                                 "accident.")
     if confirmed is not True:
-        raise HTTPException(400, "Download again needs the question on the page answered "
-                                 "first.")
+        raise HTTPException(400, "Confirm the restore in its dialog first.")
     return True
 
 
@@ -630,7 +630,7 @@ def _not_in_sample() -> None:
     looking at the sample. Reading it and building spreadsheets from it are
     the point, so those are not guarded."""
     if _SAMPLE is not None:
-        raise HTTPException(409, "the panel is looking at the sample archive. "
+        raise HTTPException(409, "This is the sample archive. "
                                  "Leave the sample first.")
 
 
@@ -975,21 +975,21 @@ async def api_export(request: Request):
     provider = str(body.get("provider") or "").strip() or None
     mod = _export_module()
     if mod is None:
-        return {"ok": False, "reason": "export_purchases.py was not found next to this control panel."}
+        return {"ok": False, "reason": "This copy of PaperPull is missing export_purchases.py. Download PaperPull again to repair it."}
     if provider:
         # Only a provider the exporter itself found may be named, so the page
         # cannot steer the filename or the folder walk.
         known = {p["provider"].lower(): p["provider"] for p in mod.providers(apps_root())}
         if provider.lower() not in known:
-            return {"ok": False, "reason": f"no order history for {provider!r} under {apps_root()}"}
+            return {"ok": False, "reason": f"No receipts saved for {provider} yet. Get new documents first."}
         provider = known[provider.lower()]
     try:
         result = mod.export(apps_root(), None, provider, as_csv)
     except Exception as e:
-        return {"ok": False, "reason": "the export failed, %s" % str(e).splitlines()[0][:120]}
+        return {"ok": False, "reason": "The file was not made (%s). Try again." % str(e).splitlines()[0][:120]}
     if not result["sources"]:
-        return {"ok": False, "reason": "no '<Provider> Order History.csv' under %s. Receipt apps "
-                "(Amazon, Target, Walmart, Gap) write one after a run." % apps_root()}
+        return {"ok": False, "reason": "No receipts saved yet. Get new documents from a shop such as "
+                "Amazon or Target first."}
     _LAST_EXPORT = Path(result["path"])
     return {"ok": True, **result}
 
@@ -1024,7 +1024,7 @@ def api_export_transactions_providers():
     workbook can be built from."""
     tool = _transactions_tool()
     if tool is None:
-        return {"available": False, "providers": [], "reason": "export_transactions.py was not found next to this control panel."}
+        return {"available": False, "providers": [], "reason": "This copy of PaperPull is missing export_transactions.py. Download PaperPull again to repair it."}
     import importlib.util
     try:
         spec = importlib.util.spec_from_file_location("paperpull_export_tx", tool)
@@ -1055,13 +1055,13 @@ def api_export_transactions(provider: str = "", csv: str = ""):
     way a run streams. Only a provider the tool itself lists may be named."""
     tool = _transactions_tool()
     if tool is None:
-        raise HTTPException(404, "export_transactions.py was not found next to this control panel.")
+        raise HTTPException(404, "This copy of PaperPull is missing export_transactions.py. Download PaperPull again to repair it.")
     provider = (provider or "").strip()
     if provider:
         known = {p["provider"].lower(): p["provider"]
                  for p in api_export_transactions_providers().get("providers", [])}
         if provider.lower() not in known:
-            raise HTTPException(400, f"no statement archive for {provider!r}")
+            raise HTTPException(400, f"No statements saved for {provider} yet. Get new documents first.")
         provider = known[provider.lower()]
     cmd = [sys.executable, str(tool), "--root", str(apps_root())]
     if provider:
@@ -1126,7 +1126,7 @@ def api_export_reveal():
     path from the page on purpose, only the one the server itself wrote."""
     p = _LAST_EXPORT
     if not p or not p.is_file():
-        raise HTTPException(404, "nothing exported yet")
+        raise HTTPException(404, "Create the file first.")
     try:
         if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,", str(p)])
@@ -1135,7 +1135,7 @@ def api_export_reveal():
         else:
             subprocess.Popen(["xdg-open", str(p.parent)])
     except Exception as e:
-        raise HTTPException(500, "could not open the folder, %s" % e)
+        raise HTTPException(500, "Could not open the folder (%s)." % e)
     return {"ok": True}
 
 
@@ -1155,11 +1155,11 @@ def api_export_download():
         raise HTTPException(404)
     p = _LAST_EXPORT
     if not p or not os.path.lexists(p):
-        raise HTTPException(404, "nothing exported yet")
+        raise HTTPException(404, "Create the file first.")
     fd = _exported(p)
     if fd is None:
-        raise HTTPException(404, "That spreadsheet is no longer the one this panel wrote. "
-                                 "Export it again.")
+        raise HTTPException(404, "That spreadsheet has changed since PaperPull made it. "
+                                 "Create it again.")
     fh = os.fdopen(fd, "rb")
     size = os.fstat(fd).st_size
 
@@ -1221,13 +1221,13 @@ def api_status():
     mod = _status_module()
     if mod is None:
         return {"available": False, "rows": [], "gaps": [],
-                "reason": "status.py was not found next to this control panel.",
+                "reason": "This copy of PaperPull is missing tools/status.py. Download PaperPull again to repair it.",
                 "root": str(apps_root())}
     try:
         rows = mod.scan_all(apps_root())
     except Exception as e:
         return {"available": False, "rows": [], "gaps": [],
-                "reason": "the scan failed, %s" % str(e).splitlines()[0][:120],
+                "reason": "PaperPull could not read how current each account is (%s)." % str(e).splitlines()[0][:120],
                 "root": str(apps_root())}
 
     out, gaps = [], []
@@ -1570,15 +1570,15 @@ def _port_note(shared: dict, meta: dict, account: str):
     return {
         "port": found.port,
         "with": names,
-        "say": ("%s %s debugging port %d too. A sign-in joins the browser already on its "
-                "port, so these accounts sign in to one browser, and a run of any of them "
-                "reads whichever account that browser is signed in to. To keep them apart, "
-                "%s, %s no other account here names and no provider PaperPull ships comes "
-                "with. Nothing is stopped for this."
-                % (named[:1].upper() + named[1:], "names" if len(names) == 1 else "name",
+        "say": ("%s %s the same browser as this account, on port %d, so a run of any of "
+                "them reads whichever account that browser is signed in to. To keep them "
+                "apart, %s, %s no other account here names and no provider uses by "
+                "default. Nothing is stopped for this."
+                % (named[:1].upper() + named[1:], "signs in with" if len(names) == 1 else "sign in with",
                    found.port, what, "a port" if len(found.moves) == 1 else "ports")),
-        "short": ("Shares debugging port %d with %s. Open it to see the setting to change."
-                  % (found.port, named if len(names) == 1 else "%d other accounts" % len(names))),
+        "short": ("Signs in with the same browser as %s, on port %d. Open it to see how to "
+                  "keep them apart."
+                  % (named if len(names) == 1 else "%d other accounts" % len(names), found.port)),
     }
 
 
@@ -1687,9 +1687,10 @@ def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") 
             if what in REVEAL_FOLDERS and inner.is_dir() and not inner.is_symlink():
                 folder = inner
     except ValueError:
-        raise HTTPException(404, "that account's config names no folder PaperPull can read")
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
     if not folder.is_dir():
-        raise HTTPException(404, "that account has no folder yet")
+        raise HTTPException(404, "That folder does not exist yet.")
     return folder
 
 
@@ -1701,7 +1702,7 @@ def api_saved_in(app: str = "", account: str = "primary"):
     a path. A plain def, so the walk runs in a worker thread."""
     apps = discover_apps()
     if app not in apps or account not in apps[app]["accounts"]:
-        raise HTTPException(404, "unknown app or account")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     return {"folder": str(_documents_folder_or_404(apps[app], account))}
 
 
@@ -1721,7 +1722,7 @@ async def api_reveal(request: Request):
         raise HTTPException(400, "unknown folder to show")
     apps = discover_apps()
     if name not in apps or account not in apps[name]["accounts"]:
-        raise HTTPException(404, "unknown app or account")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     # The walk for the newest PDF reads the disk, so it runs in a worker
     # thread and a download streaming meanwhile is not held up.
     folder = await run_in_threadpool(_documents_folder_or_404, apps[name], account, what)
@@ -1733,7 +1734,7 @@ async def api_reveal(request: Request):
         else:
             subprocess.Popen(["xdg-open", str(folder)])
     except Exception as e:
-        raise HTTPException(500, "could not open the folder, %s" % e)
+        raise HTTPException(500, "Could not open the folder (%s)." % e)
     return {"ok": True}
 
 
@@ -1779,27 +1780,28 @@ async def api_root_set(request: Request):
     moving the installs into it is a reasonable order of operations.
     """
     if os.environ.get("APPS_ROOT"):
-        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
-                                 "overrides any saved choice. Unset it first.")
+        raise HTTPException(409, "PaperPull was started with APPS_ROOT set, so "
+                                 "the folder cannot be changed here. Start it "
+                                 "without APPS_ROOT to change it.")
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(400, "expected a JSON body")
     raw = str((body or {}).get("root") or "").strip().strip('"')
     if not raw:
-        raise HTTPException(400, "no folder given")
+        raise HTTPException(400, "Paste the folder path first.")
     root = Path(raw).expanduser()
     if not root.is_absolute():
-        raise HTTPException(400, "give the full path, starting from the drive "
-                                 "or from /")
+        raise HTTPException(400, "Give the full path, starting from the drive "
+                                 "(C:\\) or from /.")
     if not root.is_dir():
-        raise HTTPException(400, "that folder does not exist")
+        raise HTTPException(400, "That folder does not exist. Check the path, or create the folder first.")
     data = _read_settings()
     data["apps_root"] = str(root.resolve())
     try:
         _write_settings(data)
     except OSError as e:
-        raise HTTPException(500, "could not save the choice: %s" % e)
+        raise HTTPException(500, "Could not save the folder (%s). Try again." % e)
     global _STATUS_MOD, _EXPORT_MOD
     _STATUS_MOD = None      # the status report is looked for relative to root
     _EXPORT_MOD = None      # and so is the exporter
@@ -1952,10 +1954,10 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
     Never overwrites, because an existing folder may hold years of history."""
     tmpl_root = _templates_root()
     if tmpl_root is None:
-        raise HTTPException(500, "no templates are available to create from")
+        raise HTTPException(500, "This copy of PaperPull has no providers to set up. Download it again from paperpull.net.")
     src = tmpl_root / slug
     if not src.is_dir() or not _entry_script(src):
-        raise HTTPException(400, "unknown provider %r" % slug)
+        raise HTTPException(400, "PaperPull has no provider called %r. Reload the page." % slug)
     info = next(p for p in list_providers() if p["slug"] == slug)
     dst = root / info["folder"]
     if dst.exists():
@@ -2474,8 +2476,9 @@ async def api_create(request: Request):
     nothing is remembered, since the image sets that folder every start."""
     server = server_mode.enabled()
     if os.environ.get("APPS_ROOT") and not server:
-        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
-                                 "overrides any saved choice. Unset it first.")
+        raise HTTPException(409, "PaperPull was started with APPS_ROOT set, so "
+                                 "the folder cannot be changed here. Start it "
+                                 "without APPS_ROOT to change it.")
     try:
         body = await request.json()
     except Exception:
@@ -2486,17 +2489,17 @@ async def api_create(request: Request):
     owner = str((body or {}).get("owner") or "").strip()[:80]
     slugs = (body or {}).get("providers") or []
     if not raw:
-        raise HTTPException(400, "no folder given")
+        raise HTTPException(400, "Paste the folder path first.")
     if not isinstance(slugs, list) or not slugs:
-        raise HTTPException(400, "choose at least one provider")
+        raise HTTPException(400, "Choose at least one provider.")
     root = Path(raw).expanduser()
     if not root.is_absolute():
-        raise HTTPException(400, "give the full path, starting from the drive "
-                                 "or from /")
+        raise HTTPException(400, "Give the full path, starting from the drive "
+                                 "(C:\\) or from /.")
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        raise HTTPException(400, "could not create that folder: %s" % e)
+        raise HTTPException(400, "Could not create that folder (%s). Choose a folder you can write to." % e)
 
     created, existed = [], []
     for slug in slugs:
@@ -2511,7 +2514,7 @@ async def api_create(request: Request):
         try:
             _write_settings(data)
         except OSError as e:
-            raise HTTPException(500, "could not save the choice: %s" % e)
+            raise HTTPException(500, "Could not save the folder (%s). Try again." % e)
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"root": str(root.resolve()), "created": created, "existed": existed,
@@ -2568,12 +2571,12 @@ async def api_account(request: Request):
     owner = str(body.get("owner") or "").strip()[:80]
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     if not _LABEL_RE.match(label):
-        raise HTTPException(400, "the label is used in a filename, so letters, digits, - and _ only, "
-                                 "starting with a letter or digit")
+        raise HTTPException(400, "Use lowercase letters, digits, - or _, starting with "
+                                 "a letter or digit.")
     if label in ("primary", "example") or label in apps[name]["accounts"]:
-        raise HTTPException(409, "there is already an account called %r in %s" % (label, name))
+        raise HTTPException(409, "%s already has a person called %s. Choose another name." % (name, label))
     app_dir = Path(apps[name]["dir"])
     dest = _make_account(app_dir, label, owner)
     cfg = json.loads(dest.read_text(encoding="utf-8"))
@@ -2590,10 +2593,10 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
     checked by the caller. Returns the new config's path."""
     mod = _account_module()
     if mod is None:
-        raise HTTPException(500, "add_account.py was not found next to this control panel")
+        raise HTTPException(500, "This copy of PaperPull is missing add_account.py. Download PaperPull again to repair it.")
     if not (app_dir / "config.json").is_file():
-        raise HTTPException(409, "%s has no config.json yet. Run Login once for the first account, "
-                                 "then add the second." % app_dir.name)
+        raise HTTPException(409, "Sign in to %s once with Open sign-in window, then "
+                                 "add another person." % app_dir.name)
     if server_mode.enabled():
         # make_config copies the first person's config into the new one and
         # makes the new person's folder, so a config left as a link in the
@@ -2612,9 +2615,9 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
     try:
         dest = mod.make_config(app_dir, label, owner=owner)
     except Exception as e:
-        raise HTTPException(500, "could not make the account: %s" % str(e).splitlines()[0][:160])
+        raise HTTPException(500, "Could not add this person (%s). Try again." % str(e).splitlines()[0][:160])
     if dest is None:
-        raise HTTPException(409, "%s has no config.json yet." % app_dir.name)
+        raise HTTPException(409, "Sign in to %s once with Open sign-in window, then add another person." % app_dir.name)
     if server_mode.enabled():
         # make_config puts the profile in the account's own folder, which on
         # the server is the shared folder, so it moves to the profiles volume.
@@ -2679,7 +2682,7 @@ def _history_outside(where: Path) -> bool:
 def _migrate_or_fail():
     mod = _migrate_module()
     if mod is None:
-        raise HTTPException(500, "migrate.py was not found next to this control panel")
+        raise HTTPException(500, "This copy of PaperPull is missing migrate.py. Download PaperPull again to repair it.")
     return mod
 
 
@@ -2690,7 +2693,7 @@ def api_history_export():
     mod = _migrate_or_fail()
     data, _ = mod.build(apps_root(), keep=_history_keep())
     if data is None:
-        raise HTTPException(404, "there is no download history here to export yet")
+        raise HTTPException(404, "Nothing is downloaded yet, so there is no history to export. Get new documents first.")
     name = "PaperPull history %s.ppz" % date.today().isoformat()
     return Response(content=data, media_type="application/zip",
                     headers={"Content-Disposition": 'attachment; filename="%s"' % name,
@@ -2704,12 +2707,12 @@ async def _history_upload(request: Request):
     the folder chosen there."""
     import base64
     if int(request.headers.get("content-length") or 0) > HISTORY_MAX_BYTES:
-        raise HTTPException(413, "that file is far larger than any download history")
+        raise HTTPException(413, "That file is too large to be a history file. Choose the .ppz file that Export history saved.")
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
         if len(body) > HISTORY_MAX_BYTES:
-            raise HTTPException(413, "that file is far larger than any download history")
+            raise HTTPException(413, "That file is too large to be a history file. Choose the .ppz file that Export history saved.")
     try:
         data = json.loads(bytes(body).decode("utf-8"))
         raw = base64.b64decode(str(data.get("file") or ""), validate=True)
@@ -2734,12 +2737,13 @@ def _history_root(raw: str):
         return apps_root(), False
     root = Path(raw).expanduser()
     if not root.is_absolute():
-        raise HTTPException(400, "give the full path, starting from the drive or from /")
+        raise HTTPException(400, "Give the full path, starting from the drive (C:\\) or from /.")
     if os.path.normcase(str(root)) == os.path.normcase(str(apps_root())):
         return apps_root(), False
     if os.environ.get("APPS_ROOT"):
-        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
-                                 "overrides any saved choice. Unset it first.")
+        raise HTTPException(409, "PaperPull was started with APPS_ROOT set, so "
+                                 "the folder cannot be changed here. Start it "
+                                 "without APPS_ROOT to change it.")
     return root, True
 
 
@@ -2918,10 +2922,10 @@ async def api_history_import(request: Request):
     # (_start_run), so the two never overlap. A run reads progress.json when
     # it starts and writes it as it goes, over what an import wrote.
     if not _IMPORTING.acquire(blocking=False):
-        raise HTTPException(409, "an import is already under way")
+        raise HTTPException(409, "An import is already going. Wait for it to finish.")
     if _RUNNING:
         _IMPORTING.release()
-        raise HTTPException(409, "a provider is running right now. Import once it has finished.")
+        raise HTTPException(409, "A run is going. Import once it has finished.")
     try:
         rows = await to_thread.run_sync(_history_walk, mod, manifest, root, True)
     finally:
@@ -2935,8 +2939,8 @@ async def api_history_import(request: Request):
         try:
             _write_settings(data)
         except OSError as e:
-            raise HTTPException(500, "the import is done, and the folder could not be "
-                                     "remembered: %s" % e)
+            raise HTTPException(500, "The import is done, but the folder could not be "
+                                     "remembered (%s)." % e)
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"root": str(root), "rows": rows}
@@ -2958,7 +2962,7 @@ def _account_named(meta: dict, account) -> str:
     that app, so a name from the page can never point at another folder."""
     account = str(account or "primary")
     if account not in (meta.get("accounts") or ["primary"]):
-        raise HTTPException(404, "unknown account")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     return account
 
 
@@ -3013,7 +3017,7 @@ def api_failure_latest(app: str = "", account: str = "primary"):
     """Whether the run that just stopped left a file worth attaching."""
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     found = _latest_failure(apps[app], _account_named(apps[app], account))
     if found is None:
         return {"found": False}
@@ -3028,10 +3032,10 @@ async def api_failure_reveal(request: Request):
     name = str((body or {}).get("app") or "")
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     found = _latest_failure(apps[name], _account_named(apps[name], (body or {}).get("account")))
     if found is None:
-        raise HTTPException(404, "no recent failure file")
+        raise HTTPException(404, "There is no recent file about what went wrong.")
     try:
         if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,", str(found)])
@@ -3040,7 +3044,7 @@ async def api_failure_reveal(request: Request):
         else:
             subprocess.Popen(["xdg-open", str(found.parent)])
     except Exception as e:
-        raise HTTPException(500, "could not open the folder, %s" % e)
+        raise HTTPException(500, "Could not open the folder (%s)." % e)
     return {"ok": True}
 
 
@@ -3053,11 +3057,11 @@ def api_failure_download(app: str = "", account: str = "primary"):
         raise HTTPException(404)
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     account = _account_named(apps[app], account)
     found = _latest_failure(apps[app], account)
     if found is None:
-        raise HTTPException(404, "no recent failure file")
+        raise HTTPException(404, "There is no recent file about what went wrong.")
     return _handed(apps[app], account, "Diagnostics", found)
 
 
@@ -3136,14 +3140,14 @@ def _handed(meta: dict, account: str, name: str, path: Path) -> Response:
     try:
         inside = _inside(meta, account, name)
     except ValueError:
-        raise HTTPException(404, "that account's folder cannot be read here")
+        raise HTTPException(404, "That account's folder cannot be read here.")
     fd = _open_plain(path, inside)
     if fd is None:
-        raise HTTPException(404, "that file cannot be handed over")
+        raise HTTPException(404, "That file cannot be downloaded.")
     with os.fdopen(fd, "rb") as fh:
         data = fh.read(HANDED_MOST + 1)
     if len(data) > HANDED_MOST:
-        raise HTTPException(413, "that file is too large to be a report")
+        raise HTTPException(413, "That file is too large to be a report.")
     kind = "application/json" if path.suffix.lower() == ".json" else "application/octet-stream"
     return Response(content=data, media_type=kind, headers=_attachment(path.name))
 
@@ -3167,7 +3171,7 @@ def api_diagnostics_download(app: str = "", account: str = "primary", action: st
         raise HTTPException(400, "diagnose or record")
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     account = _account_named(apps[app], account)
     found = _latest_failure(apps[app], account, REPORT_FILES[action])
     if found is None:
@@ -3184,7 +3188,7 @@ def _set_aside(meta: dict, account: str):
     try:
         inside = _inside(meta, account, "Manual Review")
     except ValueError:
-        raise HTTPException(404, "that account's folder cannot be read here")
+        raise HTTPException(404, "That account's folder cannot be read here.")
     out = []
     if os.path.islink(inside):
         return out, inside
@@ -3228,7 +3232,7 @@ def api_aside_download(app: str = "", account: str = "primary"):
         raise HTTPException(404)
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     files, inside = _set_aside(apps[app], _account_named(apps[app], account))
     named = "%s set aside.zip" % (app if account == "primary" else "%s %s" % (app, account))
     # A file of no name, which the system removes when it is closed or the
@@ -3285,16 +3289,17 @@ async def api_record_stop(request: Request):
     name = str((body or {}).get("app") or "")
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     try:
         target = _diagnostics_of(apps[name], _account_named(apps[name], (body or {}).get("account")))
     except ValueError:
-        raise HTTPException(404, "that account's config names no folder PaperPull can read")
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
     try:
         _make_folder(target)
         _write_text(target / ".stop-recording", "stop\n")
     except OSError as e:
-        raise HTTPException(500, "could not signal the recording: %s" % e)
+        raise HTTPException(500, "Could not stop the recording (%s). Press Stop recording again." % e)
     return {"app": name, "stopping": True}
 
 
@@ -3337,14 +3342,14 @@ async def api_remove(request: Request):
     name = str((body or {}).get("app") or "")
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     if name in _RUNNING:
-        raise HTTPException(409, "that provider is running right now. Wait for it "
-                                 "to finish, or close the tab it is running in.")
+        raise HTTPException(409, "That provider is running. Wait for it to finish, "
+                                 "or close the tab it is running in.")
     src = Path(apps[name]["dir"])
     root = apps_root()
     if src.parent.resolve() != root.resolve():
-        raise HTTPException(400, "that folder is not directly under the apps root")
+        raise HTTPException(400, "That folder is not directly inside the PaperPull folder.")
 
     summary = _removal_summary(src)
     dest_dir = root / REMOVED_DIR
@@ -3359,8 +3364,8 @@ async def api_remove(request: Request):
         _make_folder(dest_dir)
         shutil.move(str(src), str(dest))
     except OSError as e:
-        raise HTTPException(500, "could not move the folder: %s. Is a file in it "
-                                 "open, or a browser still signed in there?" % e)
+        raise HTTPException(500, "Could not move the folder (%s). Close any file open "
+                                 "from it and its sign-in window, then try again." % e)
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"app": name, "moved_to": str(dest), **summary}
@@ -3370,7 +3375,7 @@ def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=(), redown
     if action not in ACTIONS:
         raise HTTPException(400, "unknown action")
     if account not in app_meta["accounts"]:
-        raise HTTPException(400, "unknown account")
+        raise HTTPException(400, "That account is no longer here. Reload the page.")
     flags = []
     for f in ACTIONS[action]["flags"]:
         flags.append(app_meta["login_flag"] if f == "__LOGIN__" else f)
@@ -3408,10 +3413,10 @@ def _review_cmd(app_meta: dict, account: str) -> list:
     through /api/review-names, which hands it what it would otherwise ask
     in a console (renaming.REVIEW_LIST_ENV, REVIEW_ANSWERS_ENV)."""
     if not app_meta.get("reviews_names"):
-        raise HTTPException(400, "%s has no Review Names. Only receipt providers do."
+        raise HTTPException(400, "%s has no Review names. Only receipt providers do."
                             % app_meta.get("name", "This provider"))
     if account not in app_meta["accounts"]:
-        raise HTTPException(400, "unknown account")
+        raise HTTPException(400, "That account is no longer here. Reload the page.")
     return _command(app_meta, account, ["--review-names"])
 
 
@@ -3551,21 +3556,21 @@ def _review_list(app: str, account: str) -> dict:
     said while finding them (rows it leaves out, and why)."""
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     meta = apps[app]
     if server_mode.enabled() and not meta.get("runnable", True):
-        raise HTTPException(409, "This install does not match a provider PaperPull ships, "
-                                 "so it will not be run.")
+        raise HTTPException(409, "PaperPull does not recognize this provider's folder, "
+                                 "so it cannot run it.")
     blocked = setup_needed(meta)
     if blocked:
-        raise HTTPException(409, blocked.splitlines()[0] if blocked.strip() else "setup needed")
+        raise HTTPException(409, blocked.splitlines()[0] if blocked.strip() else "This provider is not set up yet.")
     cmd = _review_cmd(meta, account)
     folder = None
     try:
         try:
             folder = Path(tempfile.mkdtemp(prefix="paperpull-review-"))
         except OSError as e:
-            raise HTTPException(500, "Review Names had nowhere to list into, %s" % e)
+            raise HTTPException(500, "Review names had nowhere to list the receipts (%s)." % e)
         mark = run_result.new_mark()
         env = dict(_run_env(meta), **{REVIEW_LIST_ENV: str(folder / HANDED),
                                       run_result.MARK_ENV: mark})
@@ -3576,10 +3581,10 @@ def _review_list(app: str, account: str) -> dict:
                                   stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                   errors="replace", env=env, timeout=REVIEW_LIST_SECONDS)
         except subprocess.TimeoutExpired:
-            raise HTTPException(504, "Review Names did not finish listing in %d seconds."
-                                % REVIEW_LIST_SECONDS)
+            raise HTTPException(504, "Review names took too long to list the receipts. "
+                                "Try again.")
         except OSError as e:
-            raise HTTPException(500, "Review Names could not start, %s" % e)
+            raise HTTPException(500, "Review names could not start (%s)." % e)
         said = [line.rstrip() for line in (done.stdout or "").splitlines()
                 if line.strip() and run_result.parse(line, mark) is None]
         try:
@@ -3589,8 +3594,7 @@ def _review_list(app: str, account: str) -> dict:
                 raise ValueError("not a list")
         except (OSError, ValueError, KeyError, TypeError):
             raise HTTPException(500, " ".join(said[-3:]) or
-                                "Review Names ended with code %s and listed nothing."
-                                % done.returncode)
+                                "Review names listed nothing. Try again.")
         return {"receipts": receipts, "said": said}
     finally:
         _drop(folder)
@@ -3657,17 +3661,17 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
     run's own that is gone once the run ends (_hand_over)."""
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     meta = apps[app]
 
     if server_mode.enabled() and not meta.get("runnable", True):
         # Fail closed. The install does not map to exactly one provider the
         # image ships, so there is no trusted code to run for it, and the
         # server never falls back to code in the /data folder.
-        detail = ("This install does not match a provider PaperPull ships, so "
-                  "it will not be run. Its folder must hold exactly one "
-                  "provider script whose name is one PaperPull ships. Remove "
-                  "any extra script, or add the provider again from the panel.")
+        detail = ("PaperPull does not recognize this provider's folder, so it "
+                  "cannot run it. Its folder should hold exactly one provider "
+                  "script, named as PaperPull's own are. Remove any extra "
+                  "script, or add the provider again with Add a provider.")
 
         async def refuse_unmapped():
             for line in detail.splitlines():
@@ -3698,8 +3702,8 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         except Exception as e:
             # Never the reason a run does not start. Its documents go where
             # its config already says.
-            documents_said = ["Documents stay where they were, since the folder for every "
-                              "provider could not be applied (%s)." % type(e).__name__]
+            documents_said = ["Documents stay where they were, since the Documents folder "
+                              "could not be applied (%s)." % type(e).__name__]
 
     if blocked:
         # Said here rather than let the app start under an interpreter
@@ -4077,7 +4081,7 @@ def _newest_saved(records, n=3):
 def _naming_app(name: str) -> Path:
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "no such app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     return Path(apps[name]["dir"])
 
 
@@ -4182,7 +4186,7 @@ async def api_naming_preview(request: Request):
     naming = _naming()
     d = _naming_app(str(body.get("app") or ""))
     if naming is None:
-        raise HTTPException(503, "file naming is not available in this install")
+        raise HTTPException(503, "File naming is not available in this copy of PaperPull. Update PaperPull to get it.")
     pattern = str(body.get("pattern") or "").strip()
     if pattern == naming.DEFAULT_RECEIPTS:
         # Under the default a name is what the app built at the time,
@@ -4227,7 +4231,7 @@ async def api_naming_save(request: Request):
     naming = _naming()
     d = _naming_app(str(body.get("app") or ""))
     if naming is None:
-        raise HTTPException(503, "file naming is not available in this install")
+        raise HTTPException(503, "File naming is not available in this copy of PaperPull. Update PaperPull to get it.")
     scope = body.get("scope")
     if scope not in ("shared", "own"):
         raise HTTPException(400, "scope is shared or own")
@@ -4367,7 +4371,7 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
                     "of their own.")
     for name, meta in apps.items():
         if _within(meta["dir"], target):
-            return ("That folder holds %s's own folder, with its settings and records. "
+            return ("That folder holds %s's own folder, with its settings and download history. "
                     "Choose a folder of their own." % name)
         for other in meta["accounts"]:
             try:
@@ -4378,10 +4382,10 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
             # Around any account's own folder, this one's included, its
             # records and Manual Review would sit in the watched folder.
             if _within(root, target):
-                return ("That folder holds the folder %s keeps its records and Manual Review "
-                        "in. Choose a folder of their own." % who)
+                return ("That folder holds the folder %s keeps its download history and "
+                        "Manual Review in. Choose a folder of their own." % who)
             if (name, other) != (app_name, account) and _within(target, root):
-                return ("That folder is inside the folder %s keeps its records in. "
+                return ("That folder is inside the folder %s keeps its download history in. "
                         "Choose a folder of its own." % who)
             if (name, other) == (app_name, account) and _within(target, root):
                 # Inside its own folder it may be, but not where a document
@@ -4392,7 +4396,7 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
                     first = ()
                 if first and (first[0] in KEPT_FOLDERS or first[0].startswith(".")):
                     return ("That folder is inside %s, where documents that failed their "
-                            "check or a run's own records are kept. Choose a folder of their "
+                            "check or a run's own logs and backups are kept. Choose a folder of their "
                             "own." % first[0])
     return None
 
@@ -4774,11 +4778,12 @@ def _documents_account(app_name: str, account: str):
     apps = discover_apps()
     meta = apps.get(app_name)
     if meta is None or account not in meta["accounts"]:
-        raise HTTPException(404, "unknown app or account")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     try:
         root = _account_root(meta, account)
     except ValueError:
-        raise HTTPException(404, "that account's config names no folder PaperPull can read")
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
     return apps, meta, root
 
 
@@ -4853,7 +4858,7 @@ def _save_account_documents(body: dict) -> dict:
         problem = _in_root_problem(apps, app_name, account, docs_root) or \
             _root_held_problem(apps, docs_root, skip=(app_name, account))
         if problem:
-            raise HTTPException(400, "%s would get %s inside the folder for every provider. %s"
+            raise HTTPException(400, "%s would get %s inside the Documents folder. %s"
                                 % (_who(app_name, account), folder, problem))
     elif folder:
         problem = (_documents_problem(apps, app_name, account, folder)
@@ -4864,7 +4869,7 @@ def _save_account_documents(body: dict) -> dict:
         folder = os.path.normpath(folder)
     cfg_path = _account_config(meta, account)
     if not cfg_path.is_file():
-        raise HTTPException(404, "that account has no settings yet")
+        raise HTTPException(404, "That account has no settings yet. Sign in to it once with Open sign-in window first.")
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     # Its own folder is written as "" while a documents folder is set, so
     # the account stays out of it, and is no setting at all when none is.
@@ -4896,8 +4901,8 @@ def _save_documents_root(folder: str, apply_all: bool) -> dict:
         raise HTTPException(409, "A history file is being imported. Save this once it has "
                                  "finished.")
     if apply_all and (not folder or os.path.normpath(folder) != _documents_root()):
-        raise HTTPException(409, "Save that folder first. Use it for every provider gives every "
-                                 "provider and person a folder inside the folder saved.")
+        raise HTTPException(409, "Save the Documents folder first. Apply to every account "
+                                 "then gives each account a folder inside it.")
     apps = discover_apps()
     if folder:
         problem = _documents_root_problem(apps, folder, force=apply_all)
@@ -4913,7 +4918,7 @@ def _save_documents_root(folder: str, apply_all: bool) -> dict:
     try:
         _write_settings(data)
     except OSError as e:
-        raise HTTPException(500, "could not save the folder: %s" % e)
+        raise HTTPException(500, "Could not save the folder (%s). Try again." % e)
     missed = []
     written = _sync_documents(apps, old, force=apply_all, missed=missed)
     following, own = _documents_counts(apps, folder)
@@ -4946,13 +4951,13 @@ async def api_terms(request: Request):
     except Exception:
         raise HTTPException(400, "expected a JSON body")
     if not isinstance(body, dict) or body.get("accepted") != TERMS_VERSION:
-        raise HTTPException(409, "those are not the current terms, reload the page")
+        raise HTTPException(409, "The terms have changed. Reload the page to read them.")
     data = _read_settings()
     data["terms_accepted"] = TERMS_VERSION
     try:
         _write_settings(data)
     except OSError as e:
-        raise HTTPException(500, "could not save the answer: %s" % e)
+        raise HTTPException(500, "Could not save the answer (%s)." % e)
     return {"accepted": TERMS_VERSION}
 
 
