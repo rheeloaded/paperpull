@@ -299,7 +299,7 @@ def test_a_run_never_remembers_another_bill_as_one_it_could_not_find(history, tm
     doc = _bill("2025-01-15")
     app.process([doc])
     rec = app.progress.get(doc.key)
-    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value
+    assert rec["state"] == State.FAILED.value
     assert not rec.get("downloaded_ok")
     assert not list(tmp_path.glob("*.pdf"))
     assert _seen(page) == []

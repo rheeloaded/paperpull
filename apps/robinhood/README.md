@@ -35,7 +35,7 @@ Some months of an account come from Robinhood only as a web page, behind a
 "Download HTML" control, and are printed to PDF in a separate browser
 context of that signed-in browser. Without `cdp_url` in `config.json` the
 tool runs in a profile of its own, which has no browser to open that context
-in, so every such month is marked for manual review instead.
+in, so every such month fails instead, and each run tries it again.
 
 ## Documents captured
 

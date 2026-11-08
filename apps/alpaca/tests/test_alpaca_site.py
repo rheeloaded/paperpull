@@ -1734,7 +1734,7 @@ def test_nothing_private_leaves_on_runs_that_stop(tmp_path):
         attach(app, Center())
         app.cmd_discover()
         app.check_session = lambda p: None
-        # A row that is missing: marked for review, nothing pressed.
+        # A row that is missing: a failure tried again, nothing pressed.
         bad = Center()
         bad.rows = [r for r in bad.drawn() if r[2] != uid(2)]
         attach(app, bad)
@@ -1770,7 +1770,7 @@ def test_nothing_private_leaves_on_runs_that_stop(tmp_path):
         trace = []
         take(Center(), tmp_path, n=105, day="2026-09-07", trace=trace)
         traces.append(json.dumps(trace))
-    assert app.stats["manual_review"] >= 1
+    assert app.stats["failed"] >= 1
     assert_private(seen.getvalue() + written(app) + " ".join(traces))
 
 
