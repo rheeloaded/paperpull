@@ -1643,9 +1643,13 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "settled": _settled(state, (row or {}).get("gaps"), log),
         "documents": (row or {}).get("documents") or 0,
         "newest": _jsonable((row or {}).get("newest")),
-        # When the app last finished a run at all, from its own run
-        # summary, so a run from a terminal counts as a check too.
-        "checked": _jsonable((row or {}).get("last_run")),
+        # When the app last read the provider's whole list, from the note
+        # it keeps, so a run from a terminal counts as a check too, and a
+        # Resume, a Verify or a Rename, which read no list, does not (#148).
+        "checked": _jsonable((row or {}).get("last_listed")),
+        # When the app last finished a run at all, from its own run summary,
+        # for a run from a terminal, which the panel's log never sees.
+        "ran": _jsonable((row or {}).get("last_run")),
         "age_days": (row or {}).get("age_days"),
         "cadence_days": (row or {}).get("cadence_days"),
         "cadence": mod._fmt_cadence((row or {}).get("cadence_days")) if mod else "-",
@@ -1767,7 +1771,7 @@ def account_rows() -> list:
                     "app": name, "account": account, "provider": provider, "owner": "",
                     "gets": cards.get(slug, {}).get("documents", ""), "kind": kind,
                     "state": "nostatus", "settled": False, "documents": 0, "newest": None,
-                    "checked": None,
+                    "checked": None, "ran": None,
                     "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
                     "last_run": None, "last_outcome": "", "runs": [], "latest": [],
                     "running": dict(running) if running else None,

@@ -139,9 +139,12 @@ function groupOf(r) { return NEEDS.includes(r.state) ? 'needs' : FRESH.includes(
 function continues(r) { return r.state === 'stopped' && r.last_outcome !== 'unlisted'; }
 function present(r) {
   const n = noun(r), latest = when(r.newest);
-  // The panel's own log first, then the time the app last wrote its run
-  // summary, which a run from a terminal leaves too.
-  const lastAt = r.last_run && r.last_run.ended ? when(r.last_run.ended) : when(r.checked);
+  // When the last run ended, from the panel's own log first, then the time
+  // the app last wrote its run summary, which a run from a terminal leaves
+  // too. "Checked" is only when the provider's whole list was last read,
+  // which a Continue with nothing left to take never does (#148).
+  const lastAt = r.last_run && r.last_run.ended ? when(r.last_run.ended) : when(r.ran);
+  const checkedAt = when(r.checked);
   const every = CADENCE[r.cadence] || '';
   const usual = (age, cls, chip) => ({
     chip: {cls, text: chip},
@@ -213,12 +216,12 @@ function present(r) {
         say: many(r.documents, n) + (latest ? ', newest ' + latest : '') + '. Too few to know how often ' + r.provider + ' sends one.',
         act: {label: 'Get new', run: 'all'}};
     case 'ongoing':
-      return {chip: {cls: 'ok', text: lastAt ? 'Checked ' + lastAt : 'Ready'},
+      return {chip: {cls: 'ok', text: checkedAt ? 'Checked ' + checkedAt : 'Ready'},
         say: many(r.documents, n) + (latest ? ' · newest ' + latest : ''),
         act: {label: 'Get new', run: 'all'}};
     default:
       return {chip: {cls: 'ok', text: 'Up to date'},
-        say: many(r.documents, n) + (latest ? ' · newest ' + latest : '') + (lastAt ? ' · checked ' + lastAt : ''),
+        say: many(r.documents, n) + (latest ? ' · newest ' + latest : '') + (checkedAt ? ' · checked ' + checkedAt : ''),
         act: {label: 'Get new', run: 'all'}};
   }
 }

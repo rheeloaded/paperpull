@@ -192,6 +192,62 @@ def test_a_resume_only_a_listing_carries_on_from_is_its_own_outcome(root):
     assert (row["state"], row["last_outcome"]) == ("stopped", "stopped")
 
 
+def _listed(folder, at, whole_at="", resume_ended=""):
+    """The listing note an app keeps, and a Resume after it that read none."""
+    note = {"complete": True, "at": at}
+    if whole_at != "":
+        note["whole_at"] = whole_at
+    (folder / "last-listing.json").write_text(json.dumps(note), encoding="utf-8")
+    if resume_ended:
+        (folder / "run-summary.txt").write_text(
+            "Mode: resume\nRun end: %s\n" % resume_ended, encoding="utf-8")
+        _log(folder, {"action": "resume", "exit_code": 0, "ended": resume_ended,
+                      "result": {"stopped": 0, "new_files": 0}})
+
+
+def test_a_continue_with_nothing_to_take_is_no_check(panel, root):
+    """A Continue after every listed document was saved reads no list, so
+    the card says when the list was last read, not when the Continue ran,
+    and the last run is still said as the run it was (#148)."""
+    bank = root / "Bank Statements - second"
+    weeks_ago = (date.today() - timedelta(days=21)).isoformat() + "T09:00:00"
+    today = date.today().isoformat() + "T10:00:00"
+    _listed(bank, weeks_ago, weeks_ago, resume_ended=today)
+    row = _rows()[("Bank Statements", "second")]
+    assert (row["state"], row["checked"], row["ran"]) == ("current", weeks_ago, today)
+    shown = panel.evaluate("(row) => present(row)", json.loads(json.dumps(row, default=str)))
+    said_then = panel.evaluate("(iso) => when(iso)", weeks_ago)
+    said_today = panel.evaluate("(iso) => when(iso)", today)
+    assert shown["say"].endswith("checked " + said_then), shown
+    assert said_today not in shown["say"]
+
+
+@pytest.mark.parametrize("complete, whole_at, checked", [
+    (True, "", "at"), (False, "", None), (True, None, None)],
+    ids=["older note, whole", "older note, stopped", "never read whole"])
+def test_a_card_says_checked_only_for_a_list_read_whole(panel, root, complete, whole_at, checked):
+    bank = root / "Bank Statements - second"
+    at = (date.today() - timedelta(days=9)).isoformat() + "T09:00:00"
+    _listed(bank, at, whole_at)
+    if not complete:
+        (bank / "last-listing.json").write_text(json.dumps({"complete": False, "at": at}),
+                                                encoding="utf-8")
+    row = _rows()[("Bank Statements", "second")]
+    assert row["checked"] == (at if checked else None)
+    shown = panel.evaluate("(row) => present(row)", json.loads(json.dumps(row, default=str)))
+    assert ("checked" in shown["say"]) is bool(checked), shown
+
+
+def test_a_stopped_run_from_a_terminal_still_says_when_it_ran(panel, root):
+    """With nothing in the panel's log, the last run is the run summary's."""
+    bank = root / "Bank Statements - second"
+    ended = (date.today() - timedelta(days=3)).isoformat() + "T10:00:00"
+    (bank / "run-summary.txt").write_text("Mode: all\nRun end: %s\n" % ended, encoding="utf-8")
+    row = dict(_rows()[("Bank Statements", "second")], state="stopped", last_outcome="unlisted")
+    shown = panel.evaluate("(row) => present(row)", json.loads(json.dumps(row, default=str)))
+    assert ("The last run on " + panel.evaluate("(iso) => when(iso)", ended)) in shown["say"]
+
+
 def test_a_clean_run_after_a_stop_clears_it(root):
     _log(root / "Bank Statements - second",
          {"action": "all", "exit_code": 0, "result": {"stopped": 0, "attention": False}},

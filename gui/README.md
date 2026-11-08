@@ -102,7 +102,10 @@ step.
 
 How current an archive is comes from `tools/status.py`, run on each
 account's own folder, measured against how often that provider sends a
-document. The panel never says an account is signed in, since nothing short
+document. The date an account was checked is when a run last read the
+provider's whole list, which a Continue with nothing left to take, a check
+of the saved files or a rename never does, and a run over part of the history
+does not either. The panel never says an account is signed in, since nothing short
 of a run can know that. When several accounts may have something new,
 **Get new for all** runs them one after another, and pauses at one that does
 not finish, so you can sign in again and try it once more, or skip it.
