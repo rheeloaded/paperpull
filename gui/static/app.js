@@ -275,6 +275,10 @@ function route() {
   else if (VIEW === 'sheets') openSheets();
   else if (VIEW === 'names') openNames();
   else if (VIEW === 'settings') renderSettings();
+  // Moving on is having seen how the run ended, and the Run page says the
+  // rest, so neither the tab's title nor the link to that page stays.
+  tabEnd = '';
+  if (VIEW === 'run' && !$('noticelink').hidden) notice('', '');
   renderRunbar();
   if (changed) {
     const h = document.querySelector('#view-' + VIEW + ' h1');
@@ -290,8 +294,11 @@ function renderAll() {
   renderRunbar();
 }
 
-function notice(text, tone) {
+// link, the words of a link to the Run page, for a run that ended elsewhere.
+function notice(text, tone, link) {
   $('noticetext').textContent = text;
+  $('noticelink').textContent = link || '';
+  $('noticelink').hidden = !link;
   $('notice').className = 'notice' + (tone ? ' ' + tone : '');
   $('notice').hidden = !text;
 }
@@ -783,7 +790,11 @@ function startRun(r, action, opts) {
   };
   if (SERVER && action === 'login') openDock(r.provider);
   closeMenus();
-  notice('', '');
+  // A later run of a round starts on its own, perhaps under a notice the
+  // person is reading on another page.
+  if (!(opts.queue && opts.stay)) notice('', '');
+  tabEnd = '';
+  paintTitle();
   if (!opts.stay && location.hash !== '#/run') location.hash = '#/run'; else renderAll();
   lockStarts();
   return true;
@@ -799,6 +810,9 @@ function onLine(text) {
   else if ((m = /Downloading (\d+) document/i.exec(t))) { RUN.total = +m[1]; }
   if (/^Connected\b/.test(t)) RUN.connected = true;
   if (t && !t.startsWith('$ ')) RUN.now = t;
+  // Not left to the frame below, which a browser holds back while the tab
+  // is out of sight, the very time the title is there to be read.
+  paintTitle();
   if (!paintQueued) {
     paintQueued = true;
     requestAnimationFrame(() => { paintQueued = false; paintRunLive(); renderRunbar(); });
@@ -853,9 +867,45 @@ function finishRun(code, refused, streamed) {
   if (savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(RUN.app, RUN.account);
   if (done) done(RUN.code);
   if (RUN.queue && QUEUE) queueStep();
+  tabEnd = RUN.queue && QUEUE && QUEUE.finished ? 'Round done' : endedInWords(RUN);
+  paintTitle();
+  tellRunEnded();
   loadAccounts().then(renderAll);
   renderAll();
   lockStarts();
+}
+// What the tab's own title says of a run that has ended, until the person
+// moves on, as somebody working in the provider's window sees only the tab.
+let tabEnd = '';
+function paintTitle() {
+  const title = RUN.state === 'running'
+    ? (RUN.total ? '(' + RUN.step + '/' + RUN.total + ') ' : '') + RUN.provider + ' · PaperPull'
+    : tabEnd ? tabEnd + ' · PaperPull' : 'PaperPull';
+  if (document.title !== title) document.title = title;
+}
+// A sign-in window that opened leaves the person to work in it, so there
+// is no end of anything to announce.
+function endedInWords(run) {
+  const o = run.outcome || {};
+  if (run.action === 'login' && o.clean) return '';
+  return run.provider + (o.attention ? ' needs a look' : o.clean ? ' done' : ' stopped');
+}
+// A run that ends while the person is on another page of PaperPull only
+// loses its bar at the bottom, so it says so, with the way to its outcome.
+// A dialog that started one shows its output and says how it went. A round
+// says so once, when it pauses for the person or comes to its end, as the
+// next run of it would clear anything said sooner.
+function tellRunEnded() {
+  const o = RUN.outcome || {};
+  if (VIEW === 'run' || RUN.sink || (RUN.action === 'login' && o.clean)) return;
+  if (RUN.queue && QUEUE) {
+    if (QUEUE.finished) notice('The round is done.', 'ok', 'See how each one went');
+    else if (QUEUE.held) notice('Paused at ' + QUEUE.items[QUEUE.i].provider + '. The rest wait for you.', 'warn', 'See what it needs');
+    return;
+  }
+  const name = RUN.provider + (RUN.who ? ' (' + RUN.who + ')' : '');
+  notice((o.title.startsWith(RUN.provider) ? o.title : name + ': ' + o.title) + '.',
+    {ok: 'ok', warn: 'warn', bad: 'warn'}[o.tone] || '', 'See what happened');
 }
 // Where a run's documents went, said beside them with a button to show
 // them, so nobody leaves the page to find them. The panel names the folder
@@ -1258,6 +1308,7 @@ function paintRunLive() {
   }
 }
 function renderRunbar() {
+  paintTitle();
   const show = RUN.state === 'running' && VIEW !== 'run';
   $('runbar').hidden = !show;
   if (!show) return;
@@ -1278,7 +1329,7 @@ function startQueue() {
     key: keyOf(r), provider: r.provider + (whoOf(r) ? ' (' + whoOf(r) + ')' : ''),
     action: continues(r) ? 'resume' : 'all', scope: {year: '', start: '', end: ''}, said: ''}));
   if (!items.length) return;
-  QUEUE = {items, i: 0, held: false, finished: false};
+  QUEUE = {items, i: 0, held: false, finished: false, started: false};
   queueRun();
 }
 function queueRun() {
@@ -1293,7 +1344,12 @@ function queueRun() {
   // Another run started in the moment before this one could, and only
   // one goes at a time, so the round waits for the person instead of
   // saying the next starts on its own when it never would.
-  if (!startRun(rowByKey(it.key), it.action, {scope: it.scope, queue: true})) {
+  // The first run of the round opens the Run page. The rest stay put, so
+  // somebody reading another page meanwhile is not pulled back at each one,
+  // and the bar at the bottom carries the progress.
+  if (startRun(rowByKey(it.key), it.action, {scope: it.scope, queue: true, stay: QUEUE.started})) {
+    QUEUE.started = true;
+  } else {
     QUEUE.held = true;
     renderAll();
   }
@@ -1301,6 +1357,7 @@ function queueRun() {
 function queueStep() {
   const it = QUEUE.items[QUEUE.i];
   const o = RUN.outcome || {};
+  it.title = o.title;
   if (o.clean) {
     it.said = o.attention ? 'held' : 'done';
     QUEUE.i++;
@@ -1329,9 +1386,16 @@ function renderQueueList() {
 function queueHeld() {
   if (!QUEUE) return '';
   if (QUEUE.finished) {
-    const done = QUEUE.items.filter(it => it.said === 'done').length;
-    return '<section class="callout info" style="margin-top:20px"><div class="text"><h2>All done</h2><p>' +
-      esc(done + ' of ' + QUEUE.items.length + ' finished with nothing to look at.') + '</p><div class="row-actions">' +
+    // One line each, in what the run itself came to, so a run that saved
+    // four documents and set one aside reads as that, not as one of the
+    // few that did not finish.
+    const each = QUEUE.items.map(it => {
+      const r = rowByKey(it.key);
+      const said = it.said === 'skipped' ? 'Skipped' : it.said === 'gone' ? 'No longer in PaperPull' : it.title;
+      return '<li>' + (r ? '<a href="' + accountHash(r) + '">' + esc(it.provider) + '</a>' : esc(it.provider)) + ': ' + esc(said) + '</li>';
+    }).join('');
+    return '<section class="callout info" style="margin-top:20px"><div class="text"><h2>The round is done</h2>' +
+      '<ul class="roundend">' + each + '</ul><div class="row-actions">' +
       '<a class="btn btn-s" href="#/" data-do="queue-end">All accounts</a></div></div></section>';
   }
   if (!QUEUE.held) return '<p class="hint" style="margin-top:12px">' + esc('Account ' + (QUEUE.i + 1) + ' of ' + QUEUE.items.length +

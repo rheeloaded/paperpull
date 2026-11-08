@@ -201,6 +201,13 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **A run can be followed from the tab, and a round leaves you where you
+  are.** The browser tab's title shows a run's progress and how it ended,
+  so somebody working in the provider's window can see it. A run that ends
+  while you are on another page of PaperPull says so with a link to the
+  outcome. Get new for all no longer pulls you back to the Run page at each
+  account, and its last line lists each account with what it came to, so
+  one that saved documents and set one aside no longer reads as a failure.
 - **A checkout nobody has set up shows the welcome.** Its `apps/` holds the
   provider templates, which looked like installs, so the README's quick
   start landed on every provider "Not started" with no welcome, and a run
