@@ -1055,6 +1055,11 @@ def _name_of(store) -> str:
     return "the index" if "PDF Full Path" in columns else "the order history"
 
 
+def _many(n: int, noun: str) -> str:
+    """"1 receipt", "2 receipts"."""
+    return "%d %s%s" % (n, noun, "" if n == 1 else "s")
+
+
 def _listed(names) -> str:
     """"a", "a and b", "a, b and c"."""
     names = list(names)
@@ -2482,16 +2487,17 @@ def review_names(app, ask, words: ReviewWords = WORDS,
             offered.add(str(path))
             review.append((r, path))
     if left_out:
-        print(f"{left_out} row(s) marked for review have no receipt PDF in this "
-              "app's folders to rename, so they are left out.")
+        print(f"{_many(left_out, 'row')} marked for review {'has' if left_out == 1 else 'have'} "
+              f"no receipt PDF in this app's folders to rename, so "
+              f"{'it is' if left_out == 1 else 'they are'} left out.")
     if shared:
-        print(f"{shared} row(s) marked for review name a file that another purchase's "
-              "rows or record also name, so whose receipt it is cannot be told and "
-              "they are left out.")
+        print(f"{_many(shared, 'row')} marked for review {'names' if shared == 1 else 'name'} a "
+              "file that another purchase's rows or record also name, so whose receipt it "
+              f"is cannot be told and {'it is' if shared == 1 else 'they are'} left out.")
     if listing:
         _write_review_list(Path(listing), app, review)
-        print(f"{len(review)} receipt(s) need review." if review
-              else "No receipts need name review.")
+        print(f"{_many(len(review), 'receipt')} {'needs' if len(review) == 1 else 'need'} review."
+              if review else "No receipts need name review.")
         return
     if not review:
         print("No receipts need name review.")
@@ -2503,9 +2509,9 @@ def review_names(app, ask, words: ReviewWords = WORDS,
         given = [(r, p) for r, p in review if (str(p), _number_of(r)) in answers]
         stale = len(answers) - len(given)
         if stale:
-            print(f"{stale} new name(s) were for receipts no longer waiting for review, so "
-                  "nothing was done with them. Open Review names again to see the list as "
-                  "it is now.")
+            print(f"{_many(stale, 'new name')} {'was for a receipt' if stale == 1 else 'were for receipts'} "
+                  f"no longer waiting for review, so nothing was done with {'it' if stale == 1 else 'them'}. "
+                  "Open Review names again to see the list as it is now.")
         if not given:
             print("No receipt was given a new name, so nothing was renamed.")
             return
@@ -2528,10 +2534,10 @@ def review_names(app, ask, words: ReviewWords = WORDS,
               "run Review Names again." % (_listed([p.name for p in held]), them, them))
         raise SystemExit(1)
     if answers is not None:
-        print(f"Renaming {len(review)} receipt(s) given a new name.\n")
+        print(f"Renaming {_many(len(review), 'receipt')} given a new name.\n")
     else:
-        print(f"{len(review)} receipt(s) need review. Enter a new summary, "
-              "press Enter to keep, or 'q' to stop.\n")
+        print(f"{_many(len(review), 'receipt')} {'needs' if len(review) == 1 else 'need'} review. "
+              "Enter a new summary, press Enter to keep, or 'q' to stop.\n")
     # The folder each receipt is filed in, inside which a naming pattern's
     # folders are, as Rename and a download have them (#101). One put aside
     # in Manual Review stays there, with no folders.

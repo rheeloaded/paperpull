@@ -111,7 +111,7 @@ def test_the_list_is_what_a_console_review_would_ask_and_renames_nothing(
         (str(first), "ORDER-0001", FIRST), (str(second), "ORDER-0002", SECOND)]
     assert receipts[0]["items"] == ["Invented Hose", "Invented Nozzle"]
     assert receipts[0]["date"] == "2026-05-14"
-    assert "2 receipt(s) need review." in capsys.readouterr().out
+    assert "2 receipts need review." in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("app", APPS, ids=IDS)
@@ -143,7 +143,7 @@ def test_only_the_receipt_given_a_name_is_renamed(app, tmp_path, monkeypatch, ca
     assert Path(record["pdf_path"]).name == renamed[0]
     assert rows_for(inst, "ORDER-0002")[0]["PDF Filename"] == SECOND
     out = capsys.readouterr().out
-    assert "Renaming 1 receipt(s) given a new name." in out
+    assert "Renaming 1 receipt given a new name." in out
     assert "New summary: garden hose" in out
     # The next list holds only the receipt kept as it was.
     assert [r["number"] for r in listed(inst, tmp_path, monkeypatch)] == ["ORDER-0002"]
@@ -163,7 +163,7 @@ def test_a_name_for_another_purchase_or_a_file_gone_from_the_list_does_nothing(
         {"id": str(gone), "number": "ORDER-0003", "summary": "Not Waiting"}])
     assert census.everything_under(tmp_path / "out") == before
     out = capsys.readouterr().out
-    assert "2 new name(s) were for receipts no longer waiting for review" in out
+    assert "2 new names were for receipts no longer waiting for review" in out
     assert "nothing was renamed" in out
 
 
@@ -177,7 +177,7 @@ def test_of_two_names_for_one_file_the_one_for_its_own_purchase_is_taken(
     names = files(inst)
     assert any("Right Purchase" in n for n in names), names
     assert not any("Wrong Purchase" in n for n in names), names
-    assert "1 new name(s) were for receipts no longer waiting" in capsys.readouterr().out
+    assert "1 new name was for a receipt no longer waiting" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("app", APPS, ids=IDS)

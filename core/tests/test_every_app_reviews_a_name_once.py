@@ -294,7 +294,7 @@ def test_only_a_receipt_the_app_holds_is_renamed(app, tmp_path, monkeypatch, cap
 
     said = " ".join(capsys.readouterr().out.split())
     assert len(asked) == 3, "only the three receipts the app holds are offered, %s" % said
-    assert ("8 row(s) marked for review have no receipt PDF in this app's folders to "
+    assert ("8 rows marked for review have no receipt PDF in this app's folders to "
             "rename, so they are left out." in said), said
     assert {"here": everything_under(here), "elsewhere": everything_under(elsewhere)} == before
     assert {p: p.read_bytes() for p in kept} == kept
@@ -621,9 +621,9 @@ def test_a_file_another_purchase_names_is_left_out(app, later_kept, tmp_path, mo
     said = " ".join(capsys.readouterr().out.split())
     out = 1 if later_kept in ("record", "an invoice") else 2
     assert len(asked) == 1, "only the purchase with a file of its own is offered, %s" % said
-    assert ("%d row(s) marked for review name a file that another purchase's rows or "
-            "record also name, so whose receipt it is cannot be told and they are left "
-            "out." % out) in said, said
+    assert (("1 row marked for review names" if out == 1 else "%d rows marked for review name" % out)
+            + " a file that another purchase's rows or record also name, so whose receipt it is "
+            "cannot be told and " + ("it is" if out == 1 else "they are") + " left out.") in said, said
     assert (filed / name).read_bytes() == shared
     garden = [p for p in filed.iterdir() if "Garden Hose" in p.name]
     assert len(garden) == 1 and {name, garden[0].name} <= {p.name for p in filed.iterdir()}

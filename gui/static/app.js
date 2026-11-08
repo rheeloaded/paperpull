@@ -250,6 +250,9 @@ function parseRoute() {
   if (parts[0] === 'add') return {view: 'welcome', add: true};
   return {view: 'home'};
 }
+// A provider folder's name on the page. /api/apps has it, since the rows are
+// not read yet when the Updated notice is said.
+function providerName(folder) { return (META.provider_names || {})[folder] || folder; }
 function accountHash(r) { return '#/a/' + encodeURIComponent(r.app) + '/' + encodeURIComponent(r.account); }
 function route() {
   if (!META) return;
@@ -319,7 +322,7 @@ async function load() {
   $('sandboxbar').hidden = !sandbox;
   const fresh = Object.keys(META.refreshed || {});
   if (fresh.length) {
-    notice('Updated ' + fresh.join(', ') +
+    notice('Updated ' + fresh.map(providerName).join(', ') +
            " to this version of PaperPull. The old files are in each one's Backups folder.", '');
   }
   await loadAccounts();
@@ -2218,7 +2221,9 @@ function openNames() {
   const sel = $('nmapp');
   const apps = Object.keys(META.apps);
   const want = sel.value || (ROUTE.app && META.apps[ROUTE.app] ? ROUTE.app : apps[0]);
-  sel.innerHTML = apps.map(a => '<option' + (a === want ? ' selected' : '') + '>' + esc(a) + '</option>').join('');
+  // Two folders can hold one provider, so those two also show the folder.
+  const label = a => apps.filter(b => providerName(b) === providerName(a)).length > 1 ? providerName(a) + ' (' + a + ')' : providerName(a);
+  sel.innerHTML = apps.map(a => '<option value="' + esc(a) + '"' + (a === want ? ' selected' : '') + '>' + esc(label(a)) + '</option>').join('');
   if (!$('nmsep').options.length) {
     $('nmsep').innerHTML = NM_SEPS.map(([v, name]) => '<option value="' + esc(v) + '">' + esc(name) + ', ' +
       esc(nmDateExample('yyyy-mm-dd') + v + 'Amazon') + '</option>').join('');
@@ -2387,7 +2392,7 @@ function nmRename(apply) {
   let i = 0;
   const next = (code) => {
     if (code !== undefined && code !== '0') {
-      $('nmofferstate').textContent = 'Stopped at ' + pairs[i - 1][0] + (pairs[i - 1][1] === 'primary' ? '' : ', ' + pairs[i - 1][1]) +
+      $('nmofferstate').textContent = 'Stopped at ' + providerName(pairs[i - 1][0]) + (pairs[i - 1][1] === 'primary' ? '' : ', ' + pairs[i - 1][1]) +
         ', which did not finish. The list below says why.';
       $('nmprevbtn').disabled = false;
       return;
@@ -2426,6 +2431,7 @@ function renderSettings() {
     : 'Each provider has a folder of its own in here, holding its documents and its download history.';
   $('existing').hidden = SERVER || inSample() || META.root_source === 'environment';
   $('rootinput').value = $('rootinput').value || META.apps_root || '';
+  $('rootinput').placeholder = (META.apps_root || '').startsWith('/') ? '/Users/you/Documents/PaperPull' : 'C:\\Users\\you\\Documents\\PaperPull';
   $('stmove').hidden = inSample();
   if (!hxWelcome()) placeMove(false);
   $('g-sampleopen').hidden = inSample();

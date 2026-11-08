@@ -37,6 +37,12 @@ NOT_SIGNED_IN = 7
 NOTHING_READ = 8
 
 
+def under_panel() -> bool:
+    """Whether the control panel started this run, so its words are the
+    names on the panel's buttons. In a terminal they are the flags' names."""
+    return bool(os.environ.get(MARK_ENV, ""))
+
+
 def not_signed_in(cdp_url, err) -> SystemExit:
     """The exit for a run that could not attach to the signed-in browser at
     cdp_url, after saying so in the words of where it runs: the panel's
@@ -219,10 +225,12 @@ def report_run_result(stats):
     wrong = int(stats.get("wrong_document", 0) or 0)
     result["wrong_document"] = wrong
     if wrong:
-        print("\n%d document(s) were refused because they were not the one "
-              "asked for. Nothing was saved under their names. That is a "
-              "wrong document arriving, not a missing one, so it is worth "
-              "reporting." % wrong, flush=True)
+        print("\n%s, since %s not the one asked for. Nothing was saved under "
+              "%s. That is a wrong document arriving, not a missing one, so "
+              "it is worth reporting."
+              % ("1 document was refused" if wrong == 1 else "%d documents were refused" % wrong,
+                 "it was" if wrong == 1 else "each was",
+                 "its name" if wrong == 1 else "their names"), flush=True)
     # Documents the list held that share a type and a date with another,
     # so a row could not be bound to one of them, and they were left
     # unsaved. The rest of the run went on, so this is said on its own.
@@ -253,16 +261,19 @@ def report_run_result(stats):
         print("\nThis run stopped before it finished.", flush=True)
     elif result["stopped"] and stats.get("mode") == "discover":
         # Resume downloads, and Discover was run only to see what is there.
-        print("\nThis run stopped before it finished. Discover downloads nothing, "
+        print("\nThis run stopped before it finished. Check what's there downloads nothing, "
+              "so run it again rather than Continue." if under_panel() else
+              "\nThis run stopped before it finished. Discover downloads nothing, "
               "so press Discover again rather than Resume.", flush=True)
     elif result["stopped"] and whole_run:
         # Resume has just said the list was not read to its end. Saying here
         # that Resume carries on is what sent people round again (#124).
         print("\nThis run stopped before it finished. Whatever it saved is kept. "
-              "Resume would only stop here again, so run %s, either of which "
-              "reads the list first." % whole_run, flush=True)
+              "%s would only stop here again, so run %s, either of which "
+              "reads the list first." % ("Continue" if under_panel() else "Resume", whole_run), flush=True)
     elif result["stopped"]:
         print("\nThis run stopped before it finished. Whatever it saved is kept, "
-              "and Resume carries on from where it stopped.", flush=True)
+              "and %s carries on from where it stopped."
+              % ("Continue" if under_panel() else "Resume"), flush=True)
     # Never include account labels, paths, or provider response text.
     print(marked(PREFIX, result), flush=True)

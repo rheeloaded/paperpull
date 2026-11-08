@@ -80,7 +80,7 @@ def test_a_wrong_document_is_reported_on_its_own_and_said_in_words(capsys):
     out = capsys.readouterr().out
     result = json.loads(out.split(PREFIX, 1)[1])
     assert result["wrong_document"] == 1
-    assert "refused because they were not the one asked for" in out
+    assert "1 document was refused, since it was not the one asked for" in out
 
 
 def test_documents_left_unsaved_as_alike_are_reported_on_their_own(capsys):

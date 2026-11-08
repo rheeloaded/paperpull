@@ -893,6 +893,8 @@ def api_apps():
             "fresh_checkout": fresh_checkout(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
             "apps": apps, "refreshed": refreshed,
+            # The name each provider folder goes by on the page, as the rows have it.
+            "provider_names": {name: _provider_of(meta)[0] for name, meta in apps.items()},
             # What the server's header says about where new documents go, and
             # why this host cannot give Chrome its sandbox, if it cannot.
             "server": ({"paperless": server_mode.paperless_connected(),

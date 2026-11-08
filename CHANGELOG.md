@@ -201,6 +201,14 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **Providers go by their names, and a run's lines by the names on the
+  buttons.** The File names picker, the Updated notice and File names'
+  Stopped at line said the folder's name instead of the provider's. The
+  example path in Settings fits the computer. Under the control panel a
+  run's own lines name Get new documents, Try the newest few, Check what's
+  there and Continue, and in a terminal they still name Pilot, Run All,
+  Discover and Resume. Counts say "1 receipt" rather than "1 receipt(s)",
+  and the providers' lists read alike.
 - **The name on an account can be changed.** The welcome asked once, for
   every provider at the same time, and skipping it was for good unless you
   edited a settings file. More now has Name on the account, for the first

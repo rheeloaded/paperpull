@@ -958,11 +958,10 @@ def launch_own_browser(chromium, user_data_dir, **kwargs):
     browser type, and the rest goes to sandboxed_persistent_context, so the
     browser always starts inside its sandbox. One whose sandbox cannot
     start ends the run and says why."""
-    print("This app's settings name no cdp_url, so this run opens a browser of its")
-    print("own, with the profile in %s," % user_data_dir)
-    print("instead of attaching to the window you signed in with, and it is signed in")
-    print("only if you sign in there. To use your sign-in window, copy the cdp_url")
-    print("line from config.example.json into this app's config.json.")
+    print("This provider's config.json has no cdp_url, so this run opens a new browser")
+    print("that is not signed in, with the profile in %s." % user_data_dir)
+    print("To use your sign-in window, copy the cdp_url line from config.example.json")
+    print("into config.json.")
     try:
         return sandboxed_persistent_context(chromium, user_data_dir, **kwargs)
     except SandboxRefused as e:
