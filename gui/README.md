@@ -31,8 +31,8 @@ and the account's row says the run stopped partway.
 Apps run from the panel get no stdin, so nothing can stop and wait for an
 answer nobody is able to type. The welcome asks for the account holder's
 name on the page instead, which is what fills the index CSV's **Account
-Holder** column. To set it later, put `"owner"` in the provider's
-`config.json`.
+Holder** column. To set it later, use **Name on the account** in the
+account's **More** menu.
 
 Or manually:
 
@@ -156,6 +156,7 @@ the rest are under **More**, and every one says what it does.
 | **Rename existing files** | A preview of new names (`--rename`), then the rename (`--rename --apply`) |
 | **Check saved files** | Re-checks every saved PDF (`--verify`) |
 | **Get help** | One dialog: a recent failure file if there is one, a support report for an issue (`--diagnose`), then recording your clicks to a document (`--record`) with Stop recording |
+| **Name on the account** | The account holder's name, kept in this account's own `config.json` |
 | **Add another person** | A second account on the same provider, with its own folder, sign-in window and history |
 | **Remove from PaperPull** | Moves the provider's folder into Removed. Nothing is deleted |
 | **Open folder** | Shows the folder holding the account's newest document, its documents folder once they go there, never its browser profile |

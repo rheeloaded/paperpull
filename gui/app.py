@@ -3069,6 +3069,51 @@ async def api_account(request: Request):
             "owner": cfg.get("owner", "")}
 
 
+@app.post("/api/account/owner", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+async def api_account_owner(request: Request):
+    """Set the name on one account, the first person's or another's, in
+    that account's own config, a copy kept in Backups first. An empty name
+    clears it. Asked for here since only a console could ever ask an app
+    for it, and the welcome asks once, for every provider at the same time."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    body = body if isinstance(body, dict) else {}
+    # Off the event loop, as a config on a share may be slow to answer.
+    return await to_thread.run_sync(_save_owner, body)
+
+
+def _save_owner(body: dict) -> dict:
+    name = str(body.get("app") or "")
+    owner = str(body.get("owner") or "").strip()[:80]
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    account = _account_named(apps[name], body.get("account"))
+    running = "Wait for the run on %s to finish first." % _who(name, account)
+    if (name, account) in _RUNS:
+        raise HTTPException(409, running)
+    cfg_path = _account_config(apps[name], account)
+    if not cfg_path.is_file():
+        raise HTTPException(404, "That account has no settings yet. Sign in to it once with Open sign-in window first.")
+    if not server_mode.own_file(cfg_path):
+        raise HTTPException(409, "%s's settings file is a link in the shared folder, so the name was not changed." % name)
+    current = _read_json(cfg_path)
+    if not isinstance(current, dict):
+        raise HTTPException(409, "%s's settings could not be read, so the name was not changed." % name)
+    if str(current.get("owner") or "").strip() == owner:
+        return {"app": name, "account": account, "owner": owner, "written": False}
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Asked again under the lock that write takes, for a run started since.
+    if not _write_config(cfg_path, "owner", owner, stamp, why="owner", keep_empty=True,
+                         when=lambda _cfg: (name, account) not in _RUNS):
+        if (name, account) in _RUNS:
+            raise HTTPException(409, running)
+        raise HTTPException(500, "The name could not be saved. Check that %s's folder can be written to, then try again." % name)
+    return {"app": name, "account": account, "owner": owner, "written": True}
+
+
 # Said of a provider's folder with no config.json, which a sign-in never
 # writes. Setting a provider up copies its config.example.json to it, so
 # only a folder made some other way has none, and the copy is what mends it.

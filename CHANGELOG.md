@@ -201,6 +201,11 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **The name on an account can be changed.** The welcome asked once, for
+  every provider at the same time, and skipping it was for good unless you
+  edited a settings file. More now has Name on the account, for the first
+  person and anyone added, kept in that account's own settings with a copy
+  in Backups first. It waits while that account is running.
 - **A support report that read nothing says so.** Made with the window on a
   sign-in page or a security check, it still read "Support report saved",
   and people attached it. It now ends as Nothing was read, says to sign in

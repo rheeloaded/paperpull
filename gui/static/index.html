@@ -476,6 +476,22 @@ __CSS__
   </form>
 </dialog>
 
+<dialog id="dlg-owner" aria-labelledby="on-title">
+  <form method="dialog">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></div>
+      <div><h2 id="on-title">Name on the account</h2>
+        <p>The name as the provider writes it. It stays on this computer, and lets PaperPull take your name out of a
+          file you share or put it in your file names. Files already saved keep their names.</p></div></div>
+    <div class="dlg-body">
+      <label class="field" for="on-owner">Name on the account<input id="on-owner" type="text" autocomplete="off" spellcheck="false" maxlength="80"></label>
+      <p class="hint" style="margin-top:-10px">Leave it blank to clear it.</p>
+      <p class="err" id="on-err" role="alert" hidden></p>
+    </div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-p" type="button" data-do="on-go">Save</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlg-remove" aria-labelledby="rm-title">
   <form method="dialog">
     <div class="dlg-head"><div class="icon bad" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v4H3zM5 11v8h14v-8M10 15h4"/></svg></div>

@@ -645,6 +645,7 @@ function openMenu(btn) {
     menuItem('support', k, P.report, 'Get help', 'Makes a file with no account details, to send with a problem report');
   if (!sample) {
     html += '<div class="rule" role="separator"></div>' +
+      menuItem('owner', k, P.pencil, 'Name on the account', 'Change the name PaperPull uses for this account') +
       menuItem('person', k, P.person, 'Add another person', 'Their own sign-in window, folder and download history') +
       menuItem('remove', k, P.box, 'Remove from PaperPull', 'Moves its folder to Removed. Nothing is deleted');
   }
@@ -1490,6 +1491,23 @@ async function psGo() {
   location.hash = r ? accountHash(r) : '#/';
   notice('Added ' + (d.owner || d.account) + ' to ' + DLG_ROW.provider + '. Their documents go to ' + d.output_dir +
     '. Open the sign-in window and sign in as them, then get new documents.', 'ok');
+}
+function openOwner(r) {
+  DLG_ROW = r;
+  $('on-title').textContent = 'Name on ' + r.provider + (whoOf(r) && r.account !== 'primary' ? ' (' + whoOf(r) + ')' : '');
+  $('on-owner').value = r.owner || '';
+  $('on-err').hidden = true;
+  $('dlg-owner').showModal();
+}
+async function onGo() {
+  const r = DLG_ROW, err = $('on-err');
+  let d;
+  try { d = await postJSON('/api/account/owner', {app: r.app, account: r.account, owner: $('on-owner').value}); }
+  catch (e) { err.textContent = e.message; err.hidden = false; return; }
+  $('dlg-owner').close();
+  await loadAccounts();
+  renderAll();
+  notice(d.owner ? 'The name on ' + r.provider + ' is now ' + d.owner + '.' : 'The name on ' + r.provider + ' is cleared.', 'ok');
 }
 function openRemove(r) {
   DLG_ROW = r;
@@ -2626,6 +2644,7 @@ const DO = {
     $('dlg-support').showModal();
   },
   'person': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openPerson(r); },
+  'owner': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openOwner(r); },
   'remove': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRemove(r); },
   'reveal': async el => {
     const r = rowByKey(el.dataset.key);
@@ -2653,6 +2672,7 @@ const DO = {
   },
   'rs-go': () => rsGo(),
   'ps-go': () => psGo(),
+  'on-go': () => onGo(),
   'rm-go': () => rmGo(),
   'rn-preview': () => rnRun(false),
   'rn-apply': () => rnRun(true),
