@@ -97,7 +97,7 @@ __CSS__
     <aside class="side-col" id="w-aside">
       <section class="card aside-card" id="movelink">
         <h2>Moving from another computer?</h2>
-        <p>On the old computer, use Export history in Settings. Import that file here, and nothing you
+        <p id="movesay">On the old computer, use Export history in Settings. Import that file here, and nothing you
           already have downloads again.</p>
         <button class="btn btn-s" type="button" data-do="w-import">Import a history file</button>
       </section>
@@ -318,6 +318,7 @@ __CSS__
       <div id="movebox" class="stack">
         <h2 id="hxhead">Move to another computer</h2>
         <p class="hint" id="hxlead"></p>
+        <p class="hint" id="hxfilelead" hidden></p>
         <div class="row-actions" id="hxexportrow"><button class="btn btn-s" type="button" id="hxexport" data-do="hx-export">Export history</button></div>
         <label class="field" for="hxfile">Import a history file</label>
         <input id="hxfile" type="file" accept=".ppz">

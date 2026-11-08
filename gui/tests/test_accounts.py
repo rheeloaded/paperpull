@@ -923,3 +923,29 @@ def test_the_welcome_says_what_its_folder_holds_before_providers_are_chosen(pane
     assert press(synced, "/Users/me/Library/Mobile Documents/PaperPull")["step"] == 2
 
     assert press({"ok": True, "found": [], "found_count": 0, "synced_by": ""}, "/Users/me/New")["step"] == 2
+
+
+def test_moving_says_the_pdfs_stay_unless_the_folders_are_copied(panel):
+    """A history file marks every document it lists as downloaded and brings
+    no PDF, so Get new never fetched them, and nothing said so. The Move card
+    now leads with copying the folders, which brings everything."""
+    said = panel.evaluate("""async () => {
+        const was = META;
+        META = null;
+        placeMove(false);                   // as at start, before META is read
+        const early = $('hxlead').textContent;
+        META = Object.assign({}, was || {}, {apps_root: '/Users/me/PaperPull', documents_root: '/Users/me/Drive/Docs'});
+        placeMove(false);
+        const card = [$('hxlead').textContent, $('hxfilelead').hidden ? '' : $('hxfilelead').textContent];
+        placeMove(true);
+        const welcome = $('hxlead').textContent;
+        await openWelcome(false).catch(() => {});
+        return {early, card, welcome, aside: $('movesay').textContent};
+    }""")
+    assert "Export history saves a file" in said["early"]
+    copy, file_ = said["card"]
+    assert copy.startswith("To move everything, your PDFs included, copy your PaperPull folder, /Users/me/PaperPull")
+    assert "your Documents folder, /Users/me/Drive/Docs" in copy and "choose the Documents folder again" in copy
+    assert file_.startswith("No way to copy the folders?") and "no PDF" in file_
+    assert "The PDFs stay on the other computer: copy them over, or use Restore deleted files" in said["welcome"]
+    assert said["aside"].startswith("Copy your PaperPull folder from the old computer, then type where it is above")

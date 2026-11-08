@@ -1532,6 +1532,13 @@ async function openWelcome(add) {
   $('w-aside').hidden = add;
   $('existinglink').hidden = SERVER;
   $('movelink').hidden = inSample();
+  // A copied PaperPull folder brings everything, and typed above it finds
+  // its providers. PaperPull Server's folder is its data folder, so there
+  // the file is the way in.
+  $('movesay').textContent = SERVER
+    ? 'On the old computer, use Export history in Settings. Import that file here, and nothing you already have downloads again.'
+    : 'Copy your PaperPull folder from the old computer, then type where it is above, and PaperPull finds its providers. ' +
+      'No folder to copy? Import a history file, which brings what was downloaded but not the PDFs.';
   if (!PROVIDERS || add) {
     try { PROVIDERS = await getJSON('/api/providers'); } catch (e) { PROVIDERS = {providers: [], templates: false}; }
   }
@@ -1618,12 +1625,28 @@ async function wCreate() {
 // -- moving to another computer (#67) ------------------------------------------------
 // One box. On the welcome page of a new computer it brings a history file in,
 // setting up what the file names. In Settings it writes one too.
-const HX_LEAD_WELCOME =
-  'Choose the history file you saved with Export history in Settings on your ' +
-  'other computer. Each provider and person in it is set up here with their settings, ' +
-  'and every document they already downloaded is marked as downloaded, so none of them ' +
-  'is downloaded here again. No sign-in comes with the file, so you sign in to each ' +
-  'provider here yourself.';
+// A history file brings what was downloaded, never the PDFs, and marks
+// every one of them downloaded, so Get new never fetches them. Each place
+// the move is offered says so, and on the desktop leads with copying the
+// folders, which brings the PDFs too: config.json names its folders
+// relative to its own (output_dir ".", profile_dir "./browser-profile").
+const PDFS_STAY = () => 'The PDFs stay on the other computer' +
+  (SERVER ? '.' : ': copy them over, or use Restore deleted files under More to download them again.');
+const HX_LEAD_WELCOME = () =>
+  'Choose the history file you saved with Export history in Settings on your other computer. ' +
+  'Each provider and person in it is set up here, and what they already downloaded is marked, so none ' +
+  'of it downloads again. No sign-in comes with the file, so you sign in to each provider here. ' + PDFS_STAY();
+const HX_LEAD_COPY = () =>
+  'To move everything, your PDFs included, copy your PaperPull folder, ' + META.apps_root +
+  (META.documents_root ? ', and your Documents folder, ' + META.documents_root + ',' : '') +
+  ' to the new computer. There, type where the PaperPull folder is in the welcome\'s first step, ' +
+  'and PaperPull finds its providers' + (META.documents_root ? ', then choose the Documents folder again here' : '') +
+  '. Sign in to each provider once there, since a sign-in rarely survives a copy.';
+const HX_LEAD_FILE =
+  'No way to copy the folders? Export history saves a file that lists each provider and person here, their ' +
+  'settings, and every document each one has already downloaded, so none of it downloads again where you ' +
+  'import it. It holds no password, no sign-in and no PDF. It does hold document titles, order numbers, ' +
+  'totals and the account holders\' names, so keep it as private as your documents.';
 const HX_LEAD_STATUS =
   'Export history saves a file that lists each provider and person here, their settings, ' +
   'and every document each one has already downloaded. Import it on another computer, or ' +
@@ -1638,7 +1661,13 @@ function placeMove(welcome) {
   $('setupmove').hidden = !welcome;
   $('hxhead').textContent = welcome ? 'Import a history file' : 'Move to another computer';
   $('hxexportrow').hidden = welcome;
-  $('hxlead').textContent = welcome ? HX_LEAD_WELCOME : HX_LEAD_STATUS;
+  // PaperPull Server keeps its folders in its data folder, so the file is
+  // its way in, and its lead stays as it was.
+  // At start, before META is read, the card is drawn again once Settings is.
+  const copy = !welcome && !SERVER && Boolean(META) && !inSample();
+  $('hxlead').textContent = welcome ? HX_LEAD_WELCOME() : copy ? HX_LEAD_COPY() : HX_LEAD_STATUS;
+  $('hxfilelead').textContent = copy ? HX_LEAD_FILE : '';
+  $('hxfilelead').hidden = !copy;
 }
 function hxWelcome() { return VIEW === 'welcome'; }
 function hxReset() { HX_FILE = ''; $('hxfile').value = ''; $('hximport').hidden = true; }
@@ -1719,7 +1748,7 @@ async function planHistory() {
   $('hxplan').innerHTML = hxTable(d, false);
   if (!c.setUp && !c.people && !c.filled) { $('hxmsg').textContent = 'Nothing in that file can be imported here, as the table says.'; return; }
   if (!c.changes) { $('hxmsg').textContent = 'Everything in that file is already here, so importing it would change nothing.'; return; }
-  $('hxmsg').textContent = hxSaying(c, false) + ' Nothing is downloaded now.';
+  $('hxmsg').textContent = hxSaying(c, false) + ' Nothing is downloaded now. ' + PDFS_STAY();
   $('hximport').textContent = c.setUp || c.people ? 'Set up and import' : 'Import';
   $('hximport').hidden = false;
 }
@@ -1740,7 +1769,7 @@ async function importHistory() {
     await load();
     location.hash = '#/';
     notice(hxSaying(c, true) + ' Nothing was downloaded, and no sign-in came with the file. Open each provider and sign in, ' +
-      'and Get new then downloads only what is new.', 'ok');
+      'and Get new then downloads only what is new. ' + PDFS_STAY(), 'ok');
   } else {
     // Providers set up by the import join every list, and a panel that
     // had none leaves its welcome.
