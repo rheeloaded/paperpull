@@ -4197,6 +4197,48 @@ async def api_review_names_apply(request: Request):
                                     json.dumps({"answers": answers}))
 
 
+# The runs that are the end of a visit to a provider. Try the newest few and
+# Check what's there are usually followed by a run that needs the window.
+CLOSE_WINDOW_AFTER = ("all", "resume")
+
+
+def _closes_its_window(action, code, result) -> bool:
+    """Whether a run has finished with its sign-in window. Only a run that
+    went all the way: one that stopped leaves the window open, since the
+    next thing the person needs is that page. Never on PaperPull Server,
+    whose windows live on its own screen, and never with
+    "close_signin_window": false in the settings."""
+    return (action in CLOSE_WINDOW_AFTER and code == 0 and isinstance(result, dict) and not result.get("stopped")
+            and not server_mode.enabled() and _read_settings().get("close_signin_window") is not False)
+
+
+def _close_sign_in_window(meta: dict, account: str) -> list:
+    """Close the account's sign-in browser, and put PaperPull's own window in
+    front if the person was in that browser. Somebody who has gone to
+    another program is left there."""
+    from paperpull_core import browser
+    cfg = _config_of(meta, account)
+    try:
+        port = urllib.parse.urlsplit(str(cfg.get("cdp_url") or "")).port
+        profile = Path(str(cfg.get("profile_dir") or ""))
+    except ValueError:
+        return []
+    if not port or not str(profile) or str(profile) == ".":
+        return []
+    if not profile.is_absolute():
+        profile = Path(meta["dir"]) / profile
+    closed = browser.close_signin_browser(profile, port)
+    if not closed["closed"]:
+        return []
+    app_path = os.environ.get("PAPERPULL_APP_PATH")
+    if closed["was_front"] and app_path and sys.platform == "darwin":
+        try:
+            subprocess.Popen(["open", app_path])
+        except OSError:
+            pass
+    return ["Closed the sign-in window, since this run finished."]
+
+
 def _start_run(app: str, account: str, action: str, scope_flags, redownload=False,
                review: Optional[str] = None):
     """A run of one app for one account, streamed to the page. `review` is
@@ -4444,6 +4486,9 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             if action in DOWNLOAD_ACTIONS and root is not None:
                 said = await to_thread.run_sync(_move_new_documents, meta, account, saved, env)
                 for told in said:
+                    yield _event(told)
+            if _closes_its_window(action, code, result):
+                for told in await to_thread.run_sync(_close_sign_in_window, meta, account):
                     yield _event(told)
             if result is not None:
                 yield _event(json.dumps(result), "result")

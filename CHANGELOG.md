@@ -201,6 +201,13 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **A sign-in window comes to the front, and goes when it is done.** Opening
+  one, or reusing one already open, now brings it forward. When Get new
+  documents or Continue finishes, PaperPull closes that account's sign-in
+  browser, and returns you to PaperPull if you were in it. A run that stops
+  leaves the window open. It is known by its port and its profile folder, so
+  an everyday browser is never closed, and `"close_signin_window": false` in
+  settings.json turns it off. Mac and Linux for now.
 - **What a real run on a real account showed.** A list that stopped partway
   is said as a page PaperPull did not expect, not as a sign-out with
   Continue, for each of the providers that can stop that way. The last line

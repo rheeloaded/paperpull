@@ -2019,3 +2019,29 @@ def test_every_state_an_app_writes_is_judged_taken_or_left():
     assert written <= set(_TAKEN_OR_GONE) | _LEFT_TO_TAKE, written
     assert set(_TAKEN_OR_GONE) <= written
     assert set(app_module._NOTHING_TO_TAKE) == set(_TAKEN_OR_GONE.values())
+
+
+@pytest.mark.parametrize("action, code, result, closes", [
+    ("all", 0, {"stopped": 0}, True),
+    ("resume", 0, {"stopped": 0}, True),
+    ("all", 0, {"stopped": 1}, False),
+    ("all", 1, {"stopped": 0}, False),
+    ("all", 0, None, False),
+    ("pilot", 0, {"stopped": 0}, False),
+    ("discover", 0, {"stopped": 0}, False),
+    ("login", 0, {"stopped": 0}, False),
+])
+def test_only_a_run_that_went_all_the_way_closes_its_window(monkeypatch, action, code, result, closes):
+    monkeypatch.setattr(app_module, "_read_settings", lambda: {})
+    monkeypatch.setattr(app_module.server_mode, "enabled", lambda: False)
+    assert app_module._closes_its_window(action, code, result) is closes
+
+
+def test_a_window_stays_on_the_server_or_if_asked(monkeypatch):
+    good = ("all", 0, {"stopped": 0})
+    monkeypatch.setattr(app_module, "_read_settings", lambda: {"close_signin_window": False})
+    monkeypatch.setattr(app_module.server_mode, "enabled", lambda: False)
+    assert app_module._closes_its_window(*good) is False
+    monkeypatch.setattr(app_module, "_read_settings", lambda: {})
+    monkeypatch.setattr(app_module.server_mode, "enabled", lambda: True)
+    assert app_module._closes_its_window(*good) is False
