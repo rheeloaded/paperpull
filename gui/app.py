@@ -3627,6 +3627,8 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         async def refuse():
             for line in blocked.splitlines():
                 yield _event(line)
+            if code:
+                yield _event(" ".join(blocked.split()), "refused")
             yield _event(code, "done")
         return StreamingResponse(refuse(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
@@ -3658,8 +3660,14 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         started = time.time()
         # Asked with nothing awaited before the run counts itself, so an
         # import cannot start in between (api_history_import).
+        # A run that will not start says why as a refused event too, which
+        # the page puts under "This run did not start" rather than read the
+        # done code as a run that began and failed. The code stays 1, so a
+        # queue still counts it as not done.
         if _IMPORTING.locked():
-            yield _event("A history file is being imported. Run this once it has finished.")
+            why = "A history file is being imported. Run this once it has finished."
+            yield _event(why)
+            yield _event(why, "refused")
             yield _event(1, "done")
             return
         # One run per account. A second, from another tab, would put two
@@ -3667,8 +3675,10 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         # Checked and claimed with nothing awaited between, so two requests
         # cannot both get through.
         if (app, account) in _RUNS:
-            yield _event("%s is already running for this account, in another tab "
-                         "or window. Wait for it to finish there." % app)
+            why = ("%s is already running for this account, in another tab "
+                   "or window. Wait for it to finish there." % app)
+            yield _event(why)
+            yield _event(why, "refused")
             yield _event(1, "done")
             return
         # Where the run's log goes, worked out before the run is claimed, so

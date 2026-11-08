@@ -32,7 +32,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, report_run_result)
 
 import argparse
 import logging
@@ -411,7 +412,7 @@ class App:
             profile, port, url, prefer_real=True,
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in window on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in to Target, leave that window OPEN, then press Discover or Pilot.")
@@ -2166,9 +2167,10 @@ class App:
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
         self._catch_prints()
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='Target',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='Target',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

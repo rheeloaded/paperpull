@@ -17,6 +17,16 @@ PREFIX = "PAPERPULL_RUN_RESULT "
 MARK_ENV = "PAPERPULL_RUN_MARK"
 _MARK = re.compile(r"[0-9a-f]{32}")
 
+# How an app ends when the thing it was asked for did not happen, so the
+# panel never says a window opened that did not, or a recording was saved
+# that holds nothing. Each is said in words first, by the core, and the
+# code only tells the panel which headline to put over those words. 3 is
+# already an app's "no console to answer a prompt". gui/static/app.js keeps
+# the same numbers, and core/tests/test_every_app_says_when_nothing_happened.py
+# holds the two to it.
+NOTHING_OPENED = 5
+NOTHING_RECORDED = 6
+
 # What cannot be shown on one line of a run's output. A line feed or a
 # carriage return ends the line, the other control characters and the two
 # Unicode separators end it for str.splitlines or move a terminal about.

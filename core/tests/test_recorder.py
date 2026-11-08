@@ -581,11 +581,30 @@ def test_with_an_owner_set_it_does_not_say_that(tmp_path, monkeypatch):
 
 
 def test_a_session_writes_the_file_and_says_to_read_it(tmp_path, monkeypatch):
+    from paperpull_core import recorder as mod
+    stop = mod.Recorder.stop
+
+    def one_step(self):
+        report = stop(self)
+        report["steps"] = [{"kind": "click"}]
+        return report
+
+    monkeypatch.setattr(mod.Recorder, "stop", one_step)
     said, out = _session(tmp_path, monkeypatch, owner="Alex Morgan")
     assert Path(out) == tmp_path / "recording.json"
     assert json.loads(Path(out).read_text(encoding="utf-8"))["kind"] == "paperpull-recording"
     assert any("Read that file through" in s for s in said)
-    assert any("Nothing was recorded" in s for s in said), "an empty one says so"
+    assert not any("Nothing was recorded" in s for s in said)
+
+
+def test_an_empty_session_says_so_and_is_not_called_saved(tmp_path, monkeypatch):
+    """The file is written, so the person can see it is empty, but the app
+    is told nothing was recorded and ends with NOTHING_RECORDED, so the
+    panel never says a recording was saved and is ready to attach."""
+    said, out = _session(tmp_path, monkeypatch, owner="Alex Morgan")
+    assert out is None
+    assert any("Nothing was recorded" in s for s in said)
+    assert not any("Read that file through" in s for s in said)
 
 
 def test_a_session_refuses_and_writes_nothing_on_a_sign_in_page(tmp_path, monkeypatch):

@@ -737,7 +737,11 @@ function startRun(r, action, opts) {
   es.addEventListener('result', e => { try { RUN.result = JSON.parse(e.data); } catch (x) { RUN.result = null; } });
   es.addEventListener('saved', e => { try { RUN.saved = JSON.parse(e.data); } catch (x) { RUN.saved = []; } });
   es.onmessage = e => onLine(e.data);
-  es.addEventListener('done', e => finishRun(e.data));
+  // A run the server would not start says why as a refused event, after the
+  // same words as a line, so the page reads it as one that did not start.
+  let refusedSaid = '';
+  es.addEventListener('refused', e => { refusedSaid = e.data; });
+  es.addEventListener('done', e => finishRun(e.data, refusedSaid, true));
   es.onerror = () => {
     if (!es) return;
     const why = es.refused || '';
@@ -798,12 +802,13 @@ async function stopRecording() {
       body: JSON.stringify({ app: recordingApp, account: recordingAccount }) });
   } catch (e) { /* the run's own end says what happened */ }
 }
-function finishRun(code, refused) {
+// streamed: the refusal's words already came as a line of the run.
+function finishRun(code, refused, streamed) {
   if (RUN.state !== 'running') return;
   if (es) { es.close(); es = null; }
   recordingApp = null;
   Object.assign(RUN, {state: 'done', code: String(code), refused: refused || '', endedAt: new Date()});
-  if (RUN.refused && RUN.sink) RUN.sink.textContent += RUN.refused + '\n';
+  if (RUN.refused && RUN.sink && !streamed) RUN.sink.textContent += RUN.refused + '\n';
   RUN.outcome = runOutcome();
   if (RUN.again && !RUN.outcome.clean && RUN.sink) RUN.sink.textContent += AGAIN_LEFT + '.\n';
   const done = RUN.onDone;
@@ -823,6 +828,10 @@ function savedCount(res, saved) {
   const counted = res && Number.isInteger(res.new_files) && res.new_files > 0 ? res.new_files : 0;
   return Math.max(counted, Array.isArray(saved) ? saved.length : 0);
 }
+// How an app ends when what it was asked for did not happen, the numbers
+// in core run_reporting (core/tests/test_every_app_says_when_nothing_happened.py
+// holds the two to each other).
+const NOTHING_OPENED = '5', NOTHING_RECORDED = '6';
 // What a run came to, in a title, a sentence and a tone.
 function runOutcome() {
   const res = RUN.result, code = RUN.code, n = noun(RUN), saved = RUN.saved || [];
@@ -847,6 +856,18 @@ function runOutcome() {
     say: 'Progress is saved. Check the account. ' + next + '.', clean: false, resume: downloads, recheck};
   if (code === '130') return {tone: 'info', title: 'Interrupted, progress saved',
     say: next + '.', clean: false, resume: downloads, recheck};
+  // What was asked for did not happen. The app has said why in words, so
+  // the page says only that, and where the words are. A sign-in window
+  // that could not open is not offered again as the next step, since the
+  // same button would fail the same way until what the words name is
+  // fixed. A recording the recorder refused, on a sign-in page, is one a
+  // sign-in can fix, so that step is offered.
+  if (code === NOTHING_OPENED) return {tone: 'bad', title: 'No sign-in window opened',
+    say: 'PaperPull could not open a browser for ' + who + '. The technical details below say why. Nothing was lost.',
+    clean: false};
+  if (code === NOTHING_RECORDED) return {tone: 'info', title: 'Nothing was recorded',
+    say: 'No steps were saved for ' + who + '. The technical details below say why. ' +
+      'Sign in first if it was on a sign-in page, then record again.', clean: false, signin: true};
   if (code !== '0') return {tone: 'bad', title: 'This run ended with a problem',
     say: 'It exited with code ' + code + '. Progress is saved, and the technical details below say what happened. ' +
       next + '.', clean: false, resume: downloads, recheck};

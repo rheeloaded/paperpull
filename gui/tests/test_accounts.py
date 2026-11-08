@@ -320,6 +320,26 @@ def test_a_run_that_saved_documents_never_says_nothing_new(panel, action, saved)
     assert o["title"] == "23 new documents saved, some need a look"
 
 
+@pytest.mark.parametrize("action, code, refused, tone, title, signin", [
+    ("login", "5", "", "bad", "No sign-in window opened", False),
+    ("record", "6", "", "info", "Nothing was recorded", True),
+    ("all", "1", "Citi is already running for this account, in another tab or window.",
+     "bad", "This run did not start", False),
+])
+def test_what_did_not_happen_is_never_said_to_have(panel, action, code, refused, tone, title, signin):
+    """A sign-in with no window, an empty or refused recording and a run
+    the server would not start each say so, and never 'Sign-in window
+    opened', 'Recording saved' or an exit code."""
+    o = panel.evaluate("""([action, code, refused]) => {
+        Object.assign(RUN, {result: null, code, action, again: false, refused, saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", [action, code, refused])
+    assert (o["tone"], o["title"]) == (tone, title)
+    assert "exited with code" not in o["say"]
+    assert bool(o.get("signin")) is signin and not o.get("resume")
+
+
 def test_a_run_that_saved_nothing_still_says_so(panel):
     o = _outcome(panel, _counted(), [])
     assert (o["tone"], o["title"]) == ("ok", "Nothing new")
@@ -507,6 +527,9 @@ def test_a_second_run_of_one_account_waits_for_the_first(base, root):
     assert running and running["action"] == "pilot"
     second = run(base, {"app": "Bank Statements", "action": "all"})
     assert "already running for this account" in second and events(second, "done") == ["1"]
+    # Said as a run that did not start, not as one that began and failed.
+    refused = events(second, "refused")
+    assert len(refused) == 1 and "already running for this account" in refused[0]
     # Another person on the same app is not held up.
     other = run(base, {"app": "Bank Statements", "account": "second", "action": "discover"})
     assert "already running" not in other

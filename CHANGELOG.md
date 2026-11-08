@@ -28,6 +28,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   person as Accounts does, instead of by folder.
 
 ### Fixed
+- **The panel never says something happened that did not.** Open sign-in
+  window said "Sign-in window opened" in green when no browser could open
+  at all, and Record said "Recording saved", ready to attach, when the
+  recorder refused on a sign-in page or nothing was clicked. Each app now
+  ends those as the core's NOTHING_OPENED and NOTHING_RECORDED, and the
+  panel says "No sign-in window opened" or "Nothing was recorded", with the
+  app's own words for why under it. A run the panel would not start,
+  because another tab is running it, a history file is being imported or
+  the app needs setting up, now reads "This run did not start" with the
+  reason, instead of "It exited with code 1" and a Continue for a run that
+  never began.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month
