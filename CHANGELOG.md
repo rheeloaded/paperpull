@@ -10,6 +10,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **"May have something new" no longer keeps a gap a whole run could not
+  fill (#149).** A gap in the middle of a history, years back say, counted
+  toward the home page's "may have something new", and Get new for all ran
+  its account every time, though no run filled it. Get new and Get new for
+  all now run a gap row's whole list with no dates, and the row's own Look
+  for them still looks in the gap's dates. A Run All with no dates that ends
+  clean, with its list noted as read to its end and the account's records
+  showing nothing on it left to take, notes the gaps still there. Once the
+  newest such run and an earlier one, ended on another day, have each noted
+  a gap, the home page leaves it out of the count. A gap the person's own
+  `default_start_date` or `document_types` leave out is noted with them. A
+  Pilot, a scoped run, Download again, or a run that stopped, failed, set
+  something aside or whose records show a document left notes none, and
+  neither does a run of eleven apps whose log says their list passed over a
+  document it saw. Some apps can pass over a document with no trace in their
+  records, a statement not ready yet, say, and the second run on another
+  day is there for that. A gap that shows up later still counts, and the
+  account's row still says Possible gap and offers Look for them. An account
+  that is due is unchanged, since its next document may come any day.
+  Contributed by @JasperDale420. Before merging, the summary's buttons were
+  made to run a gap row whole, and a gap was made to settle only after two
+  such runs on different days whose records show nothing left.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month
