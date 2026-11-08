@@ -10,6 +10,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **Make a request, from the main page.** A button on Accounts opens one
+  sheet for asking for a provider or a feature, with the questions a request
+  needs answered, and says so when PaperPull already reads the provider
+  asked for. The answers start the matching form on GitHub in the person's
+  own browser, for them to read and send, so PaperPull still sends nothing
+  itself. Settings and the list of providers open the same sheet.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month

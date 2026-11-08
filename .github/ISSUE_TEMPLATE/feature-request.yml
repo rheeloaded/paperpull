@@ -1,0 +1,60 @@
+name: "💡 Request a feature"
+description: Ask for something PaperPull does not do yet.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Tell us what would make PaperPull more useful to you. To ask for a
+        provider, use **Request a provider** instead.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Part of PaperPull
+      options:
+        - Getting documents
+        - Signing in
+        - Accounts page
+        - Spreadsheets
+        - File names
+        - Settings
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like PaperPull to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What would it help you with?
+      description: What you are trying to get done, and what you do today instead.
+  - type: dropdown
+    id: importance
+    attributes:
+      label: How much does it matter to you?
+      options:
+        - Nice to have
+        - I would use it often
+        - I cannot get what I need without it
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: PaperPull version
+  - type: input
+    id: computer
+    attributes:
+      label: Computer
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: I left out account numbers, statement contents, screenshots of accounts and anything else private.
+          required: true
