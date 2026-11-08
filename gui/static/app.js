@@ -939,12 +939,12 @@ function savedCount(res, saved) {
 // How an app ends when what it was asked for did not happen, the numbers
 // in core run_reporting (core/tests/test_every_app_says_when_nothing_happened.py
 // holds the two to each other).
-const NOTHING_OPENED = '5', NOTHING_RECORDED = '6', NOT_SIGNED_IN = '7';
+const NOTHING_OPENED = '5', NOTHING_RECORDED = '6', NOT_SIGNED_IN = '7', NOTHING_READ = '8';
 // Recent runs says each of those in the words of its outcome's title, since
 // none of them is a problem with the run, and a row that says Sign in first
 // read "ended with a problem" beside it.
 const ENDED_WITH = {[NOTHING_OPENED]: 'no sign-in window opened', [NOTHING_RECORDED]: 'nothing was recorded',
-  [NOT_SIGNED_IN]: 'nobody was signed in'};
+  [NOT_SIGNED_IN]: 'nobody was signed in', [NOTHING_READ]: 'nothing was read'};
 // What a run came to, in a title, a sentence and a tone.
 // The run to press once signed in: Get new after a sign-in, or the run
 // that found nobody signed in, over the same dates.
@@ -1030,6 +1030,13 @@ function runOutcome() {
   if (code === NOT_SIGNED_IN) return {tone: 'info', title: 'Sign in first',
     say: 'No signed-in ' + who + ' window was open, so nothing was downloaded. Open the sign-in window, sign in there, ' +
       'then run this again.', clean: false, signin: true, first: true, rerun: true};
+  // A support report that found only a sign-in page or a security check.
+  // Its files are there, and a sign-in check can be wrong, so the file is
+  // still offered (report: true), under what to do first.
+  if (code === NOTHING_READ) return {tone: 'info', title: 'Nothing was read',
+    say: whose(who) + ' window was on a sign-in page or a security check, so this support report read nothing useful. ' +
+      'Sign in, leave the window on the page that has your documents, then make the report again.',
+    clean: false, signin: true, first: true, rerun: true, report: true};
   // Why it stopped, when the run knows (core run_reporting.stop_reason),
   // and so whose it is to fix. Each says that nothing saved is lost, and
   // only a stop that a sign-in can fix offers one. Whose it is is said
@@ -1263,7 +1270,7 @@ function renderRun() {
         'account details, to send with a problem report.</p><button type="button" class="btn btn-s starts" data-do="support" data-key="' +
         key + '">' + sv(P.report) + 'Make a support report</button></div>';
     }
-    if (r && ['diagnose', 'record'].includes(RUN.action) && o.clean) {
+    if (r && ['diagnose', 'record'].includes(RUN.action) && (o.clean || o.report)) {
       // The server's folder is on the server, so the file comes to the browser.
       html += '<div class="keepopen"><p>The file holds counts and page states, never text from your account.</p>' +
         (SERVER ? '<button type="button" class="btn btn-s" data-do="report-download" data-key="' + key + '" data-action="' +

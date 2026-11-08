@@ -30,6 +30,9 @@ from pathlib import Path
 here = Path(__file__).resolve().parent
 with open(here / "argv.jsonl", "a", encoding="utf-8") as f:
     print(json.dumps(sys.argv[1:]), file=f)
+if "--diagnose" in sys.argv and (here / "signed-out").exists():
+    # core run_reporting.NOTHING_READ
+    sys.exit(8)
 '''
 
 
@@ -179,6 +182,28 @@ def test_make_the_report_runs_the_support_report(panel, shop):
     tab.wait_for_function("() => RUN.state === 'done' && RUN.action === 'diagnose'", timeout=60000)
     assert not tab.evaluate("$('dlg-support').open")
     assert any("--diagnose" in args for args in started(shop))
+
+
+def test_a_report_that_read_nothing_says_so_and_offers_the_way_on(panel, shop):
+    signed_out = shop / "signed-out"
+    signed_out.write_text("", encoding="utf-8")
+    tab = panel.tab
+    open_get_help(tab)
+    tab.click("[data-do=sp-go]")
+    tab.wait_for_function("() => RUN.state === 'done'", timeout=60000)
+    assert tab.inner_text("#r-title") == "Nothing was read"
+    said = tab.inner_text("#statustext")
+    assert "Sign in" in said and "page that has your documents" in said and "make the report again" in said
+    steps = tab.locator(".nextsteps [data-do=run]")
+    assert [b.get_attribute("data-action") for b in steps.all()] == ["login"]
+    assert "Support report saved" not in tab.inner_text("#view-run")
+    assert tab.locator("[data-do=report-reveal][data-kind=diagnose]").count() == 1, \
+        "the file is there, and a sign-in check can be wrong"
+    signed_out.unlink()
+    tab.click(".nextsteps [data-do=support]")
+    tab.click("[data-do=sp-go]")
+    tab.wait_for_function("() => RUN.state === 'done' && $('r-title').textContent === 'Support report saved'",
+                          timeout=60000)
 
 
 def test_record_steps_starts_a_recording_from_the_same_dialog(panel, shop):

@@ -201,6 +201,12 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **A support report that read nothing says so.** Made with the window on a
+  sign-in page or a security check, it still read "Support report saved",
+  and people attached it. It now ends as Nothing was read, says to sign in
+  and leave the window on the documents page, and offers the sign-in window
+  and the report again. A report from a signed-in page PaperPull cannot make
+  sense of still reads as saved, since that is the one a repair needs.
 - **One Get help under More.** Make a support report and Record steps for
   support were two items and two dialogs, and the file a failed run had
   just written was a third place to look. Get help opens one dialog that

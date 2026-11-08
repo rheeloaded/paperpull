@@ -1697,6 +1697,8 @@ class App:
         except Exception as e:
             info["apple_store"] = {"error": type(e).__name__}
         self._survey = info
+        # Neither store reached a signed-in list, so nothing useful was read.
+        info["signed_out"] = all(info[side].get("signed_in") is False for side in ("app_store", "apple_store"))
         out = self.paths.diagnostics / "diagnose-apple.json"
         write_shaped(out, info, words)
         print(f"  Wrote {out}")

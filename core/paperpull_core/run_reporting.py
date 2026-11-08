@@ -30,6 +30,11 @@ NOTHING_RECORDED = 6
 # a first Get new pressed before Open sign-in window. Nothing was started,
 # so the panel says to sign in first and never offers Continue.
 NOT_SIGNED_IN = 7
+# A support report that ran, and whose own findings say the window was on a
+# sign-in page or a security check. Its files are there and say so, but it
+# read nothing of the account's documents, and "Support report saved" read
+# as though it had.
+NOTHING_READ = 8
 
 
 def not_signed_in(cdp_url, err) -> SystemExit:
@@ -45,6 +50,23 @@ def not_signed_in(cdp_url, err) -> SystemExit:
                  "Run login.bat first and keep that browser window OPEN.")
     print(f"{words}\n({err})", file=sys.stderr, flush=True)
     return SystemExit(NOT_SIGNED_IN)
+
+
+def nothing_read() -> SystemExit:
+    """The exit of a Diagnose that read no signed-in page, after saying so
+    in the words of where it runs. Raised from failure.write_survey, which
+    every app's Diagnose ends in, once the survey is written."""
+    if os.environ.get(MARK_ENV, ""):
+        words = ("The window was on a sign-in page or a security check, so this support report "
+                 "read nothing useful. Sign in, leave the window on the page that has your "
+                 "documents, then make the report again.")
+    else:
+        words = ("The browser window was on a sign-in page or a security check, so Diagnose read "
+                 "nothing useful.\nSign in, leave that window on the documents page, then run "
+                 "Diagnose again.")
+    print(words, flush=True)
+    return SystemExit(NOTHING_READ)
+
 
 # What cannot be shown on one line of a run's output. A line feed or a
 # carriage return ends the line, the other control characters and the two

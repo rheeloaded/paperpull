@@ -59,6 +59,7 @@ import functools
 import json
 import re
 import string
+from pathlib import Path
 from typing import Iterable
 
 # ---------------------------------------------------------------------------
@@ -868,6 +869,35 @@ def write_shaped(path, value, words: Iterable = (), *, full_list: bool = False) 
     gathered goes through shape_tree on the way to the disk."""
     from .storage import atomic_write_text
     atomic_write_text(path, json.dumps(shape_tree(value, words, full_list=full_list), indent=2))
+    _note_what_was_read(path, value)
+
+
+# The Diagnostics folders where the Diagnose just run found only a sign-in
+# page or a security check. Every app's Diagnose writes what it found through
+# write_shaped and then ends in failure.write_survey, so the finding is taken
+# here and the exit is made there, in one place rather than in 81 apps.
+_READ_NOTHING = set()
+
+
+def _note_what_was_read(path, value) -> None:
+    if not (isinstance(value, dict) and "signed_out" in value):
+        return
+    folder = str(Path(path).parent)
+    _READ_NOTHING.discard(folder)
+    # The app's own checks, the ones that stop a run for a sign-out or a
+    # check, so a page it cannot make sense of while signed in is not this.
+    # That report is the one a repair needs.
+    if (value.get("signed_out") or value.get("challenge")) and not value.get("collected"):
+        _READ_NOTHING.add(folder)
+
+
+def read_nothing_in(folder) -> bool:
+    """Whether the Diagnose that just wrote to this folder read nothing
+    useful. Asked once, for the run that is ending."""
+    folder = str(Path(folder))
+    found = folder in _READ_NOTHING
+    _READ_NOTHING.discard(folder)
+    return found
 
 
 # ---------------------------------------------------------------------------

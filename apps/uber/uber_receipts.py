@@ -1337,6 +1337,8 @@ class App:
         except Exception as e:
             info["eats"] = {"error": type(e).__name__}
         self._survey = info
+        # Neither side reached a signed-in list, so nothing useful was read.
+        info["signed_out"] = all(info[side].get("signed_in") is False for side in ("rides", "eats"))
         out = self.paths.diagnostics / "diagnose-uber.json"
         write_shaped(out, info, words)
         print(f"  Wrote {out}")
