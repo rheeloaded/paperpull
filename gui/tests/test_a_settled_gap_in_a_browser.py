@@ -96,9 +96,9 @@ def _install(apps, name, provider, records, script_text="print('not run')\n"):
     return folder
 
 
-def _clean_all(gaps_left):
+def _clean_all(gaps_left, ended="2026-11-06T16:01:00"):
     return {"action": "all", "account": "primary", "started": "2026-11-06T16:00:00",
-            "ended": "2026-11-06T16:01:00", "exit_code": 0, "closed": False,
+            "ended": ended, "exit_code": 0, "closed": False,
             "result": {"manual_review": 0, "failed": 0, "validation_failures": 0,
                        "new_files": 0, "stopped": 0},
             "scope": [], "redownload": False, "saved": [], "gaps_left": gaps_left}
@@ -148,7 +148,9 @@ def test_a_gap_a_whole_run_left_drops_out_and_a_due_account_stays(browser, base,
         before = _summary(tab)
         assert "Gapbank" in before and "Duebank" in before and "2 accounts" in before
 
-        (gapped / app_module.RUN_LOG).write_text(json.dumps([_clean_all(keys)]), encoding="utf-8")
+        # Two whole runs, the second on another day, each left the gap.
+        (gapped / app_module.RUN_LOG).write_text(json.dumps(
+            [_clean_all(keys), _clean_all(keys, "2026-11-05T09:00:00")]), encoding="utf-8")
         tab.reload()
         after = _summary(tab)
         assert "Duebank" in after and "Gapbank" not in after, after
@@ -192,10 +194,24 @@ def _asked(folder):
     return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()]
 
 
-def _when_each_has_run(*folders):
-    """Each stand-in has been started and the panel has noted how it ended."""
+def _yesterday():
+    return (date.today() - timedelta(days=1)).isoformat() + "T09:00:00"
+
+
+def _noted_the_day_before(folder):
+    """A whole, clean run ended the day before that noted the gaps there now,
+    so the next such run that notes them is the second, on another day."""
+    keys = app_module._gaps_left(folder)
+    assert keys
+    (folder / app_module.RUN_LOG).write_text(json.dumps([_clean_all(keys, _yesterday())]),
+                                             encoding="utf-8")
+
+
+def _when_each_has_run(*folders, logged=1):
+    """Each stand-in has been started and the panel has noted how it ended,
+    the log then holding `logged` runs."""
     def ran(folder):
-        return bool(_asked(folder)) and (folder / app_module.RUN_LOG).exists()
+        return bool(_asked(folder)) and len(app_module._read_run_log(folder)) >= logged
     for _ in range(600):
         if all(ran(f) for f in folders) and not app_module._RUNS:
             return
@@ -225,11 +241,13 @@ def test_get_new_for_all_runs_each_gap_row_whole_and_settles_it(browser, base, r
     dates cannot say a gap is one no run fills."""
     one = _took_it_all(root, "Gapone Statements", "Gapone", _records(5, hole=3))
     two = _took_it_all(root, "Gaptwo Statements", "Gaptwo", _records(6, hole=4))
+    _noted_the_day_before(one)
+    _noted_the_day_before(two)
     context, tab = _first_page(browser, base, 2)
     try:
         assert "2 accounts" in _summary(tab)
         tab.locator("[data-do=queue]").click()
-        _when_each_has_run(one, two)
+        _when_each_has_run(one, two, logged=2)
         for folder in (one, two):
             assert _asked(folder) == [["--all", "--yes"]]
             entry = app_module._read_run_log(folder)[0]
@@ -246,6 +264,8 @@ def test_get_new_for_all_runs_each_gap_row_whole_and_settles_it(browser, base, r
 
 
 def test_the_summarys_get_new_runs_a_gap_row_whole_and_settles_it(browser, base, root):
+    """The first run notes the gap and the row stays, since the next run may
+    take what this one could not. The next, a day on, settles it."""
     one = _took_it_all(root, "Gapone Statements", "Gapone", _records(5, hole=3))
     context, tab = _first_page(browser, base, 1)
     try:
@@ -253,7 +273,17 @@ def test_the_summarys_get_new_runs_a_gap_row_whole_and_settles_it(browser, base,
         tab.locator(".summary button.starts").click()
         _when_each_has_run(one)
         assert _asked(one) == [["--all", "--yes"]]
-        assert app_module._read_run_log(one)[0]["gaps_left"]
+        log = app_module._read_run_log(one)
+        assert log[0]["gaps_left"]
+        tab.goto(base + "/#/")
+        tab.reload()
+        assert "Gapone" in _summary(tab, 1)
+        log[0]["ended"] = _yesterday()
+        (one / app_module.RUN_LOG).write_text(json.dumps(log), encoding="utf-8")
+        tab.reload()
+        tab.locator(".summary button.starts").click()
+        _when_each_has_run(one, logged=2)
+        assert _asked(one) == [["--all", "--yes"]] * 2
         tab.goto(base + "/#/")
         tab.reload()
         assert "Gapone" not in _summary(tab, 1)
@@ -265,11 +295,12 @@ def test_look_for_them_keeps_its_dates_and_settles_nothing(browser, base, root):
     """The row's own button is for the gap, so it looks in the gap's dates,
     and a run over part of a history says nothing of the rest."""
     one = _took_it_all(root, "Gapone Statements", "Gapone", _records(5, hole=3))
+    _noted_the_day_before(one)
     gap = _gap_row(one)["gaps"][0]
     context, tab = _first_page(browser, base, 1)
     try:
         tab.locator(".acct button.starts", has_text="Look for them").click()
-        _when_each_has_run(one)
+        _when_each_has_run(one, logged=2)
         assert _asked(one) == [["--all", "--yes", "--start-date", gap["after"][:10],
                                 "--end-date", gap["before"][:10]]]
         assert "gaps_left" not in app_module._read_run_log(one)[0]
@@ -288,10 +319,11 @@ def test_a_gap_row_whose_run_left_something_stays_in_the_summary(browser, base, 
     rows["doc-3"] = {"date": (date.today() - timedelta(days=95)).isoformat(),
                      "category": "Statement", "state": "Discovered"}
     (one / "discovery.json").write_text(json.dumps(rows), encoding="utf-8")
+    _noted_the_day_before(one)
     context, tab = _first_page(browser, base, 1)
     try:
         tab.locator(".summary button.starts").click()
-        _when_each_has_run(one)
+        _when_each_has_run(one, logged=2)
         assert _asked(one) == [["--all", "--yes"]]
         assert "gaps_left" not in app_module._read_run_log(one)[0]
         tab.goto(base + "/#/")

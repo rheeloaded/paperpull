@@ -742,6 +742,18 @@ def _gap_keys_now(bank):
     return app_module._gap_keys(app_module._status_module().scan_install(bank)["gaps"]), row
 
 
+def _yesterday():
+    return (date.today() - timedelta(days=1)).isoformat() + "T09:00:00"
+
+
+def _noted_the_day_before(bank):
+    """A whole, clean run ended the day before that noted the gaps the bank
+    shows now, so the next such run that notes them is the second."""
+    keys = app_module._gap_keys(app_module._status_module().scan_install(bank)["gaps"])
+    assert keys
+    _log(bank, _clean_all(gaps_left=keys, ended=_yesterday()))
+
+
 def test_a_clean_run_all_notes_the_gaps_it_left_and_settles_them(base, root):
     bank = root / "Bank Statements"
     (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
@@ -752,7 +764,14 @@ def test_a_clean_run_all_notes_the_gaps_it_left_and_settles_them(base, root):
     entry = _run_all(base, bank)
     keys, row = _gap_keys_now(bank)
     assert keys and entry["gaps_left"] == keys
-    assert row["state"] == "gap" and row["settled"] is True
+    # One run settles nothing, since the next may take what it could not.
+    assert row["state"] == "gap" and row["settled"] is False
+    # A day on, the next whole run that notes the same gaps settles them.
+    log = app_module._read_run_log(bank)
+    log[0]["ended"] = _yesterday()
+    _log(bank, *log)
+    assert _run_all(base, bank)["gaps_left"] == keys
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
 
 
 def _listed_no_record(bank):
@@ -791,20 +810,25 @@ def _gone(name):
 @pytest.mark.parametrize("leave", [
     _listed_no_record, _a_record_saying("Discovered"), _a_record_saying("Failed"),
     _a_record_saying("PDF Saved"), _a_record_saying("Needs Manual Review"),
+    _a_record_saying("No Receipt Available"), _a_record_saying("Canceled"),
+    _a_record_saying("PDF Verified"),
     _note_says('{"complete": false, "at": "2031-01-15T09:00:00"}'),
     _note_says('{"complete": "true"}'), _note_says('{"at": "2031-01-15T09:00:00"}'),
     _note_says("[true]"), _note_says("not json"), _gone("last-listing.json"),
     _list_says("{}"), _list_says("[]"), _list_says('["doc-0"]'), _list_says("not json"),
     _list_says('{"doc-0": "a row"}'), _gone("discovery.json")],
-    ids=["no-record", "discovered", "failed", "pdf-saved", "set-aside", "list-stopped",
+    ids=["no-record", "discovered", "failed", "pdf-saved", "set-aside", "no-control-found",
+         "canceled", "pdf-verified", "list-stopped",
          "note-says-text", "note-says-nothing", "note-a-list", "note-not-json", "no-note",
          "nothing-listed", "list-empty-list", "list-a-list", "list-not-json", "row-not-a-record",
          "no-list"])
 def test_a_clean_run_that_left_something_or_cannot_say_settles_nothing(base, root, leave):
     """First Horizon's real Run All listed 10, saved 9, left one for the next
     run, ended clean and settled. A run's result does not say so, so its
-    records are read, and records that do not show it all count as left."""
+    records are read, and records that do not show it all count as left. A
+    run the day before noted the gap, so only this one stands between."""
     bank = _took_it_all(root)
+    _noted_the_day_before(bank)
     leave(bank)
     _plan(bank)
     entry = _run_all(base, bank)
@@ -828,6 +852,7 @@ def test_a_run_that_counts_documents_left_unsaved_settles_nothing(base, root):
     """Alpaca counts documents that share a type and a date and lists none
     of them, so its records show nothing, and its count is all there is."""
     bank = _took_it_all(root)
+    _noted_the_day_before(bank)
     _plan(bank, counts={"alike": 2})
     entry = _run_all(base, bank)
     assert entry["result"]["alike"] == 2
@@ -837,6 +862,7 @@ def test_a_run_that_counts_documents_left_unsaved_settles_nothing(base, root):
 
 def test_a_later_run_that_left_something_undoes_an_earlier_one(base, root):
     bank = _took_it_all(root)
+    _noted_the_day_before(bank)
     _plan(bank)
     assert _run_all(base, bank)["gaps_left"]
     assert _rows()[("Bank Statements", "primary")]["settled"] is True
@@ -845,13 +871,13 @@ def test_a_later_run_that_left_something_undoes_an_earlier_one(base, root):
     assert _rows()[("Bank Statements", "primary")]["settled"] is False
 
 
-@pytest.mark.parametrize("state", ["Completed", "PDF Verified", "No Receipt Available", "Canceled",
-                                   "No Longer Listed"])
+@pytest.mark.parametrize("state", ["Completed", "No Longer Listed"])
 def test_a_listed_document_with_nothing_to_take_is_not_left(base, root, state):
     """Each state, on a record no file was saved for. Dated as a saved
     document is, so it moves no gap. Written out here, so a state taken off
     the panel's list fails rather than takes its own case with it."""
     bank = _took_it_all(root)
+    _noted_the_day_before(bank)
     recs = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
     recs["extra"] = {"date": recs["doc-0"]["date"], "state": state, "downloaded_ok": False}
     (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
@@ -888,6 +914,7 @@ def test_a_document_the_persons_own_settings_leave_out_is_not_left(base, root, r
     such a document, since discovery.json never forgets."""
     after = (date.fromisoformat(_the_hole()) + timedelta(days=1)).isoformat()
     bank = _took_it_all(root, **{"doc-4": dict({"date": _the_hole(), "state": "Discovered"}, **row)})
+    _noted_the_day_before(bank)
     _config(bank, **{k: after if v == "AFTER" else v for k, v in settings.items()})
     _plan(bank)
     assert _run_all(base, bank)["gaps_left"]
@@ -967,14 +994,15 @@ def test_only_a_whole_clean_run_all_settles_a_gap(root, change):
 
 
 def test_the_newest_whole_run_is_the_one_that_settles(root):
-    """An older whole run that left the gap does not settle it once a newer
+    """Older whole runs that left the gap do not settle it once a newer
     whole run has noted different gaps."""
     bank = root / "Bank Statements"
     (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
     keys, _row = _gap_keys_now(bank)
-    _log(bank, _clean_all(gaps_left=[]), _clean_all(gaps_left=keys))
+    before = _clean_all(gaps_left=keys, ended="2026-11-05T09:00:00")
+    _log(bank, _clean_all(gaps_left=[]), _clean_all(gaps_left=keys), before)
     assert _rows()[("Bank Statements", "primary")]["settled"] is False
-    _log(bank, _clean_all(gaps_left=keys), _clean_all(gaps_left=[]))
+    _log(bank, _clean_all(gaps_left=keys), _clean_all(gaps_left=[]), before)
     assert _rows()[("Bank Statements", "primary")]["settled"] is True
 
 
@@ -984,12 +1012,13 @@ def test_only_a_gap_row_is_ever_settled(root):
     bank = root / "Bank Statements"
     (bank / "progress.json").write_text(json.dumps(_gapped(newest_days_ago=45)), encoding="utf-8")
     keys, row = _gap_keys_now(bank)
-    _log(bank, _clean_all(gaps_left=keys))
+    _log(bank, _clean_all(gaps_left=keys), _clean_all(gaps_left=keys, ended="2026-11-05T09:00:00"))
     row = _rows()[("Bank Statements", "primary")]
     assert row["state"] in ("due", "overdue") and row["settled"] is False
     (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
     _log(bank, {"action": "all", "exit_code": 1, "ended": "2026-11-06T17:00:00",
-                "result": {"stopped": 1}}, _clean_all(gaps_left=keys))
+                "result": {"stopped": 1}}, _clean_all(gaps_left=keys),
+         _clean_all(gaps_left=keys, ended="2026-11-05T09:00:00"))
     row = _rows()[("Bank Statements", "primary")]
     assert row["state"] == "stopped" and row["settled"] is False
 
@@ -1090,8 +1119,10 @@ def _says_it_left_a_document_out(trees):
 def test_every_app_whose_list_says_it_left_a_document_out_settles_no_gap():
     """What such a list leaves out is in no record, so the panel cannot see
     it, and a run of that app has to settle nothing. An app that starts to
-    say so joins _LISTS_LEAVE_OUT. A list that drops a row and says nothing
-    cannot be found here or by the panel."""
+    say so in a log line written as one string joins _LISTS_LEAVE_OUT. One
+    that says it in other words, in an f-string or a print, or drops a row
+    and says nothing, cannot be found here or by the panel. The second run on
+    another day that _settled waits for is there for those."""
     said = {name for name, trees in _document_apps().items() if _says_it_left_a_document_out(trees)}
     assert said == set(app_module._LISTS_LEAVE_OUT)
 
@@ -1111,3 +1142,102 @@ def test_a_run_of_such_an_app_notes_no_gaps(base, root):
     _plan(bank)
     entry = _run_all(base, bank)
     assert app_module._whole_clean_run(entry) and "gaps_left" not in entry
+
+
+# -- two whole runs on two days ------------------------------------------------------
+
+def _two_gaps():
+    gaps = [{"account": "", "summary": "Bank Statement", "after": date(2031, 1, 31),
+             "before": date(2031, 3, 31)},
+            {"account": "", "summary": "Bank Statement", "after": date(2031, 5, 31),
+             "before": date(2031, 7, 31)}]
+    one, two = app_module._gap_keys(gaps)
+    return gaps, one, two
+
+
+def _on(day, keys, at="09:00:00", **more):
+    return _clean_all(gaps_left=list(keys), ended="%sT%s" % (day, at), **more)
+
+
+def test_a_gap_settles_once_two_whole_runs_on_two_days_noted_it():
+    """A statement not ready yet, or a year that did not answer, leaves no
+    trace in some apps' records, and the next run usually takes it. So one
+    run settles nothing, nor do two on one day."""
+    gaps, one, two = _two_gaps()
+    both = [one, two]
+    settled = app_module._settled
+    assert settled("gap", gaps, [_on("2031-02-15", both)]) is False
+    assert settled("gap", gaps, [_on("2031-02-15", both, "17:00:00"), _on("2031-02-15", both)]) is False
+    assert settled("gap", gaps, [_on("2031-02-15", both), _on("2031-02-14", both)]) is True
+    # A run that is not whole between them changes nothing.
+    pilot = _on("2031-02-16", [], action="pilot")
+    assert settled("gap", gaps, [pilot, _on("2031-02-15", both), _on("2031-02-14", both)]) is True
+
+
+def test_every_gap_has_to_be_noted_by_both_runs():
+    """A run that noted one gap of two says nothing of the other."""
+    gaps, one, two = _two_gaps()
+    settled = app_module._settled
+    assert settled("gap", gaps, [_on("2031-02-15", [one]), _on("2031-02-14", [one, two])]) is False
+    assert settled("gap", gaps, [_on("2031-02-15", [one, two]), _on("2031-02-14", [one])]) is False
+    # Each gap noted on another day, by an earlier run of its own.
+    assert settled("gap", gaps, [_on("2031-02-15", [one, two]), _on("2031-02-14", [one]),
+                                 _on("2031-02-13", [two])]) is True
+
+
+def test_the_newest_whole_run_has_to_be_one_that_noted_the_gap():
+    """Two earlier runs that noted it do not settle it once a newer whole run
+    left something, and so noted nothing."""
+    gaps, one, two = _two_gaps()
+    both = [one, two]
+    log = [_on("2031-02-16", []), _on("2031-02-15", both), _on("2031-02-14", both)]
+    assert app_module._settled("gap", gaps, log) is False
+    del log[0]["gaps_left"]
+    assert app_module._settled("gap", gaps, log) is False
+
+
+@pytest.mark.parametrize("which", [0, 1])
+@pytest.mark.parametrize("ended", ["", "yesterday", None])
+def test_a_run_whose_day_is_not_known_counts_for_nothing(which, ended):
+    gaps, one, two = _two_gaps()
+    log = [_on("2031-02-15", [one, two]), _on("2031-02-14", [one, two])]
+    log[which]["ended"] = ended
+    assert app_module._settled("gap", gaps, log) is False
+
+
+# Every state a document app writes on a record, judged. Completed is a
+# document taken and No Longer Listed one its provider's whole list stopped
+# showing. The rest leave something to take.
+_TAKEN_OR_GONE = {"COMPLETED": "Completed", "NO_LONGER_LISTED": "No Longer Listed"}
+_LEFT_TO_TAKE = {"DISCOVERED", "PDF_SAVED", "FAILED", "NEEDS_MANUAL_REVIEW", "NO_RECEIPT_AVAILABLE"}
+
+
+def _states_written(trees):
+    """Each State an app writes, as a call's argument, a state= keyword, or
+    a "state" key of a dict."""
+    found = set()
+    for tree in trees:
+        for node in ast.walk(tree):
+            values = []
+            if isinstance(node, ast.Call):
+                values += list(node.args) + [k.value for k in node.keywords if k.arg == "state"]
+            elif isinstance(node, ast.Dict):
+                values += [v for k, v in zip(node.keys, node.values)
+                           if isinstance(k, ast.Constant) and k.value == "state"]
+            for v in values:
+                if isinstance(v, ast.Attribute) and v.attr == "value":
+                    v = v.value
+                if isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name) and v.value.id == "State":
+                    found.add(v.attr)
+    return found
+
+
+def test_every_state_an_app_writes_is_judged_taken_or_left():
+    """No Receipt Available is Wealthfront's download control not found and
+    Dominion's placeholder for a bill with no PDF, so a run that did not fill
+    the gap may have been refused it. A state an app starts to write has to
+    be judged here before it can count as nothing left."""
+    written = set().union(*(_states_written(trees) for trees in _document_apps().values()))
+    assert written <= set(_TAKEN_OR_GONE) | _LEFT_TO_TAKE, written
+    assert set(_TAKEN_OR_GONE) <= written
+    assert set(app_module._NOTHING_TO_TAKE) == set(_TAKEN_OR_GONE.values())

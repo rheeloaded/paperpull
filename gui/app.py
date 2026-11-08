@@ -1434,21 +1434,28 @@ def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
 _UNSETTLING = ("stopped", "list_not_read", "failed", "validation_failures",
                "manual_review", "wrong_document")
 
-# What a record says of a document with nothing left to take. The first four
-# are what every app's _already_done takes as done, and No Longer Listed is
-# one the provider's list has stopped showing. A record set aside for review
-# is not here, though a run does not ask for it again, since status.py does
-# not count it as saved and it may be what the gap is missing.
-_NOTHING_TO_TAKE = ("Completed", "PDF Verified", "No Receipt Available", "Canceled",
-                    "No Longer Listed")
+# What a record says of a document with nothing left to take, beside
+# downloaded_ok. Of the states the document apps write, Completed is a
+# document taken, and No Longer Listed is one the provider's list, read
+# whole, has stopped showing. Every other state they write is left. No Receipt
+# Available is a download control not found, or Dominion's placeholder for a
+# bill it keeps no PDF of, and a record set aside for review is not counted
+# as saved by status.py, though a run does not ask for either again, so
+# either may be what the gap is missing. gui/tests/test_accounts.py holds
+# this to the states the apps write.
+_NOTHING_TO_TAKE = ("Completed", "No Longer Listed")
 
-# The apps whose list can see a document and not list it, the ones whose own
-# code counts or says so. What they leave out is in no record, so their
+# The apps whose list says in its log, in words of its own, that it saw a
+# document and did not list it. What they leave out is in no record, so their
 # records cannot say a run took everything, and a run of theirs settles no
 # gap (_took_everything). Wells Fargo, AmFam and SBA pass over a control that
 # would not answer and say the next run takes it, and one read two ways, for a
 # person. The others pass over a row they cannot date or open.
-# gui/tests/test_accounts.py holds this to what the apps say.
+# gui/tests/test_accounts.py finds these by a log line written out as one
+# string. An app can also pass over a document and say so some other way, or
+# leave no trace at all, as Citi does with a requested statement not ready yet
+# and PayPal with a report still being made, which is why _settled waits for
+# a second run on another day.
 _LISTS_LEAVE_OUT = frozenset({"aafmaa", "affirm", "ally", "amfam", "applecard", "golden1", "ibkr",
                               "sba", "statefarm", "tsp", "wellsfargo"})
 
@@ -1483,25 +1490,47 @@ def _whole_clean_run(entry) -> bool:
     return not any(result.get(k) for k in _UNSETTLING)
 
 
+def _day(entry) -> str:
+    """The calendar day a run ended, or "" when its log entry does not say."""
+    ended = str(entry.get("ended") or "")
+    try:
+        return date.fromisoformat(ended[:10]).isoformat()
+    except ValueError:
+        return ""
+
+
+def _noted(entry) -> set:
+    """The gaps a whole run's log entry noted as left, none when it noted none."""
+    left = entry.get("gaps_left")
+    return {str(k) for k in left} if isinstance(left, list) else set()
+
+
 def _settled(state: str, gaps, log: list) -> bool:
     """Whether a gap row is one a run cannot fill (#149). It is when the
     newest whole, clean Run All noted every gap the row shows now as left
-    after it had read the provider's list and left nothing to take. That run
-    says nothing of what the person's own settings kept it from looking at. A
-    newest such run that noted no gaps, as one that left something notes
-    none, settles nothing. A gap that appears afterwards, from a history put
-    back, say, still counts, and a row that is due, stopped or anything but a
-    gap is never settled, since a new document may be waiting there."""
+    after it had read the provider's list and left nothing to take, and an
+    earlier one, ended on another day, noted each of them too. A run can
+    leave a document its records do not show, a statement not ready yet, a
+    year that did not answer, and the next run usually takes it, so one run
+    alone settles nothing. Neither says anything of what the person's own
+    settings kept a run from looking at. A newest whole run that noted no
+    gaps, as one that left something notes none, settles nothing. A gap that
+    appears afterwards, from a history put back, say, still counts, and a
+    row that is due, stopped or anything but a gap is never settled, since a
+    new document may be waiting there."""
     if state != "gap":
         return False
     now = _gap_keys(gaps)
     if not now:
         return False
-    last = next((e for e in log if _whole_clean_run(e)), None)
-    left = last.get("gaps_left") if last else None
-    if not isinstance(left, list):
+    whole = [e for e in log if _whole_clean_run(e)]
+    if not whole:
         return False
-    return set(now) <= {str(k) for k in left}
+    day = _day(whole[0])
+    if not day or not set(now) <= _noted(whole[0]):
+        return False
+    earlier = [_noted(e) for e in whole[1:] if _day(e) not in ("", day)]
+    return all(any(key in noted for noted in earlier) for key in now)
 
 
 def _settings_leave_out(row: dict, config: dict) -> bool:
@@ -1527,7 +1556,8 @@ def _nothing_left(root: Path, config: dict) -> bool:
     taken or gone, unless the person's own settings leave it out. Every app
     keeps these under one key (gui/tests/test_accounts.py), and a key that
     does not match reads as left. Records that cannot be read, or that say
-    nothing was listed, answer False."""
+    nothing was listed, answer False. A document the list passed over and
+    never wrote to discovery.json cannot be seen here at all."""
     note = _read_json(root / "last-listing.json")
     if not isinstance(note, dict) or note.get("complete") is not True:
         return False
