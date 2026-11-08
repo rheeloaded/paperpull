@@ -106,6 +106,25 @@ document. The panel never says an account is signed in, since nothing short
 of a run can know that. When several accounts may have something new,
 **Get new for all** runs them one after another, and pauses at one that does
 not finish, so you can sign in again and try it once more, or skip it.
+For a row that says Possible gap, Get new in that summary and Get new for all
+run the whole list with no dates, and the row's own Look for them looks in the
+gap's dates alone.
+A Possible gap is left out of that count once two such whole runs, ended on
+different days, have each noted it, the newer of them the newest whole run. A
+whole run is a Run All with no dates set that ends clean, with its list noted
+as read to its end and the account's own records showing nothing on that list
+left to take. It notes in `panel-runs.json` the gaps still there. That does not
+say why they are there. The provider may not offer those documents, or may have
+sent none those months, and a run does not take what comes before
+`default_start_date` or what `document_types` leaves out, so a gap your own
+settings leave out is left out of the count as well. A run whose records show a
+document left, one turned off on the provider's page that the next run takes,
+say, notes no gaps, and neither does a run of an app whose log says its list
+passed over a document it saw. Some apps can pass over a document and leave no
+trace in their records, a statement the provider has not made ready yet, say,
+and the next run usually takes it, which is why one run is not enough. Only the
+noted gaps are left out. One that shows up later still counts, and the
+account's own row still says Possible gap and offers to look for them.
 
 Each run the panel starts is noted in `panel-runs.json` in the account's
 folder, the newest twenty, with how it ended and the names of the files it

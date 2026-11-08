@@ -10,6 +10,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **"May have something new" no longer keeps a gap a whole run could not
+  fill (#149).** A gap in the middle of a history, years back say, counted
+  toward the home page's "may have something new", and Get new for all ran
+  its account every time, though no run filled it. Get new and Get new for
+  all now run a gap row's whole list with no dates, and the row's own Look
+  for them still looks in the gap's dates. A Run All with no dates that ends
+  clean, with its list noted as read to its end and the account's records
+  showing nothing on it left to take, notes the gaps still there. Once the
+  newest such run and an earlier one, ended on another day, have each noted
+  a gap, the home page leaves it out of the count. A gap the person's own
+  `default_start_date` or `document_types` leave out is noted with them. A
+  Pilot, a scoped run, Download again, or a run that stopped, failed, set
+  something aside or whose records show a document left notes none, and
+  neither does a run of eleven apps whose log says their list passed over a
+  document it saw. Some apps can pass over a document with no trace in their
+  records, a statement not ready yet, say, and the second run on another
+  day is there for that. A gap that shows up later still counts, and the
+  account's row still says Possible gap and offers Look for them. An account
+  that is due is unchanged, since its next document may come any day.
+  Contributed by @JasperDale420. Before merging, the summary's buttons were
+  made to run a gap row whole, and a gap was made to settle only after two
+  such runs on different days whose records show nothing left.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month
@@ -24,6 +46,47 @@ All notable changes to PaperPull are recorded here. Versioning follows
   past the ten transactions that tab can show goes to review rather than be
   saved with some missing. All of it comes from Venmo's public page code, and
   no run has met this page yet.
+- **SDG&E reads its Billing History again.** Since November 6 each bill
+  row on My Energy Center starts with a cell the page hides, holding the
+  row's number, and the header has no cell above it. Read cell by cell,
+  every row was one column wider than the header, so Discover, Pilot and a
+  full run stopped on the first bill, saying it did not line up with the
+  header. That first cell is now passed over when it is a plain hidden cell
+  holding only a number, the row is exactly one column wider than the
+  header, and Statement Date is the header's first column. Any other hidden
+  cell still counts as a column, so a table that hides some of its columns
+  is read by where each cell sits, and stops the list when its cells do not
+  line up. The contributor's own account listed nine bills, the eight the
+  app had recorded keeping their ids and dates. Contributed by
+  @JasperDale420. Before merging, since the page no longer says how many
+  bills it holds, the read was made to wait for the rows to settle, and the
+  list to stop on anything near the table that looks like a pager or a
+  show-more control or says there are more bills than were read, and on
+  hidden numbers that do not count the rows read from 0 or 1 at either
+  end, none of which has met the live page yet.
+- **Fidelity lists its tax forms and calls a statement of several accounts
+  Combined (#144).** The hub nests a tax form's fields, which the app did not
+  read, so every form was dropped as undated. A run now lists them and asks
+  for each through the hub's v1 download with docType `TF`, as the
+  contributor reports. A Discover on a real account listed the forms, and
+  nobody has shown one downloading that way yet. A form can be dated in the
+  year after its tax year, so a year or a date range now also asks for the
+  tax year before it, and keeps a form when its own date or the last day of
+  its tax year is inside it. `--year 2025` keeps the forms of tax year 2025
+  and the forms of 2024 dated in 2025. A form dated two or more years after
+  its tax year is listed only by a run with no year or dates set. A statement
+  with no account number kept no account, and it now reads `Combined`, which a
+  `filename_pattern` with `{account}` can make a folder of. The default file
+  name leaves it out, so files are named as before. An archive from before
+  this keeps every key and downloads nothing again. Contributed by appchamp.
+  Before merging, each document was made to find its own row of a fresh list,
+  by its stored id or else by its number among the documents of its title and
+  date, which counts across accounts, and to fail when that cannot be told,
+  since two forms on a second account saved one twice and the
+  other never, a tax year that fails was made to stop the list, the year on a
+  form was made to come from the listing rather than its first four digits,
+  and clearing manual review was taken out, since a run tries such a document
+  again anyway.
 
 ## [0.61.0] - 2026-11-06
 
