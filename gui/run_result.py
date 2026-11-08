@@ -75,6 +75,12 @@ def _count(value):
     return type(value) is int and value >= 0
 
 
+# Why a run stopped, the words core run_reporting.STOP_REASONS sends
+# (core/tests/test_a_stop_says_why.py holds the two to each other). Any
+# other word, or none, is no reason, and the page says only that it stopped.
+STOP_REASONS = ("needs_you", "page", "slow", "error")
+
+
 def parse(line, mark):
     """The counts on this run's own result line, the one carrying `mark`."""
     data = _marked(line, PREFIX, mark)
@@ -89,6 +95,11 @@ def parse(line, mark):
         return None
     result["attention"] = any(result[k] for k in FIELDS + OPTIONAL
                               if k != "new_files" and k not in SAID_ONLY)
+    # Why it stopped, one of a fixed few words. A word the panel does not
+    # know is no reason, rather than a line it refuses, so an app newer
+    # than the panel still has its counts read.
+    stop = data.get("stop")
+    result["stop"] = stop if result["stopped"] and stop in STOP_REASONS else ""
     return result
 
 

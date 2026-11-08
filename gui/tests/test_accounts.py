@@ -320,6 +320,38 @@ def test_a_run_that_saved_documents_never_says_nothing_new(panel, action, saved)
     assert o["title"] == "23 new documents saved, some need a look"
 
 
+@pytest.mark.parametrize("stop, code, title, signin, resume", [
+    ("needs_you", "0", "Citi needed you partway", True, True),
+    ("page", "0", "Citi's page was not what PaperPull expected", False, False),
+    ("slow", "1", "Citi was too slow to answer", False, True),
+    ("error", "1", "PaperPull ran into something it did not expect", False, True),
+    ("", "0", "Stopped before finishing", True, True),
+])
+def test_a_stop_says_why_and_whose_it_is_to_fix(panel, stop, code, title, signin, resume):
+    """A changed page used to read as a sign-out, so the person signed in
+    and pressed Continue, which stopped at the same place again. Only a
+    stop a sign-in can fix offers one, and no stop guesses a sign-out."""
+    o = panel.evaluate("""([result, code]) => {
+        Object.assign(RUN, {result, code, action: 'all', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", [dict(_counted(stopped=1), stop=stop), code])
+    assert o["title"] == title
+    assert "may have signed you out" not in o["say"] and "exited with code" not in o["say"]
+    assert (o.get("signin") is not False) is signin and bool(o.get("resume")) is resume
+    if stop == "page":
+        assert "for PaperPull to fix, not you" in o["say"]
+
+
+def test_a_list_left_unread_keeps_its_own_next_step_whatever_stopped_it(panel):
+    o = panel.evaluate("""(result) => {
+        Object.assign(RUN, {result, code: '0', action: 'resume', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", dict(_counted(stopped=1, list_not_read=1), stop="page"))
+    assert o.get("relist") and "was not read to its end" in o["say"]
+
+
 @pytest.mark.parametrize("action, code, refused, tone, title, signin", [
     ("login", "5", "", "bad", "No sign-in window opened", False),
     ("record", "6", "", "info", "Nothing was recorded", True),

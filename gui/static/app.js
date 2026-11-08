@@ -868,6 +868,29 @@ function runOutcome() {
   if (code === NOTHING_RECORDED) return {tone: 'info', title: 'Nothing was recorded',
     say: 'No steps were saved for ' + who + '. The technical details below say why. ' +
       'Sign in first if it was on a sign-in page, then record again.', clean: false, signin: true};
+  // Why it stopped, when the run knows (core run_reporting.stop_reason),
+  // and so whose it is to fix. Each says that nothing saved is lost, and
+  // only a stop that a sign-in can fix offers one. A changed page would
+  // stop Continue at the same place, so it is not offered there. A list
+  // left unread has its own next step below, whatever stopped it.
+  const why = res && res.stopped && !res.list_not_read ? res.stop : '';
+  const left = RUN.again ? ' ' + AGAIN_LEFT + '.' : '';
+  if (why === 'needs_you') return {tone: 'info', title: who + ' needed you partway',
+    say: who + ' asked you to sign in again or to check something on its page, and the run could not wait. ' +
+      'Nothing already saved is lost.' + (left || ' Sign in in its window, then ' +
+      (downloads ? 'continue.' : recheck ? 'check again.' : 'run it again.')),
+    clean: false, resume: downloads, recheck, signin: true};
+  if (why === 'page') return {tone: 'bad', title: whose(who) + ' page was not what PaperPull expected',
+    say: whose(who) + ' site has most likely changed, which is for PaperPull to fix, not you. ' +
+      'Nothing already saved is lost. Running again will likely stop at the same place until it is fixed.' + left,
+    clean: false, signin: false};
+  if (why === 'slow') return {tone: 'info', title: who + ' was too slow to answer',
+    say: 'Nothing already saved is lost. This is usually ' + whose(who) + ' site being busy. ' +
+      (left ? left.trim() : downloads ? 'Continue in a little while.' : 'Try again in a little while.'),
+    clean: false, resume: downloads, recheck, signin: false};
+  if (why === 'error') return {tone: 'bad', title: 'PaperPull ran into something it did not expect',
+    say: 'Nothing already saved is lost. The technical details below say what happened, and reporting it is how it gets fixed.' +
+      left, clean: false, resume: downloads, recheck, signin: false};
   if (code !== '0') return {tone: 'bad', title: 'This run ended with a problem',
     say: 'It exited with code ' + code + '. Progress is saved, and the technical details below say what happened. ' +
       next + '.', clean: false, resume: downloads, recheck};
@@ -877,8 +900,12 @@ function runOutcome() {
   if (res && res.stopped && res.list_not_read) return {tone: 'info', title: 'Stopped before finishing',
     say: whose(who) + " list was not read to its end, so there was nothing more to carry on with. Get new documents " +
       'reads the list again. Nothing already saved is lost.', clean: false, relist: true};
+  // A stop with no reason sent, from an app older than the reasons or one
+  // the app chose with its own words. Those words are in the details, so
+  // the page sends the person there rather than guess a sign-out.
   if (res && res.stopped) return {tone: 'info', title: 'Stopped before finishing',
-    say: RUN.again ? AGAIN_LEFT + '.' : who + ' may have signed you out partway. Nothing is lost. Sign in again, then ' +
+    say: RUN.again ? AGAIN_LEFT + '.' : 'Nothing is lost. The technical details below say why it stopped. ' +
+      'If ' + who + ' signed you out, sign in again, then ' +
       (downloads ? 'continue.' : recheck ? 'check again.' : 'run it again.'),
     clean: false, resume: downloads, recheck, signin: true};
   if (res && res.attention) {
@@ -1014,16 +1041,19 @@ function renderRun() {
         '<span>' + esc(n) + '</span></li>').join('') + (RUN.saved.length > 50 ? '<li>and ' + (RUN.saved.length - 50) + ' more</li>' : '') + '</ul>';
     }
     if (r && (o.resume || o.recheck || o.signin || o.relist)) {
+      // Signing in again comes first, unless the outcome knows the stop had
+      // nothing to do with it (signin: false), a changed page or a slow one.
+      const signFirst = o.signin !== false, then = signFirst ? '2' : '1';
       html += '<ol class="nextsteps">' +
-        '<li><div class="stepnum">1</div><div class="body"><b>Sign in to ' + esc(RUN.provider) + ' again</b><span>In its window, or open a new one</span></div>' +
-        '<button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' + key + '">Open sign-in window</button></li>' +
-        (o.resume ? '<li><div class="stepnum on">2</div><div class="body"><b>Continue where it stopped</b><span>Picks up what is left, without asking again for what is already saved</span></div>' +
+        (signFirst ? '<li><div class="stepnum">1</div><div class="body"><b>Sign in to ' + esc(RUN.provider) + ' again</b><span>In its window, or open a new one</span></div>' +
+        '<button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' + key + '">Open sign-in window</button></li>' : '') +
+        (o.resume ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Continue where it stopped</b><span>Picks up what is left, without asking again for what is already saved</span></div>' +
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' + key + '">' + PLAY + 'Continue</button></li>' : '') +
-        (o.relist ? '<li><div class="stepnum on">2</div><div class="body"><b>Get new documents</b><span>Reads ' + esc(whose(RUN.provider)) +
+        (o.relist ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Get new documents</b><span>Reads ' + esc(whose(RUN.provider)) +
           ' list again, then saves what you do not have yet</span></div>' +
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="all" data-key="' + key + '">' + PLAY +
           'Get new documents</button></li>' : '') +
-        (o.recheck ? '<li><div class="stepnum on">2</div><div class="body"><b>Check again</b><span>Lists what ' + esc(RUN.provider) +
+        (o.recheck ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Check again</b><span>Lists what ' + esc(RUN.provider) +
           ' has once more. Nothing is downloaded</span></div><button type="button" class="btn btn-p starts" data-do="run" data-action="discover" data-key="' +
           key + '">Check again</button></li>' : '') + '</ol>';
     }

@@ -416,7 +416,9 @@ def test_a_restore_that_ends_early_says_continue_will_not_download_again():
     assert "const next = RUN.again ? AGAIN_LEFT :" in outcome
     assert "const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again;" in outcome
     assert outcome.count("+ next + '.'") + outcome.count("say: next + '.'") >= 4
-    assert outcome.count("resume: downloads") == 5 and "resume: !RUN.again" not in outcome
+    # The five ways a run ends early, and the three stops the run can name
+    # (needs you, too slow, an error) after which Continue picks it up.
+    assert outcome.count("resume: downloads") == 8 and "resume: !RUN.again" not in outcome
     assert "say: RUN.again ? AGAIN_LEFT + '.'" in outcome
     assert "if (RUN.again && !RUN.outcome.clean && RUN.sink)" in function("finishRun")
     # A row whose last run was a restore that stopped offers the rest of the

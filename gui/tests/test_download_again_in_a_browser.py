@@ -219,7 +219,7 @@ def test_a_restore_that_stops_partway_says_continue_will_not_download_again(pane
     tab.get_by_role("button", name="Try the newest few first").click()
     finished(tab)
     assert tab.inner_text("#r-title") == "Stopped before finishing"
-    assert "may have signed you out" in tab.inner_text("#statustext")
+    assert "If Shop Docs signed you out, sign in again, then continue." in tab.inner_text("#statustext")
     assert tab.locator("#view-run [data-action=resume]").count() == 1
 
 
@@ -232,7 +232,7 @@ def test_a_discover_that_stops_offers_to_check_again_never_continue(panel, shop)
     finished(tab)
     assert started(shop) == [["--discover"]]
     assert tab.inner_text("#r-title") == "Stopped before finishing"
-    assert tab.inner_text("#statustext").endswith("Sign in again, then check again.")
+    assert tab.inner_text("#statustext").endswith("sign in again, then check again.")
     assert tab.locator("#view-run [data-action=resume]").count() == 0
     assert tab.locator("#view-run [data-action=discover]").count() == 1
 

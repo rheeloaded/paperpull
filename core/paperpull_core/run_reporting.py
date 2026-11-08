@@ -92,6 +92,44 @@ def list_not_read() -> str:
     return stop.whole_run if isinstance(stop, ListNotRead) else ""
 
 
+# Why a run stopped, as one of these words, so the panel can say whose it
+# is to fix rather than guess a sign-out for every stop. A run that knows
+# no more sends none. gui/run_result.py takes only these, and
+# core/tests/test_a_stop_says_why.py holds the two lists to each other.
+#   needs_you  the provider wanted the person, to sign in again, get past
+#              a check or wait for a page, and nobody was at the console
+#   page       a page was not what the app expected (pressing.Stop), most
+#              often the provider's site having changed
+#   slow       the provider's page took too long to answer
+#   error      anything else the app did not expect
+STOP_REASONS = ("needs_you", "page", "slow", "error")
+
+
+def stop_reason() -> str:
+    """Why the run is on its way out, while it is, or "".
+
+    A pressing.Stop is caught by the app's own main() and left on a plain
+    SystemExit raised while handling it (pressing.stop_run), so the stop is
+    found on the exception's context as well as in flight."""
+    from .browser import nobody_answered
+    from .failure import error_kind
+    from .pressing import Stop
+    exc = sys.exc_info()[1]
+    if exc is None:
+        return ""
+    seen, link = set(), exc
+    while link is not None and id(link) not in seen:
+        if isinstance(link, Stop):
+            return "page"
+        seen.add(id(link))
+        link = link.__context__
+    if not isinstance(exc, SystemExit):
+        return "slow" if error_kind(exc) == "timeout" else "error"
+    if nobody_answered() and exc.code in (0, None):
+        return "needs_you"
+    return ""
+
+
 # The runs that write a run summary yet save nothing. Verify checks the
 # files already saved, a dry run (--dry-run, alone or with a download mode)
 # plans names and saves none, and Amazon's --reparse-items reads its saved
@@ -148,6 +186,10 @@ def report_run_result(stats):
     from .storage import unsaved_on_leaving
     unsaved = unsaved_on_leaving()
     result["stopped"] = int(stopped_early() or bool(unsaved))
+    # Sent only when it is known, as an app from before it sends nothing.
+    why = stop_reason()
+    if why:
+        result["stop"] = why
     whole_run = list_not_read()
     if whole_run:
         # Sent only when it is so, as an app from before it sends nothing.
