@@ -206,3 +206,17 @@ def test_the_panel_takes_the_same_words_and_no_others():
     assert panel.parse(line(stopped=1, stop=7), mark)["stop"] == ""
     assert panel.parse(line(stopped=0, stop="page"), mark)["stop"] == "", "only a stop has a reason"
     assert panel.parse(line(stopped=1), mark)["stop"] == "", "an app from before sends none"
+
+
+def test_a_list_that_stopped_partway_is_a_page_not_a_sign_out():
+    """Each app that has one keeps its own class. A real SDG&E run said to
+    sign in again and Continue, neither of which could help."""
+    class ListStopped(Exception):
+        pass
+
+    def stop_then_leave():
+        try:
+            raise ListStopped("a bill's row does not line up")
+        except ListStopped:
+            raise SystemExit(1)
+    assert _why_leaving_on(stop_then_leave) == "page"

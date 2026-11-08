@@ -1700,7 +1700,7 @@ async function rootChecked() {
   if (!d.ok) { rootSay(d.problem, true); $('newroot').focus(); return false; }
   if (d.found_count && !W.add) {
     rootSay('Found ' + many(d.found_count, 'provider') + ' already set up here (' + d.found.join(', ') +
-      (d.found_count > d.found.length ? ' and more' : '') + '). Open Accounts to use them, or continue to add more.', false);
+      (d.found_count > d.found.length ? ' and more' : '') + '). Open Accounts to use ' + (d.found_count === 1 ? 'it' : 'them') + ', or continue to add more.', false);
     $('w-useroot').hidden = false;
     if (!ROOTCHECK.warned) { ROOTCHECK.warned = true; return false; }
   } else if (d.synced_by) {

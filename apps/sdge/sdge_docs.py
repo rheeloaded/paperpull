@@ -37,7 +37,7 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -378,7 +378,7 @@ class App:
             raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
-        print("Sign in, keep the window OPEN, then run the pilot.")
+        print(f"Sign in, keep the window OPEN, then {after_sign_in()}.")
 
     def cmd_login(self):
         print("Checking the connection to your signed-in My Energy Center browser...\n")
@@ -481,7 +481,7 @@ class App:
                 self._record_rawdoc(r, site.BILLING_URL)
             self.discovery.save()
             print(f"\n!! The SDG&E billing history stopped partway, since {stop}.")
-            print(f"   The {len(stop.docs)} bill(s) listed before it stopped are kept,")
+            print(f"   The {len(stop.docs)} {'bill' if len(stop.docs) == 1 else 'bills'} listed before it stopped are kept,")
             print("   and this run stops rather than call the list read. Run it again.")
             self.write_failure("read the documents list", "the list stopped partway")
             raise SystemExit(1)

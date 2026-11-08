@@ -36,7 +36,7 @@ from paperpull_core import saved_copy
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -371,7 +371,7 @@ class App:
         print("The Apple Store is a separate sign-in. Open")
         print(f"  {site.STORE_LIST_URL}")
         print("in a second tab and sign in there too, if you want your Apple Store orders.")
-        print("Keep the window OPEN, then run the pilot.")
+        print(f"Keep the window OPEN, then {after_sign_in()}.")
 
     def cmd_login(self):
         if self.config.get("cdp_url"):

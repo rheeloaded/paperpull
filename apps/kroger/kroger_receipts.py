@@ -29,7 +29,7 @@ from paperpull_core import saved_copy
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -277,7 +277,7 @@ class App:
             raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
-        print("Sign in, keep the window OPEN, then run the pilot.")
+        print(f"Sign in, keep the window OPEN, then {after_sign_in()}.")
 
     def _look_at_orders(self, page):
         """Open the purchase history and say what is there, as (listed,

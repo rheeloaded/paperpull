@@ -62,3 +62,19 @@ def test_the_panels_server_keeps_the_same_number():
     src = (REPO / "gui" / "app.py").read_text(encoding="utf-8")
     m = re.search(r"^NOT_SIGNED_IN = (\d+)$", src, re.M)
     assert m and int(m.group(1)) == NOT_SIGNED_IN
+
+
+def test_its_result_line_offers_no_continue(capsys):
+    """A real run ended "Sign in first" and then "Continue carries on"."""
+    try:
+        raise not_signed_in("http://127.0.0.1:9236", OSError("x"))
+    except SystemExit:
+        run_reporting.report_run_result({"new_files": []})
+    assert "stopped before it finished" not in capsys.readouterr().out
+
+
+def test_after_signing_in_names_the_button_under_the_panel(monkeypatch):
+    monkeypatch.setenv(MARK_ENV, "0" * 32)
+    assert run_reporting.after_sign_in() == "press Try the newest few first"
+    monkeypatch.delenv(MARK_ENV)
+    assert run_reporting.after_sign_in() == "run the pilot"

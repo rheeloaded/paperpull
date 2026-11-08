@@ -43,6 +43,12 @@ def under_panel() -> bool:
     return bool(os.environ.get(MARK_ENV, ""))
 
 
+def after_sign_in() -> str:
+    """What to do once signed in, in the words of where the run is: the
+    panel's button under the panel, the command in a terminal."""
+    return "press Try the newest few first" if os.environ.get(MARK_ENV, "") else "run the pilot"
+
+
 def not_signed_in(cdp_url, err) -> SystemExit:
     """The exit for a run that could not attach to the signed-in browser at
     cdp_url, after saying so in the words of where it runs: the panel's
@@ -174,7 +180,10 @@ def stop_reason() -> str:
         return ""
     seen, link = set(), exc
     while link is not None and id(link) not in seen:
-        if isinstance(link, Stop):
+        # A list that stopped partway is its provider's page not reading as
+        # expected too. Each app that has one keeps its own class, in its own
+        # site file, so it is known here by name.
+        if isinstance(link, Stop) or type(link).__name__ == "ListStopped":
             return "page"
         seen.add(id(link))
         link = link.__context__
@@ -255,6 +264,10 @@ def report_run_result(stats):
         print("\nThis run did its work, but its run state could not be written, so "
               "the next run may download again what this one saved. Close the "
               "program that has it open before running again.", flush=True)
+    elif result["stopped"] and getattr(sys.exc_info()[1], "code", None) == NOT_SIGNED_IN:
+        # Nothing started, and not_signed_in has said to sign in first, so
+        # there is nothing here for Continue to carry on with.
+        pass
     elif result["stopped"] and stats.get("mode") == "rename":
         # Rename downloads nothing for Resume to carry on with, and when it
         # stops it has just said what it put back and what to do instead.

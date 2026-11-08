@@ -201,6 +201,11 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **What a real run on a real account showed.** A list that stopped partway
+  is said as a page PaperPull did not expect, not as a sign-out with
+  Continue, for each of the providers that can stop that way. The last line
+  after "Sign in first" no longer offers Continue. After a sign-in the log
+  names the panel's button under the panel.
 - **Providers go by their names, and a run's lines by the names on the
   buttons.** The File names picker, the Updated notice and File names'
   Stopped at line said the folder's name instead of the provider's. The
