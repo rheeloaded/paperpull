@@ -269,6 +269,7 @@ ROUTES = {
                                   desktop="changes", server="changes"),
     ("POST", "/api/account"): dict(body={"app": SHOP, "label": "second", "owner": ""},
                                    desktop="changes", server="changes"),
+    ("POST", "/api/account/done"): dict(body={"app": SHOP, "account": "primary", "done": True}, desktop="changes", server="changes"),
     ("POST", "/api/account/owner"): dict(body={"app": SHOP, "account": "primary", "owner": "An Invented Name"},
                                          desktop="changes", server="changes"),
     ("GET", "/api/history/export"): dict(desktop="reads", server="reads"),

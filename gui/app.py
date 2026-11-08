@@ -29,7 +29,7 @@ import hashlib
 import json
 import mimetypes
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import re
 import shutil
 import stat
@@ -1635,6 +1635,56 @@ def _gaps_left(root: Path) -> list:
     return _gap_keys((row or {}).get("gaps"))
 
 
+# How long an account stays off the list once it has been checked: as long
+# as its provider usually takes to send something, within these bounds.
+QUIET_DAYS = (3, 14)
+DONE_FILE = "panel-done.json"
+
+
+def _checked_by(entry) -> bool:
+    """Whether a logged run read the whole list and finished: Get new or
+    Continue, every date, with nothing stopped, failed or left unread."""
+    result = entry.get("result") if isinstance(entry, dict) else None
+    return (isinstance(result, dict) and entry.get("action") in ("all", "resume") and entry.get("exit_code") == 0
+            and not entry.get("closed") and not entry.get("scope") and not entry.get("redownload")
+            and not any(result.get(k) for k in ("stopped", "failed", "validation_failures", "list_not_read")))
+
+
+def _when(text):
+    try:
+        return datetime.fromisoformat(str(text))
+    except (TypeError, ValueError):
+        return None
+
+
+def _done_at(root: Path) -> str:
+    """When this account was last marked done, or ""."""
+    data = _read_json(root / DONE_FILE)
+    value = data.get("done_at") if isinstance(data, dict) else ""
+    return value if isinstance(value, str) else ""
+
+
+def _quieted(state: str, last, done_at: str, cadence, now=None) -> dict:
+    """What a check, or Mark as done, does to an account's place on the list.
+    "Due" is worked out from the age of the newest document, and a run that
+    finds nothing new leaves that age alone, so an account just checked
+    stayed due until its provider sent something. Marked done, it is off the
+    list until a run after that, or the time runs out. Checked by a whole
+    clean run, a due account is up to date for that time. A gap is left to
+    _settled, since one run saying it could not fill a gap proves little."""
+    now = now or datetime.now()
+    days = max(QUIET_DAYS[0], min(QUIET_DAYS[1], cadence if isinstance(cadence, (int, float)) else QUIET_DAYS[1]))
+    within = lambda when: when is not None and timedelta(0) <= now - when < timedelta(days=days)  # noqa: E731
+    marked = _when(done_at)
+    ended = _when((last or {}).get("ended")) if isinstance(last, dict) else None
+    if state not in ("unreadable", "never", "not_started", "nostatus") and within(marked) \
+            and (ended is None or marked > ended):
+        return {"state": "current", "marked_done": done_at, "checked_quiet": ""}
+    if state in ("due", "overdue") and _checked_by(last) and within(ended):
+        return {"state": "current", "marked_done": "", "checked_quiet": last["ended"]}
+    return {"state": state, "marked_done": "", "checked_quiet": ""}
+
+
 def _owner_of(meta: dict, account: str) -> str:
     """The account holder's name as the account's config gives it, or ""."""
     config = Path(meta["dir"]) / ("config.json" if account == "primary"
@@ -1667,6 +1717,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     outcome = _last_outcome(last)
     running = _RUNS.get((name, account))
     state = _account_state(row, outcome, gaps, known)
+    quiet = _quieted(state, last, _done_at(root), (row or {}).get("cadence_days"))
     return {
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
@@ -1676,7 +1727,9 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "gets": cards.get(slug, {}).get("documents", ""),
         "group": cards.get(slug, {}).get("group", ""),
         "kind": (row or {}).get("kind") or kind,
-        "state": state,
+        "state": quiet["state"],
+        "marked_done": quiet["marked_done"],
+        "checked_quiet": quiet["checked_quiet"],
         # A gap a whole, clean run could not fill, left out of "may have
         # something new" on the home page (#149).
         "settled": _settled(state, (row or {}).get("gaps"), log),
@@ -3069,6 +3122,40 @@ async def api_account(request: Request):
     return {"app": name, "account": label, "config": dest.name,
             "output_dir": cfg.get("output_dir", ""), "cdp_url": cfg.get("cdp_url", ""),
             "owner": cfg.get("owner", "")}
+
+
+@app.post("/api/account/done", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+async def api_account_done(request: Request):
+    """Take an account off the list until its next run or the time runs out,
+    or put it back. Writes only this account's own note of it."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    body = body if isinstance(body, dict) else {}
+    return await to_thread.run_sync(_save_done, body)
+
+
+def _save_done(body: dict) -> dict:
+    name = str(body.get("app") or "")
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    account = _account_named(apps[name], body.get("account"))
+    try:
+        root = _account_root(apps[name], account)
+    except ValueError:
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
+    done_at = datetime.now().isoformat(timespec="seconds") if body.get("done") else ""
+    try:
+        fd, temp = tempfile.mkstemp(dir=str(root), prefix=".panel-done-", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"done_at": done_at}, f)
+        os.replace(temp, root / DONE_FILE)
+    except OSError as e:
+        raise HTTPException(500, "Could not save that (%s). Check that its folder can be written to, then try again." % e)
+    return {"app": name, "account": account, "done_at": done_at}
 
 
 @app.post("/api/account/owner", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])

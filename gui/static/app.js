@@ -139,7 +139,7 @@ const ACTION_DOING = {login: 'Opening the sign-in window for %s', discover: 'Che
 // says an account is signed in, since nothing short of a run knows that.
 const NEEDS = ['stopped', 'signin', 'attention', 'unreadable', 'overdue', 'due', 'gap'];
 const FRESH = ['never', 'not_started'];
-function groupOf(r) { return NEEDS.includes(r.state) ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
+function groupOf(r) { return NEEDS.includes(r.state) && !r.checked_quiet ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
 // Whether a stopped account is carried on with Continue. Not after a Resume
 // that stopped because no run read the list to its end, since only a run
 // that lists carries on from that, and Continue would stop there again (#124).
@@ -160,6 +160,12 @@ function present(r) {
     act: {label: 'Get new', run: 'all', primary: true}});
   if (!r.runnable) return {chip: {cls: 'bad', text: "Can't run"}, say: 'PaperPull does not recognize this folder. Open it to see what to do.', act: {label: 'Open', nav: true}};
   if (r.needs_setup) return {chip: {cls: 'bad', text: 'Needs setup'}, say: 'Run setup-all (setup-all.command on a Mac, setup-all.bat on Windows) in the PaperPull folder, then reload this page.', act: {label: 'Open', nav: true}};
+  if (r.marked_done) return {chip: {cls: 'ok', text: 'Marked done'},
+    say: 'Marked done on ' + when(r.marked_done) + '. It comes back after a while, or if a run needs a look.',
+    act: {label: 'Get new', run: 'all'}};
+  if (r.checked_quiet && r.state === 'current') return {chip: {cls: 'ok', text: 'Up to date'},
+    say: 'Checked ' + when(r.checked_quiet) + ', nothing new yet.' + (latest ? ' Newest ' + n + ' is ' + latest + '.' : ''),
+    act: {label: 'Get new', run: 'all'}};
   switch (r.state) {
     case 'stopped': {
       const again = Boolean(r.last_run && r.last_run.redownload);
@@ -347,7 +353,7 @@ function queueTargets() {
   // still offers Look for them.
   return (ROWS || []).filter(r => r.runnable && !r.needs_setup && !r.running && !r.settled && (
     (r.state === 'stopped' && !(r.last_run && r.last_run.redownload)) ||
-    ['overdue', 'due', 'gap', 'never'].includes(r.state)));
+    ['overdue', 'due', 'gap', 'never'].includes(r.state) && !r.checked_quiet));
 }
 // Where a row stands on Accounts. A provider never run stands with what
 // needs a look, never folded away under Not started, while its first run
@@ -648,6 +654,8 @@ function openMenu(btn) {
     menuItem('support', k, P.report, 'Get help', 'Makes a file with no account details, to send with a problem report');
   if (!sample) {
     html += '<div class="rule" role="separator"></div>' +
+      menuItem('mark-done', k, P.check, r.marked_done ? 'Undo marked done' : 'Mark as done',
+        r.marked_done ? 'Put this account back on the list' : 'Take this account off the list for now') +
       menuItem('owner', k, P.pencil, 'Name on the account', 'Change the name PaperPull uses for this account') +
       menuItem('person', k, P.person, 'Add another person', 'Their own sign-in window, folder and download history') +
       menuItem('remove', k, P.box, 'Remove from PaperPull', 'Moves its folder to Removed. Nothing is deleted');
@@ -2651,6 +2659,15 @@ const DO = {
   },
   'person': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openPerson(r); },
   'owner': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openOwner(r); },
+  'mark-done': async el => {
+    const r = rowByKey(el.dataset.key);
+    closeMenus();
+    if (!r) return;
+    try { await postJSON('/api/account/done', {app: r.app, account: r.account, done: !r.marked_done}); }
+    catch (e) { notice(e.message, 'warn'); return; }
+    await loadAccounts();
+    renderAll();
+  },
   'remove': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRemove(r); },
   'reveal': async el => {
     const r = rowByKey(el.dataset.key);

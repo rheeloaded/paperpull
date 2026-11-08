@@ -1790,7 +1790,8 @@ def test_only_a_gap_row_is_ever_settled(root):
     bank = root / "Bank Statements"
     (bank / "progress.json").write_text(json.dumps(_gapped(newest_days_ago=45)), encoding="utf-8")
     keys, row = _gap_keys_now(bank)
-    _log(bank, _clean_all(gaps_left=keys), _clean_all(gaps_left=keys, ended="2026-11-05T09:00:00"))
+    _log(bank, _clean_all(gaps_left=keys, ended="2026-01-06T16:01:00"),
+         _clean_all(gaps_left=keys, ended="2026-01-05T09:00:00"))
     row = _rows()[("Bank Statements", "primary")]
     assert row["state"] in ("due", "overdue") and row["settled"] is False
     (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
@@ -2045,3 +2046,64 @@ def test_a_window_stays_on_the_server_or_if_asked(monkeypatch):
     monkeypatch.setattr(app_module, "_read_settings", lambda: {})
     monkeypatch.setattr(app_module.server_mode, "enabled", lambda: True)
     assert app_module._closes_its_window(*good) is False
+
+
+_CLEAN = {"action": "all", "exit_code": 0, "closed": False, "scope": [], "redownload": False, "ended": "2026-11-08T11:32:00",
+          "result": {"new_files": 0, "stopped": 0, "failed": 0, "validation_failures": 0, "list_not_read": 0}}
+_NOW = app_module.datetime(2026, 11, 9, 12, 0)
+
+
+@pytest.mark.parametrize("state", ["due", "overdue"])
+def test_a_run_that_found_nothing_new_takes_a_due_account_off_the_list(state):
+    """Fidelity finished clean with nothing new, and stayed due, since due
+    came only from the age of its newest statement."""
+    q = app_module._quieted(state, _CLEAN, "", 26, now=_NOW)
+    assert q["state"] == "current" and q["checked_quiet"] == _CLEAN["ended"]
+
+
+def test_a_gap_is_left_to_the_rule_that_settles_gaps():
+    q = app_module._quieted("gap", _CLEAN, "", 26, now=_NOW)
+    assert q["state"] == "gap" and not q["checked_quiet"]
+
+
+@pytest.mark.parametrize("change", [{"exit_code": 1}, {"action": "pilot"}, {"closed": True}, {"scope": ["--year", "2025"]},
+                                    {"redownload": True}, {"result": {"stopped": 1}}, {"result": {"failed": 2}}, {"result": None}])
+def test_only_a_whole_clean_run_counts_as_a_check(change):
+    assert app_module._quieted("due", dict(_CLEAN, **change), "", 26, now=_NOW)["state"] == "due"
+
+
+@pytest.mark.parametrize("cadence, days, state", [(26, 13, "current"), (26, 15, "due"), (1, 2, "current"), (1, 4, "due"), (None, 13, "current")])
+def test_a_check_lasts_as_long_as_the_provider_usually_takes(cadence, days, state):
+    now = app_module.datetime(2026, 11, 8, 11, 33) + app_module.timedelta(days=days)
+    assert app_module._quieted("due", _CLEAN, "", cadence, now=now)["state"] == state
+
+
+def test_mark_as_done_takes_anything_off_the_list_until_a_later_run():
+    done = "2026-11-08T12:00:00"
+    for state in ("due", "overdue", "gap", "stopped", "attention"):
+        q = app_module._quieted(state, _CLEAN, done, 26, now=_NOW)
+        assert (q["state"], q["marked_done"]) == ("current", done), state
+    later = dict(_CLEAN, ended="2026-11-08T13:00:00", exit_code=1)
+    assert app_module._quieted("stopped", later, done, 26, now=_NOW)["marked_done"] == ""
+
+
+def test_records_that_cannot_be_read_are_never_marked_done():
+    assert app_module._quieted("unreadable", _CLEAN, "2026-11-08T12:00:00", 26, now=_NOW)["state"] == "unreadable"
+
+
+def test_mark_as_done_is_saved_and_undone(root):
+    body = {"app": "Bank Statements", "done": True}
+    assert app_module._save_done(body)["done_at"]
+    own = root / "Bank Statements"
+    assert app_module._done_at(own)
+    app_module._save_done({"app": "Bank Statements", "done": False})
+    assert app_module._done_at(own) == ""
+
+
+def test_an_account_checked_is_not_counted_on_the_page(panel):
+    got = panel.evaluate("""() => {
+        ROWS = [{state: 'gap', checked_quiet: '2026-11-08T11:32:00', runnable: true, provider: 'A', gaps: []},
+                {state: 'due', checked_quiet: '', runnable: true, provider: 'B', gaps: []}];
+        return [queueTargets().map(r => r.provider), groupOf(ROWS[0]), groupOf(ROWS[1])];
+    }""")
+    assert got == [["B"], "ok", "needs"]

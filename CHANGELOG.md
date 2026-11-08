@@ -201,6 +201,11 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **An account just checked comes off the list.** "Due" came only from the
+  age of the newest document, so a run that found nothing new left it due
+  until its provider sent something. A whole clean run now counts as a check
+  for as long as that provider usually takes, between 3 and 14 days. **Mark as done** under the three dots takes
+  any account off the list for that time, and can be undone.
 - **A sign-in window comes to the front, and goes when it is done.** Opening
   one, or reusing one already open, now brings it forward. When Get new
   documents or Continue finishes, PaperPull closes that account's sign-in
