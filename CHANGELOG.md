@@ -42,6 +42,29 @@ All notable changes to PaperPull are recorded here. Versioning follows
   show-more control or says there are more bills than were read, and on
   hidden numbers that do not count the rows read from 0 or 1 at either
   end, none of which has met the live page yet.
+- **Fidelity lists its tax forms and calls a statement of several accounts
+  Combined (#144).** The hub nests a tax form's fields, which the app did not
+  read, so every form was dropped as undated. A run now lists them and asks
+  for each through the hub's v1 download with docType `TF`, as the
+  contributor reports. A Discover on a real account listed the forms, and
+  nobody has shown one downloading that way yet. A form can be dated in the
+  year after its tax year, so a year or a date range now also asks for the
+  tax year before it, and keeps a form when its own date or the last day of
+  its tax year is inside it. `--year 2025` keeps the forms of tax year 2025
+  and the forms of 2024 dated in 2025. A form dated two or more years after
+  its tax year is listed only by a run with no year or dates set. A statement
+  with no account number kept no account, and it now reads `Combined`, which a
+  `filename_pattern` with `{account}` can make a folder of. The default file
+  name leaves it out, so files are named as before. An archive from before
+  this keeps every key and downloads nothing again. Contributed by appchamp.
+  Before merging, each document was made to find its own row of a fresh list,
+  by its stored id or else by its number among the documents of its title and
+  date, which counts across accounts, and to fail when that cannot be told,
+  since two forms on a second account saved one twice and the
+  other never, a tax year that fails was made to stop the list, the year on a
+  form was made to come from the listing rather than its first four digits,
+  and clearing manual review was taken out, since a run tries such a document
+  again anyway.
 
 ## [0.61.0] - 2026-11-06
 
