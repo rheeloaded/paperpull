@@ -69,9 +69,9 @@ LIVE_ROWS = [numbered(ID1, "1", "Sep 12, 2031"), numbered(ID2, "2", "Aug 13, 203
 LIVE_DATES = ["2031-09-12", "2031-08-13", "2031-07-14"]
 
 
-def near(said="", press=False, pager=False):
+def near(said="", press=False, marks=""):
     """One thing drawn near the table, as the page reader returns it."""
-    return {"said": said, "press": press, "pager": pager}
+    return {"said": said, "press": press, "marks": marks}
 # Invented account details, which must never leave through a log, the
 # console or a diagnostic.
 FAKE_ACCOUNT = "987650001234"
@@ -404,23 +404,25 @@ class ListReady(unittest.TestCase):
         page = Page(rows=LIVE_ROWS, heads=LIVE_HEADS)
         self.assertEqual([d.date_text for d in site.collect_download_docs(page)], LIVE_DATES)
 
-    def test_hidden_numbers_run_from_1_in_the_rows_read(self):
+    def test_hidden_numbers_count_the_rows_from_0_or_1_at_either_end(self):
         def rows(*numbers):
             return [{"number": n} for n in numbers]
         for good in (rows("1", "2", "3"), rows("01", "02", "03"), rows("001"), rows(), None,
                      rows("", "", ""), rows("1", "", "3"), rows("", "2"),
-                     rows("3", "2", "1"), rows("03", "02", "01")):
+                     rows("3", "2", "1"), rows("03", "02", "01"), rows("0", "1", "2"),
+                     rows("00", "01", "02"), rows("2", "1", "0"), rows("0"), rows("1", "0")):
             self.assertTrue(site.numbers_in_place(good), good)
-        for bad in (rows("0", "1", "2"), rows("2", "3"), rows("11", "12"), rows("1", "2", "4"),
-                    rows("1", "1", "2"), rows("1", "", "2"), rows("10"),
-                    rows("12", "11"), rows("4", "2", "1"), rows("2", "1", "3")):
+        for bad in (rows("2", "3"), rows("11", "12"), rows("1", "2", "4"), rows("0", "1", "3"),
+                    rows("1", "1", "2"), rows("0", "0", "1"), rows("1", "", "2"), rows("10"),
+                    rows("12", "11"), rows("4", "2", "1"), rows("2", "1", "3"),
+                    rows("3", "2", "0"), rows("2", "3", "4")):
             self.assertFalse(site.numbers_in_place(bad), bad)
 
-    def test_numbers_that_do_not_run_from_1_stop_with_what_was_read(self):
+    def test_numbers_that_do_not_count_the_rows_stop_with_what_was_read(self):
         second_page = [numbered(ID1, "11", "Sep 12, 2031"), numbered(ID2, "12", "Aug 13, 2031")]
         with self.assertRaises(site.ListStopped) as stop:
             site.collect_download_docs(Page(rows=second_page, heads=LIVE_HEADS))
-        self.assertIn("hidden row numbers do not run from 1 to 2", str(stop.exception))
+        self.assertIn("hidden row numbers do not count the 2 rows read", str(stop.exception))
         self.assertEqual([d.document_id for d in stop.exception.docs], [ID1, ID2])
 
     def test_rows_with_no_hidden_number_are_not_asked_about_it(self):
@@ -434,10 +436,11 @@ class ListReady(unittest.TestCase):
 
     def test_what_looks_like_a_pager_or_show_more_is_known(self):
         steps = ["Next", "next", "Next page", "Next 10", "Next \u203a", "\u2039 Prev", "Previous",
-                 "Older", "Newer", "First", "Last", "Last page", "More", "Page 2", "Go to page 2"]
+                 "Older", "Newer", "First", "Last", "Last page", "More", "Page 2", "Go to page 2",
+                 "Next 10 Bills", "Next Bills", "Previous 10 bills", "More statements"]
         arrows = [">", ">>", "\u00bb", "\u203a", "<", "\u00ab", "\u2039"]
         for said in steps + arrows:
-            self.assertTrue(site.shows_more([near(said, press=True)]), said)
+            self.assertTrue(site.shows_more([near(said, press=True)], 3), said)
         for said in ("Show more", "SHOW MORE", "show   more", "Show more \u00bb", "Load more",
                      "View more", "See more", "See all", "View all", "Show all", "Get more",
                      "Display more", "Show 10 more", "Show older", "Load previous bills",
@@ -446,23 +449,53 @@ class ListReady(unittest.TestCase):
                      "Show more records", "Show more items", "Show more invoices", "Show earlier",
                      "View all history", "More bills", "Older bills", "Previous statements",
                      "Earlier bills", "Showing 1 to 10 of 24 entries", "Bills 1-10 of 24",
-                     "1\u201310 of 24", "Page 1 of 3", "page 2 of 2"):
-            self.assertTrue(site.shows_more([near(said)]), said)
-        self.assertTrue(site.shows_more([near(pager=True)]))
-        self.assertTrue(site.shows_more([near("1", press=True), near("2", press=True)]))
-        self.assertTrue(site.shows_more([near("Billed"), near("Show more")]), "wherever it comes")
+                     "1\u201310 of 24", "Page 1 of 3", "page 2 of 2", "View All 24 Bills",
+                     "Showing 10 of 24 bills", "10 of 24 bills", "Displaying 3 of 1,024 entries"):
+            self.assertTrue(site.shows_more([near(said)], 3), said)
+        self.assertTrue(site.shows_more([near(marks="pagination")], 3))
+        self.assertTrue(site.shows_more([near("1", press=True), near("2", press=True)], 3))
+        self.assertTrue(site.shows_more([near("Billed"), near("Show more")], 3),
+                        "wherever it comes")
 
     def test_a_steps_words_alone_on_something_not_pressed_are_no_pager(self):
         # A detail row can head a column Previous, and a tile can hold a number.
         for said in ("Next", "Previous", "First", "Last", "More", "Page 2", ">", "\u00bb", "2"):
-            self.assertFalse(site.shows_more([near(said)]), said)
-        self.assertFalse(site.shows_more([near("12"), near("30")]))
+            self.assertFalse(site.shows_more([near(said)], 3), said)
+        self.assertFalse(site.shows_more([near("12"), near("30")], 3))
+
+    def test_a_pager_is_named_by_a_word_of_its_own(self):
+        for marks in ("pagination", "pagination pagination-sm", "pager-nav", "bill-pager",
+                      "dataTables_paginate paging_simple_numbers", "billPager", "billPagination",
+                      "PAGINATION", "nav Pagination", "table-pagination-wrap", "pager2"):
+            self.assertTrue(site.pager_named(marks), marks)
+            self.assertTrue(site.shows_more([near(marks=marks)], 3), marks)
+        for marks in ("pageRow", "pageRight", "pageRoot", "page-right", "paginated-table",
+                      "page-item page-link", "pages", "homepage", "Bill pages", "", None):
+            self.assertFalse(site.pager_named(marks), marks)
+            self.assertFalse(site.shows_more([near(marks=marks)], 3), marks)
+
+    def test_a_count_that_agrees_with_the_rows_read_is_no_pager(self):
+        for said, read in (("Showing 1 to 3 of 3 entries", 3), ("Page 1 of 1", 3),
+                           ("1-3 of 3", 3), ("Showing 3 of 3 bills", 3), ("3 of 3 bills", 3),
+                           ("View all 3 bills", 3), ("Show all 24", 24), ("View All 9 Bills", 12),
+                           ("Showing 1 to 1,024 of 1,024 entries", 1024)):
+            for press in (True, False):
+                self.assertFalse(site.shows_more([near(said, press=press)], read), said)
+
+    def test_a_count_past_the_rows_read_or_a_later_page_stops(self):
+        for said, read in (("Showing 1 to 3 of 4 entries", 3),
+                           ("Showing 11 to 13 of 13 entries", 13), ("Page 1 of 2", 3),
+                           ("Page 2 of 2", 3), ("Showing 3 of 24 bills", 3),
+                           ("View all 24 bills", 10), ("10 of 24 bills", 10),
+                           ("1 to 3 of 1,024", 3),
+                           ("Show 3 more", 3), ("Show more", 3), ("View all", 3)):
+            self.assertTrue(site.shows_more([near(said)], read), said)
 
     def test_one_page_number_says_there_are_no_others(self):
         for around in ([near("1", press=True)], [near("1", press=True), near("1", press=True)],
                        [near("1", press=True), near("2")],
                        [near("2031", press=True), near("2030", press=True)]):
-            self.assertFalse(site.shows_more(around), around)
+            self.assertFalse(site.shows_more(around, 3), around)
 
     def test_the_pages_own_words_are_no_pager(self):
         # The labels this page is known by, and others like them.
@@ -473,12 +506,12 @@ class ListReady(unittest.TestCase):
                      "Show", "Next Bill Date", "Previous Balance", "Last Payment", "Show details",
                      "$12.34", "Sep 12, 2031", "", None):
             for press in (True, False):
-                self.assertFalse(site.shows_more([near(said, press=press)]), said)
+                self.assertFalse(site.shows_more([near(said, press=press)], 3), said)
         for around in (None, []):
-            self.assertFalse(site.shows_more(around))
+            self.assertFalse(site.shows_more(around, 3))
 
     def test_something_near_the_table_stops_with_what_was_read(self):
-        for around in ([near("Show more", press=True)], [near(pager=True)]):
+        for around in ([near("Show more", press=True)], [near(marks="pagination")]):
             with self.assertRaises(site.ListStopped) as stop:
                 site.collect_download_docs(Page(around=around))
             self.assertIn("pager or a show-more control", str(stop.exception))

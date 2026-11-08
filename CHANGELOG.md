@@ -39,8 +39,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   @JasperDale420. Before merging, since the page no longer says how many
   bills it holds, the read was made to wait for the rows to settle, and the
   list to stop on anything near the table that looks like a pager or a
-  show-more control or on hidden numbers that do not count the rows
-  read, none of which has met the live page yet.
+  show-more control or says there are more bills than were read, and on
+  hidden numbers that do not count the rows read from 0 or 1 at either
+  end, none of which has met the live page yet.
 
 ## [0.61.0] - 2026-11-06
 

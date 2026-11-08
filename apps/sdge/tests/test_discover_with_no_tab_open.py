@@ -15,8 +15,9 @@ list.
 
 A list that may be partial stops too. The live table says nothing of how
 many bills it holds, so rows that have not settled, anything near the table
-that looks like a pager or a show-more control, and hidden row numbers that
-do not run from 1 to the rows read all stop it. The shape headed "the live
+that looks like a pager or a show-more control or says there are more bills
+than were read, and hidden row numbers that do not count the rows read all
+stop it. The shape headed "the live
 table" below comes from the words of the pull request that reported it, and
 every other shape around it is invented, since this project cannot see the
 page.
@@ -141,7 +142,7 @@ TABLES["hidden tall number"] = (
     LIVE_HEAD, LIVE_ROW,
     lambda n: '<td rowspan="3" style="display:none;">1</td>' if n == 0 else "")
 # A hidden cell two columns wide is no row number, under a header that has
-# those two columns, so its digits are not asked to run from 1.
+# those two columns, so its digits are not asked to count the rows.
 TABLES["hidden wide cell"] = (
     LIVE_HEAD.replace("<tr>", '<tr><th colspan="2">Reference</th>'), LIVE_ROW,
     lambda n: '<td colspan="2" style="display:none;">77</td>')
@@ -162,6 +163,9 @@ TABLES["numbers from eleven"] = (
     LIVE_HEAD, LIVE_ROW, lambda n: '<td style="display:none;">%d</td>' % (n + 11))
 TABLES["a gap in the numbers"] = (
     LIVE_HEAD, LIVE_ROW, lambda n: '<td style="display:none;">%d</td>' % (1, 2, 4)[n])
+# Rows counted from 0 and down, which nothing says the live page does not do.
+TABLES["numbers from zero, counting down"] = (
+    LIVE_HEAD, LIVE_ROW, lambda n: '<td style="display:none;">%d</td>' % (2 - n))
 
 PAGER = ('<nav aria-label="Bill pages"><ul class="pagination"><li class="active"><a href="#">1</a>'
          '</li><li><a href="#">2</a></li><li><a href="#">3</a></li></ul></nav>')
@@ -195,6 +199,10 @@ MORE_NEAR = {
     "a Show more span": {"after": '<span class="link">Show more</span>'},
     "a Show more row": {"tail": '<tr><td colspan="7"><a href="#">Show more</a></td></tr>'},
     "a line of what is shown": {"after": "<p>Showing 1 to 3 of 24 bills</p>"},
+    "a line of a later page": {"after": "<p>Page 2 of 2</p>"},
+    "a line of 3 of 24 bills": {"after": "<p>Showing 3 of 24 bills</p>"},
+    "a Next 10 Bills button": {"after": '<button type="button">Next 10 Bills</button>'},
+    "a View All 24 Bills link": {"after": '<p><a href="#">View All 24 Bills</a></p>'},
 }
 
 # What is not near the table, not drawn, or a bill's own.
@@ -210,6 +218,18 @@ NOT_MORE_NEAR = {
     "a detail row's own link": {
         "detail": lambda n: ('<tr><td colspan="7"><a href="#">Show more</a></td></tr>'
                              if n == 0 else "")},
+    "a line that counts the rows read": {"after": "<p>Showing 1 to 3 of 3 entries</p>"},
+    "a line of one page": {"after": "<p>Page 1 of 1</p>"},
+    "a View all that counts the rows read": {"after": '<p><a href="#">View all 3 bills</a></p>'},
+    "the plugin's info line agreeing": {
+        "after": '<div id="billHistoryTable_info">Showing 1 to 3 of 3 entries</div>'},
+    "a wrapper named as a pagination": {"before": '<div class="table-pagination-wrap">',
+                                        "after": "</div>"},
+    "a wrapper with an id that starts with page": {"before": '<div id="pageRow">',
+                                                   "after": "</div>"},
+    "names that only start with page": {
+        "after": ('<div class="pageRight"%s></div><div id="pageRoot"%s></div>'
+                  '<div class="paginated-list"%s></div>' % (SIZED, SIZED, SIZED))},
 }
 
 # Draws the first three rows now and the rest a second and a half later, the
@@ -501,7 +521,8 @@ def test_a_blank_statement_date_stops_the_list_and_takes_no_due_date(attached, s
 
 
 @pytest.mark.parametrize("table", ["two rows", "row headers", "hidden row number",
-                                   "second cells hidden", "numbered column", "hidden wide cell"])
+                                   "second cells hidden", "numbered column", "hidden wide cell",
+                                   "numbers from zero, counting down"])
 def test_the_statement_date_column_is_found_in_other_table_shapes(table, attached, server,
                                                                   tmp_path, capsys):
     """Statement Date as the first cell of the header's second row, the
@@ -662,8 +683,8 @@ def test_rows_drawn_in_two_batches_are_read_once_they_settle(attached, server, t
 
 
 @pytest.mark.parametrize("table", ["numbers from eleven", "a gap in the numbers"])
-def test_hidden_numbers_that_do_not_run_from_1_stop_the_list(table, attached, server, tmp_path,
-                                                             capsys):
+def test_hidden_numbers_that_do_not_count_the_rows_stop_the_list(table, attached, server,
+                                                                tmp_path, capsys):
     """Rows numbered from 11 are a second page, and a gap is a bill the
     table did not draw. Both read as the whole list, and now the bills read
     are kept and the list stops."""
@@ -673,7 +694,7 @@ def test_hidden_numbers_that_do_not_run_from_1_stop_the_list(table, attached, se
     ended, out = discover(tmp_path, attached, capsys)
 
     assert ended == ("exit", 1), folded(out)
-    assert "hidden row numbers do not run from 1 to 3" in folded(out), folded(out)
+    assert "hidden row numbers do not count the 3 rows read" in folded(out), folded(out)
     assert discovered(tmp_path) == LISTED, folded(out)
     assert read_whole(tmp_path) is False
 
