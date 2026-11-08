@@ -885,3 +885,41 @@ def test_an_account_not_started_offers_to_sign_in_not_to_open_its_page(panel):
     acts = panel.evaluate("""() => ['not_started', 'signin'].map(state =>
         present({state, provider: 'Citi', kind: 'DOCUMENT', runnable: true, documents: 0, gaps: [], latest: []}).act)""")
     assert all(a == {"label": "Sign in", "run": "login", "primary": True} for a in acts), acts
+
+
+def test_the_welcome_says_what_its_folder_holds_before_providers_are_chosen(panel):
+    """The folder was checked only at Set up, two steps on; one already
+    holding providers was not noticed; and one in a sync service, which
+    would sync each sign-in, was not said."""
+    reply = {}
+    panel.route("**/api/root/check", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(reply)))
+
+    def press(answer, typed="/Users/me/PaperPull"):
+        reply.clear()
+        reply.update(answer)
+        return panel.evaluate("""async (typed) => {
+            PROVIDERS = {providers: [], templates: true};
+            if ($('newroot').value !== typed) { $('newroot').value = typed; $('newroot').oninput && $('newroot').oninput(); }
+            W.step = 1; W.add = false; wShow();
+            await DO['w-next']();
+            return {step: W.step, said: $('rootcheck').hidden ? '' : $('rootcheck').textContent,
+                    use: !$('w-useroot').hidden, next: $('w-next1').textContent};
+        }""", typed)
+
+    panel.evaluate("() => openWelcome(false).catch(() => {})")
+    bad = press({"ok": False, "problem": "That is a file, not a folder. Choose a folder."})
+    assert bad["step"] == 1 and bad["said"].startswith("That is a file") and not bad["use"]
+
+    found = {"ok": True, "found": ["Chase Statements", "Amex Statements"], "found_count": 2, "synced_by": ""}
+    first = press(found, "/Users/me/Old")
+    assert first["step"] == 1 and first["use"]
+    assert "Found 2 providers already set up here: Chase Statements, Amex Statements" in first["said"]
+    assert press(found, "/Users/me/Old")["step"] == 2, "a second Continue goes on, to add more"
+
+    synced = {"ok": True, "found": [], "found_count": 0, "synced_by": "iCloud Drive"}
+    warned = press(synced, "/Users/me/Library/Mobile Documents/PaperPull")
+    assert warned["step"] == 1 and "in iCloud Drive" in warned["said"] and warned["next"] == "Continue anyway"
+    assert press(synced, "/Users/me/Library/Mobile Documents/PaperPull")["step"] == 2
+
+    assert press({"ok": True, "found": [], "found_count": 0, "synced_by": ""}, "/Users/me/New")["step"] == 2

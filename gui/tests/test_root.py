@@ -717,3 +717,71 @@ def test_a_name_long_enough_to_be_an_attack_is_cut(tmp_path):
     cfg = json.loads((root / "Costco Receipts" / "config.json")
                      .read_text(encoding="utf-8"))
     assert len(cfg["owner"]) == 80
+
+
+# -- the welcome's first step --------------------------------------------------
+
+def _check(body):
+    return asyncio.run(app_module.api_root_check(_Req(body)))
+
+
+def test_the_welcome_says_what_is_wrong_with_a_folder_before_providers_are_chosen(settings, tmp_path):
+    """It was refused only at Set up, two steps on and away from the field."""
+    a_file = tmp_path / "notes.txt"
+    a_file.write_text("x", encoding="utf-8")
+    for body, words in (({"root": ""}, "Paste the folder path first"),
+                        ({"root": "Documents/PaperPull"}, "full path"),
+                        ({"root": str(a_file)}, "is a file, not a folder")):
+        d = _check(body)
+        assert d["ok"] is False and words in d["problem"], body
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="permissions differ")
+def test_a_folder_that_cannot_be_written_is_said_before_set_up(settings, tmp_path):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    try:
+        d = _check({"root": str(locked / "PaperPull")})
+        assert d["ok"] is False and "cannot write there" in d["problem"]
+    finally:
+        locked.chmod(0o700)
+
+
+def test_a_folder_not_made_yet_is_fine_and_holds_nothing(settings, tmp_path):
+    d = _check({"root": str(tmp_path / "new" / "PaperPull")})
+    assert d == {"ok": True, "root": str(tmp_path / "new" / "PaperPull"), "found": [],
+                 "found_count": 0, "synced_by": ""}
+
+
+def test_a_folder_already_holding_providers_names_them(settings, tmp_path):
+    """Typed into the welcome, the obvious move for somebody who already has
+    PaperPull folders, it used to ask them to choose providers again."""
+    _installs(tmp_path, 8)
+    (tmp_path / "Not a provider").mkdir()
+    d = _check({"root": str(tmp_path)})
+    assert d["ok"] and d["found_count"] == 8
+    assert d["found"] == ["App %d" % i for i in range(6)], "the first few, in name order"
+
+
+@pytest.mark.parametrize("parts, service", [
+    (("Library", "Mobile Documents", "com~apple~CloudDocs", "PaperPull"), "iCloud Drive"),
+    (("Library", "CloudStorage", "GoogleDrive-me@example.com", "My Drive", "PaperPull"), "Google Drive"),
+    (("Library", "CloudStorage", "OneDrive-Personal", "PaperPull"), "OneDrive"),
+    (("Dropbox", "PaperPull"), "Dropbox"),
+    (("OneDrive - Contoso", "Documents", "PaperPull"), "OneDrive"),
+    (("Documents", "PaperPull"), ""),
+])
+def test_a_folder_a_sync_service_keeps_is_named_so_sign_ins_are_not_synced(settings, tmp_path, parts, service):
+    root = tmp_path.joinpath(*parts)
+    assert app_module._synced_by(root) == service
+    assert _check({"root": str(root)})["synced_by"] == service
+
+
+def test_set_up_refuses_what_the_welcome_said(settings, tmp_path):
+    """The two use one check, so they never disagree."""
+    a_file = tmp_path / "notes.txt"
+    a_file.write_text("x", encoding="utf-8")
+    with pytest.raises(fastapi.HTTPException) as e:
+        asyncio.run(app_module.api_create(_Req({"root": str(a_file), "providers": ["github"]})))
+    assert e.value.status_code == 400 and e.value.detail == _check({"root": str(a_file)})["problem"]

@@ -1760,6 +1760,70 @@ async def api_sample(request: Request):
             "apps": _looks_like_installs(apps_root())}
 
 
+def _root_problem(raw: str):
+    """The folder a person typed for their PaperPull folder, and "", or None
+    and what is wrong with it, in words to show under the field. A folder
+    that does not exist yet is fine, since setting up makes it, as long as
+    the nearest one above it that does can be written to."""
+    raw = str(raw or "").strip().strip('"')
+    if not raw:
+        return None, "Paste the folder path first."
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        return None, "Give the full path, starting from the drive (C:\\) or from /."
+    if root.exists() and not root.is_dir():
+        return None, "That is a file, not a folder. Choose a folder."
+    above = root
+    while not above.exists() and above.parent != above:
+        above = above.parent
+    if not above.is_dir() or not os.access(above, os.W_OK):
+        return None, "PaperPull cannot write there. Choose a folder you can write to, such as one in Documents."
+    return root, ""
+
+
+# The folders a sync service keeps in step with its cloud, by the name of
+# a folder on the way. A PaperPull folder holds each provider's signed-in
+# browser profile, which the terms say anyone holding it can act as you
+# with, so one inside these is warned of, never refused.
+_SYNCED = (("mobile documents", "iCloud Drive"), ("icloud", "iCloud Drive"), ("onedrive", "OneDrive"),
+           ("dropbox", "Dropbox"), ("googledrive", "Google Drive"), ("google drive", "Google Drive"),
+           ("my drive", "Google Drive"))
+
+
+def _synced_by(root: Path) -> str:
+    """The sync service a folder sits inside, by name, or ""."""
+    for part in root.parts:
+        low = part.lower()
+        for start, name in _SYNCED:
+            if low.startswith(start):
+                return name
+    return ""
+
+
+@app.post("/api/root/check", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+async def api_root_check(request: Request):
+    """What the welcome says of the folder typed in its first step, before
+    the person goes on: what is wrong with it, the providers already set up
+    in it, so they can open those instead of choosing again, and the sync
+    service it sits inside. Changes nothing."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    root, problem = _root_problem((body or {}).get("root"))
+    if problem:
+        return {"ok": False, "problem": problem}
+    found = []
+    if root.is_dir():
+        try:
+            found = [d.name for d in sorted(root.iterdir()) if d.is_dir() and run_result.on_one_line(d.name)
+                     and _entry_script(d)]
+        except OSError:
+            found = []
+    return {"ok": True, "root": str(root), "found": found[:6], "found_count": len(found),
+            "synced_by": _synced_by(root)}
+
+
 @app.get("/api/root", dependencies=[Depends(_same_origin_only)])
 def api_root_get():
     root = apps_root()
@@ -2488,14 +2552,13 @@ async def api_create(request: Request):
         raw = str(server_mode.data_root())
     owner = str((body or {}).get("owner") or "").strip()[:80]
     slugs = (body or {}).get("providers") or []
-    if not raw:
-        raise HTTPException(400, "Paste the folder path first.")
     if not isinstance(slugs, list) or not slugs:
         raise HTTPException(400, "Choose at least one provider.")
-    root = Path(raw).expanduser()
-    if not root.is_absolute():
-        raise HTTPException(400, "Give the full path, starting from the drive "
-                                 "(C:\\) or from /.")
+    # The same check the welcome makes on Continue (_root_problem), so the
+    # two never disagree.
+    root, problem = _root_problem(raw)
+    if problem:
+        raise HTTPException(400, problem)
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as e:

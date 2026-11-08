@@ -1484,8 +1484,48 @@ function closeDock() { document.body.classList.remove('docked'); }
 const W = {step: 1, add: false, picked: new Set(), group: 'all', search: ''};
 // The groups in gui/providers.json, in the order the chips show them.
 const GROUP_ORDER = ['banks', 'shopping', 'bills', 'pay', 'investing', 'loans', 'insurance'];
+// What the welcome's first step says of the folder typed, on Continue,
+// before the person chooses providers for it: what is wrong with it, under
+// the field it is about rather than at Set up two steps on; the providers
+// already set up there, which they can open instead of choosing again; and
+// a sync service it sits inside, said once, after which Continue goes on.
+const ROOTCHECK = {root: '', warned: false};
+function rootSay(text, warn) {
+  $('rootcheck').textContent = text;
+  $('rootcheck').hidden = !text;
+  $('rootcheck').classList.toggle('warn', Boolean(warn));
+}
+async function rootChecked() {
+  const typed = $('newroot').value.trim();
+  if (typed !== ROOTCHECK.root) Object.assign(ROOTCHECK, {root: typed, warned: false});
+  let d;
+  try { d = await postJSON('/api/root/check', {root: typed}); }
+  catch (e) { return true; }  // Set up checks again, and says it there.
+  $('w-useroot').hidden = true;
+  if (!d.ok) { rootSay(d.problem, true); $('newroot').focus(); return false; }
+  if (d.found_count && !W.add) {
+    rootSay('Found ' + many(d.found_count, 'provider') + ' already set up here: ' + d.found.join(', ') +
+      (d.found_count > d.found.length ? ' and more' : '') + '. Open Accounts to use them, or continue to add more.', false);
+    $('w-useroot').hidden = false;
+    if (!ROOTCHECK.warned) { ROOTCHECK.warned = true; return false; }
+  } else if (d.synced_by) {
+    rootSay('This folder is in ' + d.synced_by + '. It will hold each provider\'s sign-in, which should stay on this ' +
+      'computer. Choose a folder outside ' + d.synced_by + ', or press Continue to use it anyway.', true);
+    if (!ROOTCHECK.warned) { ROOTCHECK.warned = true; $('w-next1').textContent = 'Continue anyway'; return false; }
+  } else rootSay('', false);
+  return true;
+}
+// Use a folder that already holds providers as the PaperPull folder, and
+// go to them, rather than choose providers again for it.
+async function useFoundRoot() {
+  try { await postJSON('/api/root', {root: $('newroot').value.trim()}); }
+  catch (e) { rootSay(e.message, true); return; }
+  await load();
+  location.hash = '#/';
+}
 async function openWelcome(add) {
   W.add = add;
+  $('newroot').oninput = () => { rootSay('', false); $('w-useroot').hidden = true; $('w-next1').textContent = 'Continue'; };
   W.step = add ? 2 : W.step || 1;
   if (!add) W.picked = W.picked || new Set();
   if (add) W.picked = new Set();
@@ -2228,7 +2268,11 @@ async function saveRoot() {
   $('rootmsg').textContent = d.apps === 0 ? 'Saved, but no provider folders are there yet. Choose the folder that holds folders such as Chase Statements.'
     : 'Found ' + many(d.apps, 'provider') + '.';
   XL_LOADED = false;
+  // Somebody sent here from the welcome, with no providers before, goes on
+  // to the ones just found, since Settings has nothing more for them.
+  const first = !Object.keys((META && META.apps) || {}).length;
   await load();
+  if (first && d.apps) location.hash = '#/';
 }
 async function setSample(on) {
   try { await postJSON('/api/sample', {on}); }
@@ -2305,11 +2349,13 @@ const DO = {
   'hx-export': () => exportHistory(),
   'hx-import': () => importHistory(),
   'w-import': () => { placeMove(true); $('hxfile').focus(); },
-  'w-next': () => {
+  'w-next': async () => {
     if (W.step === 1 && !$('newroot').value.trim()) { $('newroot').focus(); return; }
+    if (W.step === 1 && !SERVER && !(await rootChecked())) return;
     W.step = Math.min(3, W.step + 1); wShow();
     const h = $(W.step === 2 ? 'w-title2' : 'w-title3'); if (h) h.focus();
   },
+  'w-use-root': () => useFoundRoot(),
   'w-back': () => {
     if (W.add && W.step === 2) { location.hash = '#/'; return; }
     W.step = Math.max(1, W.step - 1); wShow();

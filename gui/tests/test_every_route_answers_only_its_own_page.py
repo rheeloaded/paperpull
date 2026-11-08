@@ -260,6 +260,7 @@ ROUTES = {
     ("GET", "/api/saved-in"): dict(ask="/api/saved-in?app=Shop%20Receipts", desktop="reads", server="reads"),
     ("POST", "/api/sample"): dict(body={"on": True}, desktop="changes", server="changes"),
     ("GET", "/api/root"): dict(desktop="reads", server="reads"),
+    ("POST", "/api/root/check"): dict(body=lambda box: {"root": str(box.elsewhere)}, desktop="reads", server="reads"),
     ("POST", "/api/root"): dict(body=lambda box: {"root": str(box.elsewhere)},
                                 desktop="changes", server="reads"),
     ("GET", "/api/providers"): dict(desktop="reads", server="reads"),

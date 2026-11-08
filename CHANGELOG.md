@@ -28,6 +28,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   person as Accounts does, instead of by folder.
 
 ### Fixed
+- **The welcome's folder step says what it thinks of the folder.** A
+  folder that could not be used was refused only at Set up, two steps on
+  and away from its field. One already holding PaperPull providers, the
+  obvious one to type for somebody who has them, was not noticed: they were
+  asked to choose providers again, and Set up said it set up 0. One inside
+  iCloud Drive, Google Drive, Dropbox or OneDrive was taken without a word,
+  though it holds each provider's signed-in browser. Continue now checks the
+  folder (the same check Set up makes) and says under the field what is
+  wrong, the providers already there with Open Accounts to use them, or the
+  sync service it is in before going on. Already have PaperPull folders, in
+  Settings, goes on to Accounts once it finds them.
 - **The panel calls each thing by one name, and says what to do next.**
   The same thing went by several names from page to page, and some were
   the command line's. The panel now says provider, account, PaperPull
