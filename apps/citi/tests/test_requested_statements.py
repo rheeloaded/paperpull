@@ -301,13 +301,15 @@ def test_a_month_that_is_not_the_records_is_never_asked_for(tmp_path):
     assert page.pdf_bodies() == []
 
 
-def test_a_non_pdf_answer_goes_to_manual_review_through_the_app(make_app):
+def test_a_non_pdf_answer_is_a_failure_through_the_app(make_app):
+    """Nothing was saved, so nothing waits in Manual Review, and the next
+    run asks for the month again (#152)."""
     page = Page(requested={CARD["accountId"]: _requested(_entry("202010"))},
                 pdf={"status": 200, "ct": "application/json", "json": {"error": "x"}})
     app = make_app(page)
     app.cmd_run("all")
     rec = next(r for r in app.progress.data.values() if r.get("archived_month"))
-    assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value and not rec.get("downloaded_ok")
+    assert rec["state"] == State.FAILED.value and not rec.get("downloaded_ok")
     assert not list(app.paths.folder_for("Statement").glob("*.pdf"))
 
 

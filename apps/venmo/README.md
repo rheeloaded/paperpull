@@ -100,7 +100,7 @@ busy month draws ten transactions at a time. Before printing, the app
 presses that month's own "Show more", and nothing else, until every
 transaction is drawn, each press required to draw more and at most 60
 presses. A "Show more" that Venmo has turned off is not pressed, and that
-month is left for review and the next run. Nothing is printed while the
+month counts as failed and is tried again on the next run. Nothing is printed while the
 newest answer heard for the month says more transactions are to come. The
 number of transactions printed is kept in the month's record.
 Each statement remembers a one-way tag of the profile it was listed on.
@@ -116,7 +116,7 @@ month" on the Wallet tab is not enough on its own, since that page also says
 it when Venmo could not load the month, so it counts only when Venmo's own
 answer for the month says the same. The Balance tab shows a month's first ten
 transactions, and its "Show more" does nothing, so a busier Balance month is
-left for review rather than saved with some missing. Venmo's server normally
+not saved, rather than saved with some missing, and counts as failed. Venmo's server normally
 says whether an account has tabs, and the app takes its word. When it says
 nothing, the page can learn of them a moment after it has drawn, so that month
 waits up to five seconds for them, and tabs that first appear after months read

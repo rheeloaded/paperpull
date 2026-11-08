@@ -495,7 +495,8 @@ class App:
         twice = site.colliding_dates(docs)
         if twice:
             print(f"\n!! Two bills carry the date {', '.join(twice)}, so neither can be told apart")
-            print("   from the other. That date is left for Manual Review; every other bill is read.")
+            print("   from the other. Neither bill of that date is fetched, so it is counted as failed.")
+            print("   Every other bill is read.")
         others = site.other_accounts()
         if others:
             print(f"\n!! This sign-in holds {others} other account(s). Only the one Billing & Payment")

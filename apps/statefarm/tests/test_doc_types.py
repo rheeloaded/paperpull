@@ -581,7 +581,7 @@ def _downloading_app(tmp_path, monkeypatch):
     app.paths = types.SimpleNamespace(folder_for=lambda cat: tmp_path, diagnostics=tmp_path)
     app._dl_dir = tmp_path
     app._requests = object()
-    app.stats.update({"duplicate_filenames": 0, "manual_review": 0})
+    app.stats.update({"duplicate_filenames": 0, "manual_review": 0, "failed": 0})
     app.check_session = lambda page: None
     app.progress = _Store()
     app.rows, app.failures, app.asked = [], [], []
@@ -613,7 +613,10 @@ def test_the_download_is_handed_the_census_and_the_file_address(monkeypatch, tmp
     attempt = json.loads((tmp_path / "download-attempt.json").read_text(encoding="utf-8"))
     assert attempt["landed_on"]["host"] == "edocuments.statefarm.com"
     assert attempt["responses"] == [{"note": "an entry"}]
-    assert app.rows == [("Capture failed", "Needs Manual Review")] and len(app.failures) == 1
+    # Nothing was saved, so it is a failure the next run tries again, not
+    # one for review (#152).
+    assert app.rows == [("Capture failed", "Failed")] and len(app.failures) == 1
+    assert app.stats["failed"] == 1 and app.stats["manual_review"] == 0
 
 
 def test_a_record_that_stands_for_two_documents_goes_to_manual_review_untouched(monkeypatch, tmp_path):

@@ -368,7 +368,7 @@ def test_a_print_page_of_another_billing_date_is_not_saved(attached, server, tmp
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
     assert len(saved(tmp_path)) == 2, folded(out)
-    assert out.count("marked for manual review") == 1, folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == 1, folded(out)
 
 
 def test_a_redirect_on_a_print_page_stops_the_run_as_signed_out(attached, server, tmp_path, capsys):
@@ -475,7 +475,7 @@ def test_a_pdf_that_does_not_read_as_the_bill_is_not_kept(attached, server, tmp_
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
     assert saved(tmp_path) == [], folded(out)
-    assert out.count("marked for manual review") == len(BILLS), folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == len(BILLS), folded(out)
     assert not list((tmp_path / "out").rglob("*.drawing"))
 
 

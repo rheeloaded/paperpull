@@ -26,7 +26,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   run tries again, rather than a document for Manual Review, and Anthem's
   documents fetched through its API do the same. Wealthfront recorded a row it
   could not find as having nothing to fetch, so it was never asked for again,
-  and now tries it again too, the records it left so before included. Every
+  and now tries it again too, the records it left so before included, and
+  those in a history moved to another computer. NW Natural and Portland
+  General Electric no longer say a date two bills share is left for Manual
+  Review, since neither bill is fetched and nothing goes there. Every
   document index now holds a row once, so a document that fails the same way
   on several runs has one row. Refusals that save nothing, such as a wrong
   document or a page that asks you to sign in again, are still counted for
@@ -42,8 +45,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   could not load it, so on the Wallet tab those words count only when Venmo's
   own answer says the same. A Balance tab that will not open stops the list,
   unless Venmo's answer says there is no Balance account, and a Balance month
-  past the ten transactions that tab can show goes to review rather than be
-  saved with some missing. All of it comes from Venmo's public page code, and
+  past the ten transactions that tab can show is not saved, rather than be
+  saved with some missing, and counts as failed. All of it comes from Venmo's public page code, and
   no run has met this page yet.
 
 ## [0.61.0] - 2026-11-06

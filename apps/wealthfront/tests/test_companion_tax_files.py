@@ -212,6 +212,22 @@ def test_a_row_an_older_version_left_final_for_no_control_is_asked_again(tmp_pat
     assert app._already_done(doc) is (not asked)
 
 
+def test_a_history_moved_to_another_computer_still_asks_for_such_a_row(monkeypatch, tmp_path):
+    """tools/migrate.py takes a record that is not done as one to ask for,
+    and --minimal carries a record's note only where the note says it is
+    asked for again. A history moved after the update would otherwise hold
+    the row final on the other computer, with no note left to say why."""
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
+    import migrate
+    app = make_app(tmp_path)
+    doc = a_form()
+    rec = dict(doc.to_dict(), state=State.NO_RECEIPT_AVAILABLE.value,
+               notes="Invented earlier note; " + app_mod.NO_CONTROL)
+    assert not migrate._done(rec)
+    app.progress.update(doc.key, migrate._skip_fields(rec, "Wealthfront"))
+    assert app._already_done(doc) is False
+
+
 def test_no_folder_is_made_when_no_download_arrives(tmp_path, monkeypatch):
     app = make_app(tmp_path)
     doc = a_form()

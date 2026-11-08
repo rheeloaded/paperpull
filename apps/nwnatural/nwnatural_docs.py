@@ -519,7 +519,7 @@ class App:
             if done:
                 print("   The bill already saved for that date is kept, and the other is not fetched.")
             else:
-                print("   That date is left for Manual Review. Every other bill is read.")
+                print("   Neither bill of that date is fetched, so it is counted as failed. Every other bill is read.")
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).

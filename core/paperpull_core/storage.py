@@ -23,7 +23,7 @@ from typing import Dict, Iterable, List, Optional
 from . import shared_folder
 from .characters import json_escaped, whole_characters, whole_json
 from .run_reporting import on_one_line, one_line
-from .sheets import read_stored_row, store_value
+from .sheets import read_stored, read_stored_row, store_value
 from .spec import INFRASTRUCTURE_FOLDERS, RECEIPT
 
 # ---------------------------------------------------------------------------
@@ -1322,11 +1322,11 @@ class CsvFile:
                 csv.DictWriter(f, fieldnames=self.columns, quoting=csv.QUOTE_MINIMAL).writeheader()
 
     def _held(self) -> Optional[set]:
-        """Every row the file holds, as it was written, by this file's
-        columns, or None when the file cannot be read as this app writes
-        it. A file a person saved again from Excel in the code page of
-        their Windows, with a name such as José in it, is not UTF-8, and a
-        file with a field past the csv module's limit is not one it reads.
+        """Every row the file holds, as read_stored gives it back, by this
+        file's columns, or None when the file cannot be read as this app
+        writes it. A file a person saved again from Excel in the code page
+        of their Windows, with a name such as José in it, is not UTF-8, and
+        a file with a field past the csv module's limit is not one it reads.
         Appending never read the file before, so such a file is appended to
         as it always was, rather than every row of a run failing to be
         written, with the files that run saved counted as failed."""
@@ -1334,7 +1334,8 @@ class CsvFile:
             return set()
         try:
             with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig", newline="") as f:
-                return {tuple(r.get(c) or "" for c in self.columns) for r in csv.DictReader(f)}
+                return {tuple(r.get(c) or "" for c in self.columns)
+                        for r in (read_stored_row(row) for row in csv.DictReader(f))}
         except (OSError, UnicodeError, csv.Error):
             return None
 
@@ -1347,9 +1348,9 @@ class CsvFile:
             for row in rows:
                 stored = {c: store_value(row.get(c, "")) for c in self.columns}
                 if held is not None:
-                    # As the csv module writes it, None as nothing and the
-                    # rest as its text.
-                    written = tuple("" if v is None else str(v) for v in stored.values())
+                    # As read_stored gives it back from the file, the way
+                    # _held reads the rows already there.
+                    written = tuple(read_stored(v) or "" for v in stored.values())
                     if written in held:
                         continue
                     held.add(written)
