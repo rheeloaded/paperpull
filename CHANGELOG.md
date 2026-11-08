@@ -19,12 +19,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   once the switch is done, and a Download of another document shows, the run now
   reads that card's statements and leaves those year-end summaries out for both
   cards. It names them, counts them for review, never presses their Download for
-  the card on show, whatever the page renames them to, and does not note the
-  list as whole, so Resume says to run Pilot or Run All. A switch that keeps
-  such rows while documents are taken notes the list the same way. Anything else
-  that stays still stops the run, and the failure file now counts what stayed as
-  year-end summaries and as monthly statements, as counts only. No real account
-  has run this yet.
+  the card on show, whatever the page renames them to before the press, and does
+  not note the list as whole, so Resume says to run Pilot or Run All. A switch
+  that keeps such rows while documents are taken notes the list the same way.
+  Rows of a document type the archive does not take leave nothing out. Anything
+  else that stays, or any other row of the old list that shows again once the
+  switch is done, still stops the run, and the failure file now counts what
+  stayed as year-end summaries and as monthly statements, as counts only. No
+  real account has run this yet.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month

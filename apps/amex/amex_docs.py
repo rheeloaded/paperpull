@@ -494,7 +494,8 @@ class App:
                     docs = [r for r in docs if site.name_of(
                         "Year-End Summary" if r.kind == "year-end" else "Statement",
                         r.date_text) not in kept]
-                    self._leave_kept_rows(card["label"], kept)
+                    if self._listed_kind(kept):
+                        self._leave_kept_rows(card["label"], self._listed_kind(kept))
                 if not docs and not site.has_no_statements(page):
                     log.info("card %s has no statements and page did not say so", card["label"])
                     print(f"\n!! Could not find statements for {card['label']}. Discovery was not completed.")
@@ -594,6 +595,20 @@ class App:
         self._cards_left.append(f"{label}, turned off in the card switcher")
         self.stats["manual_review"] += 1
         self.write_failure("switch card", "a card option is turned off")
+
+    def _listed_kind(self, named: set) -> set:
+        """Those of the documents in `named`, as site.kept_on_show names them,
+        that this archive lists at all, by its document types and its start
+        date as _record_rawdoc goes by them. A kept row of a kind it never
+        lists leaves nothing out."""
+        floor = self.args.start_date or self.config.get("default_start_date")
+        listed = set()
+        for kind, when in named:
+            category, date = (("Year-End Summary", f"{when}-12-31") if kind == "ye"
+                              else ("Statement", when))
+            if doc_types.wanted(category, self.config) and not (floor and date < floor):
+                listed.add((kind, when))
+        return listed
 
     def _leave_kept_rows(self, label: str, named: set) -> None:
         """Leave out the documents whose rows stayed on the page through the
@@ -759,23 +774,27 @@ class App:
                 self.stats["manual_review"] += 1
                 print(f"  Could not switch to card {doc.account} - marked for manual review.")
                 return
-            # A switch here, outside a listing, that kept rows leaves the list
-            # noted as one that stopped, as one that stopped here did. A Resume
-            # in a later run makes no switch, so it would know nothing of them.
-            if site.kept_on_show(page) != set() and listing.last(self) != listing.STOPPED:
+            # A switch here, outside a listing, that kept rows of documents the
+            # list holds leaves the list noted as one that stopped, as one that
+            # stopped here did. A Resume in a later run may make no switch to
+            # the card left on show, so it would know nothing of them.
+            kept = site.kept_on_show(page)
+            if kept != set() and (kept is None or self._listed_kind(kept)) \
+                    and listing.last(self) != listing.STOPPED:
                 listing.started(self)
-            # A row that stayed through the switch to this card may bring the
-            # card before's PDF, so it is never pressed for this one.
-            if site.stayed_from_the_card_before(page, doc.category, doc.date):
-                log.info("a row that stayed from the card before was not pressed")
-                self._record(doc, State.NEEDS_MANUAL_REVIEW,
-                             notes="Its row stayed on the page from the card before")
-                self._write_row(doc, "Row from the card before", "Needs Manual Review")
-                self.stats["manual_review"] += 1
-                print("  !! Its Download stayed on the page from the card before, so whose it is "
-                      "could not be told. Nothing was pressed, and it is left for review.")
-                return
-        saved = site.download_document(page, doc.category, doc.date, out_path)
+        # A row that stayed through the switch to this card may bring the card
+        # before's PDF, so it is never pressed for this one (site.KeptRow).
+        try:
+            saved = site.download_document(page, doc.category, doc.date, out_path)
+        except site.KeptRow:
+            log.info("a row that stayed from the card before was not pressed")
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes="Its row stayed on the page from the card before")
+            self._write_row(doc, "Row from the card before", "Needs Manual Review")
+            self.stats["manual_review"] += 1
+            print("  !! Its Download stayed on the page from the card before, so whose it is "
+                  "could not be told. Nothing was pressed, and it is left for review.")
+            return
         if not saved:
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
                          notes="Could not capture the document PDF")

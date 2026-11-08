@@ -98,9 +98,12 @@ changes, and whose PDF it then brings cannot be told. When only such rows stay,
 just as they were, or show again once the switch is done, and a Download of
 another document shows, the run reads that card's statements and leaves out
 whatever those rows are named. It names them, counts them for review and never
-presses their Download for the card on show, whatever the page renames them to.
-The list is then not noted as whole, so a Resume takes nothing, since a later
-run makes no switch and cannot know which rows stayed. A card the site has
+presses their Download for the card on show, whatever the page renames them to
+up to the moment of the press. The list is then not noted as whole, so a Resume
+takes nothing, since a later run may make no switch to the card left on show
+and could not know which rows stayed. Rows of a document type the archive does
+not take leave nothing out. Any other row of the old list that shows again once
+the switch is done stops the run like one that stayed. A card the site has
 turned off in the switcher, a canceled card say, is
 not read. The run names it, counts it for review, writes a failure file and goes
 on with the other cards. A card the switcher holds but

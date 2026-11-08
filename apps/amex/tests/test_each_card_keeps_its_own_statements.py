@@ -436,14 +436,14 @@ def their_tab(attached, amex, width=WIDE):
         browser.close()
 
 
-def config(tmp_path, cdp_url):
+def config(tmp_path, cdp_url, types=("Statement", "Year-End Summary")):
     out = tmp_path / "out"
     out.mkdir(parents=True, exist_ok=True)
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps({
         "owner": "Dana Example", "output_dir": str(out),
         "profile_dir": str(tmp_path / "launched-profile"), "cdp_url": cdp_url,
-        "document_types": ["Statement", "Year-End Summary"], "default_start_date": "",
+        "document_types": list(types), "default_start_date": "",
         "delay_min_seconds": 0, "delay_max_seconds": 0}), encoding="utf-8")
     return cfg
 
@@ -1111,6 +1111,25 @@ def holds_statements_and_leaves_the_summaries(tmp_path, amex, out):
     assert (result["manual_review"], result["new_files"]) == (2, 4), result
     assert noted_whole(tmp_path) is False
     assert not list((tmp_path / "out").rglob("failure-*.json"))
+
+
+def test_kept_rows_of_a_type_the_archive_does_not_take_leave_nothing_out(attached, serve, tmp_path,
+                                                                        capsys):
+    """An archive that takes statements alone lists no year-end summary, so
+    year-end rows kept at a switch leave nothing out. Nothing is counted for
+    review or said to be unread, and the list is noted whole, at the switches
+    of the listing and those made while the statements are taken."""
+    amex = serve(cards=[MANY, FEW], keyed="ye", list_ms=300)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached, types=("Statement",)), capsys)
+    said = folded(out)
+    result = panel_reads(out)
+
+    assert (result["stopped"], result["manual_review"], result["new_files"]) == (0, 0, 4), said
+    for rec in saved(tmp_path).values():
+        assert rec["state"] == State.COMPLETED.value and rec["card"] == digits_of(rec["account"]), rec
+    assert "Not read" not in said and "stayed on the page" not in said, said
+    assert noted_whole(tmp_path) is True
 
 
 def test_a_row_hidden_at_a_switch_and_shown_again_by_its_section_is_left_out(attached, serve,

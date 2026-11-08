@@ -1376,6 +1376,36 @@ def test_the_next_cards_own_rows_are_told_from_the_kept_ones_by_either_name(page
     assert site._new_rows_come(with_new, ["2030"]) is True
 
 
+def test_a_kept_row_renamed_while_its_section_opens_is_not_pressed(page_of, tmp_path):
+    """The check is made at the last moment before the press. Opening the
+    Year End Summary section takes a press and a wait, and the page renames
+    the kept row to the document's name meanwhile, so a check made before the
+    section opened would have let the press through."""
+    pg = page_of("""<!doctype html><meta charset="utf-8">
+<script>window.eval = function () { throw new Error('eval is disabled'); };</script>
+<button type="button" id="ye-head" aria-expanded="false">Year End Summary</button>
+<section id="table-area">%s</section><span id="presses">0</span>
+<script>
+document.getElementById('ye-head').addEventListener('click', (e) => {
+  e.target.setAttribute('aria-expanded', 'true');
+  document.querySelectorAll('.row.ye button').forEach(b => b.setAttribute('data-testid',
+    b.getAttribute('data-testid').replace('/2031/', '/2030/')));
+});
+document.querySelectorAll('.row.ye button').forEach(b => b.addEventListener('click', () => {
+  const p = document.getElementById('presses'); p.textContent = Number(p.textContent) + 1;
+}));
+</script>""" % year_row("2031"))
+    site._note_kept(pg, [pg.locator(".row.ye button").first.element_handle()])
+    try:
+        assert site.stayed_from_the_card_before(pg, "Year-End Summary", "2030-12-31") is False
+        with pytest.raises(site.KeptRow):
+            site.download_document(pg, "Year-End Summary", "2030-12-31", tmp_path / "summary.pdf")
+        assert pg.locator("#ye-head").get_attribute("aria-expanded") == "true"
+        assert pg.locator("#presses").inner_text() == "0"
+    finally:
+        site._KEPT.pop(id(pg), None)
+
+
 def test_a_kept_row_that_cannot_be_read_could_be_any_documents():
     class Broken:
         def get_attribute(self, name, **kwargs):

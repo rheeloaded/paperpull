@@ -1051,13 +1051,19 @@ def _names(tids) -> set:
     return named
 
 
+class KeptRow(Exception):
+    """The Download of a document is a row that stayed on show through the
+    last card switch, so it may bring the card before's PDF, and it was not
+    pressed. The app leaves the document for review and goes on."""
+
+
 def kept_on_show(page) -> Optional[set]:
     """What the rows that stayed through the last card switch on this page
     name now, as _names gives it, whether they show now or not. Empty when no
     switch was made on this page or none stayed, and None when one of them
     could not be read, so what it names could be anything. A row the page has
-    taken away still reads, and what it names is refused all the same, which
-    costs at most a document the next run takes."""
+    taken away still reads, and what it names is refused all the same until
+    the next switch."""
     entry = _KEPT.get(id(page))
     if entry is None or entry[0] is not page:
         return set()
@@ -1621,6 +1627,10 @@ def download_document(page, category: str, date: str, out_path) -> bool:
     if btn is None or not _shows(btn):
         log.info("row download button not found for %s %s (sel=%s)", category, date, sel)
         return False
+    # Read at the last moment before the press, after the sections above
+    # have opened and waited, since the page can rename a kept row meanwhile.
+    if stayed_from_the_card_before(page, category, date):
+        raise KeptRow(thing)
     try:
         pressing.click(page, btn, css=sel, what=button, words=words,
                        step="press a download button")
