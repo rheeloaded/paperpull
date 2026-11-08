@@ -157,9 +157,9 @@ def test_download_resolves_the_id_fresh_and_refuses_a_non_pdf(monkeypatch, tmp_p
         return b"%PDF-1.4 ok"
     monkeypatch.setattr(site, "fetch_pdf", fake_fetch)
     out = tmp_path / "x.pdf"
-    assert site.download_document(None, "Trade Confirmation", "2026-09-15", out, item_hint="stale",
-                                  client_hint="STMT|Brokerage", account="BrokerageLink 6789",
-                                  number_rows=alone)
+    assert "fresh" == site.download_document(
+        None, "Trade Confirmation", "2031-09-15", out, item_hint="stale",
+        client_hint="STMT|Brokerage", account="BrokerageLink 6789", number_rows=alone)
     assert seen == {"item_id": "fresh", "doc_type": "TC", "acct_type": "Brokerage"} and out.read_bytes().startswith(b"%PDF")
     monkeypatch.setattr(site, "fetch_pdf", lambda *a: b"<html>sign in</html>")
     assert not site.download_document(None, "Statement", "2031-08-31", tmp_path / "y.pdf",

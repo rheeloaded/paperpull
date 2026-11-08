@@ -23,13 +23,16 @@ picker offers, and a run scoped with `--year` or `--start-date` asks only
 for the years it wants. Tax forms are listed by tax year and can be dated in
 the year after it, so a scoped run asks for the year before as well, and a
 form is in scope when its own date or the last day of its tax year is.
-`--year 2025` keeps the forms of tax year 2025 and the forms dated in 2025.
+`--year 2025` keeps the forms of tax year 2025 and the forms of 2024 dated in
+2025. A form dated two or more years after its tax year, a late correction
+say, is listed only by a run with no year or dates set.
 
 Each document is identified by its kind, its account and its period end
 date, never by the hub's own id, which is stored as a hint and looked up
 fresh at download time. Filenames carry the account's display name and the
 last four digits of its number, never the whole number. Documents sharing a
-title and a date are told apart by a number. A download finds its own row of
+title and a date are told apart by a number, counted across every account,
+since an account is not part of the key. A download finds its own row of
 a fresh list by the id it keeps, or by that number when the list no longer
 shows the id, and when the list cannot say which row it is, that document
 fails and nothing is saved for it.

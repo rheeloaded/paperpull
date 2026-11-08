@@ -124,7 +124,7 @@ def listed_key(d: dict) -> str:
     as _record_statement_doc reads the row. A history moved to another
     computer carries no discovery.json, and told_apart finds each saved
     number by this key then."""
-    return Document(title=re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement",
+    return Document(title=site.tidy(d.get("title")) or "Statement",
                     category=d.get("category") or "", date=(d.get("date") or "").strip()).key
 
 
@@ -381,7 +381,7 @@ class App:
         """Record one hub row {title, date, account, category, item_id, client_id}. Returns 1 if new.
         A row that cannot be told apart from one saved keeps no id
         (keys.told_apart), so it is never downloaded in its place."""
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
+        title = site.tidy(d.get("title")) or "Statement"
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
             return 0
@@ -403,7 +403,7 @@ class App:
         if floor and not any(day and day >= floor for day in scope_days(date, d.get("tax_year"))):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
+        account = site.tidy(d.get("account"))
         acct_short = re.sub(r"\b(COMBINED|ACCOUNTS?)\b", "", account, flags=re.I)
         acct_short = re.sub(r"\s+", " ", acct_short).strip()
         if acct_short.isupper():
@@ -633,6 +633,9 @@ class App:
             self.stats["manual_review"] += 1
             print("  Could not capture this document - marked for manual review.")
             return
+        # The id its bytes came from, which may not be the one discovery
+        # kept. A later list knows the saved document by it.
+        doc.item_id = saved
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
         # else is the document. Anything more is kept whole for a person to

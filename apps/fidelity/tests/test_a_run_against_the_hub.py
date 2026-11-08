@@ -409,6 +409,43 @@ def test_a_row_not_told_apart_writes_no_id_over_anything(home):
     assert records[FORM + "#1"]["item_id"] == ""
 
 
+@pytest.mark.parametrize("account,name,kept", [("Roth  IRA", "Form 1099-R", "Roth IRA 0022"),
+                                               ("Roth", "Form 1099-R ", "Roth 0022"),
+                                               ("Roth", "Form  1099-R", "Roth 0022")])
+def test_a_name_with_spaces_to_tidy_is_still_its_own_records(home, account, name, kept):
+    """The record keeps a name tidied and the fresh row was read raw, so a
+    doubled or trailing space missed, its id read as another document's,
+    and every new document failed. The record keeps the names as main
+    writes them."""
+    home.hub.accounts = [dict(TWO, name=account)]
+    home.hub.forms = [form("F30", home.hub.accounts[0], name=name)]
+    code, _said = home.run_all()
+    assert code == 0
+    assert home.held() == {FORM: "F30"}
+    record = home.store("discovery.json")[FORM]
+    assert (record["title"], record["account"]) == ("2030 Form 1099-R", kept)
+
+
+def test_a_record_keeps_the_id_its_bytes_came_from(home):
+    """An account renamed while a new form waited. Its download found the new
+    form by number and kept the id discovery had given it, the saved form's,
+    so the next list gave that id to the saved form and the new one came
+    down again under a new number."""
+    home.hub.accounts = [dict(ONE)]
+    home.hub.forms = [form("X", home.hub.accounts[0])]
+    home.run_all()
+    home.hub.forms.insert(0, form("Y", home.hub.accounts[0]))
+    home.run("--discover")
+    home.hub.accounts[0]["name"] = "Trading"
+    home.run_all()
+    assert home.on_disk() == ["X", "Y"]
+    assert {key: rec["item_id"] for key, rec in home.store("progress.json").items()} == {
+        FORM: "X", FORM + "#1": "Y"}
+    home.run_all()
+    assert home.fetched_ids() == []
+    assert home.on_disk() == ["X", "Y"]
+
+
 # -- an archive from before this change --------------------------------------
 
 def test_a_second_accounts_old_statement_resolves_to_its_own_bytes(home):
@@ -533,6 +570,17 @@ def test_a_scope_keeps_a_form_by_its_date_or_its_tax_year(home, flags, config, s
     assert code == 0
     assert home.on_disk() == saved
     assert sorted(set(home.hub.tax_years_asked), reverse=True) == asked
+
+
+def test_a_form_dated_two_years_late_is_listed_only_by_a_run_with_no_scope(home):
+    """As the README and the changelog say. A scoped run asks its years and
+    the one before, and no earlier."""
+    home.hub.forms = [form("F28", ONE, year=2028, day="2030-06-01")]
+    home.run_all("--year", "2030")
+    assert home.on_disk() == []
+    assert 2028 not in home.hub.tax_years_asked
+    home.run_all()
+    assert home.on_disk() == ["F28"]
 
 
 def test_a_form_dated_before_a_floor_inside_its_tax_year_is_kept(home):

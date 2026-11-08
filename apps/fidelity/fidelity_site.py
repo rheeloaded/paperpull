@@ -453,6 +453,13 @@ def _row(kind: str, category: str, d: dict, accounts: dict, doc_type: str,
     }
 
 
+def tidy(text) -> str:
+    """A name as a record keeps it, every run of spaces one space and none at
+    either end. A fresh row is read through this too, or a name with a doubled
+    space was never its own record's."""
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
 def _rows_of(items: List[dict], kind: str, category: str, accounts: dict, doc_type: str,
              year: int) -> List[dict]:
     """The documents of one answer. Discover and a download's fresh listing
@@ -489,6 +496,8 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
     if "Tax Document" in wanted:
         # A tax year is listed once it has ended, and its forms can be dated
         # in the next one, so a scope that holds a year asks the year before.
+        # A form dated two or more years after its tax year is listed only by
+        # a run with no scope.
         for y in range(this_year - 1, FIRST_YEAR - 1, -1):
             if keep is not None and not (keep(str(y)) or keep(str(y + 1))):
                 continue
@@ -537,8 +546,8 @@ def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0,
         doc_type, kind, category = "TAX", "Tax Form", "Tax Document"
     rows = _rows_of(items, kind, category, accounts, doc_type, year)
     numbers = number_rows(rows)
-    alike = [i for i, r in enumerate(rows) if r["title"] == title and r["date"] == date
-             and r["account"] == (account or COMBINED)]
+    alike = [i for i, r in enumerate(rows) if tidy(r["title"]) == title and r["date"] == date
+             and tidy(r["account"]) == (account or COMBINED)]
     mine = [i for i in alike if numbers[i][0] == occurrence]
     if not mine:
         # The stored id is left as the way to it, unless another document
@@ -581,10 +590,11 @@ def fetch_pdf(page, item_id: str, doc_type: str, acct_type: str) -> bytes:
 
 def download_document(page, title: str, date: str, out_path: Path, occurrence: int = 0,
                       item_hint: str = "", client_hint: str = "", account: str = "",
-                      tax_year: int = 0, *, number_rows, twins: int = 1) -> bool:
-    """Save one document. Looks it up again by kind, account and date
-    first, and falls back to the stored id only when the listing no longer
-    shows it. Which row is its own is resolve_item's to say, and it raises
+                      tax_year: int = 0, *, number_rows, twins: int = 1) -> str:
+    """Save one document, and answer the id its bytes came from, or "" when
+    nothing was saved. Looks it up again by kind, account and date first,
+    and falls back to the stored id only when the listing no longer shows
+    it. Which row is its own is resolve_item's to say, and it raises
     NotToldApart when that cannot be told."""
     found = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                          tax_year=tax_year, number_rows=number_rows, twins=twins)
@@ -592,15 +602,15 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
     client = (found or {}).get("client_id") or client_hint or "STMT|Brokerage"
     if not item_id:
         log.warning("no id for %s %s", title, date)
-        return False
+        return ""
     doc_type, _, acct_type = client.partition("|")
     data = fetch_pdf(page, item_id, doc_type or "STMT", acct_type or "Brokerage")
     if not data.startswith(b"%PDF"):
         log.warning("not a PDF for %s %s (%d bytes)", title, date, len(data))
-        return False
+        return ""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
-    return True
+    return item_id
 
 
 def _page_summary(page) -> dict:
