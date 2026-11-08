@@ -845,6 +845,16 @@ async function whereSaved(app, account) {
     renderAll();
   } catch (e) { /* the run's own page still says what it saved */ }
 }
+// Where a file to attach goes: a new problem report for this provider, on
+// the form for an app that stopped working, with the provider filled in.
+// A link the person follows in their own browser, carrying the provider's
+// name and nothing from the account; PaperPull itself sends nothing.
+const ISSUES = 'https://github.com/rheeloaded/paperpull/issues';
+function reportLink(r) {
+  const href = r.slug ? ISSUES + '/new?' + new URLSearchParams({template: 'app-broke.yml',
+    title: '[Broken] ' + r.slug + ', ', app: r.slug}) : ISSUES;
+  return '<a class="btn btn-s" href="' + esc(href) + '" target="_blank" rel="noopener">Report a problem</a>';
+}
 // How many files a run saved. Its own result counts them, and the names
 // read from its new-this-run.txt can be fewer (one name for two files of
 // that name, 500 at most) or none when the list could not be read, so a run
@@ -1118,8 +1128,9 @@ function renderRun() {
       // The server's folder is on the server, so the file comes to the browser.
       html += '<div class="keepopen"><p>The file holds counts and page states, never text from your account.</p>' +
         (SERVER ? '<button type="button" class="btn btn-s" data-do="report-download" data-key="' + key + '" data-action="' +
-          esc(RUN.action) + '">' + sv(P.download) + 'Download the file to attach</button></div>'
-          : '<button type="button" class="btn btn-s" data-do="reveal" data-what="diagnostics" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>');
+          esc(RUN.action) + '">' + sv(P.download) + 'Download the file to attach</button>'
+          : '<button type="button" class="btn btn-s" data-do="report-reveal" data-kind="' + esc(RUN.action) + '" data-key="' + key + '">' +
+            sv(P.folder) + 'Show the file</button>') + reportLink(r) + '</div>';
     }
     html += techDetails(!o.clean && !RUN.failure) + '</section>';
     if (o.attention && r) {
@@ -1141,8 +1152,9 @@ function renderRun() {
       html += '<section class="callout plain" id="failnote" style="margin-top:20px">' + sv(P.report, 22) + '<div class="text">' +
         '<h2>A file about what went wrong</h2><p>This run wrote a file about what went wrong. It holds counts and page states, ' +
         'never text from your account. Read it, then attach it to a problem report.</p>' +
-        '<button type="button" class="btn btn-s" id="failreveal" data-do="failure">' + (SERVER ? 'Download the file to attach' : 'Show the file to attach') +
-        '</button></div></section>';
+        '<div class="row-actions"><button type="button" class="btn btn-s" id="failreveal" data-do="failure">' +
+        (SERVER ? 'Download the file to attach' : 'Show the file to attach') + '</button>' + (r ? reportLink(r) : '') +
+        '</div></div></section>';
     }
   }
   html += queueHeld();
@@ -2330,7 +2342,13 @@ const DO = {
   'restore': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRestore(r); },
   'rename': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRename(r); },
   'review': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openReview(r); },
-  'support': el => { DLG_ROW = rowByKey(el.dataset.key); closeMenus(); if (DLG_ROW) $('dlg-support').showModal(); },
+  'support': el => {
+    DLG_ROW = rowByKey(el.dataset.key); closeMenus();
+    if (!DLG_ROW) return;
+    $('sp-signsay').textContent = 'Sign in to the provider first and leave its window on the page that has your ' +
+      'documents, so the report reads the right page.';
+    $('dlg-support').showModal();
+  },
   'record': el => { DLG_ROW = rowByKey(el.dataset.key); closeMenus(); if (DLG_ROW) $('dlg-record').showModal(); },
   'person': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openPerson(r); },
   'remove': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRemove(r); },
@@ -2365,6 +2383,18 @@ const DO = {
   'rn-apply': () => rnRun(true),
   'rv-go': () => rvGo(),
   'sp-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'diagnose'); },
+  // The report reads a signed-in page, so the dialog that says to sign in
+  // first opens the sign-in window itself, and stays open for the report.
+  'sp-signin': () => {
+    if (startRun(DLG_ROW, 'login', {stay: true})) $('sp-signsay').textContent = 'The sign-in window is opening. ' +
+      'Sign in there and go to the page that has your documents, then make the report.';
+  },
+  'report-reveal': async el => {
+    const r = rowByKey(el.dataset.key);
+    if (!r) return;
+    try { await postJSON('/api/failure/reveal', {app: r.app, account: r.account, kind: el.dataset.kind}); }
+    catch (e) { notice(e.message, 'warn'); }
+  },
   'rc-go': () => { $('dlg-record').close(); startRun(DLG_ROW, 'record'); },
   'tm-go': () => tmGo(),
   'dock-close': () => closeDock(),

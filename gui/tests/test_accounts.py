@@ -949,3 +949,45 @@ def test_moving_says_the_pdfs_stay_unless_the_folders_are_copied(panel):
     assert file_.startswith("No way to copy the folders?") and "no PDF" in file_
     assert "The PDFs stay on the other computer: copy them over, or use Restore deleted files" in said["welcome"]
     assert said["aside"].startswith("Copy your PaperPull folder from the old computer, then type where it is above")
+
+
+def test_a_report_lands_on_its_file_and_where_to_send_it(panel):
+    """About 15 steps from More to an attached file: the dialog said to sign
+    in with no way to, the folder held several files, and the place to send
+    it was under Settings, About."""
+    got = panel.evaluate("""() => {
+        const r = {app: 'Chase Statements', account: 'primary', provider: 'Chase', slug: 'chase', kind: 'DOCUMENT',
+                   state: 'current', runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'diagnose', scope: {year: '', start: '', end: ''}, again: false, lines: [],
+                            result: null, saved: [], code: '0', refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date()});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const keep = document.querySelector('#view-run .keepopen');
+        const show = keep.querySelector('[data-do="report-reveal"]');
+        const link = keep.querySelector('a');
+        // The dialog's own sign-in, which keeps the person, and the dialog, where they are.
+        let asked = null;
+        const real = startRun;
+        startRun = (row, action, opts) => { asked = [row.app, action, opts]; return true; };
+        DLG_ROW = r;
+        DO['sp-signin']();
+        startRun = real;
+        return {kind: show && show.dataset.kind, text: show && show.textContent, href: link.href, target: link.target,
+                rel: link.rel, asked, said: $('sp-signsay').textContent, plain: reportLink({}).match(/href="([^"]+)"/)[1]};
+    }""")
+    assert got["kind"] == "diagnose" and got["text"] == "Show the file"
+    url = got["href"]
+    assert url.startswith("https://github.com/rheeloaded/paperpull/issues/new?")
+    assert "template=app-broke.yml" in url and "app=chase" in url and "title=%5BBroken%5D+chase%2C+" in url
+    assert (got["target"], got["rel"]) == ("_blank", "noopener")
+    assert got["asked"] == ["Chase Statements", "login", {"stay": True}]
+    assert got["said"].startswith("The sign-in window is opening.")
+    assert got["plain"] == "https://github.com/rheeloaded/paperpull/issues", "no slug, the issue list"
+
+
+def test_every_row_carries_the_name_its_issues_use(root):
+    rows = _rows()
+    assert rows and all(r.get("slug") for r in rows.values())

@@ -28,6 +28,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   person as Accounts does, instead of by folder.
 
 ### Fixed
+- **A support report takes three steps, not fifteen.** Its dialog said to
+  sign in first with no way to, so a person cancelled, signed in and came
+  back through More; Open folder then opened a folder of two or three
+  files to pick the one to attach from; and where to send it was under
+  Settings, About. The dialog now opens the sign-in window itself and stays
+  open for the report, Show the file selects the survey or recording in
+  the file manager, and Report a problem opens a new problem report for
+  that provider, on the form for an app that stopped working with the
+  provider filled in. The note about a file a failed run wrote offers the
+  same link. A link the person follows, carrying the provider's name only.
 - **Moving to another computer says what comes with you.** The Move card
   offered only a history file, which brings no PDF and marks every document
   it lists as downloaded, so Get new never fetched them, and nothing said

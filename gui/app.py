@@ -1474,6 +1474,9 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     return {
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
+        # The name its issues use, chase or amex, which a problem report
+        # is filed under (static/app.js reportLink).
+        "slug": slug,
         "gets": cards.get(slug, {}).get("documents", ""),
         "group": cards.get(slug, {}).get("group", ""),
         "kind": (row or {}).get("kind") or kind,
@@ -1602,6 +1605,7 @@ def account_rows() -> list:
                 running = _RUNS.get((name, account))
                 row = {
                     "app": name, "account": account, "provider": provider, "owner": "",
+                    "slug": slug,
                     "gets": cards.get(slug, {}).get("documents", ""),
                     "group": cards.get(slug, {}).get("group", ""), "kind": kind,
                     "state": "nostatus", "documents": 0, "newest": None, "checked": None,
@@ -3089,16 +3093,24 @@ def api_failure_latest(app: str = "", account: str = "primary"):
 
 @app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
 async def api_failure_reveal(request: Request):
-    """Show that file in the file manager. Takes no path from the page,
-    only the app name, and finds the file here the same way."""
+    """Show that file in the file manager, selected. Takes no path from the
+    page, only the app name and which kind of file, the failure file, or a
+    support report's survey or a recording (REPORT_FILES) by the action
+    that wrote it, and finds the file here the same way, so a person sent
+    to attach one lands on it rather than among the files beside it."""
     body = await request.json()
     name = str((body or {}).get("app") or "")
+    kind = str((body or {}).get("kind") or "failure")
+    if kind != "failure" and kind not in REPORT_FILES:
+        raise HTTPException(400, "unknown kind of file")
     apps = discover_apps()
     if name not in apps:
         raise HTTPException(404, "That account is no longer here. Reload the page.")
-    found = _latest_failure(apps[name], _account_named(apps[name], (body or {}).get("account")))
+    pattern = REPORT_FILES.get(kind, "failure-*.json")
+    found = _latest_failure(apps[name], _account_named(apps[name], (body or {}).get("account")), pattern)
     if found is None:
-        raise HTTPException(404, "There is no recent file about what went wrong.")
+        raise HTTPException(404, "There is no recent file about what went wrong." if kind == "failure"
+                            else "There is no recent file to attach. Make the report again.")
     try:
         if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,", str(found)])

@@ -175,3 +175,34 @@ def test_the_page_tells_the_tester_what_to_do_with_it():
     assert "Show the file to attach" in page
     assert "never text from your account" in page
     assert "checkFailure(RUN.app, RUN.account)" in page
+
+
+# -- a support report or recording, shown itself ----------------------------------
+
+def test_a_support_report_or_recording_is_shown_itself_not_its_folder(install, monkeypatch):
+    """After Make the report, Open folder opened a folder of two or three
+    files to pick the one to attach from. It now selects that one."""
+    opened = []
+    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd, *a, **k: opened.append(cmd))
+    wrote(install, "failure-pilot-20260922-174903.json")
+    survey = wrote(install, "survey-20260922-175000.json")
+    wrote(install, "detail-20260922-175000.json")
+    recording = wrote(install, "recording.json")
+    assert reveal({"app": "costco", "kind": "diagnose"}) == {"ok": True}
+    assert reveal({"app": "costco", "kind": "record"}) == {"ok": True}
+    assert str(survey) in " ".join(opened[0]) and str(recording) in " ".join(opened[1])
+
+
+def test_a_report_not_written_says_to_make_it_again(install):
+    with pytest.raises(HTTPException) as e:
+        reveal({"app": "costco", "kind": "diagnose"})
+    assert e.value.status_code == 404 and "Make the report again" in e.value.detail
+
+
+@pytest.mark.parametrize("kind", ["../x", "survey-*.json", "verify"])
+def test_only_the_named_kinds_are_shown(install, kind):
+    """The page names a kind, never a pattern or a path."""
+    wrote(install, "survey-20260922-175000.json")
+    with pytest.raises(HTTPException) as e:
+        reveal({"app": "costco", "kind": kind})
+    assert e.value.status_code == 400
