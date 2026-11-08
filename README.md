@@ -828,14 +828,14 @@ first version takes no programming (see
 That provider may stop working until it is repaired. Each provider is a
 small app of its own, and everything it knows about a site lives in one
 file, so a redesign breaks only that provider and the repair is usually
-small. Make a support report from its **More** menu and
+small. Press **Get help** in its **More** menu, make a support report, and
 [report it](https://github.com/rheeloaded/paperpull/issues/new?template=app-broke.yml).
 Documents you already saved stay saved.
 
 ### Is a support report safe to attach to an issue?
 
-Yes, it is built for that. **Make a support report**, under a provider's
-**More** menu, saves a file whose name starts with `survey-`. It holds
+Yes, it is built for that. **Make the report**, under **Get help** in a
+provider's **More** menu, saves a file whose name starts with `survey-`. It holds
 counts and states and no text from your account, and it is the file to
 attach. Never attach a password, a browser profile folder, a token or an
 unredacted statement to anything you post.

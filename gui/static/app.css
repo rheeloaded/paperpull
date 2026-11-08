@@ -515,6 +515,10 @@ dialog::backdrop { background: var(--overlay); }
 .dlg-head h2 { font-size: 19px; line-height: 1.25; }
 .dlg-head p { margin-top: 6px; color: var(--ink-2); font-size: 14px; }
 .dlg-body { padding: var(--s5) var(--s6) var(--s2); display: flex; flex-direction: column; gap: var(--s4); }
+#dlg-support .hint { margin: 4px 0 var(--s2); }
+#dlg-support .spwhat { margin-top: var(--s3); }
+#dlg-support .spwhat summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+#dlg-support .spwhat p { font-size: 13px; color: var(--muted); }
 .dlg-foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; padding: var(--s4) var(--s6) var(--s6); }
 .dlg-foot .btn { min-width: 96px; }
 /* The terms keep I understand, and the sentence saying what it accepts, in

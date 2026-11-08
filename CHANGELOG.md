@@ -201,6 +201,12 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **One Get help under More.** Make a support report and Record steps for
+  support were two items and two dialogs, and the file a failed run had
+  just written was a third place to look. Get help opens one dialog that
+  offers a recent failure file first, then the support report with its
+  sign-in button, then recording as the next step. What each file holds
+  moved under What's in the file?, every word of it kept.
 - **A run can be followed from the tab, and a round leaves you where you
   are.** The browser tab's title shows a run's progress and how it ended,
   so somebody working in the provider's window can see it. A run that ends

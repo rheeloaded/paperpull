@@ -44,7 +44,6 @@ const P = {
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
   report: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
   file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
-  record: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/>',
   person: '<circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/>',
   box: '<path d="M3 7h18v4H3zM5 11v8h14v-8M10 15h4"/>', plus: '<path d="M12 5v14M5 12h14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -620,7 +619,7 @@ function closeMenus() {
   for (const b of document.querySelectorAll('[aria-expanded="true"][data-do="menu"]')) b.setAttribute('aria-expanded', 'false');
 }
 function menuItem(doIt, key, ico, title, line, disabled) {
-  return '<button type="button" role="menuitem" class="mi' + (doIt === 'run' || doIt === 'record' || doIt === 'support' ||
+  return '<button type="button" role="menuitem" class="mi' + (doIt === 'run' || doIt === 'support' ||
     doIt === 'rename' || doIt === 'review' || doIt === 'restore' ? ' starts' : '') + '" data-do="' + doIt + '" data-key="' + esc(key) + '"' +
     (disabled ? ' disabled' : '') + (doIt === 'run' ? ' data-action="verify"' : '') + '>' + sv(ico, 20) +
     '<span><b>' + esc(title) + '</b><span>' + esc(line) + '</span></span></button>';
@@ -643,8 +642,7 @@ function openMenu(btn) {
   html += menuItem('run', k, P.shield, 'Check saved files', 'Checks every PDF already saved. Downloads nothing');
   if (!SERVER && !sample) html += menuItem('reveal', k, P.folder, 'Open folder', 'Where ' + whose(r.provider) + ' files are saved');
   html += '<div class="rule" role="separator"></div>' +
-    menuItem('support', k, P.report, 'Make a support report', "Reads " + whose(r.provider) + " page and saves a file with no account details, to send with a problem report") +
-    menuItem('record', k, P.record, 'Record steps for support', 'Watches while you click your way to a document. Downloads nothing and records no typing');
+    menuItem('support', k, P.report, 'Get help', 'Makes a file with no account details, to send with a problem report');
   if (!sample) {
     html += '<div class="rule" role="separator"></div>' +
       menuItem('person', k, P.person, 'Add another person', 'Their own sign-in window, folder and download history') +
@@ -1160,17 +1158,30 @@ async function fetchDownload(url) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
 }
-async function revealFailure() {
-  if (!failureApp) return;
+async function revealFailure(app = failureApp, account = failureAccount) {
+  if (!app) return;
   if (SERVER) {
-    await fetchDownload('/api/failure/download?' + new URLSearchParams({app: failureApp, account: failureAccount}).toString());
+    await fetchDownload('/api/failure/download?' + new URLSearchParams({app, account}).toString());
     return;
   }
   try {
     await fetch('/api/failure/reveal', { method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: failureApp, account: failureAccount }) });
+      body: JSON.stringify({ app, account }) });
   } catch (e) { /* the file is still there */ }
+}
+// A recent failure file is what helps most, so the dialog offers it first.
+// Asked of the server each time the dialog opens, for the account it was
+// opened on, and shown only while that is still the account it is open on.
+async function offerFailure(r) {
+  $('sp-failure').hidden = true;
+  try {
+    const d = await getJSON('/api/failure/latest?' + new URLSearchParams({app: r.app, account: r.account}));
+    if (!d.found || DLG_ROW !== r) return;
+    $('sp-failacts').innerHTML = '<button type="button" class="btn btn-s" data-do="sp-failure">' +
+      (SERVER ? 'Download the file to attach' : 'Show the file to attach') + '</button>' + reportLink(r);
+    $('sp-failure').hidden = false;
+  } catch (e) { /* nothing to offer */ }
 }
 function renderRun() {
   const body = $('r-body');
@@ -2591,11 +2602,14 @@ const DO = {
   'restore': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRestore(r); },
   'rename': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRename(r); },
   'review': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openReview(r); },
+  // Record steps is a section of Get help, so its step opens that sheet.
+  'record': el => DO.support(el),
   'support': el => {
     DLG_ROW = rowByKey(el.dataset.key); closeMenus();
     if (!DLG_ROW) return;
     $('sp-signsay').textContent = 'Sign in to the provider first and leave its window on the page that has your ' +
       'documents, so the report reads the right page.';
+    offerFailure(DLG_ROW);
     // PaperPull Server's sign-in window is docked in this page, and nothing
     // outside a dialog that is open can be pressed, so there the dialog
     // offers no sign-in of its own.
@@ -2604,7 +2618,6 @@ const DO = {
     $('sp-log').textContent = '';
     $('dlg-support').showModal();
   },
-  'record': el => { DLG_ROW = rowByKey(el.dataset.key); closeMenus(); if (DLG_ROW) $('dlg-record').showModal(); },
   'person': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openPerson(r); },
   'remove': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRemove(r); },
   'reveal': async el => {
@@ -2661,7 +2674,8 @@ const DO = {
     try { await postJSON('/api/failure/reveal', {app: r.app, account: r.account, kind: el.dataset.kind}); }
     catch (e) { notice(e.message, 'warn'); }
   },
-  'rc-go': () => { $('dlg-record').close(); startRun(DLG_ROW, 'record'); },
+  'rc-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'record'); },
+  'sp-failure': () => { if (DLG_ROW) revealFailure(DLG_ROW.app, DLG_ROW.account); },
   'tm-go': () => tmGo(),
   'request': el => openRequest(el.dataset.kind, el.id === 'w-request' ? W.search.trim() : ''),
   'rq-close': () => $('dlg-request').close(),
