@@ -488,7 +488,9 @@ class ListReady(unittest.TestCase):
                            ("Page 2 of 2", 3), ("Showing 3 of 24 bills", 3),
                            ("View all 24 bills", 10), ("10 of 24 bills", 10),
                            ("1 to 3 of 1,024", 3),
-                           ("Show 3 more", 3), ("Show more", 3), ("View all", 3)):
+                           ("Show 3 more", 3), ("Show more", 3), ("View all", 3),
+                           # A later page than the line counts does not add up.
+                           ("Page 2 of 1", 3)):
             self.assertTrue(site.shows_more([near(said)], read), said)
 
     def test_one_page_number_says_there_are_no_others(self):
