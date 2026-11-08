@@ -24,6 +24,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   past the ten transactions that tab can show goes to review rather than be
   saved with some missing. All of it comes from Venmo's public page code, and
   no run has met this page yet.
+- **SDG&E reads its Billing History again.** Since November 6 each bill
+  row on My Energy Center starts with a cell the page hides, holding the
+  row's number, and the header has no cell above it. Read cell by cell,
+  every row was one column wider than the header, so Discover, Pilot and a
+  full run stopped on the first bill, saying it did not line up with the
+  header. That first cell is now passed over when it is a plain hidden cell
+  holding only a number, the row is exactly one column wider than the
+  header, and Statement Date is the header's first column. Any other hidden
+  cell still counts as a column, so a table that hides some of its columns
+  is read by where each cell sits, and stops the list when its cells do not
+  line up. The contributor's own account listed nine bills, the eight the
+  app had recorded keeping their ids and dates. Contributed by
+  @JasperDale420. Before merging, since the page no longer says how many
+  bills it holds, the read was made to wait for the rows to settle, and the
+  list to stop on anything near the table that looks like a pager or a
+  show-more control or says there are more bills than were read, and on
+  hidden numbers that do not count the rows read from 0 or 1 at either
+  end, none of which has met the live page yet.
 
 ## [0.61.0] - 2026-11-06
 
