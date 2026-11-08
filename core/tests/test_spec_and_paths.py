@@ -167,3 +167,60 @@ def test_config_saved_with_a_bom_still_loads(tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text('{"owner": "Sam"}', encoding="utf-8-sig")
     assert storage.load_config(cfg)["owner"] == "Sam"
+
+
+def test_relative_output_dir_resolves_to_app_folder_when_cwd_is_outside(tmp_path, monkeypatch):
+    """When a script is run from the parent/root folder, output_dir='.' must resolve
+    to the app's own directory, not the parent/cwd."""
+    app_dir = tmp_path / "Discover Statements"
+    app_dir.mkdir()
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.json").write_text('{"output_dir": "."}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == app_dir.resolve()
+    paths.ensure()
+    assert (app_dir / "Backups").is_dir()
+    assert (app_dir / "Statements").is_dir()
+    assert not (tmp_path / "Backups").exists()
+    assert not (tmp_path / "Statements").exists()
+
+
+def test_relative_output_dir_sibling_resolves_relative_to_app_folder(tmp_path, monkeypatch):
+    """Multi-account configs like config.biz.json often specify '../App - biz'."""
+    app_dir = tmp_path / "American Express Statements"
+    app_dir.mkdir()
+    biz_dir = tmp_path / "American Express Statements - biz"
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.biz.json").write_text(
+        '{"output_dir": "../American Express Statements - biz"}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.biz.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == biz_dir.resolve()
+
+
+def test_documents_dir_for_matches_relative_output_dir_when_run_from_outside(tmp_path, monkeypatch):
+    """documents_dir mapping works correctly even when output_dir='.' is loaded from outside."""
+    app_dir = tmp_path / "Discover Statements"
+    app_dir.mkdir()
+    docs = tmp_path / "0GDrive" / "Discover Statements"
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.json").write_text(
+        f'{{"output_dir": ".", "documents_dir": "{docs.as_posix()}"}}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == app_dir.resolve()
+    assert paths.documents == docs.resolve()
+
