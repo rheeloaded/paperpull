@@ -1333,6 +1333,76 @@ def test_a_read_that_fails_never_counts_as_the_old_list_gone():
     assert site._still_showing(SimpleNamespace(wait_for_timeout=lambda ms: None), [broken]) == [broken]
 
 
+def year_row(year: str, attr: str = "data-testid") -> str:
+    """A year-end summary's row, its Download twice like statement_row's."""
+    tid = "axp-pdf-statements/common/Table/year-end-summary/%s/download-button" % year
+    return ('<div class="row ye"><button class="dl" %s="%s">Download</button>'
+            '<button class="dl mobile" style="display:none" %s="%s">Download</button></div>'
+            % (attr, tid, attr, tid))
+
+
+def test_a_kept_row_renamed_after_the_switch_is_refused_by_its_name_then(page_of, monkeypatch):
+    """The year-end row stays through the switch as it was, and the page
+    renames it to the next card's year later, with the card before's PDF
+    still behind it. The row is read again each time it is asked about, so
+    whatever it is named by then is refused. The year it carried at the
+    switch alone would have let the press through under its new name."""
+    monkeypatch.setattr(site, "LINK_WAIT_MS", 1000)
+    rename = ("document.querySelectorAll('.row.ye button').forEach(b => b.setAttribute('data-testid', "
+              "b.getAttribute('data-testid').replace('/2030/', '/2029/')));")
+    pg = page_of(switch_page(statement_row("2030-11-11") + year_row("2030"),
+                             "moveSwitcher(); area.firstElementChild.outerHTML = `%s`; "
+                             "setTimeout(() => { %s }, 6000);" % (NEW_ROW, rename)))
+    cards = site.list_cards(pg)
+    assert site.select_card(pg, cards[1]) is True
+    assert site.kept_on_show(pg) == {("ye", "2030")}
+    assert site.stayed_from_the_card_before(pg, "Year-End Summary", "2030-12-31") is True
+    assert site.stayed_from_the_card_before(pg, "Statement", "2030-11-22") is False
+
+    pg.wait_for_timeout(6500)
+    assert site.kept_on_show(pg) == {("ye", "2029")}
+    assert site.stayed_from_the_card_before(pg, "Year-End Summary", "2029-12-31") is True
+
+
+@pytest.mark.parametrize("attr", ["data-testid", "data-test-id"])
+def test_the_next_cards_own_rows_are_told_from_the_kept_ones_by_either_name(page_of, monkeypatch, attr):
+    """A page in another language writes test ids as data-test-id (#107), and
+    a kept year-end row under either name says nothing of the next card's list."""
+    monkeypatch.setattr(site, "LIST_WAIT_MS", 500)
+    kept_only = page_of("<!doctype html><main>%s</main>" % year_row("2030", attr))
+    assert site._new_rows_come(kept_only, ["2030"]) is False
+    with_new = page_of("<!doctype html><main>%s%s</main>" % (
+        year_row("2030", attr), statement_row("2030-11-22").replace("data-testid", attr)))
+    assert site._new_rows_come(with_new, ["2030"]) is True
+
+
+def test_a_kept_row_that_cannot_be_read_could_be_any_documents():
+    class Broken:
+        def get_attribute(self, name, **kwargs):
+            raise RuntimeError("eval is disabled")
+
+    page = SimpleNamespace()
+    site._note_kept(page, [Broken()])
+    try:
+        assert site.kept_on_show(page) is None
+        assert site.stayed_from_the_card_before(page, "Statement", "2030-11-11") is True
+    finally:
+        site._KEPT.pop(id(page), None)
+    assert site.kept_on_show(page) == set()
+
+
+def test_a_kept_row_whose_test_id_cannot_be_read_is_never_left_out_as_a_year_end_row():
+    """A row that stayed and cannot be read now could be anything, so the
+    switch is not taken for one that kept only year-end rows."""
+    class Broken:
+        def get_attribute(self, name, **kwargs):
+            raise RuntimeError("eval is disabled")
+
+    broken = Broken()
+    tid = "axp-pdf-statements/common/Table/year-end-summary/2030/download-button"
+    assert site._kept_years([(broken, [tid])], [broken]) is None
+
+
 def test_an_empty_message_that_never_goes_stops_the_switch(page_of, monkeypatch):
     """The switcher moves and the words of the card before stay, with no list
     drawn. Whether the new card is empty or its list is late cannot be told,

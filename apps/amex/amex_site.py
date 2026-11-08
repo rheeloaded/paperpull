@@ -955,10 +955,17 @@ def _shown_downloads(buttons) -> list:
 
 def _what_stayed(held: list, stayed: list) -> dict:
     """For the failure file, how the old list went, so one report says what the
-    page does. Counts alone, since a test id holds a closing date."""
-    renamed = 0
+    page does. Counts alone, since a test id holds a closing date. What stayed
+    is counted by what it was when held, a year-end summary or a monthly
+    statement, since a year-end summary's test id is the same on every card
+    and a statement's only on cards that close on the same day."""
+    renamed = year_end = statement = 0
     for handle, ids in held:
         if handle in stayed:
+            if any(_YE_TESTID_RE.search(tid) for tid in ids):
+                year_end += 1
+            elif any(_STMT_TESTID_RE.search(tid) for tid in ids):
+                statement += 1
             try:
                 now = _test_ids_of(handle)
             except Exception:
@@ -966,7 +973,119 @@ def _what_stayed(held: list, stayed: list) -> dict:
             if now and now != ids:
                 renamed += 1
     return {"downloads_shown": len(held), "downloads_gone": len(held) - len(stayed),
-            "stayed_under_another_id": renamed}
+            "stayed_under_another_id": renamed, "stayed_year_end": year_end,
+            "stayed_statement": statement}
+
+
+def _kept_years(held: list, stayed: list) -> Optional[List[str]]:
+    """The years of the year-end summaries whose rows stayed through a switch
+    just as they were held, when nothing else of the old list stayed. None
+    when anything else did, a monthly statement, a row under another test id
+    or one whose test id cannot be read.
+
+    A year-end summary's test id holds its year and nothing else, the same on
+    every card with a summary of that year, so a page that keeps its rows by
+    test id keeps that row through a switch. A tester's two cards kept two
+    Downloads of 204 (#135). Whose PDF its Download then brings cannot be told
+    from the page, so these rows are never read as the new card's."""
+    years = set()
+    for handle, ids in held:
+        if handle not in stayed:
+            continue
+        try:
+            now = _test_ids_of(handle)
+        except Exception:
+            return None
+        if not now or now != ids:
+            return None
+        found = [_YE_TESTID_RE.search(tid) for tid in now]
+        if not all(found):
+            return None
+        years.update(m.group(1) for m in found)
+    return sorted(years)
+
+
+def _year_end_css(year: str) -> str:
+    return _by_test_id("$=", "/year-end-summary/%s/download-button" % year)
+
+
+def _new_rows_come(page, years: List[str]) -> bool:
+    """Whether a Download that shows, other than those of the year-end rows
+    that stayed, comes within LIST_WAIT_MS, so the new card's own list is
+    drawn. The rows that stayed say nothing of it."""
+    css = _DOWNLOAD_BUTTONS
+    if years:
+        kept = "".join(":not(%s)" % sel for year in years
+                       for sel in _year_end_css(year).split(", "))
+        css = ", ".join(part + kept for part in _DOWNLOAD_BUTTONS.split(", "))
+    loc = page.locator(css)
+    for _ in range(int(LIST_WAIT_MS / 250)):
+        if _shows(_first_visible(loc)):
+            return True
+        page.wait_for_timeout(250)
+    return False
+
+
+# For each page, by its id with the page itself kept beside it, the rows of
+# the old list still on show after its last card switch. They are read again
+# each time they are asked about, since a page that keeps a row can rename it
+# later, and pressing one could bring the card before's PDF whatever it is
+# named by then. A switch that keeps none leaves an empty list here.
+_KEPT: dict = {}
+
+
+def _note_kept(page, handles: list) -> None:
+    _KEPT[id(page)] = (page, list(handles))
+
+
+def _names(tids) -> set:
+    """What a Download's test ids name, ("ye", year) or ("stmt", date)."""
+    named = set()
+    for tid in tids:
+        m = _YE_TESTID_RE.search(tid)
+        if m:
+            named.add(("ye", m.group(1)))
+        m = _STMT_TESTID_RE.search(tid)
+        if m:
+            named.add(("stmt", m.group(2)))
+    return named
+
+
+def kept_on_show(page) -> Optional[set]:
+    """What the rows that stayed through the last card switch on this page
+    name now, as _names gives it, whether they show now or not. Empty when no
+    switch was made on this page or none stayed, and None when one of them
+    could not be read, so what it names could be anything. A row the page has
+    taken away still reads, and what it names is refused all the same, which
+    costs at most a document the next run takes."""
+    entry = _KEPT.get(id(page))
+    if entry is None or entry[0] is not page:
+        return set()
+    named = set()
+    for handle in entry[1]:
+        try:
+            tids = _test_ids_of(handle)
+        except Exception:
+            return None
+        if not tids:
+            return None
+        named |= _names(tids)
+    return named
+
+
+def name_of(category: str, date: str) -> tuple:
+    """A document's name as _names gives it, from its record."""
+    if category == "Year-End Summary":
+        return ("ye", (date or "")[:4])
+    return ("stmt", date or "")
+
+
+def stayed_from_the_card_before(page, category: str, date: str) -> bool:
+    """Whether this document's Download may be a row that stayed on show
+    through the last card switch, so may bring the card before's PDF. One
+    that could not be read could be any document's."""
+    named = kept_on_show(page)
+    return named is None or name_of(category, date) in named
 
 
 def _switch_stopped(card: dict, reason: str, facts: Optional[dict] = None) -> pressing.NoAnswer:
@@ -1100,11 +1219,17 @@ def select_card(page, card: dict) -> bool:
     # Wait until the previous card's statement buttons are gone / hidden. The
     # address says nothing here, since it never changes on this page, and nor
     # does a new test id on a button that stays, since rows can change one by
-    # one. A stop beats a wrong PDF.
+    # one. A stop beats a wrong PDF. Year-end rows that stay just as they were,
+    # with the rest of the old list gone and the new card's own rows come, are
+    # the one exception, and they are left out of the new card (_kept_years).
     stayed = _still_showing(page, [handle for handle, _ in held])
     if stayed:
-        log.info("switched card option but old statements list never cleared")
-        raise _switch_stopped(card, "the statements did not switch", _what_stayed(held, stayed))
+        years = _kept_years(held, stayed)
+        if years is None or not _new_rows_come(page, years):
+            log.info("switched card option but old statements list never cleared")
+            raise _switch_stopped(card, "the statements did not switch", _what_stayed(held, stayed))
+        log.info("the year-end rows of %d years stayed through the switch, so they are left out",
+                 len(years))
 
     # Wait until the previous card's empty message is gone / hidden. That card
     # left no Download behind it, so one on the page now is the new card's.
@@ -1116,6 +1241,17 @@ def select_card(page, card: dict) -> bool:
     # Wait for either a new Download that shows or a no-statements message.
     _list_comes(page)
     expand_sections(page)
+    # A row of the old list hidden during the switch and shown again, by its
+    # section opening say, is as much the card before's as one that stayed.
+    back = [handle for handle, _ in held if handle not in stayed and _handle_shows(handle)]
+    if back:
+        on_show = stayed + back
+        years = _kept_years(held, on_show)
+        if years is None or not _new_rows_come(page, years):
+            log.info("a row of the old list showed again after the switch")
+            raise _switch_stopped(card, "the statements did not switch", _what_stayed(held, on_show))
+        stayed = on_show
+    _note_kept(page, stayed)
     return True
 
 

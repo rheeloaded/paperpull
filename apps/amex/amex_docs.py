@@ -119,6 +119,25 @@ class Document:
         return cls(**d)
 
 
+def _and(items: List[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _kept_words(named: set) -> str:
+    """The documents of rows that stayed through a switch, in words, "the
+    year-end summaries of 2029 and 2030" or "the statement dated 2030-11-11"."""
+    years = sorted(when for kind, when in named if kind == "ye")
+    dates = sorted(when for kind, when in named if kind == "stmt")
+    parts = []
+    if years:
+        parts.append("the %s year-end summary" % years[0] if len(years) == 1
+                     else "the year-end summaries of %s" % _and(years))
+    if dates:
+        parts.append("the statement dated %s" % dates[0] if len(dates) == 1
+                     else "the statements dated %s" % _and(dates))
+    return " and ".join(parts)
+
+
 def migrate_legacy_keys(records: dict) -> int:
     """Move records written while the account was cut to forty characters.
 
@@ -464,6 +483,18 @@ class App:
                                              f"{card.get('label', 'A card')} could not be chosen in the card "
                                              "switcher, so the list was not read whole.")
                 docs = site.collect_download_docs(page, account=card["label"])
+                kept = site.kept_on_show(page)
+                if kept is None:
+                    raise pressing.Stop("read the statements", "a row that stayed could not be read", [
+                        "A Download that stayed on the page from the card before could not be "
+                        "read, so which document it is could not be told, and "
+                        f"{card['label']}'s list was not read.",
+                        "Nothing more was pressed."], list_unread=True)
+                if kept:
+                    docs = [r for r in docs if site.name_of(
+                        "Year-End Summary" if r.kind == "year-end" else "Statement",
+                        r.date_text) not in kept]
+                    self._leave_kept_rows(card["label"], kept)
                 if not docs and not site.has_no_statements(page):
                     log.info("card %s has no statements and page did not say so", card["label"])
                     print(f"\n!! Could not find statements for {card['label']}. Discovery was not completed.")
@@ -563,6 +594,26 @@ class App:
         self._cards_left.append(f"{label}, turned off in the card switcher")
         self.stats["manual_review"] += 1
         self.write_failure("switch card", "a card option is turned off")
+
+    def _leave_kept_rows(self, label: str, named: set) -> None:
+        """Leave out the documents whose rows stayed on the page through the
+        switch to this card, as site.kept_on_show names them now. A year-end
+        summary's row is named by its year alone, the same on every card, so
+        the page can keep it from the card before, and whose PDF its Download
+        brings cannot be told (site._kept_years). Rather than stop every run
+        with more than one card there, the rest of the card is read, and these
+        are said by name, counted for review, and the listing is not noted as
+        whole. No failure file is written, since this comes again on every
+        run, and the run's one file is kept for something that went wrong."""
+        words = _kept_words(named)
+        one = len(named) == 1
+        print(f"\n!! The Download{'' if one else 's'} of {words} stayed on the page from the card "
+              f"before, so whose {'it is' if one else 'they are'} could not be told.")
+        print(f"   {'It was' if one else 'They were'} not read as {label}'s, the rest of its "
+              "statements are read as usual, and this list is not noted as whole.")
+        self._cards_left.append(f"{words} of {label}, whose Download{'' if one else 's'} stayed "
+                                "from the card before")
+        self.stats["manual_review"] += 1
 
     def _say_cards_left(self) -> None:
         """What this run's list left out, by name, again where a person reads
@@ -707,6 +758,22 @@ class App:
                 self._write_row(doc, "Card switch failed", "Needs Manual Review")
                 self.stats["manual_review"] += 1
                 print(f"  Could not switch to card {doc.account} - marked for manual review.")
+                return
+            # A switch here, outside a listing, that kept rows leaves the list
+            # noted as one that stopped, as one that stopped here did. A Resume
+            # in a later run makes no switch, so it would know nothing of them.
+            if site.kept_on_show(page) != set() and listing.last(self) != listing.STOPPED:
+                listing.started(self)
+            # A row that stayed through the switch to this card may bring the
+            # card before's PDF, so it is never pressed for this one.
+            if site.stayed_from_the_card_before(page, doc.category, doc.date):
+                log.info("a row that stayed from the card before was not pressed")
+                self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                             notes="Its row stayed on the page from the card before")
+                self._write_row(doc, "Row from the card before", "Needs Manual Review")
+                self.stats["manual_review"] += 1
+                print("  !! Its Download stayed on the page from the card before, so whose it is "
+                      "could not be told. Nothing was pressed, and it is left for review.")
                 return
         saved = site.download_document(page, doc.category, doc.date, out_path)
         if not saved:

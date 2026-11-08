@@ -66,6 +66,7 @@ html, body { margin: 0; font: 16px sans-serif; }
   .row button.mobile { display: inline-block; }
   .swc.mobile { display: block; }
 }
+#table-area.ye-closed .row.ye { display: none; }
 #lb { border: 1px solid #333; width: 300px; }
 #lb [role=option] { display: block; height: 40px; width: 300px; }
 .dialog { position: fixed; left: 40px; top: 60px; width: 380px; background: #fff; z-index: 5;
@@ -75,6 +76,7 @@ html, body { margin: 0; font: 16px sans-serif; }
 <main>
 <h1>%(title)s</h1>
 <div id="sw"></div>
+%(ye_head)s
 <section id="table-area"></section>
 </main>
 <div class="backdrop" id="backdrop" hidden></div>
@@ -113,19 +115,49 @@ function listHtml(c) {
     c.years.map(y => row('ye', y, c.digits)).join('');
 }
 const area = document.getElementById('table-area');
+// A Year End Summary section that the next card's list draws closed, its
+// rows hidden until its heading is pressed.
+const head = document.getElementById('ye-head');
+let drawn = 0;
+if (head) head.addEventListener('click', () => {
+  const open = head.getAttribute('aria-expanded') === 'true';
+  head.setAttribute('aria-expanded', open ? 'false' : 'true');
+  area.classList.toggle('ye-closed', open);
+});
 function drawList(i) {
+  if (head && drawn++ > 0) {
+    head.setAttribute('aria-expanded', 'false');
+    area.classList.add('ye-closed');
+  }
   const next = document.createElement('div');
   next.innerHTML = listHtml(C[i]);
   const kept = [...area.querySelectorAll('.row')];
   const fresh = [...next.querySelectorAll('.row')];
-  if (!(CFG.reuse_rows || CFG.stage_ms || CFG.keep_year_row) || kept.length !== fresh.length) {
+  if (CFG.keyed) {
+    // As a list that keys its rows by test id draws them. A row whose test
+    // id the next card's list has too is kept, node, test ids, PDF and all,
+    // when it is a year-end row, or any row when CFG.keyed is 'all'. Every
+    // other row of the next card is drawn anew and the rest go.
+    const idOf = (r) => r.querySelector('.dl').dataset.testid;
+    const old = new Map(kept.map(r => [idOf(r), r]));
+    area.replaceChildren(...fresh.map(r => {
+      const same = old.get(idOf(r));
+      return same && (CFG.keyed === 'all' || r.classList.contains('ye')) ? same : r;
+    }));
+    return;
+  }
+  if (!(CFG.reuse_rows || CFG.stage_ms) || kept.length !== fresh.length) {
     area.innerHTML = listHtml(C[i]);
     return;
   }
   // Row by row. Reused rows keep their nodes and take the next card's test
-  // ids and PDFs, and any other row is replaced.
+  // ids and PDFs, the year-end rows alone when CFG.reuse_rows is 'ye', and
+  // any other row is replaced.
   const redraw = (n) => {
-    if (!CFG.reuse_rows) { kept[n].replaceWith(fresh[n]); return; }
+    if (!CFG.reuse_rows || (CFG.reuse_rows === 'ye' && !kept[n].classList.contains('ye'))) {
+      kept[n].replaceWith(fresh[n]);
+      return;
+    }
     const from = fresh[n].querySelectorAll('.dl');
     kept[n].querySelectorAll('.dl').forEach((b, k) => {
       b.setAttribute('data-testid', from[k].getAttribute('data-testid'));
@@ -135,7 +167,7 @@ function drawList(i) {
   kept.forEach((r, n) => {
     if (!r.classList.contains('ye')) redraw(n);
     else if (CFG.stage_ms) setTimeout(() => redraw(n), CFG.stage_ms);
-    else if (!CFG.keep_year_row) redraw(n);
+    else redraw(n);
   });
 }
 function card(i) {
@@ -263,22 +295,29 @@ class FakeAmex:
     after, the old list showing until then. `list_ms_of` gives the nth switch
     a time of its own, and a time below nought means its list never comes.
     `stage_ms` redraws the year-end rows that long after the monthly rows,
-    `reuse_rows` keeps every row's nodes and changes their test ids and PDFs,
-    and `keep_year_row` leaves the year-end rows as they are. Each Download's
-    PDF is of the card whose rows it was drawn for."""
+    `reuse_rows` keeps every row's nodes and changes their test ids and PDFs
+    ('ye' for the year-end rows alone), and `keyed` keeps the rows the next
+    card shares by test id just as they are, the year-end rows ('ye') or any
+    ('all'), whatever the length of either list. `ye_section` puts the
+    year-end rows under a Year End Summary heading that each switch closes.
+    Each Download's PDF is of the card whose rows it was drawn for, so a row
+    kept from the card before brings that card's PDF."""
 
     def __init__(self, **cfg):
         self.cfg = dict(cards=[A, B], start=0, switch_ms=100, list_ms=1500, switcher="normal",
                         narrow_copy_first=False, address_moves_first=False,
                         switcher_copies=False, switcher_gone=False, list_ms_of={},
                         tip_over_switcher=False, dialog_left_open=False, option_copies="",
-                        hidden_options=[], reuse_rows=False, stage_ms=0, keep_year_row=False)
+                        hidden_options=[], reuse_rows=False, stage_ms=0, keyed="",
+                        ye_section=False)
         self.cfg.update(cfg)
         self.pressed = []
         self.downloads = []
 
     def page(self):
-        return PAGE % {"title": TITLE, "cfg": json.dumps(self.cfg)}
+        head = ('<button type="button" id="ye-head" aria-expanded="true">Year End Summary</button>'
+                if self.cfg["ye_section"] else "")
+        return PAGE % {"title": TITLE, "cfg": json.dumps(self.cfg), "ye_head": head}
 
 
 def _handler(fake):
@@ -971,24 +1010,33 @@ def test_a_list_redrawn_in_stages_is_waited_for_to_its_last_part(attached, serve
 
 
 @pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
-@pytest.mark.parametrize("cfg,gone,renamed", [
-    (dict(reuse_rows=True), 0, 1),
-    (dict(reuse_rows=True, stage_ms=1500), 0, 1),
-    (dict(reuse_rows=True, cards=[A, dict(B, dates=A["dates"])]), 0, 0),
-    (dict(keep_year_row=True), 1, 0),
-    (dict(list_ms_of={"1": -1}), 0, 0)],
-    ids=["rows-reused", "rows-reused-in-stages", "rows-reused-same-ids", "year-end-row-kept",
+@pytest.mark.parametrize("cfg,counts", [
+    (dict(reuse_rows=True), (2, 0, 1, 1, 1)),
+    (dict(reuse_rows=True, stage_ms=1500), (2, 0, 1, 1, 1)),
+    (dict(reuse_rows=True, cards=[A, dict(B, dates=A["dates"])]), (2, 0, 0, 1, 1)),
+    (dict(reuse_rows="ye", cards=[A, dict(B, years=["2031"])]), (2, 1, 1, 1, 0)),
+    (dict(keyed="all", cards=[dict(A, dates=["2030-11-11", "2030-10-11"]),
+                              dict(B, dates=["2030-11-11", "2030-10-22"])]), (3, 1, 0, 1, 1)),
+    (dict(keyed="ye", cards=[A, dict(B, dates=[])]), (2, 1, 0, 1, 0)),
+    (dict(keyed="ye", ye_section=True, cards=[A, dict(B, dates=[])]), (2, 1, 0, 1, 0)),
+    (dict(list_ms_of={"1": -1}), (2, 0, 0, 1, 1))],
+    ids=["rows-reused", "rows-reused-in-stages", "rows-reused-same-ids",
+         "year-end-row-under-another-id", "statement-row-kept-by-its-id",
+         "no-row-of-the-next-card-comes", "shown-again-with-no-row-of-the-next-card",
          "list-never-changes"])
 def test_a_list_that_stays_in_any_part_stops_with_the_list_unread(attached, serve, tmp_path, capsys,
-                                                                  monkeypatch, width, cfg, gone,
-                                                                  renamed):
+                                                                  monkeypatch, width, cfg, counts):
     """A Download that goes on showing cannot be told from the old card's, even
     under a new test id, since the rows can change one by one. So the run stops
-    and nothing is listed under the next card. The failure file counts what
-    showed, what went and what stayed under another id, so one report says what
-    the real page does, and it holds nothing else of the page's. The year-end
-    rows of both cards share their id, so of the two that stay here at most
-    one is under another."""
+    and nothing is listed under the next card. The one exception is a year-end
+    row kept just as it was, once the next card's own rows show, and these are
+    the shapes around it that still stop, a year-end row under another test id,
+    a monthly statement kept by its test id on two cards that close on the
+    same day, and year-end rows kept with no row of the next card drawn. The
+    failure file counts what showed, what went, what stayed under another id,
+    and what stayed by what it was, a year-end summary or a monthly statement,
+    so one report says what the real page does, and it holds nothing else of
+    the page's."""
     monkeypatch.setattr(site, "LINK_WAIT_MS", 3000)
     amex = serve(list_ms=300, **cfg)
     their_tab(attached, amex, width)
@@ -1002,7 +1050,133 @@ def test_a_list_that_stays_in_any_part_stops_with_the_list_unread(attached, serv
     assert saved(tmp_path) == {} and amex.downloads == []
 
     report, written = read_failure(tmp_path)
-    assert report["extra"] == {"downloads_shown": 2, "downloads_gone": gone,
-                               "stayed_under_another_id": renamed}, report["extra"]
+    shown, gone, renamed, year_end, statement = counts
+    assert report["extra"] == {"downloads_shown": shown, "downloads_gone": gone,
+                               "stayed_under_another_id": renamed, "stayed_year_end": year_end,
+                               "stayed_statement": statement}, report["extra"]
     for word in ("2030-", "year-end-summary", "recent-statements", "11111", "22222", "Alpha", "Bravo"):
         assert word not in written, word
+
+
+# A card of many statements and two year-end summaries, and a newer card of
+# one statement with the same two years, as a tester's two cards were, 204
+# Downloads and 30 (#135).
+MANY = dict(A, dates=["2030-11-11", "2030-10-11", "2030-09-11"], years=["2029", "2030"])
+FEW = dict(B, dates=["2030-11-22"], years=["2029", "2030"])
+
+
+@pytest.mark.parametrize("width", [WIDE, NARROW], ids=["wide", "narrow"])
+def test_year_end_rows_kept_through_a_switch_are_left_out_and_the_rest_is_read(
+        attached, serve, tmp_path, capsys, width):
+    """A tester's two cards stopped at the first switch with 202 of 204
+    Downloads gone and none under another id (#135). A year-end summary's
+    test id holds only its year, so a page that keeps its rows by test id
+    keeps those rows through the switch, with the card before's PDF behind
+    them. Every monthly statement of both cards is saved, each its own. No
+    year-end row is pressed or listed for either card, and the run says so
+    by year, counts it and does not note the list as whole, so a Resume
+    takes nothing. It comes again on every such run, so it writes no
+    failure file, which is kept for something that went wrong."""
+    amex = serve(cards=[MANY, FEW], keyed="ye", list_ms=300)
+    their_tab(attached, amex, width)
+    conf = config(tmp_path, attached)
+    code, out = run_all(conf, capsys)
+    holds_statements_and_leaves_the_summaries(tmp_path, amex, out)
+
+    code, out = run_all(conf, capsys, "--resume")
+    assert "stopped before it read the whole list" in folded(out)
+    assert panel_reads(out)["list_not_read"] == 1
+
+
+def holds_statements_and_leaves_the_summaries(tmp_path, amex, out):
+    """Each card's statements saved as its own, and the year-end summaries
+    of both, whose rows were kept, left out, said and counted."""
+    said = folded(out)
+    result = panel_reads(out)
+    assert result["stopped"] == 0, said
+    listed = records(tmp_path, "discovery.json")
+    assert sorted((digits_of(r["account"]), r["date"]) for r in listed.values()) == (
+        [("11111", d) for d in sorted(MANY["dates"])] + [("22222", d) for d in FEW["dates"]]), said
+    kept = saved(tmp_path)
+    assert len(kept) == 4, (kept, said)
+    for rec in kept.values():
+        assert rec["state"] == State.COMPLETED.value and rec["card"] == digits_of(rec["account"]), rec
+    assert not [d for d in amex.downloads if "/ye-" in d], amex.downloads
+    tail = out[out.rindex("[4/4]"):]
+    for label in ("Alpha Card (11111)", "Bravo Card (22222)"):
+        assert ("!! Not read: the year-end summaries of 2029 and 2030 of %s, whose Downloads "
+                "stayed from the card before." % label) in tail, tail
+    assert ("The Downloads of the year-end summaries of 2029 and 2030 stayed on the page from "
+            "the card before, so whose they are could not be told.") in said
+    assert (result["manual_review"], result["new_files"]) == (2, 4), result
+    assert noted_whole(tmp_path) is False
+    assert not list((tmp_path / "out").rglob("failure-*.json"))
+
+
+def test_a_row_hidden_at_a_switch_and_shown_again_by_its_section_is_left_out(attached, serve,
+                                                                             tmp_path, capsys):
+    """The next card's list draws its Year End Summary section closed, so the
+    rows kept from the card before go out of sight and count as gone, until
+    the app opens the section and they show again. They are the card
+    before's all the same, so they are left out like rows that stayed."""
+    amex = serve(cards=[MANY, FEW], keyed="ye", list_ms=300, ye_section=True)
+    their_tab(attached, amex)
+    code, out = run_all(config(tmp_path, attached), capsys)
+    holds_statements_and_leaves_the_summaries(tmp_path, amex, out)
+
+
+def test_a_second_resume_after_a_switch_that_kept_rows_takes_nothing(attached, serve, tmp_path,
+                                                                     capsys):
+    """A list read whole on a page that drew each card anew, then a Resume on
+    a page that keeps the year-end rows. The Resume's own switch keeps them,
+    so that summary is not pressed and the list is noted as not whole. The
+    next Resume, a run of its own on the tab left on that card, makes no
+    switch and knows nothing of the kept row, so it takes nothing at all.
+    It used to press the kept row and get the card before's summary."""
+    conf = config(tmp_path, attached)
+    their_tab(attached, serve(list_ms=300))
+    code, out = run_all(conf, capsys, "--all", "--yes", "--type", "Statement")
+    assert noted_whole(tmp_path) is True
+
+    amex = serve(keyed="ye", list_ms=300)
+    their_tab(attached, amex)
+    code, out = run_all(conf, capsys, "--resume")
+    said = folded(out)
+    assert "Nothing was pressed, and it is left for review." in said, said
+    assert noted_whole(tmp_path) is False
+    taken = list(amex.downloads)
+    assert "22222/ye-2030.pdf" not in taken and "11111/ye-2030.pdf" not in taken[1:], taken
+
+    code, out = run_all(conf, capsys, "--resume")
+    assert "stopped before it read the whole list" in folded(out)
+    assert panel_reads(out)["list_not_read"] == 1
+    assert amex.downloads == taken, amex.downloads
+
+
+def test_a_year_end_row_kept_through_a_switch_is_never_pressed_for_a_card(attached, serve, tmp_path,
+                                                                          capsys):
+    """Year-end summaries listed by an earlier run, on a page that drew each
+    card's rows anew, and taken on a page that keeps them by test id. After
+    a switch the row on show may be the card before's, so it is not pressed
+    for either card, and each is left for review with nothing saved."""
+    conf = config(tmp_path, attached)
+    their_tab(attached, serve(list_ms=300))
+    code, out = run_all(conf, capsys, "--all", "--yes", "--type", "Statement")
+    assert sorted(r["category"] for r in records(tmp_path, "discovery.json").values()) == [
+        "Statement", "Statement", "Year-End Summary", "Year-End Summary"]
+    assert len(saved(tmp_path)) == 2
+
+    amex = serve(keyed="ye", list_ms=300)
+    their_tab(attached, amex)
+    code, out = run_all(conf, capsys)
+    said = folded(out)
+
+    assert amex.downloads == [], (amex.downloads, said)
+    left = [r for r in records(tmp_path, "progress.json").values()
+            if r["category"] == "Year-End Summary"]
+    assert len(left) == 2, left
+    for rec in left:
+        assert rec["state"] == State.NEEDS_MANUAL_REVIEW.value and not rec.get("pdf_path"), rec
+        assert "Its row stayed on the page from the card before" in rec.get("notes", ""), rec
+    assert said.count("Nothing was pressed, and it is left for review.") == 2, said
+    assert not list((tmp_path / "out").rglob("Manual Review/*.pdf"))

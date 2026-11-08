@@ -91,7 +91,17 @@ on the statements page, one after the other, and waits for every Download that
 shows of one card's list to go before it reads the next. If any of them stays,
 even under another statement's name, the run stops there, since rows redrawn one
 by one cannot be told from the old card's, and the failure file counts how many
-stayed. A card the site has turned off in the switcher, a canceled card say, is
+stayed, and how many of those were year-end summaries and how many monthly
+statements. The one exception is a year-end summary. Its row is named by its
+year alone, the same on every card, so the page can keep it when the card
+changes, and whose PDF it then brings cannot be told. When only such rows stay,
+just as they were, or show again once the switch is done, and a Download of
+another document shows, the run reads that card's statements and leaves out
+whatever those rows are named. It names them, counts them for review and never
+presses their Download for the card on show, whatever the page renames them to.
+The list is then not noted as whole, so a Resume takes nothing, since a later
+run makes no switch and cannot know which rows stayed. A card the site has
+turned off in the switcher, a canceled card say, is
 not read. The run names it, counts it for review, writes a failure file and goes
 on with the other cards. A card the switcher holds but
 does not show, in a collapsed group say, cannot be chosen, so the run names it
