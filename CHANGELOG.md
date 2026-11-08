@@ -7,7 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.61.1] - 2026-11-08
+
+SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo
+reads both tabs of its newer Statements page, and American Express goes on
+past year-end rows that stay at a card switch. A document that could not be
+downloaded no longer reads as one waiting in Manual Review, a gap no run can
+fill no longer keeps an account in "may have something new", and an account
+says it was checked only when its list was read.
 
 ### Fixed
 - **"May have something new" no longer keeps a gap a whole run could not
