@@ -132,7 +132,7 @@ class App:
         self.progress.load()
         self.discovery.load()
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -627,11 +627,16 @@ class App:
                 site.scroll_full_page(page)
             control = site.find_row_download(page, doc.account, doc.title)
             if control is None:
-                self._record(doc, State.NO_RECEIPT_AVAILABLE,
+                # A row not found, or not found yet, is no proof there is
+                # nothing to fetch. Recorded as No Receipt Available, which
+                # is final, it was never asked for again, and it was counted
+                # for a Manual Review folder that held nothing (#152). It is
+                # a failure the next run tries again.
+                self._record(doc, State.FAILED,
                              notes="No safe download control found for this row")
-                self._write_row(doc, "No download control", "Review Needed")
-                self.stats["manual_review"] += 1
-                print("  No download control found - marked for manual review.")
+                self._write_row(doc, "No download control", State.FAILED.value)
+                self.stats["failed"] += 1
+                print("  No download control found. Nothing was saved, and the next run tries it again.")
                 return
             try:
                 with page.expect_download(timeout=45000) as dl:

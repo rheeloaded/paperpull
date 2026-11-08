@@ -1301,23 +1301,49 @@ class CsvFile:
     one of these files reads it here, or through read_stored_row as both
     spreadsheet tools do."""
 
-    def __init__(self, path: Path, columns: List[str], backups_dir: Optional[Path] = None):
+    def __init__(self, path: Path, columns: List[str], backups_dir: Optional[Path] = None,
+                 once: bool = False):
         self.path = Path(path)
         self.columns = columns
         self.backups_dir = backups_dir
+        # A file that holds each row once. A document app's index gets a row
+        # for each outcome, and an outcome that is tried again on the next
+        # run, a capture that saved nothing, is written again on every run
+        # it fails. Ally's index held seven rows, word for word alike, for one
+        # tax form its page could not open (#152). A row of a saved file
+        # carries the moment it was saved, so a second save is always a row
+        # of its own. An order history holds one row per item bought, and two
+        # alike items are two rows, so it never holds its rows once.
+        self.once = once
 
     def _ensure_header(self) -> None:
         if not self.path.exists() or self.path.stat().st_size == 0:
             with shared_folder.open_to_write(self.path, "w", encoding="utf-8-sig", newline="") as f:
                 csv.DictWriter(f, fieldnames=self.columns, quoting=csv.QUOTE_MINIMAL).writeheader()
 
+    def _held(self) -> set:
+        """Every row the file holds, as it was written, by this file's columns."""
+        if not self.path.exists():
+            return set()
+        with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig", newline="") as f:
+            return {tuple(r.get(c) or "" for c in self.columns) for r in csv.DictReader(f)}
+
     def append_rows(self, rows: Iterable[dict]) -> None:
         self._ensure_header()
+        held = self._held() if self.once else None
         with shared_folder.open_to_write(self.path, "a", encoding="utf-8-sig", newline="") as f:
             w = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore",
                                quoting=csv.QUOTE_MINIMAL)
             for row in rows:
-                w.writerow({c: store_value(row.get(c, "")) for c in self.columns})
+                stored = {c: store_value(row.get(c, "")) for c in self.columns}
+                if held is not None:
+                    # As the csv module writes it, None as nothing and the
+                    # rest as its text.
+                    written = tuple("" if v is None else str(v) for v in stored.values())
+                    if written in held:
+                        continue
+                    held.add(written)
+                w.writerow(stored)
 
     def read_all(self) -> List[dict]:
         if not self.path.exists():

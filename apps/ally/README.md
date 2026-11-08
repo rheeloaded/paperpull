@@ -123,8 +123,13 @@ baked in.
   - A **corrected** form is flagged in its filename so it cannot be confused
     with, or overwrite, the original.
   - **Ally's tax year picker starts at 2020** while its API returns a 2019
-    form. That one cannot be reached from the page; the app reports it instead
-    of downloading a different year.
+    form. That one cannot be reached from the page, so the app presses
+    nothing rather than download a different year. It says so once, counts it
+    on the run summary's line "Not reachable on Ally's page", and leaves it on
+    later runs, with no failure file and one row in the index. A run with
+    `--redownload` asks for it again. A year after the picker's last, or a
+    picker that could not be read whole, is a failure tried again instead,
+    since the picker may simply not have reached it yet (#152).
 - **The dashboard carries a transfer widget whose account dropdown looks
   exactly like a statements picker** (`<select id="fromAccount">`, options are
   your accounts). The first probe matched it and tried to set it, nothing was

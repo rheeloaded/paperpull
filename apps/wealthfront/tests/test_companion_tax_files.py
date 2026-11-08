@@ -178,8 +178,17 @@ def test_no_folder_is_made_when_the_dialog_gives_no_link(tmp_path, monkeypatch):
     page = MagicMock()
     page.locator().count.return_value = 1
     app.download_one(page, doc, storage.build_pdf_filename(doc.date, doc.summary, "", record=doc))
-    assert doc.state == State.NO_RECEIPT_AVAILABLE.value
+    # A row with no control found is no proof there is nothing to fetch. It
+    # was recorded as No Receipt Available, which is final, and counted for
+    # a Manual Review folder that held nothing (#152). It is a failure the
+    # next run tries again, written in the index once.
+    assert doc.state == State.FAILED.value
+    assert (app.stats["failed"], app.stats["manual_review"]) == (1, 0), app.stats
+    assert not app._already_done(doc)
     assert not (app.paths.tax_documents / "Wealthfront").exists()
+    again = a_form()
+    app.download_one(page, again, storage.build_pdf_filename(again.date, again.summary, "", record=again))
+    assert len(app.index_csv.read_all()) == 1, app.index_csv.read_all()
 
 
 def test_no_folder_is_made_when_no_download_arrives(tmp_path, monkeypatch):

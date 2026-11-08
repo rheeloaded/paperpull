@@ -172,7 +172,7 @@ class App:
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -187,6 +187,8 @@ class App:
             "other": 0, "skipped_completed": 0, "skipped_out_of_scope": 0,
             "manual_review": 0, "failed": 0, "duplicate_filenames": 0,
             "validation_failures": 0, "dates": [], "new_files": [],
+            # Listed by Ally, and its own page cannot open them (#152).
+            "out_of_reach": 0,
         }
 
     # -- infrastructure ----------------------------------------------------
@@ -567,6 +569,16 @@ class App:
                         and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
         return False
 
+    def _found_out_of_reach(self, doc: Document) -> bool:
+        """Whether an earlier run found that Ally lists this document and its
+        own page cannot open it (_left_out_of_reach). It is not asked for
+        again, and --redownload, which asks for everything in scope again,
+        asks for it too. Nothing else here records No Receipt Available."""
+        if getattr(self.args, "redownload", False):
+            return False
+        rec = self.progress.get(doc.key) or {}
+        return rec.get("state") == State.NO_RECEIPT_AVAILABLE.value
+
     # -- processing --------------------------------------------------------
 
     def _on_its_site(self):
@@ -580,6 +592,10 @@ class App:
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
+            if self._found_out_of_reach(doc):
+                print("  An earlier run found that Ally's page cannot open this one - skipping.")
+                self.stats["out_of_reach"] += 1
+                continue
             if self._already_done(doc):
                 print("  Already downloaded and verified - skipping.")
                 self.stats["skipped_completed"] += 1
@@ -697,9 +713,13 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
-        saved = site.ally_download(page, page.context, doc.account, doc.date,
-                                   out_path, doc.occurrence, doc.document_id,
-                                   doc.kind, doc.title)
+        try:
+            saved = site.ally_download(page, page.context, doc.account, doc.date,
+                                       out_path, doc.occurrence, doc.document_id,
+                                       doc.kind, doc.title)
+        except site.OutOfReach as beyond:
+            self._left_out_of_reach(doc, beyond)
+            return
         if not saved:
             # A failed capture must not leave a file behind. Playwright's
             # save_as creates the target before the bytes arrive, so a
@@ -712,14 +732,14 @@ class App:
                     out_path.unlink()
             except OSError:
                 pass
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
-                         notes="Could not capture the document PDF "
-                               "(see the log; it may pre-date what Ally's "
-                               "year picker can reach)")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            # Nothing was saved, so nothing is in Manual Review. It is a
+            # failure, and the next run tries it again (#152).
+            self._record(doc, State.FAILED,
+                         notes="Could not capture the document PDF (see the log)")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
@@ -777,6 +797,23 @@ class App:
         else:
             self.stats["other"] += 1
         print(f"  Saved: {out_path.name}")
+
+    def _left_out_of_reach(self, doc: Document, beyond) -> None:
+        """A document Ally lists whose year its own page's year picker does
+        not go back to, so nothing on the page opens it (#152). Ally's tax
+        picker starts at 2020 while its API lists a 2019 form. Nothing was
+        pressed or saved, so it is not counted for Manual Review, which
+        would hold nothing, and no failure file is written, since there is
+        nothing to repair. It is recorded as a document with nothing to
+        fetch, which no later run asks for again."""
+        self._record(doc, State.NO_RECEIPT_AVAILABLE,
+                     notes="Not reachable on Ally's page, whose year picker "
+                           "starts at %s" % beyond.first)
+        self._write_row(doc, "Not reachable on Ally's page", State.NO_RECEIPT_AVAILABLE.value)
+        self.stats["out_of_reach"] += 1
+        print(f"  Ally lists this {beyond.year} document, and its year picker starts at {beyond.first},")
+        print("  so its page cannot open it. Nothing was saved, and later runs leave it")
+        print("  (a run with --redownload asks for it again).")
 
     # -- records -----------------------------------------------------------
 
@@ -1163,6 +1200,7 @@ class App:
             f"Other documents:           {s['other']}",
             f"Skipped (already done):    {s['skipped_completed']}",
             f"Skipped (out of scope):    {s['skipped_out_of_scope']}",
+            f"Not reachable on Ally's page: {s.get('out_of_reach', 0)}",
             f"Needs manual review:       {s['manual_review']}",
             f"Failed:                    {s['failed']}",
             f"Duplicate filenames (#'d): {s['duplicate_filenames']}",
