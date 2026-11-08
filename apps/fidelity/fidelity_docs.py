@@ -329,9 +329,9 @@ class App:
             return False
         if a.type and doc.category.lower() != a.type.lower():
             return False
-        return any(self._in_window(day) for day in scope_days(doc.date, self._tax_year(doc)))
+        return any(self._in_dates(day) for day in scope_days(doc.date, self._tax_year(doc)))
 
-    def _in_window(self, day: str) -> bool:
+    def _in_dates(self, day: str) -> bool:
         a = self.args
         if a.year and not (day or "").startswith(str(a.year)):
             return False
