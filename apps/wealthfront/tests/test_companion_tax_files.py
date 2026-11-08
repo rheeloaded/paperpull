@@ -191,6 +191,27 @@ def test_no_folder_is_made_when_the_dialog_gives_no_link(tmp_path, monkeypatch):
     assert len(app.index_csv.read_all()) == 1, app.index_csv.read_all()
 
 
+@pytest.mark.parametrize("rec, asked", [
+    # What up to 0.61.0 wrote for a row with no control found.
+    ({"state": State.NO_RECEIPT_AVAILABLE.value,
+      "notes": "Invented earlier note; No safe download control found for this row"}, True),
+    ({"state": State.NO_RECEIPT_AVAILABLE.value, "notes": "No safe download control found for this row"}, True),
+    # The twins, final for another reason or saved once.
+    ({"state": State.NO_RECEIPT_AVAILABLE.value, "notes": "Invented reason with nothing to fetch"}, False),
+    ({"state": State.NO_RECEIPT_AVAILABLE.value, "notes": "No safe download control found for this row",
+      "downloaded_ok": True}, False),
+    ({"state": State.COMPLETED.value, "notes": "No safe download control found for this row"}, False),
+])
+def test_a_row_an_older_version_left_final_for_no_control_is_asked_again(tmp_path, rec, asked):
+    """Recorded as No Receipt Available, which is final, a row whose control
+    was not found was never asked for again. Only the runs after the fix
+    would have tried it, so a record left so before is asked for again (#152)."""
+    app = make_app(tmp_path)
+    doc = a_form()
+    app.progress.update(doc.key, dict(doc.to_dict(), **rec))
+    assert app._already_done(doc) is (not asked)
+
+
 def test_no_folder_is_made_when_no_download_arrives(tmp_path, monkeypatch):
     app = make_app(tmp_path)
     doc = a_form()

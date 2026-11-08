@@ -127,9 +127,11 @@ baked in.
     nothing rather than download a different year. It says so once, counts it
     on the run summary's line "Not reachable on Ally's page", and leaves it on
     later runs, with no failure file and one row in the index. A run with
-    `--redownload` asks for it again. A year after the picker's last, or a
-    picker that could not be read whole, is a failure tried again instead,
-    since the picker may simply not have reached it yet (#152).
+    `--redownload` asks for it again. A year after the picker's last, a
+    picker that could not be read whole, or a page with another dropdown of
+    years, hidden or shown, is a failure tried again instead, since the
+    picker may simply not have reached it yet or may not be the one the list
+    follows (#152).
 - **The dashboard carries a transfer widget whose account dropdown looks
   exactly like a statements picker** (`<select id="fromAccount">`, options are
   your accounts). The first probe matched it and tried to set it, nothing was

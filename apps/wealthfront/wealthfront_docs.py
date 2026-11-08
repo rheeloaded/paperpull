@@ -52,6 +52,21 @@ log = logging.getLogger("wealthfront_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 
+# What a run notes when it finds no safe download control for a row. Up to
+# 0.61.0 it was written with No Receipt Available, which is final, so the
+# document was never asked for again (#152). A record an older version left
+# so is asked for again.
+NO_CONTROL = "No safe download control found for this row"
+
+
+def left_final_for_no_control(rec: dict) -> bool:
+    """A record an older version made final when it found no download
+    control for the row, which says nothing about whether there is a
+    document. The note the state was written with is the last one."""
+    if rec.get("state") != State.NO_RECEIPT_AVAILABLE.value or rec.get("downloaded_ok"):
+        return False
+    return str(rec.get("notes") or "").rsplit("; ", 1)[-1].strip() == NO_CONTROL
+
 
 def ask(prompt: str) -> str:
     try:
@@ -489,6 +504,8 @@ class App:
             return False
         if rec.get("downloaded_ok"):
             return True
+        if left_final_for_no_control(rec):
+            return False
         state = rec.get("state")
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
@@ -632,8 +649,7 @@ class App:
                 # is final, it was never asked for again, and it was counted
                 # for a Manual Review folder that held nothing (#152). It is
                 # a failure the next run tries again.
-                self._record(doc, State.FAILED,
-                             notes="No safe download control found for this row")
+                self._record(doc, State.FAILED, notes=NO_CONTROL)
                 self._write_row(doc, "No download control", State.FAILED.value)
                 self.stats["failed"] += 1
                 print("  No download control found. Nothing was saved, and the next run tries it again.")

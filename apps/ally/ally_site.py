@@ -696,6 +696,28 @@ def _year_picker(page):
     return None, [], unread or bool(missed)
 
 
+def _the_only_year_picker(page, sel) -> bool:
+    """Whether `sel` is shown on the page and no other shown dropdown offers
+    years. _year_picker takes the first dropdown of years in the page's
+    order, shown or not, so a hidden picker of another list, or a second
+    picker, could be the one read, and a year it does not offer says
+    nothing for good about the list on screen (#152). It only reads, and
+    anything it cannot read says no."""
+    try:
+        if not sel.is_visible():
+            return False
+        shown = 0
+        for s, _identity in _safe_selects(page):
+            if not s.is_visible():
+                continue
+            opts = [o.strip() for o in s.locator("option").all_inner_texts()]
+            if any(re.fullmatch(r"20\d{2}", o) for o in opts):
+                shown += 1
+        return shown == 1
+    except Exception:
+        return False
+
+
 def _select_option(page, sel, label: str) -> bool:
     """Set a dropdown - but never one attached to a money-movement widget.
 
@@ -1270,7 +1292,7 @@ def ally_download(page, ctx, account: str, date: str, out_path,
         # reach (the tax picker starts at 2020, but the API returns a 2019
         # form, #152). Clicking whatever row is on screen would download some
         # other year's document, so stop here and say why.
-        if not unread and year < min(years):
+        if not unread and year < min(years) and _the_only_year_picker(page, sel):
             log.warning("%s is older than Ally's year picker (%s..%s), so this "
                         "document cannot be reached from the page",
                         year, min(years), max(years))

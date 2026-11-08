@@ -80,6 +80,9 @@ PAGE = """<!doctype html><html><head><style>
 <script>
 const LISTS = %(lists)s;
 const PDFS = %(pdfs)s;
+// Another dropdown of years on the Tax Forms tab, hidden before the picker
+// the list follows, or shown after it, offering other years.
+const ANOTHER = %(another)s;
 window.__pressed = [];
 
 function save(year) {
@@ -117,8 +120,15 @@ function open(tab) {
   const years = Object.keys(LISTS[tab]).sort().reverse();
   let shown = years[0];
   const id = tab === 'tax' ? 'taxYear' : 'statementYear';
-  document.getElementById('picker').innerHTML = '<label for="' + id + '">Year</label><select id="' +
+  const other = '<label for="otherYear">Other year</label><select id="otherYear" data-guid="otherYear"' +
+    (ANOTHER === 'hidden before' ? ' style="display:none"' : '') + '>' +
+    options('otherYear', ANOTHER === 'hidden before' ? ['2025', '2024', '2023']
+                                                     : ['2025', '2024', '2023', '2022', '2021', '2020', '2019', '2018']) +
+    '</select>';
+  const picker = '<label for="' + id + '">Year</label><select id="' +
     id + '" data-guid="' + id + '">' + options(id, years) + '</select>';
+  document.getElementById('picker').innerHTML = tab !== 'tax' || !ANOTHER ? picker
+    : ANOTHER === 'hidden before' ? other + picker : picker + other;
   const sel = document.getElementById(id);
   sel.value = shown;
   sel.addEventListener('change', () => { shown = sel.value; draw(tab, shown); });
@@ -147,7 +157,7 @@ def browser():
 class Ally:
     """The app at home and Ally's page in a browser refused the network."""
 
-    def __init__(self, browser, tmp_path, monkeypatch, capsys):
+    def __init__(self, browser, tmp_path, monkeypatch, capsys, another=""):
         # The browser is up before the harness stands in for Playwright.
         self.home = census.Home(ALLY, tmp_path, monkeypatch, capsys)
         self.home.config["min_pdf_bytes"] = 100
@@ -156,7 +166,8 @@ class Ally:
         ctx = browser.new_context(accept_downloads=True)
         ctx.route("**/*", lambda route: route.abort())
         self.page = ctx.new_page()
-        self.page.set_content(PAGE % {"lists": json.dumps(LISTS), "pdfs": json.dumps(PDFS)})
+        self.page.set_content(PAGE % {"lists": json.dumps(LISTS), "pdfs": json.dumps(PDFS),
+                                      "another": json.dumps(another)})
         # The pauses a run takes for Ally's own page are cut short, as the
         # other page tests here cut them.
         wait = self.page.wait_for_timeout
@@ -338,6 +349,25 @@ def test_a_picker_that_could_not_be_read_decides_nothing_for_good(
     assert first.result["failed"] == 1 and first.result["manual_review"] == 0, first.result
     assert ally.record("2019")["state"] == State.FAILED.value
     assert ally.run().asked == ["2019"]
+
+
+@pytest.mark.parametrize("another, year", [("hidden before", "2022"), ("shown after", "2019")])
+def test_a_page_with_another_dropdown_of_years_decides_nothing_for_good(
+        browser, tmp_path, monkeypatch, capsys, another, year):
+    """The year picker is taken as the first dropdown of years on the page,
+    shown or not. A hidden one of another list before it, offering 2023 on,
+    made 2022's form, which the picker on screen reaches, look out of reach
+    for good. A second one shown after it, offering 2019, leaves which
+    picker the list follows in doubt. Either way the form is a failure
+    tried again, never left for good."""
+    ally = Ally(browser, tmp_path, monkeypatch, capsys, another=another)
+    ally.lists(year)
+    first = ally.run()
+    assert ally.record(year)["state"] != State.NO_RECEIPT_AVAILABLE.value, ally.record(year)
+    assert first.result["manual_review"] == 0, first.result
+    if not first.result["new_files"]:
+        assert first.result["failed"] == 1, first.result
+        assert ally.run().asked == [year], "a form not known to be out of reach is tried again"
 
 
 def test_redownload_asks_for_a_form_out_of_reach_again(browser, tmp_path, monkeypatch, capsys):

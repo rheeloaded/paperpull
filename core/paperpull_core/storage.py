@@ -1321,12 +1321,22 @@ class CsvFile:
             with shared_folder.open_to_write(self.path, "w", encoding="utf-8-sig", newline="") as f:
                 csv.DictWriter(f, fieldnames=self.columns, quoting=csv.QUOTE_MINIMAL).writeheader()
 
-    def _held(self) -> set:
-        """Every row the file holds, as it was written, by this file's columns."""
+    def _held(self) -> Optional[set]:
+        """Every row the file holds, as it was written, by this file's
+        columns, or None when the file cannot be read as this app writes
+        it. A file a person saved again from Excel in the code page of
+        their Windows, with a name such as José in it, is not UTF-8, and a
+        file with a field past the csv module's limit is not one it reads.
+        Appending never read the file before, so such a file is appended to
+        as it always was, rather than every row of a run failing to be
+        written, with the files that run saved counted as failed."""
         if not self.path.exists():
             return set()
-        with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig", newline="") as f:
-            return {tuple(r.get(c) or "" for c in self.columns) for r in csv.DictReader(f)}
+        try:
+            with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig", newline="") as f:
+                return {tuple(r.get(c) or "" for c in self.columns) for r in csv.DictReader(f)}
+        except (OSError, UnicodeError, csv.Error):
+            return None
 
     def append_rows(self, rows: Iterable[dict]) -> None:
         self._ensure_header()

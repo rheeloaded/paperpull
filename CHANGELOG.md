@@ -10,7 +10,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
-- **A document that could not be saved no longer reads as one waiting in
+- **A capture that saved nothing no longer reads as a document waiting in
   Manual Review (#152).** Ally's tax forms API lists a 2019 Form 1099-INT
   while its Tax Forms year picker starts at 2020, so its page cannot open it.
   The run counted it as needing manual review, the panel said a document sat
@@ -19,14 +19,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   index. Ally now says once that the form is out of reach of its page, counts
   it on the run summary's line "Not reachable on Ally's page", and leaves it
   on later runs, with no failure file. A run with `--redownload` asks for it
-  again. Only a year older than the picker's first, read twice, counts as out
-  of reach, so a year the picker has not reached yet is still tried. In every
+  again. Only a year older than the first of the one year picker shown, read
+  twice, counts as out of reach, so a year the picker has not reached yet is
+  still tried. In every
   document app a capture that saved nothing is now a failure, which the next
   run tries again, rather than a document for Manual Review, and Anthem's
   documents fetched through its API do the same. Wealthfront recorded a row it
   could not find as having nothing to fetch, so it was never asked for again,
-  and now tries it again too. Every document index now holds a row once, so a
-  document that fails the same way on several runs has one row.
+  and now tries it again too, the records it left so before included. Every
+  document index now holds a row once, so a document that fails the same way
+  on several runs has one row. Refusals that save nothing, such as a wrong
+  document or a page that asks you to sign in again, are still counted for
+  review as before.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month
