@@ -28,6 +28,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   person as Accounts does, instead of by folder.
 
 ### Fixed
+- **A run says where its documents went, and Open folder opens them.** A
+  run's page listed the names it saved and never where, and Open folder
+  opened the account's own folder, among its script, config and records,
+  with the PDFs a folder down, or, once a documents folder was set in
+  Settings, a folder they had moved out of. A run that saved documents now
+  says "Saved to" the folder with an Open folder button, and Open folder
+  everywhere opens the folder holding the account's newest document: its
+  documents folder once that is where they land, or Statements, say, in its
+  own. A support report or recording opens its Diagnostics folder and what
+  a run set aside opens Manual Review, as the page says they are there.
+  Accounts names the documents folder once one is set.
 - **Sign in, then get new documents, in one go.** Get new pressed before
   signing in, the likeliest first-run slip, read as a crash ("It exited with
   code 1", "Run login.bat first"), said "Sign in again" to somebody who never

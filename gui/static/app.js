@@ -411,8 +411,12 @@ function renderHome() {
     html += '<details class="group-more h-sec" id="h-more"' + (MORE_OPEN ? ' open' : '') + '><summary>Not started (' +
       groups.new.length + ')</summary>' + rows(groups.new) + '</details>';
   } else html += section('Not started', groups.new);
-  html += '<p class="hint">' + (inSample() ? 'This is the sample archive. ' : '') + 'Saved in <span class="mono">' +
-    esc(META.apps_root) + '</span>' + (!SERVER && !inSample() ? ' · <a href="#/settings">Change in Settings</a>' : '') + '</p>';
+  // Where documents go, the documents folder once one is set in Settings,
+  // since that is where new ones land and the PaperPull folder then holds
+  // their records.
+  html += '<p class="hint">' + (inSample() ? 'This is the sample archive. ' : '') +
+    (META.documents_root ? 'Documents go to' : 'Saved in') + ' <span class="mono">' +
+    esc(META.documents_root || META.apps_root) + '</span>' + (!SERVER && !inSample() ? ' · <a href="#/settings">Change in Settings</a>' : '') + '</p>';
   body.innerHTML = html;
   $('h-findbox').hidden = n <= FIND_AT;
   if ($('h-findbox').hidden) $('h-find').value = '';
@@ -726,7 +730,7 @@ function startRun(r, action, opts) {
   if (again && (SERVER || !againScoped(s) || !(META.redownload_actions || []).includes(action))) return false;
   Object.assign(RUN, {state: 'running', app, account, provider: r.provider, kind: r.kind, who: whoOf(r), action,
     scope: s, again, lines: [], result: null, saved: null, code: null, refused: '', found: null, step: 0, total: 0,
-    connected: false, now: '', failure: false, startedAt: new Date(), endedAt: null, outcome: null,
+    connected: false, now: '', failure: false, startedAt: new Date(), endedAt: null, outcome: null, savedIn: '',
     queue: Boolean(opts.queue), onDone: opts.onDone || null, sink: opts.sink ? $(opts.sink) : null, stopped: false});
   if (RUN.sink) { if (!opts.append) RUN.sink.textContent = ''; RUN.sink.hidden = false; }
   const q = new URLSearchParams({ app, account, action });
@@ -822,11 +826,23 @@ function finishRun(code, refused, streamed) {
   const done = RUN.onDone;
   RUN.onDone = null;
   if (RUN.code !== '0' || (RUN.result && RUN.result.attention)) checkFailure(RUN.app, RUN.account);
+  if (savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(RUN.app, RUN.account);
   if (done) done(RUN.code);
   if (RUN.queue && QUEUE) queueStep();
   loadAccounts().then(renderAll);
   renderAll();
   lockStarts();
+}
+// Where a run's documents went, said beside them with a button to show
+// them, so nobody leaves the page to find them. The panel names the folder
+// (gui/app.py _where_documents_are), never the page.
+async function whereSaved(app, account) {
+  try {
+    const d = await getJSON('/api/saved-in?' + new URLSearchParams({app, account}));
+    if (RUN.state !== 'done' || RUN.app !== app || RUN.account !== account || !d.folder) return;
+    RUN.savedIn = d.folder;
+    renderAll();
+  } catch (e) { /* the run's own page still says what it saved */ }
 }
 // How many files a run saved. Its own result counts them, and the names
 // read from its new-this-run.txt can be fewer (one name for two files of
@@ -1071,6 +1087,10 @@ function renderRun() {
       html += '<ul class="saved" aria-label="Saved this run">' + RUN.saved.slice(0, 50).map(n => '<li>' + sv(P.check, 16, 3) +
         '<span>' + esc(n) + '</span></li>').join('') + (RUN.saved.length > 50 ? '<li>and ' + (RUN.saved.length - 50) + ' more</li>' : '') + '</ul>';
     }
+    if (r && RUN.savedIn) {
+      html += '<div class="keepopen"><p>Saved to <span class="mono">' + esc(RUN.savedIn) + '</span></p>' +
+        '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>';
+    }
     if (r && (o.resume || o.recheck || o.signin || o.relist || o.rerun)) {
       // Signing in again comes first, unless the outcome knows the stop had
       // nothing to do with it (signin: false), a changed page or a slow one.
@@ -1097,7 +1117,7 @@ function renderRun() {
       html += '<div class="keepopen"><p>The file holds counts and states and no text from your account.</p>' +
         (SERVER ? '<button type="button" class="btn btn-s" data-do="report-download" data-key="' + key + '" data-action="' +
           esc(RUN.action) + '">' + sv(P.download) + 'Download the file to attach</button></div>'
-          : '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>');
+          : '<button type="button" class="btn btn-s" data-do="reveal" data-what="diagnostics" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>');
     }
     html += techDetails(!o.clean && !RUN.failure) + '</section>';
     if (o.attention && r) {
@@ -1109,8 +1129,9 @@ function renderRun() {
         '<p>' + esc(o.say) + '</p>' + (o.names || folder || aside ? '<div class="row-actions">' +
         (o.names ? '<button type="button" class="btn btn-s" data-do="review" data-key="' + key + '">' + sv(P.tag) +
           'Review names</button>' : '') +
-        (folder ? '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' +
-          sv(P.folder) + 'Open ' + esc(whose(RUN.provider)) + ' folder</button>' : '') +
+        (folder ? '<button type="button" class="btn btn-s" data-do="reveal" data-what="' + (o.aside ? 'aside' : 'records') +
+          '" data-key="' + key + '">' + sv(P.folder) + (o.aside ? 'Open what was set aside' : 'Open ' + esc(whose(RUN.provider)) + ' folder') +
+          '</button>' : '') +
         (aside ? '<button type="button" class="btn btn-s" data-do="aside-download" data-key="' + key + '">' +
           sv(P.download) + 'Download what was set aside</button>' : '') + '</div>' : '') + '</div></section>';
     }
@@ -2239,7 +2260,9 @@ const DO = {
     const r = rowByKey(el.dataset.key);
     closeMenus();
     if (!r) return;
-    try { await postJSON('/api/reveal', {app: r.app, account: r.account}); } catch (e) { notice(e.message, 'warn'); }
+    // What to show, the documents unless the button names another folder.
+    const what = el.dataset.what || 'documents';
+    try { await postJSON('/api/reveal', {app: r.app, account: r.account, what}); } catch (e) { notice(e.message, 'warn'); }
   },
   'queue': () => startQueue(),
   'queue-retry': () => queueRun(),

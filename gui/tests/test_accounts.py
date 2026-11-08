@@ -617,6 +617,113 @@ class _Req:
         return self._body
 
 
+def _pdf(path, age):
+    """A PDF written `age` seconds ago."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"%PDF-1.4\n")
+    when = time.time() - age
+    os.utime(path, (when, when))
+    return path
+
+
+def _opened(monkeypatch):
+    opened = []
+
+    class Popen:
+        def __init__(self, cmd, *a, **k):
+            opened.append(Path(cmd[-1]).resolve())
+
+    monkeypatch.setattr(app_module.subprocess, "Popen", Popen)
+    return opened
+
+
+def test_open_folder_shows_the_documents_not_the_programs_beside_them(root, monkeypatch):
+    """The account's own folder holds its script, config and records, and
+    the PDFs one folder down, so Open folder opens the one holding them."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "2024" / "march.pdf", 100)
+    # Newer, but none of these is where its documents are.
+    for records in ("Logs", "Diagnostics", "Backups", "Manual Review", ".cache"):
+        _pdf(own / records / "x.pdf", 1)
+    opened = _opened(monkeypatch)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements"})))
+    assert opened == [(own / "Statements").resolve()]
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(own / "Statements")}
+
+
+def test_open_folder_follows_the_newest_document_into_a_documents_folder(root, tmp_path, monkeypatch):
+    """Once a documents folder is set, only what is saved from then on goes
+    there, so it is shown once it holds the newest document, and not before."""
+    own, docs = root / "Bank Statements", tmp_path / "Documents" / "Bank"
+    docs.mkdir(parents=True)
+    _pdf(own / "Statements" / "old.pdf", 500)
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    _pdf(docs / "Statements" / "new.pdf", 10)
+    assert app_module._where_documents_are(meta, "primary") == docs
+
+
+def test_with_no_document_yet_it_is_the_documents_folder_or_the_accounts_own(root, tmp_path, monkeypatch):
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == root / "Bank Statements"
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    assert app_module._where_documents_are(meta, "primary") == docs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="links need privileges on Windows")
+def test_a_link_in_the_folder_is_never_followed_to_find_documents(root, tmp_path, monkeypatch):
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf(tmp_path / "elsewhere" / "newer.pdf", 1)
+    (own / "Linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+
+
+def test_a_support_file_and_what_was_set_aside_open_their_own_folders(root, monkeypatch):
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "a.pdf", 100)
+    (own / "Diagnostics").mkdir()
+    opened = _opened(monkeypatch)
+    for what in ("diagnostics", "aside", "records"):
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+    # Nothing was set aside, so its folder is not there, and the account's is shown.
+    assert opened == [(own / "Diagnostics").resolve(), own.resolve(), own.resolve()]
+    for what in ("../..", "/etc", "Statements"):
+        with pytest.raises(app_module.HTTPException) as e:
+            asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+        assert e.value.status_code == 400
+
+
+def test_a_run_that_saved_documents_says_where_and_offers_to_show_them(panel):
+    """Where the documents went was asked where it was answered least, on
+    the page that lists them."""
+    js = panel.evaluate("() => [whereSaved.toString(), finishRun.toString(), renderRun.toString()]")
+    assert "/api/saved-in?" in js[0]
+    assert "savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(" in js[1]
+    shown = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'current',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'all', scope: {year: '', start: '', end: ''}, again: false, lines: [], result: null,
+                            saved: ['a.pdf'], code: '0',
+                            refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: '/Users/me/Documents/Bank/Statements'});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const keep = document.querySelector('#view-run .keepopen');
+        return [keep.innerText, keep.querySelector('button').dataset.what || ''];
+    }""")
+    assert "Saved to /Users/me/Documents/Bank/Statements" in shown[0] and "Open folder" in shown[0]
+    assert shown[1] == "", "the documents, which reveal shows unless told otherwise"
+
+
 def test_open_folder_shows_only_the_accounts_own_folder(root, monkeypatch):
     opened = []
 

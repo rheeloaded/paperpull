@@ -50,6 +50,7 @@ import run_result
 from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import MutableHeaders
 
 # PaperPull targets Python 3.11+ (README, and core/pyproject.toml's
@@ -873,7 +874,7 @@ def _reviews_names(script) -> bool:
 def api_apps():
     refreshed = refresh_installs()
     apps = discover_apps()
-    return {"apps_root": str(apps_root()), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
+    return {"apps_root": str(apps_root()), "documents_root": _documents_root(), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
             "apps": apps, "refreshed": refreshed,
             # What the server's header says about where new documents go, and
@@ -1629,26 +1630,101 @@ def api_accounts():
             "accounts": account_rows()}
 
 
+# The folders of an account's own that hold its records and never a
+# document of the kind a person opens (core spec.INFRASTRUCTURE_FOLDERS).
+# Manual Review holds a document, but one that failed its check, and is
+# no place to be sent to find what was saved.
+NOT_DOCUMENTS = frozenset({"Manual Review", "Logs", "Diagnostics", "Backups"})
+
+
+def _where_documents_are(meta: dict, account: str) -> Path:
+    """The folder to show for an account's documents. Its own folder holds
+    its program and records beside them, and once a documents folder is
+    set only what is saved from then on goes there, so it is the folder
+    holding the newest PDF: the documents folder itself when that is where
+    it is, or the folder of its own that holds it, Statements, say. With
+    no PDF yet, the documents folder when set, or its own folder."""
+    root = _account_root(meta, account)
+    docs = _documents_of(meta, account)
+    bases = ([Path(docs)] if docs and Path(docs).is_dir() else []) + [root]
+    newest = None
+    for base in bases:
+        try:
+            children = [c for c in sorted(base.iterdir()) if c.is_dir() and not c.is_symlink()
+                        and c.name not in NOT_DOCUMENTS and not c.name.startswith((".", "_"))]
+        except OSError:
+            continue
+        for child in children:
+            try:
+                # In name order, so of two saved the same second the
+                # same one is shown on every computer.
+                for f in sorted(child.rglob("*")):
+                    if f.suffix.lower() == ".pdf" and f.is_file():
+                        when = f.stat().st_mtime
+                        if newest is None or when > newest[0]:
+                            newest = (when, base, child)
+            except OSError:
+                continue
+    if newest is None:
+        return bases[0]
+    _, base, child = newest
+    return base if base is not root else child
+
+
+# What Open folder can be asked to show, each a folder the panel works out
+# itself: the documents, a run's support file or recording, what a run set
+# aside, or the account's own folder with its records.
+REVEAL_FOLDERS = {"diagnostics": "Diagnostics", "aside": "Manual Review"}
+
+
+def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") -> Path:
+    try:
+        if what == "documents":
+            folder = _where_documents_are(meta, account)
+        else:
+            folder = _account_root(meta, account)
+            inner = folder / REVEAL_FOLDERS.get(what, "")
+            if what in REVEAL_FOLDERS and inner.is_dir() and not inner.is_symlink():
+                folder = inner
+    except ValueError:
+        raise HTTPException(404, "that account's config names no folder PaperPull can read")
+    if not folder.is_dir():
+        raise HTTPException(404, "that account has no folder yet")
+    return folder
+
+
+@app.get("/api/saved-in", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+def api_saved_in(app: str = "", account: str = "primary"):
+    """The folder Open folder shows for an account, named for the page to
+    say where a run's documents went. Takes the app's name and the
+    account, both checked against what the panel itself found, and never
+    a path. A plain def, so the walk runs in a worker thread."""
+    apps = discover_apps()
+    if app not in apps or account not in apps[app]["accounts"]:
+        raise HTTPException(404, "unknown app or account")
+    return {"folder": str(_documents_folder_or_404(apps[app], account))}
+
+
 @app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
 async def api_reveal(request: Request):
-    """Show one account's folder in the file manager. Takes the app's name
-    and the account, both checked against what the panel itself found, and
-    never a path."""
+    """Show where one account's documents are in the file manager
+    (_where_documents_are). Takes the app's name and the account, both
+    checked against what the panel itself found, and never a path."""
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(400, "expected a JSON body")
     name = str((body or {}).get("app") or "")
     account = str((body or {}).get("account") or "primary")
+    what = str((body or {}).get("what") or "documents")
+    if what not in ("documents", "records", *REVEAL_FOLDERS):
+        raise HTTPException(400, "unknown folder to show")
     apps = discover_apps()
     if name not in apps or account not in apps[name]["accounts"]:
         raise HTTPException(404, "unknown app or account")
-    try:
-        folder = _account_root(apps[name], account)
-    except ValueError:
-        raise HTTPException(404, "that account's config names no folder PaperPull can read")
-    if not folder.is_dir():
-        raise HTTPException(404, "that account has no folder yet")
+    # The walk for the newest PDF reads the disk, so it runs in a worker
+    # thread and a download streaming meanwhile is not held up.
+    folder = await run_in_threadpool(_documents_folder_or_404, apps[name], account, what)
     try:
         if sys.platform == "win32":
             subprocess.Popen(["explorer", str(folder)])
