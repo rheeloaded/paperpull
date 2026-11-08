@@ -256,7 +256,8 @@ function route() {
   if (!META) return;
   closeMenus();
   const want = parseRoute();
-  const empty = !Object.keys(META.apps).length;
+  // A fresh checkout's providers are templates, not accounts of anybody's.
+  const empty = !Object.keys(META.apps).length || Boolean(META.fresh_checkout);
   if (empty && !['welcome', 'settings'].includes(want.view)) { want.view = 'welcome'; want.add = false; }
   Object.assign(ROUTE, {view: want.view, app: want.app || '', account: want.account || ''});
   const changed = VIEW !== want.view;

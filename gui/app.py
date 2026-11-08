@@ -155,6 +155,21 @@ def root_source() -> str:
     return "default"
 
 
+def fresh_checkout() -> bool:
+    """Whether this is a source checkout nobody has set up yet. Its apps/
+    folder holds the provider templates, which look like installs: somebody
+    following the README's quick start landed on every provider "Not
+    started", without the welcome the README promises, and a run would have
+    written PDFs and browser profiles into the git tree. Somebody already
+    running from apps/ has a config.json in one of them, and keeps doing so."""
+    if root_source() != "default" or _is_packaged() or server_mode.enabled():
+        return False
+    try:
+        return not any((d / "config.json").is_file() for d in _DEFAULT_ROOT.iterdir() if d.is_dir())
+    except OSError:
+        return False
+
+
 # -- the sample archive -------------------------------------------------------
 #
 # A folder of invented statements and receipts, written on request rather
@@ -874,7 +889,8 @@ def _reviews_names(script) -> bool:
 def api_apps():
     refreshed = refresh_installs()
     apps = discover_apps()
-    return {"apps_root": str(apps_root()), "documents_root": _documents_root(), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
+    return {"apps_root": str(apps_root()), "documents_root": _documents_root(), "root_source": root_source(),
+            "fresh_checkout": fresh_checkout(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
             "apps": apps, "refreshed": refreshed,
             # What the server's header says about where new documents go, and
@@ -2920,7 +2936,8 @@ def _seed_missing_cores(root: Path) -> dict:
 def api_providers():
     installed = set()
     root = apps_root()
-    if root.is_dir():
+    # A fresh checkout's apps/ holds templates, none of them set up.
+    if root.is_dir() and not fresh_checkout():
         installed = {d.name for d in root.iterdir() if d.is_dir() and _entry_script(d)}
     out = list_providers()
     for p in out:

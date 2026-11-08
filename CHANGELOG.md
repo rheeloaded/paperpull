@@ -201,6 +201,16 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
+- **A checkout nobody has set up shows the welcome.** Its `apps/` holds the
+  provider templates, which looked like installs, so the README's quick
+  start landed on every provider "Not started" with no welcome, and a run
+  would have written PDFs and sign-ins into the git tree. A checkout with no
+  chosen folder and no `config.json` in `apps/` now shows the welcome, and
+  somebody already running from `apps/` carries on as before.
+- **A support report takes three steps, not fifteen.** Its dialog said to
+  sign in first with no way to, so a person cancelled, signed in and came
+  back through More; Open folder then opened a folder of two or three
+  files to pick the one to attach from; and where to send it was under
   Settings, About. The dialog now opens the sign-in window itself and stays
   open for the report, Show the file selects the survey or recording in
   the file manager, and Report a problem opens a new problem report for
