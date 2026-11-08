@@ -138,7 +138,7 @@ const ACTION_DOING = {login: 'Opening the sign-in window for %s', discover: 'Che
 // -- where an account stands, in words ---------------------------------------------
 // Each state gets one chip, one sentence and one next step. Nothing here
 // says an account is signed in, since nothing short of a run knows that.
-const NEEDS = ['stopped', 'attention', 'unreadable', 'overdue', 'due', 'gap'];
+const NEEDS = ['stopped', 'signin', 'attention', 'unreadable', 'overdue', 'due', 'gap'];
 const FRESH = ['never', 'not_started'];
 function groupOf(r) { return NEEDS.includes(r.state) ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
 // Whether a stopped account is carried on with Continue. Not after a Resume
@@ -215,7 +215,12 @@ function present(r) {
     case 'not_started':
       return {chip: {cls: 'plain', text: 'Not started'},
         say: 'Sign in once and PaperPull saves every ' + n + ' ' + r.provider + ' keeps online.',
-        act: {label: 'Start', nav: true, primary: true}};
+        act: {label: 'Sign in', run: 'login', primary: true}};
+    case 'signin':
+      return {chip: {cls: 'info', text: 'Sign in first'},
+        say: 'The last run' + (lastAt ? ' on ' + lastAt : '') + ' found no signed-in ' + r.provider +
+          ' window, so nothing was downloaded. Sign in, then get new.',
+        act: {label: 'Sign in', run: 'login', primary: true}};
     case 'unknown':
       return {chip: {cls: 'plain', text: 'No schedule yet'},
         say: many(r.documents, n) + (latest ? ', newest ' + latest : '') + '. Too few to know how often ' + r.provider + ' sends one.',
@@ -510,6 +515,9 @@ function renderAccount() {
   const loginSay = SERVER
     ? 'Opens ' + whose(r.provider) + " sign-in page in the sign-in window, docked beside this page. You type your password there and PaperPull never sees it. Leave it signed in while documents download."
     : 'Opens ' + r.provider + ' in its own browser window. You type your password there and PaperPull never sees it. Leave the window open while documents download.';
+  // Until it has run, or after a run that found nobody signed in, signing
+  // in is the step to take, so it carries the weight and Get new does not.
+  const signFirst = ['not_started', 'signin'].includes(r.state);
   html += '<div class="cols"><div class="main-col"><section class="card" aria-labelledby="getdocs">' +
     '<div class="band ' + band + '"><span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span><span class="say">' +
     esc(p.say) + '</span>' + (stoppedHere ? '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' +
@@ -517,10 +525,10 @@ function renderAccount() {
     (again && !SERVER && !inSample() ? '<button type="button" class="btn btn-p starts" data-do="restore" data-key="' + esc(keyOf(r)) + '">Restore the rest</button>' : '') +
     '</div>' + gapList(r) +
     '<div class="steps"><h2 id="getdocs" style="margin-bottom:18px">Get your documents</h2>' +
-    '<div class="step"><div class="stepnum">1</div><div class="body"><h3>Sign in to ' + esc(r.provider) + '</h3><p id="steplogin">' +
-    esc(loginSay) + '</p><button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' +
+    '<div class="step"><div class="stepnum' + (signFirst ? ' on' : '') + '">1</div><div class="body"><h3>Sign in to ' + esc(r.provider) + '</h3><p id="steplogin">' +
+    esc(loginSay) + '</p><button type="button" class="btn ' + (signFirst ? 'btn-p' : 'btn-s') + ' starts" data-do="run" data-action="login" data-key="' +
     esc(keyOf(r)) + '">' + sv(P.lock) + 'Open sign-in window</button></div></div>' +
-    '<div class="step"><div class="stepnum on">2</div><div class="body"><h3>Get new documents</h3><p>Saves every ' + noun(r) +
+    '<div class="step"><div class="stepnum' + (signFirst ? '' : ' on') + '">2</div><div class="body"><h3>Get new documents</h3><p>Saves every ' + noun(r) +
     ' you do not have yet. Safe to repeat, nothing is ever downloaded twice, even if you deleted the PDFs after importing them elsewhere.' +
     (!SERVER ? ' To get deleted files back, use Restore deleted files under More.' : '') + '</p>' +
     '<fieldset><legend>Which dates</legend><div class="seg">' +
@@ -531,7 +539,7 @@ function renderAccount() {
     '<span id="rangebox" class="dates" style="margin:0"><label class="field">From<input type="date" id="start" value="' + esc(saved.start) + '"></label>' +
     '<label class="field">To<input type="date" id="end" value="' + esc(saved.end) + '"></label></span></div>' +
     '<p class="hint" id="scopehint" style="margin-top:8px"></p></fieldset>' +
-    '<div class="row-actions" style="margin-top:18px"><button type="button" class="btn btn-p btn-lg starts" data-do="run" data-action="all" data-key="' +
+    '<div class="row-actions" style="margin-top:18px"><button type="button" class="btn ' + (signFirst ? 'btn-s' : 'btn-p') + ' btn-lg starts" data-do="run" data-action="all" data-key="' +
     esc(keyOf(r)) + '">' + sv(P.download, 18, 2.2) + 'Get new documents</button>' +
     '<button type="button" class="link starts" data-do="run" data-action="pilot" data-key="' + esc(keyOf(r)) + '">Try the newest few first</button>' +
     '<span class="sep-dot" aria-hidden="true">·</span>' +
@@ -831,8 +839,22 @@ function savedCount(res, saved) {
 // How an app ends when what it was asked for did not happen, the numbers
 // in core run_reporting (core/tests/test_every_app_says_when_nothing_happened.py
 // holds the two to each other).
-const NOTHING_OPENED = '5', NOTHING_RECORDED = '6';
+const NOTHING_OPENED = '5', NOTHING_RECORDED = '6', NOT_SIGNED_IN = '7';
 // What a run came to, in a title, a sentence and a tone.
+// The run to press once signed in: Get new after a sign-in, or the run
+// that found nobody signed in, over the same dates.
+const RERUN = {all: ['Get new documents', 'Saves every document you do not have yet'],
+  pilot: ['Try the newest few first', 'Saves the newest few, to see it work'],
+  discover: ["Only check what's there", 'Lists what is there. Nothing is downloaded'],
+  resume: ['Continue', 'Picks up what is left, without asking again for what is already saved']};
+function rerunStep(run, key, num, after) {
+  const action = RERUN[run.action] ? run.action : 'all', s = run.action === 'login' ? {} : run.scope || {};
+  const dates = (s.year ? ' data-year="' + esc(s.year) + '"' : '') + (s.start ? ' data-start="' + esc(s.start) + '"' : '') +
+    (s.end ? ' data-end="' + esc(s.end) + '"' : '');
+  return '<li><div class="stepnum' + (after ? '' : ' on') + '">' + num + '</div><div class="body"><b>' + esc(RERUN[action][0]) + '</b><span>' +
+    esc(RERUN[action][1]) + '</span></div><button type="button" class="btn ' + (after ? 'btn-s' : 'btn-p') + ' starts" data-do="run" data-action="' + action +
+    '" data-key="' + key + '"' + dates + '>' + PLAY + esc(RERUN[action][0]) + '</button></li>';
+}
 function runOutcome() {
   const res = RUN.result, code = RUN.code, n = noun(RUN), saved = RUN.saved || [];
   const fresh = savedCount(res, saved);
@@ -868,6 +890,12 @@ function runOutcome() {
   if (code === NOTHING_RECORDED) return {tone: 'info', title: 'Nothing was recorded',
     say: 'No steps were saved for ' + who + '. The technical details below say why. ' +
       'Sign in first if it was on a sign-in page, then record again.', clean: false, signin: true};
+  // A run that downloads found no signed-in browser, most often a first Get
+  // new pressed before signing in. Nothing started, so nothing is offered
+  // to continue: the next steps are to sign in, then the same run again.
+  if (code === NOT_SIGNED_IN) return {tone: 'info', title: 'Sign in first',
+    say: 'No signed-in ' + who + ' window was open, so nothing was downloaded. Open the sign-in window, sign in there, ' +
+      'then run this again.', clean: false, signin: true, first: true, rerun: true};
   // Why it stopped, when the run knows (core run_reporting.stop_reason),
   // and so whose it is to fix. Each says that nothing saved is lost, and
   // only a stop that a sign-in can fix offers one. A changed page would
@@ -953,7 +981,10 @@ function runOutcome() {
     review_names: rvRenamed(RUN.lines) ? ['Receipts renamed', 'The technical details list each file.']
       : ['Nothing was renamed', 'The technical details say why.'],
   }[RUN.action];
-  if (plain) return {tone: 'ok', title: plain[0], say: plain[1] + (RUN.action === 'discover' ? alike : ''), clean: true};
+  // A sign-in window that opened is followed by Get new on this page, so
+  // nobody goes back to the account to find it.
+  if (plain) return {tone: 'ok', title: plain[0], say: plain[1] + (RUN.action === 'discover' ? alike : ''), clean: true,
+    ...(RUN.action === 'login' ? {signin: false, rerun: true} : {})};
   if (res) return {tone: 'ok', title: 'Finished, no issues reported', say: '', clean: true};
   return {tone: 'warn', title: 'Finished, check the details', say: 'No run summary came back, so read the technical details.', clean: true};
 }
@@ -1040,13 +1071,16 @@ function renderRun() {
       html += '<ul class="saved" aria-label="Saved this run">' + RUN.saved.slice(0, 50).map(n => '<li>' + sv(P.check, 16, 3) +
         '<span>' + esc(n) + '</span></li>').join('') + (RUN.saved.length > 50 ? '<li>and ' + (RUN.saved.length - 50) + ' more</li>' : '') + '</ul>';
     }
-    if (r && (o.resume || o.recheck || o.signin || o.relist)) {
+    if (r && (o.resume || o.recheck || o.signin || o.relist || o.rerun)) {
       // Signing in again comes first, unless the outcome knows the stop had
       // nothing to do with it (signin: false), a changed page or a slow one.
       const signFirst = o.signin !== false, then = signFirst ? '2' : '1';
       html += '<ol class="nextsteps">' +
-        (signFirst ? '<li><div class="stepnum">1</div><div class="body"><b>Sign in to ' + esc(RUN.provider) + ' again</b><span>In its window, or open a new one</span></div>' +
-        '<button type="button" class="btn btn-s starts" data-do="run" data-action="login" data-key="' + key + '">Open sign-in window</button></li>' : '') +
+        // Somebody who has not signed in yet does that first, so it carries
+        // the weight, and the run after it does not.
+        (signFirst ? '<li><div class="stepnum' + (o.first ? ' on' : '') + '">1</div><div class="body"><b>Sign in to ' + esc(RUN.provider) + (o.first ? '' : ' again') +
+          '</b><span>' + (o.first ? 'In the window that opens. Leave it open while documents download' : 'In its window, or open a new one') + '</span></div>' +
+        '<button type="button" class="btn ' + (o.first ? 'btn-p' : 'btn-s') + ' starts" data-do="run" data-action="login" data-key="' + key + '">Open sign-in window</button></li>' : '') +
         (o.resume ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Continue where it stopped</b><span>Picks up what is left, without asking again for what is already saved</span></div>' +
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' + key + '">' + PLAY + 'Continue</button></li>' : '') +
         (o.relist ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Get new documents</b><span>Reads ' + esc(whose(RUN.provider)) +
@@ -1055,7 +1089,8 @@ function renderRun() {
           'Get new documents</button></li>' : '') +
         (o.recheck ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Check again</b><span>Lists what ' + esc(RUN.provider) +
           ' has once more. Nothing is downloaded</span></div><button type="button" class="btn btn-p starts" data-do="run" data-action="discover" data-key="' +
-          key + '">Check again</button></li>' : '') + '</ol>';
+          key + '">Check again</button></li>' : '') +
+        (o.rerun ? rerunStep(RUN, key, then, o.first) : '') + '</ol>';
     }
     if (r && ['diagnose', 'record'].includes(RUN.action) && o.clean) {
       // The server's folder is on the server, so the file comes to the browser.
@@ -1512,7 +1547,7 @@ async function wCreate() {
   const n = d.created.length;
   notice('Set up ' + many(n, 'provider') + ' in ' + d.root + '. ' +
     (d.owner ? 'Documents will be filed under ' + d.owner + '. ' : '') +
-    'Next, open one and sign in when its sign-in window opens.', 'ok');
+    'Next, press Sign in beside ' + (n === 1 ? 'it' : 'one of them') + '. A sign-in window opens for you to sign in there.', 'ok');
 }
 
 // -- moving to another computer (#67) ------------------------------------------------
@@ -2189,7 +2224,8 @@ const DO = {
   'run': el => {
     const r = rowByKey(el.dataset.key);
     if (!r) return;
-    const scope = el.dataset.start ? {year: '', start: el.dataset.start, end: el.dataset.end} : null;
+    const scope = el.dataset.start || el.dataset.year
+      ? {year: el.dataset.year || '', start: el.dataset.start || '', end: el.dataset.end || ''} : null;
     startRun(r, el.dataset.action, scope ? {scope} : {});
   },
   'restore': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRestore(r); },

@@ -28,6 +28,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   person as Accounts does, instead of by folder.
 
 ### Fixed
+- **Sign in, then get new documents, in one go.** Get new pressed before
+  signing in, the likeliest first-run slip, read as a crash ("It exited with
+  code 1", "Run login.bat first"), said "Sign in again" to somebody who never
+  had, and offered Continue for a run that never started. Each app now ends
+  that run through `run_reporting.not_signed_in`, which says it in the
+  panel's words under the panel and in login.bat's in a terminal, and exits
+  `NOT_SIGNED_IN` (7). The panel titles it "Sign in first" and offers the
+  sign-in, then the same run over the same dates, and the account is not
+  listed as stopped. "Sign-in window opened" now offers Get new documents on
+  the same page. A row not started yet offers Sign in, which opens the
+  window, where it offered Start, which only opened the account's page, and
+  that page leads with signing in until a sign-in has been asked for.
 - **A run that stops says why, and whose it is to fix.** Every stop read
   "may have signed you out partway … Sign in again, then continue", so a
   stop at a page that was not what the app expected, most often a

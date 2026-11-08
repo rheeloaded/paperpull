@@ -1380,6 +1380,11 @@ def _provider_of(meta: dict) -> tuple:
     return (p.group(1) if p else name), (k.group(1) if k else "")
 
 
+# The exit of a run that found no signed-in browser, core
+# run_reporting.NOT_SIGNED_IN, which static/app.js keeps too.
+NOT_SIGNED_IN = 7
+
+
 def _last_outcome(entry) -> str:
     """How a logged run ended, in one word the page turns into a sentence.
     "" for a run that finished cleanly or no run at all."""
@@ -1391,6 +1396,10 @@ def _last_outcome(entry) -> str:
     result = entry.get("result") if isinstance(entry.get("result"), dict) else None
     if code == 130:
         return "interrupted"
+    # Found no signed-in browser, so nothing started and there is nothing
+    # to continue (core run_reporting.NOT_SIGNED_IN).
+    if code == NOT_SIGNED_IN:
+        return "signin"
     if code not in (0, None):
         return "failed"
     if result and result.get("stopped"):
@@ -1404,7 +1413,7 @@ def _last_outcome(entry) -> str:
 
 
 # The order the home page lists accounts in, most in need first.
-STATE_ORDER = ("stopped", "attention", "unreadable", "overdue", "due", "gap",
+STATE_ORDER = ("stopped", "signin", "attention", "unreadable", "overdue", "due", "gap",
                "never", "not_started", "nostatus", "unknown", "current", "ongoing")
 
 
@@ -1416,6 +1425,8 @@ def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
     archive whose status could not be read is never called not started."""
     if outcome in ("closed", "interrupted", "failed", "stopped", "unlisted"):
         return "stopped"
+    if outcome == "signin":
+        return "signin"
     if outcome == "attention":
         return "attention"
     if row is None:

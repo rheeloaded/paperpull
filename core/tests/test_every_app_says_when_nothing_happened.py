@@ -66,14 +66,15 @@ def test_nothing_recorded_is_never_a_recording_saved(path):
 
 def test_the_panel_reads_the_same_numbers():
     js = (REPO / "gui" / "static" / "app.js").read_text(encoding="utf-8")
-    m = re.search(r"const NOTHING_OPENED = '(\d+)', NOTHING_RECORDED = '(\d+)';", js)
-    assert m, "app.js names both codes"
-    assert (int(m.group(1)), int(m.group(2))) == (run_reporting.NOTHING_OPENED,
-                                                  run_reporting.NOTHING_RECORDED)
+    m = re.search(r"const NOTHING_OPENED = '(\d+)', NOTHING_RECORDED = '(\d+)', NOT_SIGNED_IN = '(\d+)';", js)
+    assert m, "app.js names the three codes"
+    assert tuple(map(int, m.groups())) == (run_reporting.NOTHING_OPENED, run_reporting.NOTHING_RECORDED,
+                                           run_reporting.NOT_SIGNED_IN)
 
 
 def test_the_codes_are_not_ones_an_app_already_uses():
     taken = {0, 1, 2, 3, 130}
     assert run_reporting.NOTHING_OPENED not in taken
     assert run_reporting.NOTHING_RECORDED not in taken
-    assert run_reporting.NOTHING_OPENED != run_reporting.NOTHING_RECORDED
+    assert run_reporting.NOT_SIGNED_IN not in taken
+    assert len({run_reporting.NOTHING_OPENED, run_reporting.NOTHING_RECORDED, run_reporting.NOT_SIGNED_IN}) == 3

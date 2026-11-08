@@ -729,3 +729,52 @@ def test_a_run_that_ended_by_itself_before_its_page_closed_keeps_its_code(base, 
     assert log[0]["exit_code"] == 0 and log[0]["closed"] is False
     assert log[0]["result"]["new_files"] == 1
     assert _rows()[("Bank Statements", "primary")]["last_outcome"] == ""
+
+
+@pytest.mark.parametrize("action", ["all", "pilot", "discover", "resume"])
+def test_a_run_with_nobody_signed_in_says_sign_in_first(panel, action):
+    """Get new before Open sign-in window read as a crash with an exit code,
+    said 'Sign in again' to somebody who never had, and offered Continue
+    for a run that never started."""
+    o = panel.evaluate("""(action) => {
+        Object.assign(RUN, {result: null, code: NOT_SIGNED_IN, action, again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", action)
+    assert (o["tone"], o["title"]) == ("info", "Sign in first")
+    assert "exited with code" not in o["say"] and "nothing was downloaded" in o["say"]
+    assert o["signin"] and o["first"] and o["rerun"] and not o.get("resume")
+
+
+def test_once_signed_in_the_same_run_is_the_next_step_over_the_same_dates(panel):
+    step = panel.evaluate("""() => rerunStep({action: 'pilot', scope: {year: '2024', start: '', end: ''}}, 'k', '2')""")
+    assert 'data-action="pilot"' in step and 'data-year="2024"' in step and ">2</div>" in step
+    # After a sign-in, Get new over all dates, as the row's own button runs.
+    step = panel.evaluate("""() => rerunStep({action: 'login', scope: {year: '2024'}}, 'k', '1')""")
+    assert 'data-action="all"' in step and "data-year" not in step and "Get new documents" in step
+    assert 'btn btn-p' in step and 'stepnum on' in step
+    # After a sign-in still to do, which then carries the weight itself.
+    step = panel.evaluate("""() => rerunStep({action: 'all', scope: {}}, 'k', '2', true)""")
+    assert 'btn btn-s' in step and 'stepnum on' not in step
+
+
+def test_a_sign_in_window_that_opened_goes_straight_on_to_get_new(panel):
+    o = panel.evaluate("""() => {
+        Object.assign(RUN, {result: null, code: '0', action: 'login', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""")
+    assert o["title"] == "Sign-in window opened" and o["rerun"] and o["signin"] is False
+
+
+def test_a_run_with_nobody_signed_in_is_not_a_stop_to_continue():
+    entry = {"action": "all", "exit_code": app_module.NOT_SIGNED_IN, "result": None}
+    assert app_module._last_outcome(entry) == "signin"
+    assert app_module._account_state(None, "signin", []) == "signin"
+    assert app_module.STATE_ORDER.index("signin") < app_module.STATE_ORDER.index("not_started")
+
+
+def test_an_account_not_started_offers_to_sign_in_not_to_open_its_page(panel):
+    acts = panel.evaluate("""() => ['not_started', 'signin'].map(state =>
+        present({state, provider: 'Citi', kind: 'DOCUMENT', runnable: true, documents: 0, gaps: [], latest: []}).act)""")
+    assert all(a == {"label": "Sign in", "run": "login", "primary": True} for a in acts), acts

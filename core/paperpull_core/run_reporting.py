@@ -26,6 +26,25 @@ _MARK = re.compile(r"[0-9a-f]{32}")
 # holds the two to it.
 NOTHING_OPENED = 5
 NOTHING_RECORDED = 6
+# A run that downloads found no signed-in browser to attach to, most often
+# a first Get new pressed before Open sign-in window. Nothing was started,
+# so the panel says to sign in first and never offers Continue.
+NOT_SIGNED_IN = 7
+
+
+def not_signed_in(cdp_url, err) -> SystemExit:
+    """The exit for a run that could not attach to the signed-in browser at
+    cdp_url, after saying so in the words of where it runs: the panel's
+    buttons under the panel, which marks its runs, and login.bat in a
+    terminal. Raised by each app as `raise not_signed_in(cdp_url, e)`."""
+    if os.environ.get(MARK_ENV, ""):
+        words = ("No signed-in browser window was open for this run, so nothing was downloaded. "
+                 "Press Open sign-in window, sign in there and leave the window open, then run this again.")
+    else:
+        words = (f"Could not connect to your signed-in browser at {cdp_url}.\n"
+                 "Run login.bat first and keep that browser window OPEN.")
+    print(f"{words}\n({err})", file=sys.stderr, flush=True)
+    return SystemExit(NOT_SIGNED_IN)
 
 # What cannot be shown on one line of a run's output. A line feed or a
 # carriage return ends the line, the other control characters and the two
