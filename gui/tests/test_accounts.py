@@ -192,7 +192,7 @@ def test_a_resume_only_a_listing_carries_on_from_is_its_own_outcome(root):
     assert (row["state"], row["last_outcome"]) == ("stopped", "stopped")
 
 
-def _listed(folder, at, whole_at="", resume_ended=""):
+def _listing_note(folder, at, whole_at="", resume_ended=""):
     """The listing note an app keeps, and a Resume after it that read none."""
     note = {"complete": True, "at": at}
     if whole_at != "":
@@ -212,7 +212,7 @@ def test_a_continue_with_nothing_to_take_is_no_check(panel, root):
     bank = root / "Bank Statements - second"
     weeks_ago = (date.today() - timedelta(days=21)).isoformat() + "T09:00:00"
     today = date.today().isoformat() + "T10:00:00"
-    _listed(bank, weeks_ago, weeks_ago, resume_ended=today)
+    _listing_note(bank, weeks_ago, weeks_ago, resume_ended=today)
     row = _rows()[("Bank Statements", "second")]
     assert (row["state"], row["checked"], row["ran"]) == ("current", weeks_ago, today)
     shown = panel.evaluate("(row) => present(row)", json.loads(json.dumps(row, default=str)))
@@ -228,7 +228,7 @@ def test_a_continue_with_nothing_to_take_is_no_check(panel, root):
 def test_a_card_says_checked_only_for_a_list_read_whole(panel, root, complete, whole_at, checked):
     bank = root / "Bank Statements - second"
     at = (date.today() - timedelta(days=9)).isoformat() + "T09:00:00"
-    _listed(bank, at, whole_at)
+    _listing_note(bank, at, whole_at)
     if not complete:
         (bank / "last-listing.json").write_text(json.dumps({"complete": False, "at": at}),
                                                 encoding="utf-8")

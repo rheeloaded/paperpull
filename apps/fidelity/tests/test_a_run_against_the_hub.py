@@ -680,21 +680,22 @@ def test_a_form_whose_title_ends_in_statement_is_looked_for_among_the_forms(home
 
 # -- what a re-discovered document changes -----------------------------------
 
-def test_a_document_in_review_keeps_its_state_and_is_tried_again_anyway(home):
+def test_a_document_that_failed_keeps_its_state_and_is_tried_again(home):
     """Clearing discovery's state changed nothing a person sees, since a run
-    decides from progress, and an empty answer in review is tried again."""
+    decides from progress. An empty answer saves nothing, so it is a failure
+    and not a document waiting in Manual Review (#152), and it is tried again."""
     home.hub.ids = "session"
     home.hub.forms = [form("F30", ONE)]
     home.hub.empty = {"F30"}
     home.run_all()
-    assert home.states() == {FORM: "Needs Manual Review"}
+    assert home.states() == {FORM: "Failed"}
 
     home.hub.empty = set()
     home.hub.new_session()
     home.run("--discover")
     record = home.store("discovery.json")[FORM]
     assert record["item_id"] == home.hub.id_of("F30")
-    assert record["state"] == "Needs Manual Review"
+    assert record["state"] == "Failed"
 
     home.run_all()
     assert home.on_disk() == ["F30"]

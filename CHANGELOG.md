@@ -96,8 +96,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   own answer says the same. A Balance tab that will not open stops the list,
   unless Venmo's answer says there is no Balance account, and a Balance month
   past the ten transactions that tab can show is not saved, rather than be
-  saved with some missing, and counts as failed. All of it comes from Venmo's public page code, and
-  no run has met this page yet.
+  saved with some missing, and counts as failed. All of it comes from Venmo's
+  public page code, and no run has met this page yet.
 - **SDG&E reads its Billing History again.** Since November 6 each bill
   row on My Energy Center starts with a cell the page hides, holding the
   row's number, and the header has no cell above it. Read cell by cell,
