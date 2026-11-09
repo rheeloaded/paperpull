@@ -54,8 +54,19 @@ DOCUMENTS_FOLDERS = "documents-folders.json"
 _CONFIG_READ = None
 
 
+def _base_dir_for_config() -> Optional[Path]:
+    if _CONFIG_READ:
+        return _CONFIG_READ.parent
+    return None
+
+
 def _folder_key(path) -> str:
-    return os.path.normcase(os.path.abspath(str(path)))
+    p = Path(path)
+    if not p.is_absolute():
+        base = _base_dir_for_config()
+        if base:
+            p = (base / p).resolve()
+    return os.path.normcase(os.path.abspath(str(p)))
 
 
 def documents_dir_for(output_dir) -> str:
@@ -87,7 +98,11 @@ def spec():
 def load_config(path: Optional[Path] = None) -> dict:
     """Read config.json and fill in this provider's defaults."""
     sp = spec()
-    path = Path(path) if path else (sp.project_dir / "config.json")
+    if path:
+        p = Path(path)
+        path = p if p.is_absolute() or p.exists() else (sp.project_dir / p)
+    else:
+        path = sp.project_dir / "config.json"
     if not path.exists():
         copy_cmd = ("copy config.example.json config.json"
                     if sys.platform == "win32"
@@ -137,13 +152,13 @@ def load_config(path: Optional[Path] = None) -> dict:
     cfg.setdefault("browser", "auto")
     for key, value in sp.config_defaults.items():
         cfg.setdefault(key, value)
+    global _CONFIG_READ
+    _CONFIG_READ = Path(path).resolve()
     # How files are named (#50). Read here because every app loads its
     # config before it names anything, so no app has to remember to.
     set_filename_patterns(cfg)
     # Where documents go (#102), read here for the same reason.
     set_documents_dir(cfg, path)
-    global _CONFIG_READ
-    _CONFIG_READ = Path(path).absolute()
     return cfg
 
 
@@ -243,6 +258,12 @@ def set_documents_dir(cfg: dict, path) -> str:
         docs = os.path.normpath(raw.strip())
         profile = str(cfg.get("profile_dir") or "")
         out = str(cfg["output_dir"])
+        out_p = Path(out)
+        if not out_p.is_absolute():
+            base = Path(path).resolve().parent if path else (_CONFIG_READ.parent if _CONFIG_READ else None)
+            if base:
+                out_p = (base / out_p).resolve()
+        out = str(out_p)
         if profile and (_inside(docs, profile) or _inside(profile, docs)):
             why = ("it is the browser profile, inside it or around it, and documents are "
                    "never kept with a signed-in profile")
@@ -541,7 +562,14 @@ class Paths:
 
     def __init__(self, output_dir, app_spec=None, documents_dir=None):
         self._spec = app_spec or spec()
-        self.root = Path(output_dir)
+        root = Path(output_dir)
+        if not root.is_absolute():
+            base = _CONFIG_READ.parent if _CONFIG_READ else (
+                app_spec.project_dir if app_spec and app_spec.project_dir != Path(".") else None
+            )
+            if base:
+                root = (base / root).resolve()
+        self.root = root
         if documents_dir is None:
             documents_dir = documents_dir_for(output_dir)
         self.documents = Path(documents_dir) if documents_dir else self.root
