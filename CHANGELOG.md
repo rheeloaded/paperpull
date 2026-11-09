@@ -29,6 +29,59 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and account are now told apart by their ids, so neither is saved with
   the other's bytes, and Login says signed in only once DKB answers with
   the list.
+- **Discover Bank, the 83rd app, checking and savings statements (#151).**
+  `discoverbank` reads Discover Bank deposit accounts on bank.discover.com.
+  It reads every account on the Statements page's account menu from the
+  state the page keeps for it, asks each account's statement list the way
+  the page does, from inside the page, and saves each PDF under its own
+  account, named for it. Nothing on the page is pressed. Contributed by
+  @appchamp, whose full run saved 100 checking and 100 savings statements.
+  Money market and CD accounts are untested. Before merging, the Discover
+  card app was kept beside it, since Capital One moves Discover cards onto
+  its own site in waves into 2027, and the new app was given a port of its
+  own where it had taken the card app's. It no longer opens the account
+  menu and chooses each account when the menu's state cannot be read, nor
+  reads the page's text in place of the lists. An account whose list did
+  not answer, an account with no id or another's name, an option named for
+  an action, and a statement whose PDF is not its own account's, whose date
+  is no day, or whose kind its account's name and id disagree on, now leave
+  the list not whole, so the run keeps what it saved and stops at its end.
+  A list with nothing read is no longer noted whole.
+- **Ziply Fiber, the 84th app, monthly internet bills (#129).** It
+  downloads every bill My Account's Billing page lists from
+  ziplyfiber.com. Nothing is clicked. The app asks the page's own bill
+  list query from inside the signed-in page with the page's own headers,
+  which stay in memory for the run and are never written down, and
+  fetches each bill's PDF the same way. A list with no bills, an answer
+  the account API marks as failed, a list as long as was asked for, or a
+  page that asks about more than one account stops the list rather than
+  be read as whole. A bill is known by the account's last four digits and
+  its invoice id, its file name carries the account, and a bill listed
+  under another account than the one the page shows stops the run once
+  and names the account to choose. Contributed by crazyhorse90210 and run
+  on the contributor's own account. Before merging, an empty or failed
+  list was made to stop, a second account was made to stop the list, a
+  list that stops while bills download was made to stop the run once
+  with the list unread, a bill answered with JSON was made to fail alone,
+  the list was made to be read once a run, and the README was rewritten
+  for this app.
+- **Cetera (AdviceWorks), the 85th app, brokerage statements and
+  quarterly performance reports (#130).** It downloads every statement of
+  every account the AdviceWorks client portal lists, and the quarterly
+  performance reports beside them. Nothing is clicked. The app asks the
+  page's own two lists from inside the signed-in page with the page's own
+  headers, which stay in memory for the run and are never written down,
+  and fetches each PDF the way the page's own download does. A list
+  shorter than its own count, a statement of an account the page did not
+  ask about, or a history with no statements stops the list rather than be
+  read as whole. A statement's file name carries its account as the portal
+  masks it. Contributed by crazyhorse90210 and run on the contributor's
+  own account. Before merging, one document answered with something other
+  than a PDF was made to fail alone, where it had stopped every run at that
+  document for good, two statements of one account and date were made to
+  leave only that date, a list that stops while documents download was
+  made to stop the run once with the list unread, and both lists were made
+  to be read once a run.
 - **Make a request, from the main page.** A button on Accounts opens one
   sheet for asking for a provider or a feature, with the questions a request
   needs answered, and says so when PaperPull already reads the provider
@@ -73,24 +126,6 @@ All notable changes to PaperPull are recorded here. Versioning follows
   started in the app's folder or its config's, since every path such a run
   records is relative to that folder, and the search for a config was kept to
   a bare file name.
-- **Discover Bank checking and savings statements, a new app (#151).**
-  `discoverbank` reads Discover Bank deposit accounts on bank.discover.com.
-  It reads every account on the Statements page's account menu from the
-  state the page keeps for it, asks each account's statement list the way
-  the page does, from inside the page, and saves each PDF under its own
-  account, named for it. Nothing on the page is pressed. Contributed by
-  @appchamp, whose full run saved 100 checking and 100 savings statements.
-  Money market and CD accounts are untested. Before merging, the Discover
-  card app was kept beside it, since Capital One moves Discover cards onto
-  its own site in waves into 2027, and the new app was given a port of its
-  own where it had taken the card app's. It no longer opens the account
-  menu and chooses each account when the menu's state cannot be read, nor
-  reads the page's text in place of the lists. An account whose list did
-  not answer, an account with no id or another's name, an option named for
-  an action, and a statement whose PDF is not its own account's, whose date
-  is no day, or whose kind its account's name and id disagree on, now leave
-  the list not whole, so the run keeps what it saved and stops at its end.
-  A list with nothing read is no longer noted whole.
 - **Verizon Mobile downloads your wireless bills (#31).** The app had been
   built without an account, and on a real one it found no bills. It now
   opens Bill & payment history by its address, takes the page's own list of
@@ -110,41 +145,6 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its new name. Contributed by @crazyhorse90210, who ran it on his own
   account and saved all 24 bills. Before merging, the list stops, the sign-out,
   the account and the history read once a bill were done on our side.
-- **Ziply Fiber, the 82nd app, monthly internet bills (#129).** It
-  downloads every bill My Account's Billing page lists from
-  ziplyfiber.com. Nothing is clicked. The app asks the page's own bill
-  list query from inside the signed-in page with the page's own headers,
-  which stay in memory for the run and are never written down, and
-  fetches each bill's PDF the same way. A list with no bills, an answer
-  the account API marks as failed, a list as long as was asked for, or a
-  page that asks about more than one account stops the list rather than
-  be read as whole. A bill is known by the account's last four digits and
-  its invoice id, its file name carries the account, and a bill listed
-  under another account than the one the page shows stops the run once
-  and names the account to choose. Contributed by crazyhorse90210 and run
-  on the contributor's own account. Before merging, an empty or failed
-  list was made to stop, a second account was made to stop the list, a
-  list that stops while bills download was made to stop the run once
-  with the list unread, a bill answered with JSON was made to fail alone,
-  the list was made to be read once a run, and the README was rewritten
-  for this app.
-- **Cetera (AdviceWorks), the 83rd app, brokerage statements and
-  quarterly performance reports (#130).** It downloads every statement of
-  every account the AdviceWorks client portal lists, and the quarterly
-  performance reports beside them. Nothing is clicked. The app asks the
-  page's own two lists from inside the signed-in page with the page's own
-  headers, which stay in memory for the run and are never written down,
-  and fetches each PDF the way the page's own download does. A list
-  shorter than its own count, a statement of an account the page did not
-  ask about, or a history with no statements stops the list rather than be
-  read as whole. A statement's file name carries its account as the portal
-  masks it. Contributed by crazyhorse90210 and run on the contributor's
-  own account. Before merging, one document answered with something other
-  than a PDF was made to fail alone, where it had stopped every run at that
-  document for good, two statements of one account and date were made to
-  leave only that date, a list that stops while documents download was
-  made to stop the run once with the list unread, and both lists were made
-  to be read once a run.
 - **A support report takes three steps, not fifteen.** Its dialog said to
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
@@ -202,10 +202,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   they went to more than one kind, or the documents folder once they were
   moved there. Open folder elsewhere opens the folder holding the account's
   newest document, never a browser profile, another person's folder, or a
-  documents folder no run would use. A support report or recording opens
-  its Diagnostics folder and what a run set aside opens Manual Review, as
-  the page says they are there. Accounts names the documents folder once
-  one is set.
+  documents folder no run would use. What a run set aside opens Manual
+  Review, as the page says it is there. Accounts names the documents
+  folder once one is set.
 - **Sign in, then get new documents, in one go.** Get new pressed before
   signing in, the likeliest first-run slip, read as a crash ("It exited with
   code 1", "Run login.bat first"), said "Sign in again" to somebody who never

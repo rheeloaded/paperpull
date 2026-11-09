@@ -424,12 +424,14 @@ def test_a_page_stop_of_a_check_offers_to_check_again(panel):
 @pytest.mark.parametrize("code, refused, asked", [
     ("5", "", False),
     ("6", "", False),
+    ("7", "", False),
     ("1", "Citi is already running for this account, in another tab or window.", False),
     ("1", "", True),
 ])
 def test_a_run_that_wrote_no_failure_file_is_never_offered_one(panel, code, refused, asked):
-    """A sign-in with no window, a recording with nothing in it and a run
-    that did not start write no failure file. The panel asked for the
+    """A sign-in with no window, a recording with nothing in it, a run
+    that found nobody signed in and a run that did not start write no
+    failure file. The panel asked for the
     newest one all the same, since their codes are not 0, and an older
     run's from the last hour then read 'This run wrote a file about what
     went wrong'."""
