@@ -128,11 +128,12 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"\brebalance\b|\bliquidate\b|\bdetails\b)", re.I)
 
 # The links that lead to a bill, anchored whole, Billing's own "View PDF"
-# and a "View Bill" or "Download Bill" with nothing more. This app presses
-# none of them. They are named here for the survey's verdicts.
+# and a "View Bill", "Download Bill" or "View Internet Bill", the name its
+# rules give a bill, with nothing more. This app presses none of them. They
+# are named here for the survey's verdicts.
 SAFE_DOC_CONTROL_RES = (
     re.compile(r"^view\s+pdf$", re.I),
-    re.compile(r"^(view|download)\s+(your\s+)?(detailed\s+)?bill(\s+\(?pdf\)?)?$", re.I),
+    re.compile(r"^(view|download)\s+(your\s+)?(detailed\s+)?(internet\s+)?bill(\s+\(?pdf\)?)?$", re.I),
 )
 
 BILL_CONTROL_RE = re.compile(r"^\s*view\s+pdf\s*$", re.I)

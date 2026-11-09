@@ -116,7 +116,7 @@ class Hosts(unittest.TestCase):
 
 class Controls(unittest.TestCase):
     def test_the_bill_link_is_a_document(self):
-        for name in ("VIEW PDF", "View Bill"):
+        for name in ("VIEW PDF", "View Bill", "View Internet Bill"):
             self.assertTrue(site.is_safe_control(name), name)
 
     def test_everything_else_is_refused(self):
