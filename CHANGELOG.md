@@ -51,7 +51,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **The welcome's folder step says what it thinks of the folder.** A
   folder that could not be used was refused only at Set up, two steps on
   and away from its field. One already holding PaperPull providers, the
-  obvious one to type for somebody who has them, was not noticed: they were
+  obvious one to type for somebody who has them, was not noticed. They were
   asked to choose providers again, and Set up said it set up 0. One inside
   iCloud Drive, Google Drive, Dropbox or OneDrive was taken without a word,
   though it holds each provider's signed-in browser. Continue now checks the

@@ -1504,10 +1504,11 @@ const W = {step: 1, add: false, picked: new Set(), group: 'all', search: ''};
 // The groups in gui/providers.json, in the order the chips show them.
 const GROUP_ORDER = ['banks', 'shopping', 'bills', 'pay', 'investing', 'loans', 'insurance'];
 // What the welcome's first step says of the folder typed, on Continue,
-// before the person chooses providers for it: what is wrong with it, under
-// the field it is about rather than at Set up two steps on; the providers
-// already set up there, which they can open instead of choosing again; and
-// a sync service it sits inside, said once, after which Continue goes on.
+// before the person chooses providers for it. What is wrong with it is said
+// under the field it is about, rather than at Set up two steps on. So are
+// the providers already set up there, which they can open instead of
+// choosing again, and a sync service it sits inside, said once, after
+// which Continue goes on.
 const ROOTCHECK = {root: '', warned: false};
 function rootSay(text, warn) {
   $('rootcheck').textContent = text;
@@ -1523,8 +1524,8 @@ async function rootChecked() {
   $('w-useroot').hidden = true;
   if (!d.ok) { rootSay(d.problem, true); $('newroot').focus(); return false; }
   if (d.found_count && !W.add) {
-    rootSay('Found ' + many(d.found_count, 'provider') + ' already set up here: ' + d.found.join(', ') +
-      (d.found_count > d.found.length ? ' and more' : '') + '. Open Accounts to use them, or continue to add more.', false);
+    rootSay('Found ' + many(d.found_count, 'provider') + ' already set up here (' + d.found.join(', ') +
+      (d.found_count > d.found.length ? ' and more' : '') + '). Open Accounts to use them, or continue to add more.', false);
     $('w-useroot').hidden = false;
     if (!ROOTCHECK.warned) { ROOTCHECK.warned = true; return false; }
   } else if (d.synced_by) {

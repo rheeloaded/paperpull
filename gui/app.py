@@ -1962,24 +1962,57 @@ def _root_problem(raw: str):
     above = root
     while not above.exists() and above.parent != above:
         above = above.parent
-    if not above.is_dir() or not os.access(above, os.W_OK):
+    if not above.is_dir() or not _can_make_a_folder_in(above):
         return None, "PaperPull cannot write there. Choose a folder you can write to, such as one in Documents."
     return root, ""
+
+
+# Whether os.access says yes to every folder asked whether it can be written,
+# as it does on Windows (_can_make_a_folder_in).
+_ACCESS_SAYS_YES_TO_FOLDERS = sys.platform == "win32"
+
+
+def _can_make_a_folder_in(folder: Path) -> bool:
+    """Whether a folder can be made inside `folder`, which is what setting
+    up does there. os.access answers that on macOS and Linux. On Windows it
+    reads only the read-only flag, which says nothing of a folder's own
+    rights, so it says yes to every folder, Program Files too. There a
+    folder is made and taken away again to find out. A file is never the
+    test, since a person may make a folder at the top of C:\\ and not a file."""
+    if not os.access(folder, os.W_OK):
+        return False
+    if not _ACCESS_SAYS_YES_TO_FOLDERS:
+        return True
+    try:
+        made = tempfile.mkdtemp(prefix=".paperpull-check-", dir=str(folder))
+    except OSError:
+        return False
+    try:
+        os.rmdir(made)
+    except OSError:
+        pass
+    return True
 
 
 # The folders a sync service keeps in step with its cloud, by the name of
 # a folder on the way. A PaperPull folder holds each provider's signed-in
 # browser profile, which the terms say anyone holding it can act as you
-# with, so one inside these is warned of, never refused.
-_SYNCED = (("mobile documents", "iCloud Drive"), ("icloud", "iCloud Drive"), ("onedrive", "OneDrive"),
-           ("dropbox", "Dropbox"), ("googledrive", "Google Drive"), ("google drive", "Google Drive"),
-           ("my drive", "Google Drive"))
+# with, so one inside these is warned of, never refused. A name that starts
+# a service's own folder name, "OneDrive - Contoso" or "Dropbox (Personal)",
+# is matched by its start. "My Drive" and "Mobile Documents" are ordinary
+# words too, so only a folder of exactly that name counts, and "My Drivers"
+# is not warned of.
+_SYNCED = (("icloud", "iCloud Drive"), ("onedrive", "OneDrive"), ("dropbox", "Dropbox"),
+           ("googledrive", "Google Drive"), ("google drive", "Google Drive"))
+_SYNCED_EXACTLY = {"mobile documents": "iCloud Drive", "my drive": "Google Drive"}
 
 
 def _synced_by(root: Path) -> str:
     """The sync service a folder sits inside, by name, or ""."""
     for part in root.parts:
         low = part.lower()
+        if low in _SYNCED_EXACTLY:
+            return _SYNCED_EXACTLY[low]
         for start, name in _SYNCED:
             if low.startswith(start):
                 return name
@@ -1989,9 +2022,10 @@ def _synced_by(root: Path) -> str:
 @app.post("/api/root/check", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
 async def api_root_check(request: Request):
     """What the welcome says of the folder typed in its first step, before
-    the person goes on: what is wrong with it, the providers already set up
-    in it, so they can open those instead of choosing again, and the sync
-    service it sits inside. Changes nothing."""
+    the person goes on. That is what is wrong with it, the providers already
+    set up in it, so they can open those instead of choosing again, and the
+    sync service it sits inside. Changes nothing, though on Windows a folder
+    is made in it and taken away again (_can_make_a_folder_in)."""
     try:
         body = await request.json()
     except Exception:

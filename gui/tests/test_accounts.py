@@ -948,8 +948,8 @@ def test_an_account_not_started_offers_to_sign_in_not_to_open_its_page(panel):
 
 
 def test_the_welcome_says_what_its_folder_holds_before_providers_are_chosen(panel):
-    """The folder was checked only at Set up, two steps on; one already
-    holding providers was not noticed; and one in a sync service, which
+    """The folder was checked only at Set up, two steps on. One already
+    holding providers was not noticed, and one in a sync service, which
     would sync each sign-in, was not said."""
     reply = {}
     panel.route("**/api/root/check", lambda route: route.fulfill(
@@ -974,7 +974,7 @@ def test_the_welcome_says_what_its_folder_holds_before_providers_are_chosen(pane
     found = {"ok": True, "found": ["Chase Statements", "Amex Statements"], "found_count": 2, "synced_by": ""}
     first = press(found, "/Users/me/Old")
     assert first["step"] == 1 and first["use"]
-    assert "Found 2 providers already set up here: Chase Statements, Amex Statements" in first["said"]
+    assert "Found 2 providers already set up here (Chase Statements, Amex Statements)." in first["said"]
     assert press(found, "/Users/me/Old")["step"] == 2, "a second Continue goes on, to add more"
 
     synced = {"ok": True, "found": [], "found_count": 0, "synced_by": "iCloud Drive"}
