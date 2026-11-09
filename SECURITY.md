@@ -48,8 +48,8 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Coinbase, Costco, Discover, Dominion, eBay, E*TRADE, Fairfax Water, First
     Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Nelnet, Newrez,
     PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD, Spectrum,
-    State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo, Verizon
-    Mobile and Wells Fargo) decide which of the page's controls may be
+    State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
+    Wells Fargo) decide which of the page's controls may be
     pressed with `is_safe_control()`, a hard blocklist (`FORBIDDEN_CONTROL_RE`,
     buy/sell/transfer/pay/delete/change-setting) **plus** a document
     allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass **both**, so
@@ -93,7 +93,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Apple, Citi, DKB, E-ZPass Virginia, FedEx, Fidelity, Gap, GitHub, Home Depot,
     Invest529, IRS, Kroger, Lowe's, MILITARY STAR, myPay, NetBenefits, NW
     Natural, Optum Bank, Paylocity, Portland General Electric, SDG&E, Stripe,
-    TSP, Tualatin Water, Uber, UKG and UPS) open the provider's
+    TSP, Tualatin Water, Uber, UKG, UPS and Verizon Mobile) open the provider's
     pages by their address and read them, or ask for the same lists and
     files the provider's own page asks for, from inside the signed-in page or
     with its cookies. On a site that can also change direct deposit and tax

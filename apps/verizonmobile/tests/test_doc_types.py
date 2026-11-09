@@ -1,9 +1,9 @@
 """Verizon Mobile classification, the carrier guard, and the survey's promises.
 
-The site layer is unverified, so what these pin is everything that must be
-true before a tester ever runs it: the guard refuses every control that
-pays or changes service, the survey cannot leak a number, and a bill row's
-date is read in the forms verizon.com is likely to print it in.
+A run presses nothing, so the guard says only what Diagnose would make of
+each control it sees. What these pin is that it would refuse every control
+that pays or changes service, that the survey cannot leak a number, and
+that a date is read in the forms verizon.com prints it in.
 """
 import inspect
 import sys
@@ -59,10 +59,17 @@ def test_every_control_that_pays_or_changes_service_is_refused():
 def test_the_controls_that_fetch_a_bill_are_allowed():
     for label in ["Download bill", "Download bill (PDF)", "View bill", "Print bill",
                   "See bill", "Bill PDF", "PDF", "View bill history", "See more bills",
-                  "Show older bills", "Download statement"]:
+                  "Show older bills", "Download statement", "Review bill", "Review bill PDF"]:
         assert site.is_safe_control(label), label
-        assert site.BILL_CONTROL_RE.search(label) or "more" in label or "older" in label \
-            or "history" in label, label
+
+
+def test_diagnose_marks_the_pages_own_bill_controls():
+    """The survey saw "Review bill" and "Review bill PDF" on every cycle,
+    and those are what Diagnose marks as a bill's controls."""
+    for label in ["Review bill PDF", "Review bill", " review bill pdf "]:
+        assert site.BILL_CONTROL_RE.search(label), label
+    for label in ["Pay bill", "Review bill and pay", "Download bill", "Bill history"]:
+        assert not site.BILL_CONTROL_RE.search(label), label
 
 
 def test_a_bill_control_that_also_pays_is_refused():
@@ -80,7 +87,7 @@ def test_the_login_and_settings_vocabulary_is_refused_too():
 
 # -- dates, the identity of a bill -------------------------------------------
 
-def test_bill_dates_in_every_form_att_prints():
+def test_dates_in_every_form_a_page_prints():
     assert site.parse_date("Aug 12, 2026 Download bill PDF") == "2026-08-12"
     assert site.parse_date("August 12, 2026") == "2026-08-12"
     assert site.parse_date("Bill for 08/12/2026") == "2026-08-12"
@@ -88,7 +95,8 @@ def test_bill_dates_in_every_form_att_prints():
     assert site.parse_date("2026-08-12") == "2026-08-12"
     assert site.parse_date("no date here") is None
     assert site.parse_period_date("August 2026") == ("2026-08-31", "August 2026")
-    assert site._human_date("2026-08-12") == "August 12, 2026"
+    assert site.end_day("08/12/2026") == "2026-08-12"
+    assert site.end_day("02/30/2026") is None and site.end_day("2026-08-12") is None
 
 
 # -- the survey a tester attaches to an issue --------------------------------
@@ -105,7 +113,7 @@ def test_the_survey_masks_numbers_and_takes_no_screenshot():
         {"bills": ["1 item(s)", {"amount": "number", "date": "string"}], "n": "number"}
 
 
-def test_the_survey_follows_only_billing_links():
+def test_the_survey_marks_only_billing_links():
     for text in ["Bill history", "See bill history", "View bills", "Past bills",
                  "Billing", "Statements"]:
         assert site.SURVEY_LINK_RE.match(text), text
@@ -115,20 +123,21 @@ def test_the_survey_follows_only_billing_links():
 
 # -- hosts --------------------------------------------------------------------
 
-def test_only_att_hosts():
+def test_only_verizon_hosts():
     assert site.is_safe_url("https://www.verizon.com/digital/nsa/secure/ui/bill/")
     assert site.is_safe_url("https://secure.verizon.com/x")
     assert not site.is_safe_url("https://verizon.com.evil.test/bill.pdf")
     assert not site.is_safe_url("http://www.verizon.com/bill.pdf")
     assert not site.is_safe_url("https://user@verizon.com/bill.pdf")
-    assert all(site.is_safe_url(u) for u in site.BILLING_CANDIDATES)
+    assert all(site.is_safe_url(u) for u in site.URLS.values())
+    assert site.URLS["login"] == site.HISTORY_URL == site.BILLING_URL
 
 
-def test_the_unverified_status_is_stated_where_a_tester_will_read_it():
+def test_the_confirmed_status_is_stated_where_a_reader_will_read_it():
     src = Path(site.__file__).read_text(encoding="utf-8")
-    assert "UNVERIFIED" in src.split('"""')[1]
+    assert "CONFIRMED" in src.split('"""')[1]
     readme = (Path(site.__file__).parent / "README.md").read_text(encoding="utf-8")
-    assert "Not yet tested against a real account" in readme
+    assert "Confirmed on a real account" in readme
 
 
 def test_this_is_the_wireless_side_and_the_fios_app_is_separate():

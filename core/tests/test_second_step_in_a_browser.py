@@ -140,7 +140,9 @@ def site_of(app: Path):
 
 
 def test_this_asks_every_app_that_hands_the_core_its_words():
-    assert len(APPS) >= 12, [a.name for a in APPS]
+    """Not vacuous. Verizon Mobile was the twelfth until it took each bill
+    from its history API and pressed nothing (#128)."""
+    assert len(APPS) >= 11, [a.name for a in APPS]
 
 
 @pytest.mark.parametrize("app", APPS, ids=lambda d: d.name)
