@@ -1,0 +1,23 @@
+{
+  "_comment": "Editable rules mapping Cetera AdviceWorks document titles to filename summaries. Checked in order: tax (unused), then insurance (unused), then statement. cetera_site.py titles a statement 'Cetera <statement name> <date>' and a report 'Cetera Quarterly Performance Report <year> Q<n> <date>'; a statement's file name then adds its masked account number.",
+  "tax_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "\\bquarterly\\s+performance\\s+report\\b",
+      "summary": "Quarterly Performance Report"
+    },
+    {
+      "pattern": "\\bbrokerage\\s+statement\\b",
+      "summary": "Brokerage Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Account Statement"
+    }
+  ],
+  "skip_patterns": [
+    "\\bconfirm(ation)?s?\\b",
+    "\\bturbo\\s*tax\\b"
+  ]
+}
