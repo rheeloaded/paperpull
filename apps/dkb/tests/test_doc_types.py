@@ -203,18 +203,26 @@ def test_the_document_list_walks_the_offset_until_a_short_page(monkeypatch):
 
 
 def test_the_messages_are_keyed_by_their_document_and_follow_next_only_on_dkb(monkeypatch):
+    second = site.BASE + "/api/documentstorage/messages?page%5Boffset%5D=1"
     pages = {
         site.API["messages"]: {"data": [{"id": "m1", "attributes": {"documentId": "d1", "documentType": "taxCertification"}}],
                                "links": {"next": "/api/documentstorage/messages?page%5Boffset%5D=1"}},
-        site.BASE + "/api/documentstorage/messages?page%5Boffset%5D=1": {
-            "data": [{"id": "d2", "attributes": {"documentType": "bankAccountStatement"}}],
-            "links": {"next": "https://evil.example/x"}},
+        second: {"data": [{"id": "d2", "attributes": {"documentType": "bankAccountStatement"}}]},
     }
     asked = []
     monkeypatch.setattr(site, "_get", lambda page, url, **k: (asked.append(url), {"json": pages[url]})[1])
     got = site.list_messages(None)
     assert {k: v["documentType"] for k, v in got.items()} == {"d1": "taxCertification", "d2": "bankAccountStatement"}
     assert len(asked) == 2
+    # A next page anywhere else, or one asked for already, is not followed,
+    # and the messages are not called read whole either.
+    for nxt in ("https://evil.example/x", "https://banking.dkb.de/api/documentstorage/folders",
+                "https://www.dkb.de/api/documentstorage/messages", "/api/documentstorage/messages"):
+        pages[second] = dict(pages[second], links={"next": nxt})
+        asked.clear()
+        with pytest.raises(site.ListStopped):
+            site.list_messages(None)
+        assert len(asked) <= 3, nxt
 
 
 @pytest.mark.parametrize("doc_type,category", [
@@ -303,16 +311,28 @@ def test_an_id_that_could_change_the_address_is_refused():
             site.fetch_pdf(None, bad)
 
 
+def _by_place(rows):
+    """Numbers as a listing with no stored ids gives them, each sure."""
+    seen = {}
+    out = []
+    for r in rows:
+        what = (r["title"], r["date"], r["account"])
+        out.append((seen.get(what, 0), True))
+        seen[what] = seen.get(what, 0) + 1
+    return out
+
+
 def test_download_resolves_the_id_fresh_and_refuses_a_non_pdf(monkeypatch, tmp_path):
     monkeypatch.setattr(site, "resolve_item", lambda *a, **k: {"item_id": "fresh", "client_id": "application/pdf"})
     seen = {}
     monkeypatch.setattr(site, "fetch_pdf", lambda page, item_id, ct: (seen.update(id=item_id), b"%PDF-1.4 ok")[1])
     out = tmp_path / "x.pdf"
     assert site.download_document(None, "Kontoauszug 1/2026", "2026-01-31", out,
-                                  item_hint="stale", account="1234")
+                                  item_hint="stale", account="1234", number_rows=_by_place) == "fresh"
     assert seen == {"id": "fresh"} and out.read_bytes().startswith(b"%PDF")
     monkeypatch.setattr(site, "fetch_pdf", lambda *a: b"<html>Anmelden</html>")
-    assert not site.download_document(None, "Kontoauszug", "2026-01-31", tmp_path / "y.pdf", account="1234")
+    assert not site.download_document(None, "Kontoauszug", "2026-01-31", tmp_path / "y.pdf", account="1234",
+                                      number_rows=_by_place)
     assert not (tmp_path / "y.pdf").exists()
 
 
@@ -443,8 +463,31 @@ def test_one_listing_serves_the_downloads_that_follow(monkeypatch):
     monkeypatch.setattr(site, "collect_archive", lambda page: [])
     site.collect_documents(None)
     for _ in range(3):
-        assert site.resolve_item(None, "Kontoauszug 1/2026", "2026-01-31", "1234")["item_id"] == DOC["id"]
+        assert site.resolve_item(None, "Kontoauszug 1/2026", "2026-01-31", "1234",
+                                 item_id=DOC["id"], number_rows=_by_place)["item_id"] == DOC["id"]
     assert len(calls) == 1
+
+
+def test_a_full_page_given_again_or_a_list_past_its_last_page_stops_the_listing(monkeypatch):
+    """A list asked for by offset that answers every offset with the same
+    page would be read fifty times over and called whole. A list that is
+    still full at the last page asked for was cut there."""
+    same = [{"id": "d%d" % i} for i in range(site.PAGE_LIMIT)]
+    monkeypatch.setattr(site, "_get", lambda page, url, **k: {"json": {"data": same}})
+    with pytest.raises(site.ListStopped, match="given already"):
+        site.list_documents(None)
+    count = iter(range(10 ** 6))
+    monkeypatch.setattr(site, "_get", lambda page, url, **k: {"json": {"data": [
+        {"id": "d%d" % next(count)} for _ in range(site.PAGE_LIMIT)]}})
+    with pytest.raises(site.ListStopped, match="ran past"):
+        site.list_documents(None)
+
+
+def test_an_archive_folder_whose_id_cannot_be_read_stops_the_listing(monkeypatch):
+    monkeypatch.setattr(site, "_get", lambda page, url, **k: {"json": {"data": [
+        {"id": "1", "attributes": {"name": "Mitteilungen"}}, {"id": "../x", "attributes": {"name": "Archiv"}}]}})
+    with pytest.raises(site.ListStopped):
+        site.list_folders(None)
 
 
 def test_an_archive_timestamp_without_seconds_is_a_day_in_berlin():

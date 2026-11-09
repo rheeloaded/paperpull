@@ -11,7 +11,7 @@ Usage:
     python dkb_docs.py --dry-run     plan filenames, save nothing
 
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
-         --max-docs N  --type Statement|"Credit Card Statement"|"Depot Document"|"Tax Document"
+         --max-docs N  --type Statement|"Credit Card Statement"|"Securities Document"|"Tax Document"
 
 READ-ONLY: this tool only reads the DKB Postfach and downloads PDFs that
 DKB already generated. It never transfers money, trades securities, changes
@@ -19,7 +19,7 @@ a card or limit, or changes any account setting, and never marks a message
 read. Everything stays on this machine. Nothing is sent to any external
 service.
 
-Scaffolded 2026-11-08, not yet mapped against a signed-in session. See the
+Mapped and run on 2026-11-08 against the contributor's own account. See the
 STATUS block in dkb_site.py for the API.
 """
 from __future__ import annotations
@@ -48,7 +48,8 @@ from paperpull_core import browser as browser_launcher
 import dkb_site as site
 import storage
 from paperpull_core.models import State
-from paperpull_core.keys import stable_occurrences as _stable_occurrences
+from paperpull_core.keys import told_apart as _told_apart
+from paperpull_core.keys import twins as _twins
 from paperpull_core.words import shape_label, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
@@ -125,6 +126,34 @@ class Document:
         return cls(**d)
 
 
+# Which of several documents sharing these is which is told by their ids
+# (keys.told_apart). The account is always one of them too.
+ALIKE = ("title", "date")
+
+
+def tidy(text) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def row_category(d: dict, title: str) -> str:
+    """The category a listed row is recorded under, as _record_statement_doc
+    reads it before the rules choose its words."""
+    category = d.get("category") or ""
+    if category == doc_types.OTHER and re.search(r"statement|kontoauszug", title, re.I):
+        category = doc_types.STATEMENT
+    return category
+
+
+def listed_key(d: dict) -> str:
+    """The key of the document a listed row names, before it is numbered,
+    as _record_statement_doc reads the row. A history moved to another
+    computer carries no discovery.json, and told_apart finds each saved
+    number by this key then."""
+    title = tidy(d.get("title")) or "Statement"
+    return Document(title=title, category=row_category(d, title),
+                    date=(d.get("date") or "").strip(), account=tidy(d.get("account"))).key
+
+
 class App:
     _journal = None
     _requests = None
@@ -149,7 +178,7 @@ class App:
         self.progress.load()
         self.discovery.load()
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -298,13 +327,21 @@ class App:
         page = self.page()
         ok = site.goto_documents(page)
         challenge = site.detect_security_challenge(page)
+        # A banking.dkb.de address without a sign-in form says nothing of
+        # the session. DKB answering the Postfach list does.
+        listed = False
+        if ok and not challenge:
+            try:
+                listed = site.answers_its_list(page)
+            except (site.SessionExpired, site.ListStopped) as e:
+                log.info("the Postfach list did not answer: %s", e)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
             print("Connected, but DKB shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-        elif ok:
-            print("Success: connected and the Documents page is visible.")
+        elif listed:
+            print("Success: connected, and DKB answers with your Postfach list.")
             print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
             print("Connected, but the Documents list did not load, so this cannot say")
@@ -331,9 +368,27 @@ class App:
         return True
 
 
-    def _record_statement_doc(self, d: dict, occurrence: int = 0) -> int:
-        """Record one Postfach row {title, date, account, category, item_id, client_id}. Returns 1 if new."""
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
+    def _numbered(self, rows: List[dict]) -> list:
+        """Each row's number among the documents sharing its title, date and
+        account, and whether that surely names it, as (number, sure).
+        Discover and each download's look at a recent listing are both
+        numbered here, so the two agree on which row is which document.
+
+        A number stays with the document it was given to, by the id it was
+        saved under first (paperpull_core.keys.told_apart), so a list in
+        another order or a new row ahead of one saved moves nothing. A
+        document this run saved is not counted as saved here, since an id
+        may last no longer than one list."""
+        saved = {key: rec for key, rec in self.progress.data.items()
+                 if saved_copy.holding(self, key)}
+        return _told_apart(rows, self.discovery.data, fields=ALIKE, id_field="item_id",
+                           saved=saved, key_of=listed_key)
+
+    def _record_statement_doc(self, d: dict, occurrence: int = 0, sure: bool = True) -> int:
+        """Record one Postfach row {title, date, account, category, item_id, client_id}. Returns 1 if new.
+        A row that cannot be told apart from one saved keeps no id
+        (keys.told_apart), so it is never downloaded in its place."""
+        title = tidy(d.get("title")) or "Statement"
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
             return 0
@@ -345,6 +400,7 @@ class App:
             if confidence != doc_types.HIGH or summary in ("", "Other Document", "Document"):
                 summary = storage.FALLBACK_SUMMARY.get(category, "Dokument")
             confidence = confidence or "high"
+        # The same as row_category, which listed_key reads a row by.
         if category == doc_types.OTHER and re.search(r"statement|kontoauszug", title, re.I):
             category = doc_types.STATEMENT
         if not doc_types.wanted(category, self.config):
@@ -363,7 +419,7 @@ class App:
         full_summary = f"{summary} - {acct_short}" if acct_short else summary
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, account=account,
-                       date_text=date, item_id=d.get("item_id", ""),
+                       date_text=date, item_id=d.get("item_id", "") if sure else "",
                        client_id=d.get("client_id", ""), occurrence=occurrence,
                        href=d.get("href", ""))
         existing = self.discovery.get(doc.key)
@@ -395,19 +451,32 @@ class App:
 
         # The Postfach, read through its own API. Two documents can share a
         # title and a date (a statement and its supplement, say), so the
-        # nth such pair is keyed with its position.
-        raw = site.collect_documents(page, keep=scope.period_filter(self.args, self.config),
-                                     config=self.config)
+        # nth such pair is keyed with its number.
+        try:
+            raw = site.collect_documents(page, keep=scope.period_filter(self.args, self.config),
+                                         config=self.config)
+        except site.SessionExpired as e:
+            log.info("the list answered as signed out: %s", e)
+            self.session_ended()
+        except site.ListStopped as stop:
+            # Nothing of this listing is recorded, and the listing stays
+            # noted as one that stopped, so neither this run nor a Resume
+            # calls it whole.
+            print(f"\n!! The DKB list could not be read whole, since {stop}.")
+            print("   Nothing from this listing is recorded, and this run stops rather than")
+            print("   call the list read. Look at the browser window, then run it again.")
+            self.write_failure("read the documents list", "the list stopped partway")
+            raise SystemExit(1)
         log.info("DKB: %d document(s) in the Postfach", len(raw))
         n_new = 0
-        # Which of several documents sharing a title and a date this is.
-        # The number used to follow the order the provider answered in, so
-        # if that order ever changed, the document already downloaded took
-        # the other one's number and was skipped as done while the other was
-        # fetched again beside it. A number already given now stays with the
-        # document it was given to.
-        for d, occ in zip(raw, _stable_occurrences(raw, self.discovery.data)):
-            n_new += self._record_statement_doc(d, occ)
+        # Which of several documents sharing a title, a date and an account
+        # this is. The number used to follow the order the provider answered
+        # in, so if that order ever changed, the document already downloaded
+        # took the other one's number and was skipped as done while the
+        # other was fetched again beside it. A number now stays with the id
+        # it was given to (keys.told_apart).
+        for d, (occ, sure) in zip(raw, self._numbered(raw)):
+            n_new += self._record_statement_doc(d, occ, sure)
         self.discovery.save()
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -518,19 +587,43 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.ListStopped as stop:
+                # The list, read again for this document, could not be read
+                # whole. Every document after it reads the same list, so the
+                # run stops here, with nothing recorded against this one.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
 
+    def session_ended(self) -> None:
+        """Stop the run because DKB answered the list as signed out.
+        Progress is saved and the run ends as one that stopped (tabs.stop)."""
+        self.stats["session_expired"] = 1
+        tabs.stop(self, [
+            "DKB answered the list as signed out, so this run stops here.",
+            "Everything saved so far is kept. Sign in again in the open browser",
+            "window, then run this again.",
+        ])
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        document was sought. Nothing is recorded against the document, and
+        the run leaves as one whose list did not end whole, which only a run
+        that lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list stopped partway")
+        listing.read_again_stopped(self, (
+            "The DKB list could not be read again whole (%s), so this run stops here." % stop))
+
     def download_one(self, page, doc: Document, filename: str):
         """Download one document PDF straight to its final path.
 
-        Dated documents (statements) expose a direct document URL, which is
-        the most reliable route. Tax-table rows have only a Download button,
-        so that row is re-found by its account + form text (row indexes shift
-        whenever a filter or page changes).
+        The document's own row is found again in a recent listing, by its
+        title, date and account and the number Discover gave it, and its
+        PDF is asked for by that row's id. Nothing is pressed.
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
@@ -549,12 +642,18 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
+        # How many documents alike the app knows, this one among them, so a
+        # row found by its number alone is taken only when the listing shows
+        # as many (site.resolve_item).
+        alike = _twins(doc.to_dict(), self.discovery.data, fields=ALIKE)
         try:
             saved = site.download_document(page, doc.title, doc.date, out_path,
                                            item_hint=doc.item_id,
                                            client_hint=doc.client_id,
                                            occurrence=doc.occurrence,
-                                           account=doc.account)
+                                           account=doc.account,
+                                           number_rows=self._numbered, twins=alike,
+                                           config=self.config)
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as "manual review" and finish looking successful while
@@ -565,13 +664,16 @@ class App:
             self.stats["session_expired"] = 1
             raise
         if not saved:
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
+        # The id its bytes came from, which may not be the one discovery
+        # kept. A later list knows the saved document by it.
+        doc.item_id = saved
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
         # else is the document. Anything more is kept whole for a person to
@@ -878,7 +980,7 @@ class App:
                 # only when something is raised, so it cost nothing until
                 # collection failed, and then it replaced the real error
                 # with an AttributeError about the handler itself.
-                info["collected"] = "%s: %s" % (type(e).__name__, e)
+                info["collect_error"] = "%s: %s" % (type(e).__name__, e)
                 docs = []
             info["collected"] = len(docs)
             info["samples"] = []

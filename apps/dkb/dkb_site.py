@@ -4,7 +4,9 @@ When banking.dkb.de changes, repair this file only.
 
 STATUS, scaffolded 2026-11-08 and the API mapped the same day from a
 recording of the signed-in Postfach (the three calls below, their headers
-and the shape of their answers). Not yet run end to end.
+and the shape of their answers). Run end to end the same day on the
+contributor's own account, where Discover listed 1001 documents and 611
+were saved.
 
   Sign-in is on banking.dkb.de, the web banking DKB moved every customer to
   in 2023, an Angular single-page app. The person signs in and confirms the
@@ -54,14 +56,25 @@ and the shape of their answers). Not yet run end to end.
                  -> data.attributes {content (the PDF, base64),
                     contentType, fileName}.
   A folder named for a filter files its documents there. "Archiv" files
-  each by its subject. A file also in the Postfach, the same day and the
-  same subject, is taken from the Postfach only.
+  each by its subject. A file also in the Postfach, the same day, the same
+  subject and the same account where both name one, is taken from the
+  Postfach only.
+
+  WHOLE OR NOT AT ALL. The list is the Postfach, its messages, the folder
+  list and every folder. Any of them that does not answer as a readable
+  list raises ListStopped, so the listing is never called whole without
+  it, and a run that reads it again while it downloads stops once with its
+  list unread.
 
   NEVER sent: the PATCH on /messages/{id} that marks a message read, any
   call that archives or deletes one, and anything outside documentstorage.
+  The one in-page request, _GET_JS, is a GET by its own code, and every
+  address it is given is one of API's below.
 
   IDENTITY is kind + account + date + subject, never the id. The id is
-  stored as a hint and looked up fresh from a new listing at download time.
+  stored as a hint. A download numbers a recent listing as Discover did,
+  the stored ids first (keys.told_apart), and takes a row only when that
+  surely names the document (resolve_item).
 
 SAFETY (this is a bank account, a credit card and a securities account):
   Strictly READ-ONLY. DKB can transfer money (Ueberweisung, Echtzeit-
@@ -81,7 +94,7 @@ from pathlib import Path
 from typing import List, Optional
 import time as _time
 from datetime import timedelta as _td, timezone as _tz
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -194,6 +207,21 @@ class NoFile(RuntimeError):
     """DKB lists a document and its description but has no PDF behind it.
     Seen 2026-11-08 on one Wertpapierabrechnung of two the same day, the
     other of which downloaded."""
+
+
+class ListStopped(Exception):
+    """A part of the list did not answer in a way this app can read whole.
+    The parts are the Postfach, its messages, the archive's folder list and
+    each archive folder. A part read as empty or cut short would leave its
+    documents out of a list called whole, and a missing messages answer
+    would file every document by its words and so change its key. So any
+    of them stops the listing, and a run that reads the list again while it
+    downloads stops once with the list unread (listing.read_again_stopped)."""
+
+
+class NotToldApart(Exception):
+    """A fresh listing does not say which row is this document, so nothing
+    is fetched for it. The run's loop fails that document and goes on."""
 
 
 def _error_code(res: dict) -> str:
@@ -469,47 +497,112 @@ def _get(page, url: str, accept: str = "application/vnd.api+json, application/js
     return res
 
 
-def _items(page, url: str) -> List[dict]:
-    """data[] of one JSON:API answer, and links.next when it gives one."""
-    j = _get(page, url).get("json") or {}
-    return list(j.get("data") or []), (j.get("links") or {}).get("next")
+def _list_answer(page, url: str, what: str) -> dict:
+    """One answer of a part of the list, its JSON. A signed-out answer stops
+    the run as one. Anything else that is not a readable JSON answer stops
+    the listing (ListStopped), since an answer read as empty ends a part
+    of the list as if nothing more were in it."""
+    try:
+        res = _get(page, url)
+    except SessionExpired:
+        raise
+    except Exception as e:
+        raise ListStopped("%s could not be read (%s)" % (what, e)) from None
+    j = res.get("json")
+    if not isinstance(j, dict):
+        raise ListStopped("%s did not answer with JSON" % what)
+    return j
+
+
+def _data_list(j: dict, what: str) -> List[dict]:
+    """data[] of one JSON:API answer, each entry an object, or ListStopped."""
+    data = j.get("data")
+    if not isinstance(data, list) or not all(isinstance(d, dict) for d in data):
+        raise ListStopped("%s holds no list this app can read" % what)
+    return data
+
+
+def _new_of(items: List[dict], seen: set, what: str) -> List[dict]:
+    """The entries of one full or short page not given before. An id given
+    again is the same document, so it is kept once. A full page that gives
+    nothing new is a page asked for again, and reading on would only ask
+    for it again, so the part stops there (ListStopped)."""
+    fresh = []
+    for d in items:
+        ident = str(d.get("id") or "")
+        if ident and ident in seen:
+            continue
+        if ident:
+            seen.add(ident)
+        fresh.append(d)
+    if items and len(items) >= PAGE_LIMIT and not fresh:
+        raise ListStopped("%s gave a page it had given already" % what)
+    return fresh
+
+
+def _documents_url(n: int) -> str:
+    return (API["documents"] + "?page%%5Blimit%%5D=%d&page%%5Boffset%%5D=%d&sort=-creationDate"
+            % (PAGE_LIMIT, n * PAGE_LIMIT))
+
+
+def answers_its_list(page) -> bool:
+    """True when DKB answers this tab's first page of the Postfach list as
+    a list. That is what proves a session, never a page without a sign-in
+    form. Raises SessionExpired for a signed-out answer and ListStopped for
+    one that is not the list."""
+    _data_list(_list_answer(page, _documents_url(0), "the Postfach list"), "the Postfach list")
+    return True
 
 
 def list_documents(page) -> List[dict]:
     """Every document, newest first, one page of PAGE_LIMIT at a time. The
     answer has no next link, so a page that comes back short is the last."""
     out: List[dict] = []
+    seen: set = set()
     for n in range(MAX_PAGES):
-        url = (API["documents"] + "?page%%5Blimit%%5D=%d&page%%5Boffset%%5D=%d&sort=-creationDate"
-               % (PAGE_LIMIT, n * PAGE_LIMIT))
-        items, _ = _items(page, url)
-        out.extend(items)
+        url = _documents_url(n)
+        items = _data_list(_list_answer(page, url, "the Postfach list"), "the Postfach list")
+        out.extend(_new_of(items, seen, "the Postfach list"))
         if len(items) < PAGE_LIMIT:
-            break
-    return out
+            return out
+    raise ListStopped("the Postfach list ran past %d pages" % MAX_PAGES)
+
+
+def _messages_next(j: dict, asked: set) -> str:
+    """The address of the next page of messages, or "" at the last. Only the
+    messages call itself on banking.dkb.de is followed. Any other next link,
+    or one asked for already, stops the listing rather than end it early."""
+    links = j.get("links")
+    nxt = links.get("next") if isinstance(links, dict) else None
+    if not nxt:
+        return ""
+    nxt = urljoin(BASE + "/", str(nxt))
+    parts = urlsplit(nxt)
+    if (not is_safe_url(nxt) or parts.netloc != urlsplit(BASE).netloc
+            or parts.path != urlsplit(API["messages"]).path or nxt in asked):
+        raise ListStopped("the Postfach messages gave a next page this app does not follow")
+    return nxt
 
 
 def list_messages(page) -> dict:
-    """document id -> the message's attributes. Only read, never marked read."""
+    """document id -> the message's attributes. Only read, never marked read.
+    The messages say which kind each document is, so a messages answer that
+    cannot be read whole stops the listing (ListStopped)."""
     out: dict = {}
     url = API["messages"]
-    try:
-        for _ in range(MAX_PAGES):
-            items, nxt = _items(page, url)
-            for m in items:
-                a = m.get("attributes") or {}
-                out[str(a.get("documentId") or m.get("id"))] = a
-            if not nxt:
-                break
-            nxt = urljoin(BASE + "/", nxt)
-            if not is_safe_url(nxt) or nxt == url:
-                break
-            url = nxt
-    except SessionExpired:
-        raise                      # a signed-out session stops the run
-    except RuntimeError as e:
-        log.info("messages: %s", e)
-    return out
+    asked: set = set()
+    for _ in range(MAX_PAGES):
+        asked.add(url)
+        j = _list_answer(page, url, "the Postfach messages")
+        for m in _data_list(j, "the Postfach messages"):
+            a = m.get("attributes") or {}
+            if not isinstance(a, dict):
+                raise ListStopped("a Postfach message could not be read")
+            out[str(a.get("documentId") or m.get("id"))] = a
+        url = _messages_next(j, asked)
+        if not url:
+            return out
+    raise ListStopped("the Postfach messages ran past %d pages" % MAX_PAGES)
 
 
 def _first(d: dict, *keys):
@@ -568,28 +661,36 @@ def _row(d: dict, messages: dict) -> Optional[dict]:
 
 
 def list_folders(page) -> List[tuple]:
-    """(id, name) of every archive folder."""
-    j = _get(page, API["folders"]).get("json") or {}
+    """(id, name) of every archive folder. A folder whose id cannot be read
+    would go unread, so it stops the listing instead (ListStopped)."""
+    j = _list_answer(page, API["folders"], "the archive's folder list")
     out = []
-    for f in j.get("data") or []:
+    for f in _data_list(j, "the archive's folder list"):
         fid = str(f.get("id") or "")
-        if re.fullmatch(r"[A-Za-z0-9_-]{1,64}", fid):
-            out.append((fid, str((f.get("attributes") or {}).get("name") or "")))
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", fid):
+            raise ListStopped("an archive folder carries an id this app cannot read")
+        attrs = f.get("attributes")
+        out.append((fid, str((attrs.get("name") if isinstance(attrs, dict) else "") or "")))
     return out
 
 
 def list_folder(page, folder_id: str) -> List[dict]:
     """Every file in one archive folder, a page of PAGE_LIMIT at a time."""
     out: List[dict] = []
+    seen: set = set()
+    what = "the archive folder %s" % folder_id
     for n in range(MAX_PAGES):
         url = (API["folders"] + "/%s?page%%5Blimit%%5D=%d&page%%5Boffset%%5D=%d"
                % (folder_id, PAGE_LIMIT, n * PAGE_LIMIT))
-        data = (_get(page, url).get("json") or {}).get("data") or {}
-        files = list((data.get("attributes") or {}).get("files") or [])
-        out.extend(files)
+        data = _list_answer(page, url, what).get("data")
+        attrs = data.get("attributes") if isinstance(data, dict) else None
+        files = attrs.get("files") if isinstance(attrs, dict) else None
+        if not isinstance(files, list) or not all(isinstance(f, dict) for f in files):
+            raise ListStopped("%s holds no list of files this app can read" % what)
+        out.extend(_new_of(files, seen, what))
         if len(files) < PAGE_LIMIT:
-            break
-    return out
+            return out
+    raise ListStopped("%s ran past %d pages" % (what, MAX_PAGES))
 
 
 _ARCHIVE_ACCOUNT_RE = re.compile(
@@ -640,43 +741,92 @@ LISTING_SECONDS = 600
 _listing: dict = {}
 
 
+def _in_the_postfach(postfach: List[dict]):
+    """Whether an archive row is a file the Postfach lists too: the same
+    day, the same subject, and the same account where both name one. Two
+    accounts' documents of one day and subject are two documents."""
+    accounts: dict = {}
+    for r in postfach:
+        accounts.setdefault((r["date"], r["title"]), set()).add(r["account"])
+
+    def held(r: dict) -> bool:
+        there = accounts.get((r["date"], r["title"]))
+        if not there:
+            return False
+        return not r["account"] or "" in there or r["account"] in there
+    return held
+
+
 def _all_rows(page, fresh: bool = False) -> List[dict]:
+    """The Postfach and the archive, read whole or not at all. A part that
+    cannot be read raises ListStopped (or SessionExpired), so no listing
+    missing a part is ever kept or called whole."""
     now = _time.monotonic()
     if not fresh and _listing.get("rows") is not None and now - _listing.get("at", 0) < LISTING_SECONDS:
         return _listing["rows"]
     messages = list_messages(page)
     rows = [r for r in (_row(d, messages) for d in list_documents(page)) if r]
-    seen = {(r["date"], r["title"]) for r in rows}
-    try:
-        archive = collect_archive(page)
-    except SessionExpired:
-        raise
-    except RuntimeError as e:
-        log.warning("the archive could not be read: %s", e)
-        archive = []
+    archive = collect_archive(page)
     # A file in both places is taken from the Postfach.
-    rows += [r for r in archive if (r["date"], r["title"]) not in seen]
+    held = _in_the_postfach(rows)
+    rows += [r for r in archive if not held(r)]
     _listing.update(rows=rows, at=now)
     return rows
+
+
+def _wanted(config: Optional[dict]) -> set:
+    return set((config or {}).get("document_types") or ALL_CATEGORIES) | {OTHER}
+
+
+def listed_rows(page, config: Optional[dict] = None, fresh: bool = False) -> List[dict]:
+    """The rows of the kinds document_types keeps, in the listing's order.
+    Discover numbers these, and so does each download's look at a recent
+    listing, so the two agree on which row is which document."""
+    wanted = _wanted(config)
+    return [r for r in _all_rows(page, fresh=fresh) if r["category"] in wanted]
 
 
 def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[dict]:
     """Every PDF in the Postfach and its archive, newest first. `keep` is the
     run's scope predicate over year labels. Which kinds are kept follows
     document_types in the config."""
-    wanted = set((config or {}).get("document_types") or ALL_CATEGORIES) | {OTHER}
-    rows = [r for r in _all_rows(page, fresh=True)
-            if r["category"] in wanted and (keep is None or keep(r["date"][:4]))]
+    rows = [r for r in listed_rows(page, config, fresh=True)
+            if keep is None or keep(r["date"][:4])]
     rows.sort(key=lambda r: r["date"], reverse=True)
     log.info("Postfach and archive: %d PDF(s)", len(rows))
     return rows
 
 
-def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0) -> Optional[dict]:
-    """The document's current id, from a recent listing."""
-    matches = [r for r in _all_rows(page)
-               if r["title"] == title and r["date"] == date and r["account"] == account]
-    return matches[occurrence] if occurrence < len(matches) else None
+def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0,
+                 item_id: str = "", *, number_rows, twins: int = 1,
+                 config: Optional[dict] = None) -> Optional[dict]:
+    """The document's own row of a recent listing, or None when the listing
+    no longer shows it.
+
+    `number_rows` numbers the listing as Discover numbered it, the stored
+    ids first, so a row answers to `occurrence` and no two documents can
+    come to one row. A place among the rows alike says nothing once the
+    list comes back in another order. A row found by its number and not by
+    `item_id` is taken only when the listing shows as many documents alike
+    as the app knows (`twins`). Anything less raises NotToldApart rather
+    than guess."""
+    rows = listed_rows(page, config)
+    numbers = number_rows(rows)
+    alike = [i for i, r in enumerate(rows)
+             if r["title"] == title and r["date"] == date and r["account"] == account]
+    mine = [i for i in alike if numbers[i][0] == occurrence]
+    if not mine:
+        # The stored id is left as the way to it, unless another document
+        # holds that row now.
+        if item_id and any(r["item_id"] == item_id for r in rows):
+            raise NotToldApart("Its stored id is now another document's")
+        return None
+    row, sure = rows[mine[0]], numbers[mine[0]][1]
+    if sum(r["item_id"] == row["item_id"] for r in rows) > 1:
+        raise NotToldApart("Two rows of the list carry its id")
+    if not sure or (row["item_id"] != item_id and len(alike) != twins):
+        raise NotToldApart("The list does not say which of the documents alike this is")
+    return row
 
 
 def _checked_id(item_id: str) -> str:
@@ -704,23 +854,27 @@ def fetch_pdf(page, item_id: str, content_type: str = "application/pdf") -> byte
 
 
 def download_document(page, title: str, date: str, out_path: Path, occurrence: int = 0,
-                      item_hint: str = "", client_hint: str = "", account: str = "") -> bool:
-    """Save one document. Looks it up again by title, account and date
-    first, and falls back to the stored id only when the listing no longer
-    shows it."""
-    found = resolve_item(page, title, date, account, occurrence)
+                      item_hint: str = "", client_hint: str = "", account: str = "", *,
+                      number_rows, twins: int = 1, config: Optional[dict] = None) -> str:
+    """Save one document, and answer the id its bytes came from, or "" when
+    nothing was saved. Looks it up again by title, account and date first,
+    and falls back to the stored id only when the listing no longer shows
+    it. Which row is its own is resolve_item's to say, and it raises
+    NotToldApart when that cannot be told."""
+    found = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
+                         number_rows=number_rows, twins=twins, config=config)
     item_id = (found or {}).get("item_id") or item_hint
     ct = (found or {}).get("client_id") or client_hint or "application/pdf"
     if not item_id:
         log.warning("no id for %s %s", title, date)
-        return False
+        return ""
     data = fetch_pdf(page, item_id, ct)
     if not data.startswith(b"%PDF"):
         log.warning("not a PDF for %s %s (%d bytes)", title, date, len(data))
-        return False
+        return ""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
-    return True
+    return item_id
 
 
 def _page_summary(page) -> dict:
