@@ -1,18 +1,30 @@
-"""A statement list read without an account or a year its dropdowns offer
-is never noted whole.
+"""A Discover Bank statement list is noted whole only when every account on
+the account menu was read, and a statement is saved only under its own
+account, with its own bytes.
 
-Discover's statements page lists every statement as a link, and when those
-links read nothing the page's text is read instead, under each account and
-year its dropdowns offer. An account or a year whose choice did not take
-was passed over, and the list noted as read whole, so Resume carried on
-from it and called the run finished with an account or a year never read.
+The statements page holds an account menu, a React button whose state
+names every deposit account and the id its statement list is asked by.
+Discovery reads that state and asks each account's list from inside the
+page. As first written it read the menu and, when that found nothing,
+pressed the menu open, chose each account in turn and read whatever list
+calls the browser had recorded, then read the page's text under every
+dropdown it could choose. A list call that failed, an account with no id,
+an account whose name the click guard did not like (a certificate of
+deposit, for the word deposit) and a statement with no PDF were passed over
+without a word, and the list was noted whole. With nothing read at all the
+empty list was noted whole too.
 
-Now that reading names what it passed over, and Discover keeps what it
-read, writes a failure file, leaves the listing as one that stopped, and
-Pilot, Run All and Discover stop at their end rather than finish. An option
-that is turned off or that the guard refuses is never chosen, and is no
-part of the list passed over. Driven in a real browser against a made-up
-page. Every account, year and date is invented.
+Now nothing on the page is pressed. An account whose list did not answer,
+an account with no id or a name another account has, and a statement
+whose PDF is not its own account's, whose date is no day, or whose kind
+the account's name and its id disagree on, make the list not whole. What
+was read is kept, a failure file is written, and Pilot, Run All and
+Discover stop at their end. With no menu to read, the one list the page
+asked for itself is read and the list is never noted whole. With none,
+the run stops with its list unread.
+
+Driven in a real browser on a made-up copy of the page, served for
+bank.discover.com by the test. Every account, id and date is invented.
 """
 import json
 import sys
@@ -25,35 +37,91 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import storage  # noqa: F401  binds this provider's AppSpec
 import discoverbank_docs as app_mod
 import discoverbank_site as site
-from paperpull_core import listing
+from paperpull_core import listing, testkit
 
-ACCOUNTS = ("Example Card ending 0001", "Other Card ending 0002")
+BASE = "https://bank.discover.com"
+PAGE_URL = BASE + "/web/deposits/documents/statements"
+LIST_PATH = "/bank/deposits/servicing/documents/v1/accounts/%s/statements"
+
+CHECKING = {"label": "Checking (••••0001)", "id": "1000~OC~01"}
+SAVINGS = {"label": "Online Savings (••••0002)", "id": "2000~OSA~02"}
+ACCOUNTS = [CHECKING, SAVINGS]
 
 PAGE = """<!doctype html><html><body>
-<label>Account <select id="acct" aria-label="Account">
-  <option>Example Card ending 0001</option>
-  <option>Other Card ending 0002</option>
-  %s
-</select></label>
-<label>Year <select id="year" aria-label="Statement year">
-  <option>2031</option><option>2030</option>%s
-</select></label>
-<ul id="rows"></ul>
-<script>(() => {
-const draw = () => {
-  const a = document.getElementById('acct').value.slice(-4);
-  const y = document.getElementById('year').value;
-  document.getElementById('rows').innerHTML =
-    '<li>Mar 15, ' + y + ' Statement ' + a + ' <a href="#">Download</a></li>';
-};
-document.getElementById('acct').onchange = draw;
-document.getElementById('year').onchange = draw;
-draw();
-})();</script></body></html>"""
+<h1>Statements</h1>
+%s
+<script>
+window.pressed = 0;
+document.addEventListener('click', () => { window.pressed += 1; }, true);
+const menu = %s;
+const btn = document.getElementById('menu');
+if (btn && menu) {
+  btn['__reactFiber$made'] = { memoizedProps: { className: 'x' },
+                                return: { memoizedProps: { options: menu }, return: null } };
+}
+for (const u of %s) fetch(u, { credentials: 'include' });
+</script></body></html>"""
+
+
+def statement(account_id, month, under=None):
+    """One statement as the list names it. `under` puts its PDF under
+    another account's id."""
+    sid = "s%s%02d" % (account_id[:4], month)
+    return {"name": "Statement %02d/2031" % month, "id": sid,
+            "statementDate": "2031-%02d-28T00:00:00-05:00" % month,
+            "links": [{"rel": "self", "href": LIST_PATH % account_id},
+                      {"rel": "binary",
+                       "href": (LIST_PATH % (under or account_id)) + "/" + sid}]}
+
+
+class Site:
+    """What the made-up bank.discover.com answers, and what was asked."""
+
+    def __init__(self):
+        self.menu = ACCOUNTS
+        self.page_calls = []
+        self.lists = {a["id"]: [statement(a["id"], 1), statement(a["id"], 2)]
+                      for a in ACCOUNTS}
+        self.failing = set()
+        self.asked = []
+        self.pdfs = {}
+
+    def html(self):
+        button = ('<button id="menu" class="acct_dropdown_x" aria-expanded="false">%s</button>'
+                  % (self.menu[0]["label"] if self.menu else "Statements")) \
+            if self.menu is not None else ""
+        return PAGE % (button, json.dumps(self.menu), json.dumps(self.page_calls))
+
+    def pdf_for(self, url):
+        if url not in self.pdfs:
+            self.pdfs[url] = testkit.text_pdf(["Made-up statement", url])
+        return self.pdfs[url]
+
+    def answer(self, route):
+        url = route.request.url
+        self.asked.append(url)
+        path = url[len(BASE):] if url.startswith(BASE + "/") else ""
+        if url == PAGE_URL:
+            return route.fulfill(status=200, content_type="text/html", body=self.html())
+        for acct_id, items in self.lists.items():
+            if path == LIST_PATH % acct_id:
+                if acct_id in self.failing:
+                    return route.fulfill(status=500, content_type="application/json", body="{}")
+                return route.fulfill(status=200, content_type="application/json",
+                                     body=json.dumps(items))
+            if path.startswith(LIST_PATH % acct_id + "/"):
+                return route.fulfill(status=200, content_type="application/pdf",
+                                     body=self.pdf_for(url))
+        return route.abort()
 
 
 @pytest.fixture()
-def page():
+def bank():
+    return Site()
+
+
+@pytest.fixture()
+def page(bank):
     pw = pytest.importorskip("playwright.sync_api")
     try:
         driver = pw.sync_playwright().start()
@@ -61,69 +129,18 @@ def page():
     except Exception as e:
         pytest.skip("no browser to drive: %s" % e)
     ctx = browser.new_context()
-    ctx.route("**/*", lambda route: route.abort())
+    ctx.route("**/*", bank.answer)
     pg = ctx.new_page()
     shortened = pg.wait_for_timeout
-    pg.wait_for_timeout = lambda ms: shortened(min(ms, 200))
-    pg.set_content(PAGE % ("", ""))
+    pg.wait_for_timeout = lambda ms: shortened(min(ms, 100))
+    pg.load = lambda: (pg.goto(PAGE_URL), pg.wait_for_load_state("networkidle"))
     yield pg
     browser.close()
     driver.stop()
 
 
-def choosing(monkeypatch, refuse=()):
-    """_select_option, with the labels in `refuse` not taking, and every
-    label asked for kept."""
-    chosen = []
-    real = site._select_option
-
-    def choose(pg, sel, label):
-        chosen.append(label)
-        return False if label in refuse else real(pg, sel, label)
-    monkeypatch.setattr(site, "_select_option", choose)
-    return chosen
-
-
-# -- the page's text reading names what it passed over ----------------------------
-
-def test_a_reading_of_every_part_passes_over_nothing(page, monkeypatch):
-    chosen = choosing(monkeypatch)
-    got = site.discovercard_collect(page)
-    assert set(ACCOUNTS) | {"2031", "2030"} <= set(chosen)
-    assert {r["date"][:4] for r in got} == {"2031", "2030"}
-    assert got.passed_over == ()
-
-
-def test_an_account_that_could_not_be_chosen_is_passed_over(page, monkeypatch):
-    choosing(monkeypatch, refuse=(ACCOUNTS[1],))
-    assert site.discovercard_collect(page).passed_over == ("account picker",)
-
-
-def test_a_year_that_could_not_be_chosen_is_passed_over(page, monkeypatch):
-    choosing(monkeypatch, refuse=("2030",))
-    got = site.discovercard_collect(page)
-    assert {r["date"][:4] for r in got} == {"2031"}
-    assert got.passed_over == ("year picker",)
-
-
-def test_a_turned_off_or_refused_option_is_never_chosen_or_passed_over(page, monkeypatch):
-    """A turned off year waited out its time and was passed over, and an
-    account the guard refuses is never chosen."""
-    page.set_content(PAGE % ("<option>Transfer funds ending 0003</option>",
-                             "<option disabled>2029</option>"))
-    chosen = choosing(monkeypatch)
-    got = site.discovercard_collect(page)
-    assert "2029" not in chosen and not any("Transfer" in c for c in chosen), chosen
-    assert set(ACCOUNTS) | {"2031", "2030"} <= set(chosen)
-    assert got.passed_over == ()
-
-
-# -- Discover ---------------------------------------------------------------------
-
 @pytest.fixture
 def make_app(tmp_path, monkeypatch, page):
-    pressed = []
-
     def build(*argv):
         cfg = tmp_path / "config.json"
         cfg.write_text(json.dumps({
@@ -138,14 +155,8 @@ def make_app(tmp_path, monkeypatch, page):
         monkeypatch.setattr(app, "page", lambda: page)
         monkeypatch.setattr(app, "_on_its_site", lambda: page)
         monkeypatch.setattr(app, "check_session", lambda *_a, **_kw: None)
-        monkeypatch.setattr(app, "download_one",
-                            lambda _page, doc, _name: pressed.append(doc.date))
+        page.load()
         return app
-
-    # The links read nothing, so the page's text is read.
-    monkeypatch.setattr(site, "ensure_statements", lambda pg: True)
-    monkeypatch.setattr(site, "discovercard_collect_via_api", lambda pg: [])
-    build.pressed = pressed
     return build
 
 
@@ -158,62 +169,213 @@ def said(capsys):
     return " ".join(capsys.readouterr().out.split())
 
 
-def test_a_list_read_whole_is_noted_whole(make_app):
+def saved(app):
+    return [r for r in app.progress.data.values() if r.get("state") == "Completed"]
+
+
+def owner_of(href):
+    return site.account_of_href(href)
+
+
+def assert_each_file_is_its_own(app, bank):
+    """Every saved statement holds the bytes served for its own address,
+    under the account that address belongs to, with the kind it is."""
+    by_id = {a["id"]: a for a in bank.menu or ACCOUNTS}
+    for rec in saved(app):
+        assert Path(rec["pdf_path"]).read_bytes() == bank.pdfs[rec["href"]], rec["href"]
+        acct = by_id[owner_of(rec["href"])]
+        assert rec["account"] == acct["label"], rec
+        assert rec["title"] == site.kind_of_label(acct["label"]) + " Statement", rec
+
+
+def assert_nothing_pressed(page):
+    assert page.evaluate("window.pressed") == 0
+    menu = page.locator("#menu")
+    if menu.count():
+        assert menu.get_attribute("aria-expanded") == "false"
+
+
+# -- a whole list ------------------------------------------------------------------
+
+def test_every_account_read_is_a_whole_list(make_app, bank, page):
     app = make_app("--all")
     app.cmd_run("all")
-    assert {d[:4] for d in make_app.pressed} == {"2031", "2030"}
+    assert len(saved(app)) == 4
+    assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"], SAVINGS["id"]}
+    assert_each_file_is_its_own(app, bank)
+    assert listing.last(app) == listing.COMPLETE
+    assert_nothing_pressed(page)
+
+
+def test_a_second_run_finds_every_statement_already_saved(make_app, bank):
+    make_app("--all").cmd_run("all")
+    fetched = len([u for u in bank.asked if "/statements/s" in u])
+    app = make_app("--all")
+    app.cmd_run("all")
+    assert app.stats["skipped_completed"] == 4 and not app.stats["new_files"]
+    assert len([u for u in bank.asked if "/statements/s" in u]) == fetched
+
+
+def test_a_certificate_of_deposit_is_read_and_menu_actions_are_not_accounts(make_app, bank):
+    """A name that says certificate of deposit used to be refused for the
+    word deposit and passed over without a word. A menu's own action, or
+    an option for every account, is no account and no part missing."""
+    cd = {"label": "Certificate of Deposit (••••0003)", "id": "3000~CD~03"}
+    bank.menu = ACCOUNTS + [cd, {"label": "Open a new account", "id": ""},
+                            {"label": "All accounts", "id": ""}]
+    bank.lists[cd["id"]] = [statement(cd["id"], 3)]
+    app = make_app("--all")
+    app.cmd_run("all")
+    assert len(saved(app)) == 5
+    [rec] = [r for r in saved(app) if owner_of(r["href"]) == cd["id"]]
+    assert (rec["title"], rec["account"]) == ("CD Statement", cd["label"])
     assert listing.last(app) == listing.COMPLETE
 
 
-def test_a_list_passed_over_in_part_is_not_noted_whole(make_app, monkeypatch, tmp_path, capsys):
-    """Run All takes what the list read, and stops at its end rather than
-    finish, with a failure file. The listing is left as one that stopped,
-    so a Resume after it stops too."""
-    choosing(monkeypatch, refuse=("2030",))
-    app = make_app("--all")
+# -- a list read in part -----------------------------------------------------------
+
+def stops_at_its_end(app, tmp_path, capsys, reason="some of the list could not be read"):
     with pytest.raises(SystemExit) as stopped:
         app.cmd_run("all")
     assert stopped.value.code == 0
-    assert make_app.pressed and {d[:4] for d in make_app.pressed} == {"2031"}
     assert listing.last(app) == listing.STOPPED
     out = said(capsys)
-    assert "Discover's statement list was not read whole" in out
-    assert "Not all of Discover's statement list was read, so this run stops here" in out
+    assert "Discover Bank's statement list was not read whole" in out
+    assert "so this run stops here" in out
     report = failure(tmp_path)
-    assert (report["step"], report["reason"]) == ("read the statement list",
-                                                  "some of the list could not be chosen")
+    assert (report["step"], report["reason"]) == ("read the statement list", reason)
 
+
+def test_an_account_whose_list_did_not_answer_is_passed_over(make_app, bank, page, tmp_path,
+                                                             capsys):
+    bank.failing.add(SAVINGS["id"])
+    app = make_app("--all")
+    stops_at_its_end(app, tmp_path, capsys)
+    assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"]}
+    assert_each_file_is_its_own(app, bank)
+    assert_nothing_pressed(page)
     with pytest.raises(SystemExit):
         make_app("--resume").cmd_resume()
 
 
-def test_a_discover_of_a_list_passed_over_stops_once_it_has_saved_the_list(make_app, monkeypatch):
-    choosing(monkeypatch, refuse=("2030",))
+def test_a_statement_under_another_account_is_never_taken(make_app, bank, tmp_path, capsys):
+    """One checking account's list names a PDF that sits under the other
+    checking account. Both are checking, so only the account the PDF sits
+    under tells them apart. It is not saved under the first, its bytes are
+    never asked for, and the list is not whole."""
+    other = {"label": "Checking (••••0005)", "id": "1005~OC~05"}
+    bank.menu = ACCOUNTS + [other]
+    bank.lists[other["id"]] = [statement(other["id"], 4)]
+    stray = statement(CHECKING["id"], 9, under=other["id"])
+    bank.lists[CHECKING["id"]].append(stray)
+    app = make_app("--all")
+    stops_at_its_end(app, tmp_path, capsys)
+    assert stray["links"][1]["href"] not in {r["href"][len(BASE):] for r in saved(app)}
+    assert not any(u.endswith(stray["links"][1]["href"]) for u in bank.asked)
+    assert len(saved(app)) == 5
+    assert_each_file_is_its_own(app, bank)
+
+
+def test_an_account_named_one_kind_with_an_id_of_another_is_refused(make_app, bank, tmp_path,
+                                                                    capsys):
+    bank.menu = [CHECKING, {"label": "Checking (••••0009)",
+                            "id": SAVINGS["id"]}]
+    app = make_app("--all")
+    stops_at_its_end(app, tmp_path, capsys)
+    assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"]}
+
+
+def test_an_account_with_no_id_is_passed_over(make_app, bank, tmp_path, capsys):
+    bank.menu = [CHECKING, {"label": "Savings (••••0004)", "id": ""}]
+    app = make_app("--all")
+    stops_at_its_end(app, tmp_path, capsys)
+    assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"]}
+
+
+def test_an_option_whose_name_says_an_action_is_never_asked_and_passed_over(
+        make_app, bank, tmp_path, capsys):
+    bank.menu = [CHECKING, {"label": "Transfer funds", "id": "T1"}]
+    app = make_app("--all")
+    stops_at_its_end(app, tmp_path, capsys)
+    assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"]}
+    assert not any("/accounts/T1/" in u for u in bank.asked)
+
+
+def test_two_accounts_with_one_name_are_both_passed_over(make_app, bank, tmp_path, capsys):
+    bank.menu = [CHECKING, {"label": CHECKING["label"], "id": "1001~OC~02"}]
+    app = make_app("--all")
+    stops_at_its_end(app, tmp_path, capsys)
+    assert saved(app) == []
+
+
+def test_a_statement_with_no_date_is_never_filed(make_app, bank, tmp_path, capsys):
+    undated = statement(CHECKING["id"], 5)
+    undated["statementDate"] = None
+    bank.lists[CHECKING["id"]].append(undated)
+    app = make_app("--all")
+    stops_at_its_end(app, tmp_path, capsys)
+    assert all(r["date"] for r in saved(app)) and len(saved(app)) == 4
+
+
+# -- no account menu ---------------------------------------------------------------
+
+def test_no_menu_and_no_list_stops_with_the_list_unread(make_app, bank, page, tmp_path, capsys):
+    bank.menu = None
+    app = make_app("--pilot")
+    with pytest.raises(SystemExit) as stopped:
+        app.cmd_pilot()
+    assert stopped.value.code == 0
+    assert listing.last(app) == listing.STOPPED
+    assert not app.discovery.data and saved(app) == []
+    assert "its list of accounts could not be read" in said(capsys)
+    report = failure(tmp_path)
+    assert report["reason"] == "the account menu could not be read"
+    assert_nothing_pressed(page)
+
+
+def test_no_menu_reads_the_one_list_the_page_asked_and_never_calls_it_whole(
+        make_app, bank, page, tmp_path, capsys):
+    bank.menu = None
+    bank.page_calls = [BASE + LIST_PATH % SAVINGS["id"]]
+    app = make_app("--all")
+    stops_at_its_end(app, tmp_path, capsys)
+    assert {owner_of(r["href"]) for r in saved(app)} == {SAVINGS["id"]}
+    assert {(r["title"], r["account"]) for r in saved(app)} == {("Savings Statement", "Savings")}
+    assert_nothing_pressed(page)
+
+
+def test_no_menu_and_two_lists_the_page_asked_reads_neither(make_app, bank, tmp_path, capsys):
+    bank.menu = None
+    bank.page_calls = [BASE + LIST_PATH % a["id"] for a in ACCOUNTS]
     app = make_app("--discover")
     with pytest.raises(SystemExit):
         app.cmd_discover()
-    assert listing.last(app) == listing.STOPPED
-    assert make_app().discovery.data
+    assert listing.last(app) == listing.STOPPED and not app.discovery.data
 
 
-def test_a_pilot_of_a_list_passed_over_stops_at_its_end(make_app, monkeypatch):
-    choosing(monkeypatch, refuse=("2030",))
-    app = make_app("--pilot")
-    with pytest.raises(SystemExit):
-        app.cmd_pilot()
-    assert make_app.pressed
-    assert listing.last(app) == listing.STOPPED
+# -- Diagnose ----------------------------------------------------------------------
+
+def test_diagnose_reports_the_menu_and_its_lists_and_presses_nothing(make_app, bank, page,
+                                                                     tmp_path):
+    """Diagnose reads the account menu and each list the way discovery does,
+    saves nothing, and chooses nothing on the page."""
+    bank.failing.add(SAVINGS["id"])
+    app = make_app("--diagnose")
+    app.cmd_diagnose()
+    report = json.loads((tmp_path / "out" / "Diagnostics" / "diagnose-documents.json")
+                        .read_text(encoding="utf-8"))
+    api = report["statements_api"]
+    assert api["account_menu_read"] is True and api["accounts"] == 2
+    assert api["statements"] == 2 and len(api["passed_over"]) == 1
+    assert not any("/statements/s" in u for u in bank.asked)
+    assert saved(app) == [] and not app.discovery.data
+    assert_nothing_pressed(page)
 
 
-def test_a_pilot_with_nothing_to_take_from_a_list_passed_over_still_stops(
-        make_app, monkeypatch, capsys):
-    """No account could be chosen, so nothing was read and there is nothing
-    to pilot."""
-    choosing(monkeypatch, refuse=ACCOUNTS)
-    app = make_app("--pilot")
-    with pytest.raises(SystemExit):
-        app.cmd_pilot()
-    out = said(capsys)
-    assert "No documents in scope to pilot" in out
-    assert "Not all of Discover's statement list was read, so this run stops here" in out
-    assert make_app.pressed == []
+# -- a page that is not the statements page --------------------------------------
+
+def test_a_menu_on_another_page_of_the_site_is_not_the_statements_page(page):
+    page.load()
+    assert site.on_documents_page(page)
+    page.evaluate("history.pushState({}, '', '/web/dashboard')")
+    assert not site.on_documents_page(page)

@@ -7,6 +7,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Discover Bank checking and savings statements, a new app (#151).**
+  `discoverbank` reads Discover Bank deposit accounts on bank.discover.com.
+  It reads every account on the Statements page's account menu from the
+  state the page keeps for it, asks each account's statement list the way
+  the page does, from inside the page, and saves each PDF under its own
+  account, named for it. Nothing on the page is pressed. Contributed by
+  @appchamp, whose full run saved 100 checking and 100 savings statements.
+  Money market and CD accounts are untested. Before merging, the Discover
+  card app was kept beside it, since Capital One moves Discover cards onto
+  its own site in waves into 2027, and the new app was given a port of its
+  own where it had taken the card app's. It no longer opens the account
+  menu and chooses each account when the menu's state cannot be read, nor
+  reads the page's text in place of the lists. An account whose list did
+  not answer, an account with no id or another's name, an option named for
+  an action, and a statement whose PDF is not its own account's, whose date
+  is no day, or whose kind its account's name and id disagree on, now leave
+  the list not whole, so the run keeps what it saved and stops at its end.
+  A list with nothing read is no longer noted whole.
+
 ## [0.61.1] - 2026-11-08
 
 SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo

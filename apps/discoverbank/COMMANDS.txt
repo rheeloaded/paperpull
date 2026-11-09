@@ -19,8 +19,8 @@ do the 2FA yourself.
 READ-ONLY: downloads statements only. It NEVER transfers funds,
 sends wires or Zelle, pays bills, opens/closes accounts, or changes any setting.
 
-Scope: Discover Bank Checking and Savings statements.
-Credit cards (migrated to Capital One) and loans are NOT covered.
+Scope: Discover Bank checking and savings statements.
+Discover credit cards are the discovercard app, and loans are NOT covered.
 
 STATUS: verify against the live site with paperpull discoverbank diagnose.
 See README.md.

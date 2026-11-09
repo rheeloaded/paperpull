@@ -20,23 +20,19 @@ SAFETY (this is a banking deposit account):
 """
 from __future__ import annotations
 
-import base64
 import html as _html
 import json
 import logging
 import os
 import re
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urljoin, urlparse, urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from paperpull_core import intake
 from paperpull_core import controls as _controls
-from paperpull_core import redirects
 from paperpull_core.controls import (
-    AUTH_CONTROL_RE,
     SETTINGS_CONTROL_RE,
     click_next_page as _click_next_page,
 )
@@ -354,17 +350,17 @@ DOCUMENTS_NAV_RE = re.compile(
 def on_documents_page(page) -> bool:
     """Are we on the deposit statements page?
 
-    Checks for deposit document URL paths and key deposit statements page elements.
+    By its address on Discover Bank's own host. The account menu discovery
+    reads is the one on this page, and any page of the site holds a button
+    of the menu's kind, a dashboard's transfer widget among them, so one
+    on the page is no sign of the statements page.
     """
     try:
         if looks_public_or_error(page) or looks_signed_out(page):
             return False
-        url = (page.url or "").lower()
-        if "/web/deposits/documents" in url:
-            return True
-        if page.locator('button[class*="_dropdown_"], [data-testid*="document"], button[class*="card-item-btn"]').count() > 0:
-            return True
-        return False
+        parts = urlsplit(page.url or "")
+        return (parts.scheme == "https" and parts.hostname == "bank.discover.com"
+                and parts.path.lower().startswith("/web/deposits/documents"))
     except Exception:
         return False
 
@@ -562,58 +558,123 @@ class RawDoc:
         return val
 
 
-def parse_statements_api(json_data: list, account_label: str) -> List[RawDoc]:
+# Where a statement's list and its PDF live, for one account. The account
+# is the id the statements page's own account menu holds for it, and each
+# PDF the list names sits under that same account's path.
+STATEMENTS_PATH = "/bank/deposits/servicing/documents/v1/accounts/%s/statements"
+# What an account id may be made of. One that holds anything else is not
+# put into a path, since a slash or a question mark in it would ask another
+# address on the site than this account's list.
+ACCOUNT_ID_RE = re.compile(r"[A-Za-z0-9~._-]{1,128}")
+# A statement's PDF, as the list names it, and the account it belongs to.
+BINARY_PATH_RE = re.compile(
+    r"/bank/deposits/servicing/documents/v1/accounts/([A-Za-z0-9~._-]{1,128})"
+    r"/statements/[A-Za-z0-9~._-]{1,256}")
+
+# The kind of account a statement is, from the account's own name on the
+# menu. Each word stands alone, so "Discover" or "card" never reads as one.
+_LABEL_KINDS = (
+    ("Checking", re.compile(r"\bchecking\b", re.I)),
+    ("Savings", re.compile(r"\bsavings\b", re.I)),
+    ("Money Market", re.compile(r"\bmoney\s*market\b", re.I)),
+    ("CD", re.compile(r"\bcd\b|\bcertificates?\s+of\s+deposit\b", re.I)),
+)
+# The product code inside an account id, measured on a live account. ~OC~
+# is a checking account and ~OSA~ an online savings account. Nothing else
+# has been seen, so nothing else is read from an id.
+_ID_KINDS = (("Checking", "~oc~"), ("Savings", "~osa~"))
+
+
+def kind_of_label(label: str) -> str:
+    """Checking, Savings, Money Market or CD, from an account's name, or ""
+    when it names none or more than one."""
+    found = {kind for kind, rx in _LABEL_KINDS if rx.search(label or "")}
+    return found.pop() if len(found) == 1 else ""
+
+
+def kind_of_id(account_id: str) -> str:
+    """Checking or Savings, from the product code in an account id, or ""
+    when it holds none or both."""
+    low = (account_id or "").lower()
+    found = {kind for kind, marker in _ID_KINDS if marker in low}
+    return found.pop() if len(found) == 1 else ""
+
+
+def statements_url(account_id: str) -> Optional[str]:
+    """The address of one account's statement list, or None for an id that
+    is not shaped like one."""
+    if not ACCOUNT_ID_RE.fullmatch(account_id or ""):
+        return None
+    return BASE + STATEMENTS_PATH % account_id
+
+
+def account_of_href(href: str) -> str:
+    """The account id a statement's PDF address sits under, or "" for an
+    address that is not a statement PDF on Discover Bank's own host."""
+    if not is_safe_url(href or "") or urlsplit(href).hostname != "bank.discover.com":
+        return ""
+    m = BINARY_PATH_RE.fullmatch(urlsplit(href).path or "")
+    return m.group(1) if m else ""
+
+
+def parse_statements_api(json_data, account_label: str, account_id: str = "") -> "Listed":
+    """The statements one account's list names, each with its PDF's own
+    address, its date and its kind.
+
+    A statement is kept only when its PDF sits under the account it was
+    listed for, its date is a real day, and the account's name and the
+    product code in its id agree on its kind. Any other is refused and the
+    list it came in is not whole (passed_over), so it is never filed under
+    another account, a made up date or the wrong kind, and the run says so.
+    """
+    refused = 0
     docs: List[RawDoc] = []
     if not isinstance(json_data, list):
-        return docs
-    acc_lower = (account_label or "").lower()
-
+        return _listed(docs, ("statement list",))
+    label = re.sub(r"\s+", " ", account_label or "").strip()
     for i, item in enumerate(json_data):
         if not isinstance(item, dict):
+            refused += 1
             continue
-        stmt_date = (item.get("statementDate") or "")[:10]  # YYYY-MM-DD
+        raw_date = str(item.get("statementDate") or "")
+        stmt_date = raw_date[:10] if re.match(r"\d{4}-\d{2}-\d{2}(?!\d)", raw_date) else ""
+        stmt_date = _checked_date(stmt_date, "")
         name = item.get("name", "")
+        name = name if isinstance(name, str) else ""
         binary_href = ""
-        for link in item.get("links", []):
+        links = item.get("links")
+        for link in links if isinstance(links, list) else ():
             if isinstance(link, dict) and link.get("rel") == "binary":
-                binary_href = link.get("href", "")
+                binary_href = link.get("href") or ""
                 break
-        if binary_href and binary_href.startswith("/"):
+        if not isinstance(binary_href, str):
+            binary_href = ""
+        if binary_href.startswith("/"):
             binary_href = urljoin(BASE, binary_href)
-        if not binary_href or not is_safe_url(binary_href):
+        owner = account_of_href(binary_href)
+        if not owner or not stmt_date or (account_id and owner != account_id):
+            log.warning("refusing a statement on the list (%s), since its PDF is not "
+                        "this account's or it has no date", name[:40] or i)
+            refused += 1
             continue
-
-        href_lower = binary_href.lower()
-        if "~osa~" in href_lower or "-osa" in href_lower:
-            account_clean = "Savings"
-            account_name = account_label if (account_label and "savings" in acc_lower) else (account_label or "Savings")
-        elif "~oc~" in href_lower or "-oc" in href_lower:
-            account_clean = "Checking"
-            account_name = account_label if (account_label and "checking" in acc_lower) else (account_label or "Checking")
-        elif "money market" in acc_lower or "~mm~" in href_lower:
-            account_clean = "Money Market"
-            account_name = account_label or "Money Market"
-        elif "cd" in acc_lower or "certificate" in acc_lower or "~cd~" in href_lower:
-            account_clean = "CD"
-            account_name = account_label or "CD"
-        elif "savings" in acc_lower:
-            account_clean = "Savings"
-            account_name = account_label or "Savings"
-        else:
-            account_clean = "Checking"
-            account_name = account_label or "Checking"
-
+        by_label, by_id = kind_of_label(label), kind_of_id(owner)
+        if by_label and by_id and by_label != by_id:
+            log.warning("refusing a statement on the list (%s), since the account is "
+                        "named %s and its id says %s", name[:40] or i, by_label, by_id)
+            refused += 1
+            continue
+        kind = by_label or by_id
         docs.append(
             RawDoc(
-                title=f"{account_clean} Statement",
+                title=f"{kind} Statement" if kind else "Statement",
                 date_text=stmt_date,
                 href=binary_href,
                 text=name,
-                account=account_name,
+                account=label or kind,
                 row_index=i,
             )
         )
-    return docs
+    return _listed(docs, ("statement list",) if refused else ())
 
 
 # ---------------------------------------------------------------------------
@@ -658,8 +719,8 @@ _ROW_JS = r"""() => {
 
 
 def collect_documents(page) -> List[RawDoc]:
-    """Rows currently rendered. Used by --diagnose (and as the generic
-    fallback inside discovercard_collect)."""
+    """Rows currently rendered. Used by --diagnose only, to show a layout
+    change. Discovery never files a document from them."""
     docs: List[RawDoc] = []
     seen = set()
     try:
@@ -825,36 +886,12 @@ def year_select(page):
     return None, []
 
 
-def _select_option(page, sel, label: str) -> bool:
-    """Set a dropdown - but never one attached to a money-movement widget.
-
-    Re-checked here as well as in _safe_selects: this is the only function
-    that writes to a control, so it must be safe on its own terms no matter
-    which caller reached it.
-    """
-    identity = control_identity(sel)
-    if is_money_control(identity):
-        log.warning("REFUSED to set a money-movement control: %s", identity[:160])
-        return False
-    if FORBIDDEN_CONTROL_RE.search(label or ""):
-        log.warning("REFUSED option %r - matches the forbidden list", label)
-        return False
-    try:
-        sel.select_option(label=label, timeout=8000)
-        page.wait_for_timeout(2500)
-        dismiss_timeout(page)
-        return True
-    except Exception as e:
-        log.info("could not select %r: %s", label, str(e).split("\n")[0])
-        return False
-
-
 _STATEMENTS_FETCH_JS = """async (url) => {
   const ppTarget = new URL(url, location.href);
   if (ppTarget.protocol !== "https:" || ppTarget.hostname !== "bank.discover.com" || ppTarget.username || ppTarget.password || (ppTarget.port && ppTarget.port !== "443")) throw new Error("Refusing an off-host document request");
   const res = await fetch(url, { credentials: 'include' });
-  if (!res.ok) return [];
-  return await res.json();
+  if (!res.ok) return { ok: false, status: res.status, data: null };
+  return { ok: true, status: res.status, data: await res.json() };
 }"""
 
 _DOWNLOAD_BYTES_JS = """async (url) => {
@@ -874,260 +911,185 @@ _DOWNLOAD_BYTES_JS = """async (url) => {
 }"""
 
 
-def list_deposit_accounts(page) -> List[dict]:
-    """Inspects account dropdown to return all deposit accounts."""
-    try:
-        # Check React fiber first for instant, non-invasive option discovery
-        fiber_options = page.evaluate("""() => {
-            const btn = document.querySelector("button[class*='_dropdown_']");
-            if (!btn) return null;
-            const key = Object.keys(btn).find(k => k.startsWith("__reactFiber"));
-            if (!key) return null;
-            let curr = btn[key];
-            while (curr) {
-                if (curr.memoizedProps && Array.isArray(curr.memoizedProps.options)) {
-                    return curr.memoizedProps.options.map((o, i) => ({
-                        index: i,
-                        text: o.label || '',
-                        id: o.id || o.value || ''
-                    }));
-                }
-                curr = curr.return;
-            }
-            return null;
-        }""")
-        if fiber_options:
-            results = []
-            for opt in fiber_options:
-                txt = opt.get("text", "")
-                if txt and not FORBIDDEN_CONTROL_RE.search(txt) and is_safe_control(txt):
-                    results.append(opt)
-            if results:
-                return results
+# The account menu on the statements page is a React button whose props
+# hold every account, each with its name and the id its statement list is
+# asked by. Read from the page's own state, nothing is pressed. Every such
+# button on the page is read, and the menu is the one whose options are
+# deposit accounts.
+_ACCOUNT_MENUS_JS = """() => {
+  const menus = [];
+  for (const btn of document.querySelectorAll("button[class*='_dropdown_']")) {
+    const key = Object.keys(btn).find(k => k.startsWith("__reactFiber"));
+    if (!key) continue;
+    let curr = btn[key];
+    for (let i = 0; curr && i < 40; i++, curr = curr.return) {
+      const props = curr.memoizedProps;
+      if (props && Array.isArray(props.options)) {
+        menus.push(props.options.map(o => ({
+          label: String((o && o.label) || ''),
+          id: String((o && (o.id || o.value)) || '')
+        })));
+        break;
+      }
+    }
+  }
+  return menus;
+}"""
 
-        btn = page.locator('button[class*="_dropdown_"]').first
-        if btn.count() == 0:
-            return []
-        txt = (btn.inner_text() or "").strip()
-        aria = btn.get_attribute("aria-label") or ""
-        combined = f"{txt} {aria}".strip()
-        if FORBIDDEN_CONTROL_RE.search(combined):
-            log.warning("Dropdown button matches forbidden words: %r", combined)
-            return []
-        if btn.get_attribute("aria-expanded") != "true":
-            btn.click()
-            page.wait_for_timeout(300)
-        options = page.locator('[role="option"], ul[role="listbox"] li')
-        results = []
-        for i in range(options.count()):
-            opt_text = options.nth(i).inner_text().strip()
-            if not FORBIDDEN_CONTROL_RE.search(opt_text) and is_safe_control(opt_text):
-                results.append({"index": i, "text": opt_text})
-        if btn.get_attribute("aria-expanded") == "true":
-            btn.click()
-        return results
-    except Exception as e:
-        log.warning("list_deposit_accounts failed: %s", e)
-        return []
+# The list calls the statements page made itself, read from the browser's
+# own record of them. Nothing is pressed and nothing is guessed.
+_LIST_CALLS_JS = """() => Array.from(new Set(
+  performance.getEntriesByType('resource').map(r => r.name)
+    .filter(u => u.startsWith('https://bank.discover.com/bank/deposits/servicing/documents/v1/accounts/'))
+))"""
 
 
-def discoverbank_collect(page) -> Listed:
-    """Collects statements across all available deposit accounts."""
-    all_docs: List[RawDoc] = []
-    seen_hrefs = set()
-
-    # 1. First, check if accounts and their IDs can be extracted directly from React fiber
-    try:
-        acct_options = page.evaluate("""() => {
-            const btn = document.querySelector("button[class*='_dropdown_']");
-            if (!btn) return [];
-            const key = Object.keys(btn).find(k => k.startsWith("__reactFiber"));
-            if (!key) return [];
-            let curr = btn[key];
-            while (curr) {
-                if (curr.memoizedProps && Array.isArray(curr.memoizedProps.options)) {
-                    return curr.memoizedProps.options.map(o => ({
-                        label: o.label || '',
-                        id: o.id || o.value || ''
-                    }));
-                }
-                curr = curr.return;
-            }
-            return [];
-        }""")
-    except Exception as e:
-        log.warning("Could not read React fiber account options: %s", e)
-        acct_options = []
-
-    # If accounts were found in React fiber, fetch statements directly for each account
-    if acct_options:
-        log.info("Discovered %d account(s) from React state: %s",
-                 len(acct_options), [a.get("label") for a in acct_options])
-        for acct in acct_options:
-            acct_id = acct.get("id")
-            acct_label = acct.get("label", "")
-            if not acct_id:
-                continue
-            if not is_safe_control(acct_label) or FORBIDDEN_CONTROL_RE.search(acct_label):
-                log.warning("Skipping unsafe account option %r", acct_label)
-                continue
-            url = f"https://bank.discover.com/bank/deposits/servicing/documents/v1/accounts/{acct_id}/statements"
-            try:
-                raw_json = intake.evaluate(page, _STATEMENTS_FETCH_JS, url)
-                if isinstance(raw_json, list):
-                    docs = parse_statements_api(raw_json, acct_label)
-                    for d in docs:
-                        if d.href not in seen_hrefs:
-                            seen_hrefs.add(d.href)
-                            all_docs.append(d)
-            except Exception as e:
-                log.warning("Direct fetch failed for account %s (%s): %s", acct_label, acct_id, e)
-
-        if all_docs:
-            return _listed(all_docs)
-
-    # 2. Fallback: discover endpoints from performance entries and cycle dropdown if needed
-    accounts = list_deposit_accounts(page)
-
-    # First discover any statement endpoints already present in browser performance entries
-    try:
-        endpoints = page.evaluate("""() => {
-            return Array.from(new Set(
-                performance.getEntriesByType('resource')
-                    .map(r => r.name)
-                    .filter(url => 
-                        url.startsWith('https://bank.discover.com/bank/deposits/') &&
-                        url.includes('/statements') && 
-                        !url.includes('bankprod2')
-                    )
-            ));
-        }""")
-    except Exception as e:
-        log.warning("Could not read performance entries: %s", e)
-        endpoints = []
-
-    # If performance entries do not cover all accounts, cycle the dropdown to load them
-    if accounts and len(endpoints) < len(accounts):
-        for acc in accounts:
-            idx = acc["index"]
-            label = acc["text"]
-            if not is_safe_control(label) or FORBIDDEN_CONTROL_RE.search(label):
-                log.warning("Refusing to switch to unsafe account control: %r", label)
-                continue
-            try:
-                btn = page.locator('button[class*="_dropdown_"]').first
-                if btn.count() > 0:
-                    if btn.get_attribute("aria-expanded") != "true":
-                        btn.click()
-                        page.wait_for_timeout(300)
-                    options = page.locator('[role="option"], ul[role="listbox"] li')
-                    if options.count() > idx:
-                        options.nth(idx).click()
-                        page.wait_for_timeout(1000)
-            except Exception as e:
-                log.warning("Could not switch to account %s (idx %d): %s", label, idx, e)
-
-        try:
-            endpoints = page.evaluate("""() => {
-                return Array.from(new Set(
-                    performance.getEntriesByType('resource')
-                        .map(r => r.name)
-                        .filter(url => 
-                            url.startsWith('https://bank.discover.com/bank/deposits/') &&
-                            url.includes('/statements') && 
-                            !url.includes('bankprod2')
-                        )
-                ));
-            }""")
-        except Exception:
-            pass
-
-    for ep in endpoints:
-        try:
-            raw_json = intake.evaluate(page, _STATEMENTS_FETCH_JS, ep)
-            if isinstance(raw_json, list):
-                label = ""
-                for a in accounts:
-                    txt = a.get("text", "")
-                    if ("~osa~" in ep.lower() or "-osa" in ep.lower()) and "savings" in txt.lower():
-                        label = txt
-                        break
-                    elif ("~oc~" in ep.lower() or "-oc" in ep.lower()) and "checking" in txt.lower():
-                        label = txt
-                        break
-                docs = parse_statements_api(raw_json, label)
-                for d in docs:
-                    if d.href not in seen_hrefs:
-                        seen_hrefs.add(d.href)
-                        all_docs.append(d)
-        except Exception as e:
-            log.warning("API statement collection failed for %s: %s", ep, e)
-
-    return _listed(all_docs)
+ACCOUNT, OTHER, REFUSED = "account", "other", "refused"
 
 
-def discovercard_collect(page) -> Listed:
-    """Every statement Discover still has: a list of {account, date, title}.
+def option_is(opt: dict) -> str:
+    """What a menu option is. ACCOUNT, a deposit account to read. OTHER, no
+    account of this app's, a card or a loan, or an entry with no id that
+    names no kind of account ("All accounts") or names an action ("Open an
+    account"). REFUSED, one that may be an account and is not read, an
+    account with no id or one whose name says an action, so the list is not
+    whole without it. A certificate of deposit is not an action for the
+    word deposit."""
+    label, has_id = opt.get("label", ""), bool(opt.get("id"))
+    if PRODUCT_PICKER_RE.search(label):
+        return OTHER
+    action = FORBIDDEN_CONTROL_RE.search(
+        re.sub(r"\bcertificates?\s+of\s+deposit\b", " ", label, flags=re.I))
+    if not has_id:
+        return REFUSED if kind_of_label(label) and not action else OTHER
+    return REFUSED if action else ACCOUNT
 
-    Walks the account dropdown (if there is one) and, within each account,
-    every year in the period dropdown - so the full history is captured, not
-    just the default view.
 
-    This is the DOM fallback. discovercard_collect_via_api is tried first; this runs
-    only if the API answered nothing (a redesign, or a locked-down session).
+def read_account_menu(page) -> Optional[List[dict]]:
+    """[{label, id, refused}] for every account on the statements page's
+    account menu, or None when no menu of accounts can be read. An option
+    that is no account of this app's is left out, and one that may be an
+    account and is not read comes with refused True (option_is).
 
-    A year or an account whose choice did not take was not read, and is
-    named in passed_over, where it used to be passed over and the list
-    noted whole without it. One the guard refuses is never chosen.
+    Read from the page's state and never by opening the menu. Choosing an
+    account on it is a press nobody has shown to be read-only, so it is
+    never done. Options that are no deposit account are left out. A menu
+    is the one whose options name a kind of deposit account, and when two
+    menus on the page do and hold different accounts, which is the list is
+    not known, so None.
     """
-    docs: List[dict] = []
-    seen = set()
+    try:
+        menus = page.evaluate(_ACCOUNT_MENUS_JS)
+    except Exception as e:
+        log.warning("Could not read the account menu (%s)", e)
+        return None
+    found = []
+    for menu in menus if isinstance(menus, list) else ():
+        opts = [{"label": re.sub(r"\s+", " ", str(o.get("label") or "")).strip(),
+                 "id": str(o.get("id") or "").strip()}
+                for o in menu if isinstance(o, dict)] if isinstance(menu, list) else []
+        if any(kind_of_label(o["label"]) for o in opts):
+            accounts = [dict(o, refused=option_is(o) == REFUSED) for o in opts
+                        if option_is(o) != OTHER]
+            if accounts and accounts not in found:
+                found.append(accounts)
+    if len(found) != 1:
+        if found:
+            log.warning("Two account menus on the page hold different accounts")
+        return None
+    return found[0]
+
+
+def list_deposit_accounts(page) -> List[dict]:
+    """[{index, text, id}] for every account the menu holds, read from the
+    page's state, or [] when none can be read. Nothing is pressed."""
+    accounts = [a for a in read_account_menu(page) or () if not a["refused"]]
+    return [{"index": i, "text": a["label"], "id": a["id"]}
+            for i, a in enumerate(accounts)]
+
+
+def _read_list(page, url: str):
+    """One account's statement list as the site answers it, or None when it
+    did not answer one."""
+    try:
+        got = intake.evaluate(page, _STATEMENTS_FETCH_JS, url)
+    except Exception as e:
+        log.warning("The statement list call failed (%s)", str(e).splitlines()[0][:120])
+        return None
+    if not isinstance(got, dict) or not got.get("ok"):
+        log.warning("The statement list call answered %s",
+                    got.get("status") if isinstance(got, dict) else "nothing")
+        return None
+    data = got.get("data")
+    return data if isinstance(data, list) else None
+
+
+def discoverbank_collect(page) -> Optional[Listed]:
+    """Every statement Discover Bank lists, for every account the statements
+    page's account menu holds, or None when there is no list to read.
+
+    Each account's list is the page's own call, asked from inside the page
+    with the account's id from the menu. An account whose list did not
+    answer, whose id is not shaped like one, or that is named the same as
+    another, and a statement the list names that cannot be told apart
+    (parse_statements_api), make the list not whole (passed_over). What was
+    read is kept, and the run stops at its end rather than finish.
+
+    With no menu to read, the calls the page made for itself are read, one
+    account at most and never as the whole list, since how many accounts
+    there are is then not known. Nothing on the page is pressed either way.
+    """
+    accounts = read_account_menu(page)
+    docs: List[RawDoc] = []
     passed_over = set()
+    seen = set()
 
-    def grab(acct: str):
-        expand_all(page)
-        scroll_full_page(page, rounds=3)
-        for r in collect_documents(page):
-            date, _ = parse_period_date(r.date_text or r.text)
-            if not date:
-                continue
-            key = (acct, date, r.title)
-            if key in seen:
-                continue
-            seen.add(key)
-            docs.append({"account": acct, "date": date,
-                         "title": r.title or "Statement"})
+    def take(listed):
+        passed_over.update(getattr(listed, "passed_over", ()))
+        for d in listed:
+            if d.href not in seen:
+                seen.add(d.href)
+                docs.append(d)
 
-    def walk_years(acct: str):
-        sel, years = year_select(page)
-        if sel is not None and years:
-            for y in years:
-                if _select_option(page, sel, y):
-                    grab(acct)
-                else:
-                    passed_over.add("year picker")
-        else:
-            grab(acct)
-            # no year dropdown: try pagination instead
-            for _ in range(30):
-                if not next_page(page):
-                    break
-                grab(acct)
+    if accounts:
+        log.info("Discovered %d account(s) on the account menu", len(accounts))
+        labels = [a["label"] for a in accounts]
+        for acct in accounts:
+            url = statements_url(acct["id"])
+            if (acct["refused"] or not url or not acct["label"]
+                    or labels.count(acct["label"]) > 1):
+                log.warning("passing over an account on the menu that has no usable "
+                            "id, a name that says an action, or a name another "
+                            "account has")
+                passed_over.add("account menu")
+                continue
+            data = _read_list(page, url)
+            if data is None:
+                passed_over.add("statement list")
+                continue
+            take(parse_statements_api(data, acct["label"], acct["id"]))
+        return _listed(docs, passed_over)
 
-    acct_sel, accounts = account_select(page)
-    if acct_sel is not None and accounts:
-        for a in accounts:
-            if FORBIDDEN_CONTROL_RE.search(a):
-                # Never chosen (_select_option), and no account whose
-                # statements are listed.
-                log.info("refusing account option %r", a[:60])
-                continue
-            if not _select_option(page, acct_sel, a):
-                passed_over.add("account picker")
-                continue
-            walk_years(re.sub(r"\s+", " ", a).strip())
-    else:
-        walk_years("")
+    # No menu could be read. The page's own calls, when it made exactly one.
+    try:
+        calls = page.evaluate(_LIST_CALLS_JS)
+    except Exception as e:
+        log.warning("Could not read the page's own calls (%s)", e)
+        calls = []
+    lists = sorted({u.split("?")[0] for u in calls if isinstance(u, str)
+                    and re.fullmatch(r"https://bank\.discover\.com" + STATEMENTS_PATH
+                                     % r"[A-Za-z0-9~._-]{1,128}", u.split("?")[0])})
+    if len(lists) != 1:
+        if lists:
+            log.warning("The page asked %d statement lists and holds no account menu "
+                        "to name them by", len(lists))
+        return None
+    account_id = lists[0].rsplit("/", 2)[-2]
+    data = _read_list(page, lists[0])
+    if data is None:
+        return None
+    take(parse_statements_api(data, "", account_id))
+    passed_over.add("account menu")
     return _listed(docs, passed_over)
 
 
@@ -1167,8 +1129,8 @@ def discoverbank_download(
         log.warning("No download URL provided for %s %s", account, date)
         return False
 
-    if not is_safe_url(href):
-        log.warning("Refusing to download from unsafe URL: %s", href)
+    if not is_safe_url(href) or not account_of_href(href):
+        log.warning("Refusing to download from a URL that is no statement PDF: %s", href)
         return False
 
     out_path = Path(out_path)
@@ -1185,134 +1147,6 @@ def discoverbank_download(
     return _write_if_pdf(pdf_bytes, out_path)
 
 
-# ===========================================================================
-# Downloading a statement. CONFIRMED LIVE 2026-08-19.
-#
-# Discover serves each statement at its own URL, which the page itself puts in
-# an <a href> - one per period, all present on load:
-#
-#     GET /cardmembersvcs/statements/app/stmtPDF?view=true&date=YYYYMMDD
-#       -> 200 application/pdf
-#          content-disposition: inline;
-#            filename=Discover-Statement-20250115-1234.pdf
-#
-# So there is nothing to click. The bytes are fetched with the browser
-# context's own authenticated request (cookie session, same origin, plain GET
-# of a URL the page published). This is NOT the "synthesize an endpoint" move
-# that failed on Ally: that guessed a URL and needed an Authorization header
-# the SPA added in JavaScript. Here the href is read from the DOM and used
-# verbatim.
-#
-# Not clicking is also what keeps this read-only in the strongest sense: the
-# "Download" control next to it opens a MODAL DIALOG (a transactions export,
-# not the statement), and answering a dialog is exactly what this project
-# never does.
-#
-# The server's filename carries the card's last four digits, which is the only
-# place a single-card login states them.
-# ===========================================================================
-CD_FILENAME_RE = re.compile(r"filename\*?=(?:UTF-8'')?\"?([^\";]+)", re.I)
-CD_LAST4_RE = re.compile(r"-(\d{4})\.pdf$", re.I)
-
-
-def served_last4(disposition: str) -> str:
-    """The card's last 4 from the served filename, or ""."""
-    m = CD_FILENAME_RE.search(disposition or "")
-    if not m:
-        return ""
-    m2 = CD_LAST4_RE.search(m.group(1).strip())
-    return m2.group(1) if m2 else ""
-
-
-def resolve_statement_url(href: str) -> Optional[str]:
-    """The absolute URL to fetch, or None if the href leaves Discover's host.
-
-    The fetch below carries the signed-in session's cookies, so an absolute
-    href must be on BASE's own scheme and host before it may be followed - a
-    hostile absolute href sitting in the DOM must not be able to send those
-    cookies anywhere else. Parsed and compared, never a string prefix: a
-    prefix check passes both a suffix host (card.discover.com.evil.test) and
-    a userinfo host (card.discover.com@evil.test), which is exactly how the
-    UKG app's tenant guard was once walked through.
-    """
-    parts = urlsplit(href)
-    if not parts.scheme and not parts.netloc:
-        return BASE + href
-    base = urlsplit(BASE)
-    if (parts.scheme, parts.hostname) == (base.scheme, base.hostname):
-        return href
-    return None
-
-
-def discovercard_download(page, ctx, account: str, date: str, out_path,
-                   occurrence: int = 0, document_id: str = "",
-                   title: str = "") -> bool:
-    """Download one statement PDF.
-
-    `document_id` is the statement's own URL as discovery read it from the
-    page. Nothing is clicked and nothing is navigated: the file is fetched
-    with the signed-in context's cookies and written only if it really is a
-    PDF and really is the statement that was asked for.
-    """
-    out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    href = document_id or ""
-    if not href:
-        # Re-find it on the page by its date, rather than rebuilding the URL
-        # from a template - if Discover changes the query string, guessing it
-        # would download the wrong period under a confident filename.
-        href = statement_href_for(page, date)
-    if not href:
-        log.info("no statement URL for %s", date)
-        return False
-
-    # The URL must still be one of Discover's own statement URLs, on
-    # Discover's own host, and must still name the date we want. A stored
-    # href from an earlier run cannot send this anywhere else.
-    if not STMT_PDF_RE.search(href):
-        log.warning("refusing a non-statement URL for %s: %s", date, href[:80])
-        return False
-    want = date.replace("-", "")
-    if want and want not in href:
-        log.warning("MISMATCH: %s does not name %s - refusing", href[:80], want)
-        return False
-
-    url = resolve_statement_url(href)
-    if not url:
-        log.warning("refusing an off-host statement URL for %s: %s",
-                    date, href[:80])
-        return False
-    # Every redirect on the way has to stay on Discover's hosts as well.
-    # Playwright alone would follow one wherever it led, carrying the
-    # session's cookies, so each hop is checked before it is asked.
-    try:
-        resp = redirects.get(ctx.request, url, is_safe_url, timeout=90000)
-    except Exception as e:
-        log.info("fetch failed for %s: %s", date, str(e).splitlines()[0][:80])
-        return False
-    if resp.status != 200:
-        log.info("statement %s returned HTTP %s", date, resp.status)
-        return False
-    ctype = (resp.headers.get("content-type") or "").lower()
-    if "pdf" not in ctype:
-        # An HTML body here usually means the session lapsed and Discover
-        # answered with a sign-in page. Do not write it.
-        log.info("statement %s came back as %r, not a PDF", date, ctype[:40])
-        return False
-    try:
-        data = intake.body(resp)
-    except Exception as e:
-        log.info("could not read body for %s: %s", date, e)
-        return False
-    if not _write_if_pdf(data, out_path):
-        return False
-    last4 = served_last4(resp.headers.get("content-disposition", ""))
-    log.info("saved %s (%d bytes%s)", date, len(data),
-             f", card ...{last4}" if last4 else "")
-    return True
-
-
 _DIGITS_RE = re.compile(r"\d{4,}")
 
 
@@ -1324,42 +1158,46 @@ def _redact(value):
 
 
 def probe_statements_api(page) -> dict:
-    """Report the statement index exactly as the page publishes it.
+    """Report the statement lists exactly as discovery reads them.
 
-    Discover needs no API call for discovery - the whole index is static
-    markup - so this reports what a read of that markup yields: how many PDF
-    links there are, their date range, a sample of the period labels, and
-    whether any link was refused by the read-only guard. That is the thing to
-    compare against after a redesign.
+    How many accounts the account menu holds and of what kind, how many
+    statements each list names, their date range, the shape of a PDF's
+    address, and what was passed over. Discovery reads the same lists and
+    nothing more, so this is the thing to compare after a redesign.
 
-    Read-only, and it neither clicks nor navigates.
+    Read-only, and it neither clicks nor navigates past the statements page.
     """
     try:
         ensure_statements(page)
         page.wait_for_timeout(1200)
     except Exception as e:
         log.info("probe_statements_api: %s", e)
-    try:
-        raw_links = page.locator(STMT_PDF_SEL).count()
-    except Exception:
-        raw_links = 0
-    recs = statement_links(page)
-    dates = [r["date"] for r in recs]
+    accounts = read_account_menu(page)
+    listed = discoverbank_collect(page)
+    dates = sorted(d.date_text for d in listed or () if d.date_text)
+    per_account = {}
+    for d in listed or ():
+        per_account[d.title] = per_account.get(d.title, 0) + 1
     return {
-        "pdf_links_in_dom": raw_links,
-        "statements": len(recs),
-        "oldest": dates[-1] if dates else "",
-        "newest": dates[0] if dates else "",
-        "period_labels_sample": [r["period"] for r in recs[:4] if r["period"]],
-        "href_shape": _redact(recs[0]["href"]) if recs else "",
-        "note": "pdf_links_in_dom may exceed statements: the period chooser's "
-                "markup repeats a link. Discovery de-duplicates by date.",
+        "account_menu_read": accounts is not None,
+        "accounts": len(accounts or ()),
+        "account_kinds": sorted({kind_of_label(a["label"]) or kind_of_id(a["id"]) or "?"
+                                 for a in accounts or ()}),
+        "accounts_passed_over": len([a for a in accounts or () if a["refused"]]),
+        "statements": len(listed) if listed is not None else 0,
+        "statements_by_kind": per_account,
+        "oldest": dates[0] if dates else "",
+        "newest": dates[-1] if dates else "",
+        "passed_over": list(getattr(listed, "passed_over", ())) if listed is not None
+                       else ["the whole list"],
+        "href_shape": _redact(listed[0].href) if listed else "",
     }
 
 
 def probe_api(page, seconds: int = 25) -> List[dict]:
     """Watch the SPA's JSON traffic while the statements area loads, and
-    report endpoints whose payload looks like a document list."""
+    report endpoints whose payload looks like a document list. Listen only,
+    nothing on the page is chosen or pressed."""
     hits: List[dict] = []
 
     def on_resp(r):
@@ -1384,16 +1222,7 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
     try:
         ensure_statements(page)
         page.wait_for_timeout(3000)
-        expand_all(page)
         scroll_full_page(page, rounds=4)
-        acct_sel, accounts = account_select(page)
-        if acct_sel is not None:
-            for a in accounts[:3]:
-                _select_option(page, acct_sel, a)
-        sel, years = year_select(page)
-        if sel is not None:
-            for y in years[:3]:
-                _select_option(page, sel, y)
         page.wait_for_timeout(int(seconds * 100))
     except Exception as e:
         log.info("probe_api: %s", e)
@@ -1411,142 +1240,3 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
         seen.add(h["url"])
         out.append(h)
     return out
-
-
-# ===========================================================================
-# Discovery. CONFIRMED LIVE 2026-08-19.
-#
-# The statements page is
-#     card.discover.com/cardmembersvcs/statements/app/activity
-# with hash routes #/recent, #/current and #/stmt_YYYYMMDD. page.goto works
-# and keeps the session (unlike Ally and Chase, where it did not).
-#
-# The page's "Show me" period chooser is a link-based dropdown, NOT a <select>
-# - which is why a select-based lookup finds nothing here. It does not need to
-# be opened: every period's row, each with its own PDF link, is already in the
-# DOM on plain page load. Verified: 24 links before any interaction, the same
-# 24 after opening the chooser.
-#
-# So discovery is one read of
-#     a[href*="stmtPDF"]   ->  ...stmtPDF?view=true&date=YYYYMMDD
-# where the date is the statement's CLOSING date, and the enclosing <li> gives
-# the human period label ("Mar 16 - Apr 15, 2025", or "Current (...)").
-#
-# Nothing is clicked, no accordion is expanded, no period is swept. The Chase
-# app needed all of that because its rows only existed while one card's
-# accordion was open on one year; here the whole index is static markup.
-#
-# History observed: 24 statements, the oldest .. the newest - Discover keeps
-# about two years online. Older ones are not reachable from this page and are
-# not guessed at.
-# ===========================================================================
-STMT_PDF_RE = re.compile(r"/statements/app/stmtPDF\b[^\"\']*?date=(\d{8})", re.I)
-STMT_PDF_SEL = "a[href*='stmtPDF']"
-# "Mar 16 - Apr 15, 2025" / "Dec 16, 2024 - Jan 15, 2025" / "Current (...)"
-PERIOD_LABEL_RE = re.compile(
-    r"((?:Current\s*\()?[A-Z][a-z]{2}\s+\d{1,2}(?:,\s*\d{4})?\s*[-\u2013]\s*"
-    r"[A-Z][a-z]{2}\s+\d{1,2},\s*\d{4}\)?)")
-
-
-def _iso_from_yyyymmdd(raw: str) -> str:
-    return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}" if re.fullmatch(r"\d{8}", raw or "") else ""
-
-
-def statement_links(page) -> List[dict]:
-    """Every statement Discover is offering, read from its own PDF links.
-
-    One plain read of the DOM - no clicking, no expanding, no navigation.
-    Returns {date, href, period, occurrence, ambiguous, documentId} per
-    statement, de-duplicated by date (the markup repeats a link when the
-    chooser is open).
-    """
-    out: List[dict] = []
-    seen = set()
-    try:
-        loc = page.locator(STMT_PDF_SEL)
-        n = min(loc.count(), 400)
-    except Exception as e:
-        log.info("could not read statement links: %s", e)
-        return []
-    for i in range(n):
-        el = loc.nth(i)
-        try:
-            href = el.get_attribute("href") or ""
-        except Exception:
-            continue
-        m = STMT_PDF_RE.search(href)
-        if not m:
-            continue
-        date = _iso_from_yyyymmdd(m.group(1))
-        if not date or date in seen:
-            continue
-        # The control must still clear the read-only guard, even though it is
-        # only ever fetched and never clicked.
-        try:
-            label = " ".join((el.inner_text(timeout=600) or "").split())
-        except Exception:
-            label = ""
-        if label and not is_safe_control(label):
-            log.info("refusing statement control %r", label[:60])
-            continue
-        # The human period label lives on an ANCESTOR of the link, but not a
-        # predictable one: closest('div') matches a bare wrapper holding only
-        # the word "PDF". So walk up until the text actually looks like a
-        # period, a few levels at most.
-        period = ""
-        try:
-            texts = el.evaluate("""e => {
-                const out = []; let n = e.parentElement;
-                for (let i = 0; i < 5 && n; i++, n = n.parentElement) {
-                    out.push(n.innerText || '');
-                }
-                return out;
-            }""") or []
-            for raw in texts:
-                pm = PERIOD_LABEL_RE.search(" ".join(raw.split()))
-                if pm:
-                    period = pm.group(1).strip()
-                    break
-        except Exception:
-            pass
-        seen.add(date)
-        out.append({"date": date, "href": href, "period": period,
-                    # identity IS the URL: durable, and it re-finds the file
-                    # without depending on row order.
-                    "documentId": href,
-                    "title": "Statement", "account": "",
-                    "kind": "statement", "occurrence": 0, "ambiguous": False})
-    out.sort(key=lambda r: r["date"], reverse=True)
-    return out
-
-
-def statement_href_for(page, date: str) -> str:
-    """Re-find one statement's URL on the page by its closing date."""
-    want = (date or "").replace("-", "")
-    for rec in statement_links(page):
-        if rec["date"].replace("-", "") == want:
-            return rec["href"]
-    return ""
-
-
-def discovercard_collect_via_api(page) -> List[dict]:
-    """Every statement Discover still offers.
-
-    Named for the shared orchestrator's call site. There is no API call here
-    and none is needed - the page publishes its whole statement index as
-    links, so this is a single read with nothing clicked.
-    """
-    if not ensure_statements(page):
-        log.info("statements page not reachable")
-        return []
-    scroll_full_page(page, rounds=2)
-    recs = statement_links(page)
-    if not recs:
-        log.info("no statement PDF links found - the page layout may have changed; "
-                 "run --diagnose and check STMT_PDF_SEL")
-        return []
-    log.info("Discover: %d statement(s), %s .. %s",
-             len(recs), recs[-1]["date"], recs[0]["date"])
-    return recs
-
-

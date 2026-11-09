@@ -429,66 +429,59 @@ class App:
         # that stopped, for Resume (paperpull_core.listing).
         listing.started(self)
         page = self.page()
-        moved = False
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
-                if not site.looks_moved_to_capital_one(page):
+                if site.looks_moved_to_capital_one(page):
+                    # Nobody has seen a Discover Bank account move, so this
+                    # says what the tab shows and no more, and the list
+                    # stays unread like any other list that would not open.
+                    print("Discover Bank's statements page opened on Capital One's site, so")
+                    print("this account may have moved to Capital One. PaperPull's Capital One")
+                    print("provider reads accounts there. To add it, press Add a provider on")
+                    print("the panel's Accounts page and choose Capital One.")
+                    print()
+                    print("Nothing was downloaded here. Anything this app saved before is")
+                    print("untouched, and its history is kept.")
+                else:
                     print("Could not open your Discover Bank statements. Sign in and open")
                     print("Statements at https://bank.discover.com/web/deposits/documents/statements,")
                     print("then try again.")
-                    raise SystemExit(0)
-                print("Your Discover account has moved to Capital One.")
-                print()
-                print("Capital One acquired Discover and is moving card servicing")
-                print("onto its own site. Once an account has moved, the Discover")
-                print("pages this app reads no longer exist, and there is nothing")
-                print("to fix on your end.")
-                print()
-                print("Your card's statements are on Capital One's site now, and")
-                print("PaperPull's Capital One provider downloads them there. To add")
-                print("it, press Add a provider on the panel's Accounts page and")
-                print("choose Capital One, then open it and press Open sign-in window.")
-                print()
-                print("Anything you already downloaded from Discover is untouched,")
-                print("and this app's history is kept, so it never downloads again")
-                print("what it saved.")
-                moved = True
+                # Nothing was listed, so this run stops here rather than
+                # finish clean, as a Resume after it does
+                # (paperpull_core.listing).
+                raise SystemExit(0)
+        self.check_session(page)
 
-        if moved:
-            raw = []
-        else:
-            self.check_session(page)
-
-            # Discover's document list is read from the page until a probe confirms
-            # whether it has a JSON API behind it (run --diagnose: probe_api
-            # reports any it sees). Reading a provider's own API proved far more
-            # reliable than scraping on Ally and USAA, so that is the intended
-            # destination - but nothing here guesses at an endpoint that has not
-            # been observed.
-            # Read Discover Bank's own document API by driving the page and capturing what it fetches.
-            # Row scraping stays as the fallback if that ever answers nothing.
-            raw = site.discoverbank_collect(page)
-            if raw:
-                log.info("Discover Bank: %d document(s) read from the API", len(raw))
-            else:
-                log.info("Discover Bank: API returned nothing - falling back to scraping")
-                print("  Discover Bank's document API returned nothing; reading the page instead.")
-                raw = site.discovercard_collect(page)
-                log.info("Discover Bank: collected %d document rows", len(raw))
+        # Every account on the statements page's account menu, each one's
+        # list asked by the page's own call from inside the page. Nothing
+        # on the page is pressed, and no other reading stands in for it.
+        raw = site.discoverbank_collect(page)
+        if raw is None:
+            # No account menu and no list the page asked for itself, so
+            # there is no list to read, and the run stops with it unread.
+            log.info("Discover Bank: no account menu or statement list to read")
+            print("Discover Bank's statements page is open, but its list of accounts")
+            print("could not be read, so nothing was downloaded. Sign in, open")
+            print("Statements, and try again. If it keeps happening, run Diagnose and")
+            print("attach the file it writes to an issue.")
+            self.write_failure("read the statement list", "the account menu could not be read")
+            raise SystemExit(0)
+        log.info("Discover Bank: %d statement(s) read from the account lists", len(raw))
         passed_over = list(getattr(raw, "passed_over", ()))
         if passed_over:
-            # An account or a year the dropdowns offered and the page's text
-            # reading could not choose is a part of the list missing, so the
-            # list is not noted whole, and the run goes on with what it read
-            # and stops at its end rather than finish.
+            # An account the menu holds whose list did not answer, or a
+            # statement the list names that could not be told apart, is a
+            # part of the list missing, so the list is not noted whole, and
+            # the run goes on with what it read and stops at its end rather
+            # than finish.
             self._list_cut_short = True
-            log.info("Discover: the list was not read through the %s",
+            log.info("Discover Bank: the list was not read through the %s",
                      " and the ".join(passed_over))
-            print("\n  Discover's statement list was not read whole, since an account or a year")
-            print("  on it could not be chosen. What was read is kept, and this run stops at")
-            print("  its end rather than finish. The next run reads the list again.")
-            self.write_failure("read the statement list", "some of the list could not be chosen")
+            print("\n  Discover Bank's statement list was not read whole, since an account or")
+            print("  a statement on it could not be read. What was read is kept, and this")
+            print("  run stops at its end rather than finish. The next run reads the list again.")
+            self.write_failure("read the statement list", "some of the list could not be read")
         n_new = 0
         for d in raw:
             n_new += self._record_discover_doc(d)
@@ -536,7 +529,7 @@ class App:
         leaves on SystemExit the way a run leaves on a sign-out, which the
         panel reports as a run that stopped."""
         if self._list_cut_short:
-            print("\nNot all of Discover's statement list was read, so this run stops here")
+            print("\nNot all of Discover Bank's statement list was read, so this run stops here")
             print("rather than finish. Everything it saved is kept. Run it again later to")
             print("read the rest.")
             raise SystemExit(0)
@@ -1015,22 +1008,18 @@ class App:
                 # account labels carry live balances; keep the shape, not the money
                 info["account_options"] = [re.sub(r"\$[\d,.]+", "$...", a)
                                            for a in accounts]
-                # Discover's index is static markup, so what matters is how
-                # many statement PDF links the page publishes.
                 info["year_options"] = years
-                info["statement_links"] = len(site.statement_links(page))
             except Exception as e:
                 info["selectors_error"] = str(e)
             page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
                             full_page=True)
-            # Does the SPA fetch its document list as JSON? Reading that API is
-            # far more reliable than scraping - see the USAA app. Listen only.
+            # The JSON the page fetches while it loads. Listen only.
             try:
                 info["api_candidates"] = site.probe_api(page)
             except Exception as e:
                 info["api_candidates"] = f"ERR {e}"
-            # What fields do the statement records actually carry? Needed to
-            # tell same-dated statements apart before anything is downloaded.
+            # The account menu and each account's list, read the way
+            # discovery reads them. Nothing is pressed.
             try:
                 info["statements_api"] = site.probe_statements_api(page)
             except Exception as e:
@@ -1057,8 +1046,6 @@ class App:
                 print(f"  refused: {shape_label(s['identity'][:70], words)}")
         if info.get("account_options"):
             print(f"Account picker:  {len(info['account_options'])} options")
-        if "statement_links" in info:
-            print(f"Statement links: {shape_tree(info['statement_links'], words)}")
         if info.get("year_options"):
             print(f"Period <select>: {', '.join(shape_label(o, words) for o in info['year_options'])}")
         api = info.get("api_candidates")
@@ -1068,21 +1055,21 @@ class App:
                 print(f"  {shape_tree(a['status'], words)}  {shape_url(a['url'], words)}")
         sapi = info.get("statements_api")
         if isinstance(sapi, dict):
-            print(f"\nStatements published by the page: {shape_tree(sapi.get('statements'), words)}"
-                  f"   (PDF links in DOM: {shape_tree(sapi.get('pdf_links_in_dom'), words)})")
+            print(f"\nAccount menu read: {shape_tree(sapi.get('account_menu_read'), words)}"
+                  f"   accounts: {shape_tree(sapi.get('accounts'), words)}"
+                  f"   statements listed: {shape_tree(sapi.get('statements'), words)}")
             if sapi.get("newest"):
                 print(f"Range: {shape_tree(sapi.get('oldest'), words)} .. "
                       f"{shape_tree(sapi.get('newest'), words)}")
-            for lbl in sapi.get("period_labels_sample") or []:
-                print(f"  period label: {shape_label(lbl, words)}")
+            for part in sapi.get("passed_over") or []:
+                print(f"  passed over: {shape_label(part, words)}")
             if sapi.get("href_shape"):
                 print(f"  href shape:   {shape_url(sapi['href_shape'], words)}")
         if info.get("samples"):
-            # These come from the GENERIC row scraper, which Discover discovery
-            # does not use - it reads the page's statement links instead. Shown
-            # only so a layout change is visible; the categories here are the
-            # fallback's guesses, not what gets filed.
-            print("\nGeneric row scraper (fallback only - not used for filing):")
+            # These come from the GENERIC row scraper, which discovery does
+            # not use, since it reads each account's list instead. Shown only
+            # so a layout change is visible, and nothing is filed from them.
+            print("\nGeneric row scraper (shown only, never used for filing):")
             for s in info.get("samples", [])[:5]:
                 print(shape_label(f"  [{s['category']}] {s['date']}  {s['summary']}"
                                   f"  <- {s['title'][:50]}", words, collapse=False))
