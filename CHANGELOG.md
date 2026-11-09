@@ -7,6 +7,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **FedEx and Stripe read their list on a computer just started.** Each
+  keeps its list with the time it was read and reads it again once it is
+  four minutes old, and a list never read was judged by that age alone. On
+  Windows the clock it is measured by starts with the computer, so in the
+  first four minutes after a restart a download took the list it had never
+  read for a fresh one. FedEx then sent the invoice to Manual Review, and
+  Stripe fetched the address saved with the record, which can have expired.
+  A list never read is now always read first, and a census holds every
+  app's list to it. Both apps are still waiting for someone with an account
+  to test them.
+
 ## [0.62.0] - 2026-11-09
 
 DKB, Discover Bank, Ziply Fiber and Cetera are the 82nd to 85th apps, and

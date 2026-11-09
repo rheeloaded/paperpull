@@ -446,7 +446,10 @@ def _fetch_file(page, link: str) -> dict:
 
 
 def _fresh_link(page, document_id: str) -> str:
-    if time.monotonic() - _captured["at"] > _FRESH_SECONDS:
+    # 0.0 is a list never read. time.monotonic() counts from the computer's
+    # start on Windows, so the age alone passes it for a fresh one on a
+    # computer up less than _FRESH_SECONDS.
+    if not _captured["at"] or time.monotonic() - _captured["at"] > _FRESH_SECONDS:
         capture_answers(page)
     for d in invoices_in(_captured["answers"]):
         if d["id"] == document_id:

@@ -3,6 +3,7 @@ reading invoice rows out of answers of unknown shape, the connect-account
 stop, and the download, all against made-up answers. No real account, no
 network."""
 import base64
+import itertools
 import json
 import sys
 from pathlib import Path
@@ -218,3 +219,19 @@ def test_only_fedex_com_and_its_subdomains_are_allowed():
     assert not site.is_safe_url("https://notfedex.com/")
     assert not site.is_safe_url("https://cdn.appdynamics.com/x.js")
     assert not site.is_safe_url("https://user:pw@www.fedex.com/")
+
+
+def test_a_list_never_read_is_read_on_a_computer_just_started(tmp_path, monkeypatch):
+    """time.monotonic() counts from the computer's start on Windows, so on
+    a computer up less than four minutes the list never read passed for a
+    fresh one, no link was found, and the invoice went to the person. It
+    failed main's CI on 2026-11-09 on a runner just started."""
+    _fresh()
+    ticks = itertools.count(5.0, 0.5)
+    monkeypatch.setattr(site.time, "monotonic", lambda: next(ticks))
+    link = "https://www.fedex.com/doc/INV-2.pdf"
+    page = _Page(INVOICES, fetch={link: {"status": 200, "ct": "application/pdf", "url": link,
+                                         "b64": base64.b64encode(PDF).decode()}})
+    out = tmp_path / "i.pdf"
+    assert site.download_bill(page, None, "2031-02-14", out, document_id="INV-2")
+    assert out.read_bytes() == PDF
