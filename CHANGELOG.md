@@ -34,7 +34,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   It reads every account on the Statements page's account menu from the
   state the page keeps for it, asks each account's statement list the way
   the page does, from inside the page, and saves each PDF under its own
-  account, named for it. Nothing on the page is pressed. Contributed by
+  account, named for it. Nothing on the page is pressed but the keep-alive
+  button of Discover's inactivity dialog, by its whole name, so a long run
+  is not signed out partway. Contributed by
   @appchamp, whose full run saved 100 checking and 100 savings statements.
   Money market and CD accounts are untested. Before merging, the Discover
   card app was kept beside it, since Capital One moves Discover cards onto
@@ -46,7 +48,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   an action, and a statement whose PDF is not its own account's, whose date
   is no day, or whose kind its account's name and id disagree on, now leave
   the list not whole, so the run keeps what it saved and stops at its end.
-  A list with nothing read is no longer noted whole.
+  A list with nothing read is no longer noted whole. The list call takes no
+  paging anybody has seen, and both of the contributor's accounts answered
+  exactly 100 statements, one of them for 108 months, so an account whose
+  list holds exactly 100, or answers with none, now leaves the list not
+  whole too, and the README says so. It no longer presses the site's own
+  Activity or Statements link when the Statements address lands elsewhere,
+  and a keep-alive button is pressed only by its whole name. Login says
+  signed in only once the account menu and a statement list answer, and a
+  run with nobody signed in, a sign-in window that did not open and an
+  empty recording end the way every other app's do.
 - **Ziply Fiber, the 84th app, monthly internet bills (#129).** It
   downloads every bill My Account's Billing page lists from
   ziplyfiber.com. Nothing is clicked. The app asks the page's own bill

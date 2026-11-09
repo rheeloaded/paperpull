@@ -12,11 +12,12 @@ SAFETY (this is a banking deposit account):
   generated. It must NEVER activate any control that pays a bill, sets up
   autopay, moves money, transfers funds, deposits checks, orders checks,
   freezes or replaces a debit card, closes an account, or changes any setting.
-  The guard is FORBIDDEN_CONTROL_RE; every click path checks it, and a control
-  must ALSO look like a document action (SAFE_DOC_CONTROL_RE) before it may be
-  clicked. Dropdowns are controls too - see MONEY_CONTROL_RE and
-  is_forbidden_control_context - allowing Checking/Savings account options in
-  dropdown context while refusing payment/transfer widgets.
+  The one control it presses is the keep-alive button of Discover's
+  inactivity dialog, by its whole name (is_keep_alive), and FORBIDDEN_CONTROL_RE
+  refuses anything more in that name. Dropdowns are controls too, and
+  MONEY_CONTROL_RE and is_forbidden_control_context, which Diagnose uses to
+  read Checking/Savings account options, refuse payment/transfer widgets.
+  No dropdown is ever chosen.
 """
 from __future__ import annotations
 
@@ -32,10 +33,7 @@ from urllib.parse import urljoin, urlsplit
 
 from paperpull_core import intake
 from paperpull_core import controls as _controls
-from paperpull_core.controls import (
-    SETTINGS_CONTROL_RE,
-    click_next_page as _click_next_page,
-)
+from paperpull_core.controls import SETTINGS_CONTROL_RE
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.characters import whole_json
@@ -319,33 +317,45 @@ def detect_security_challenge(page) -> Optional[str]:
 
 
 
+# The keep-alive button of Discover's inactivity dialog, by its whole name.
+# It is the one control a run presses. A run asks only from inside the page,
+# which a page's inactivity timer need not count as anybody being there, and
+# a dialog nobody answers signs the tab out partway through a long run.
+KEEP_ALIVE_RE = re.compile(
+    r"^\s*(i['’]?m\s+still\s+here|stay\s+(signed|logged)\s+in|"
+    r"continue\s+session|keep\s+me\s+(signed|logged)\s+in)\s*[.!]?\s*$", re.I)
+
+
+def is_keep_alive(label: str) -> bool:
+    """Whether a button's whole name is the inactivity dialog's keep-alive,
+    and says nothing the blocklist refuses."""
+    label = re.sub(r"\s+", " ", label or "").strip()
+    return bool(KEEP_ALIVE_RE.fullmatch(label)) and not FORBIDDEN_CONTROL_RE.search(label)
+
+
 def dismiss_timeout(page) -> None:
-    """Discover shows an inactivity modal with a keep-alive button. Clicking it
-    only extends the session - it moves no money and changes no setting.
-    Anything else in that modal (including 'Log out') is left alone."""
-    for pattern in (r"i'?m still here", r"stay (signed|logged) in",
-                    r"continue session", r"keep me (signed|logged) in"):
-        try:
-            c = page.get_by_role("button", name=re.compile(pattern, re.I))
-            if c.count() and c.first.is_visible():
-                c.first.click()
-                page.wait_for_timeout(1000)
-                return
-        except Exception:
-            pass
+    """Discover shows an inactivity dialog with a keep-alive button. Pressing
+    it only keeps the session, and moves no money and changes no setting.
+    Only a visible button whose whole name is a keep-alive is pressed, and
+    anything else in that dialog, Log out among them, is left as it is."""
+    try:
+        c = page.get_by_role("button", name=KEEP_ALIVE_RE)
+        for i in range(min(c.count(), 4)):
+            button = c.nth(i)
+            if not button.is_visible():
+                continue
+            if not is_keep_alive(button.inner_text(timeout=1000) or ""):
+                continue
+            button.click()
+            page.wait_for_timeout(1000)
+            return
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
 # Documents page
 # ---------------------------------------------------------------------------
-
-# Discover's top nav is "Activity" (a menu), and the page itself is titled
-# "Activity & Statements". Clicking nav is only the fallback here, since
-# page.goto works.
-DOCUMENTS_NAV_RE = re.compile(
-    r"^\s*(activity(\s*(&|and)\s*statements?)?|documents?|"
-    r"statements?\s*(&|and)\s*documents?|statements?)\s*(menu)?\s*$", re.I)
-
 
 def on_documents_page(page) -> bool:
     """Are we on the deposit statements page?
@@ -365,70 +375,17 @@ def on_documents_page(page) -> bool:
         return False
 
 
-def click_documents_nav(page) -> bool:
-    """Reach the documents area by clicking the app's own nav control.
-
-    Tried BEFORE any URL in DOCUMENT_URL_CANDIDATES. Whether Discover needs
-    this is unknown - its portal may well accept a pasted URL. The ordering is
-    kept because on ALLY a pasted hash fragment silently left you on the
-    dashboard (where the account dropdown belongs to a transfer widget), and on
-    CHASE every guessed URL was wrong while the nav click worked. Clicking
-    first costs one click and removes a whole class of silent failure.
-
-    The label must clear the read-only guard first."""
-    for role in ("button", "link"):
-        try:
-            loc = page.get_by_role(role, name=DOCUMENTS_NAV_RE)
-            if loc.count() == 0:
-                continue
-            for i in range(min(loc.count(), 4)):
-                c = loc.nth(i)
-                try:
-                    if not c.is_visible():
-                        continue
-                    label = (c.inner_text(timeout=1000) or "").strip()
-                except Exception:
-                    continue
-                if not is_safe_control(label):
-                    continue
-                c.click()
-                page.wait_for_timeout(3500)
-                dismiss_timeout(page)
-                log.info("clicked %s %r -> %s", role, label, page.url)
-                if on_documents_page(page):
-                    return True
-                # the nav may open a submenu (Statements / Tax Forms)
-                for sub in ("statements", "tax forms"):
-                    try:
-                        s = page.get_by_role("link", name=re.compile(rf"^\s*{sub}\s*$", re.I))
-                        if s.count() and s.first.is_visible():
-                            s.first.click()
-                            page.wait_for_timeout(3000)
-                            dismiss_timeout(page)
-                            log.info("clicked submenu %r -> %s", sub, page.url)
-                            if on_documents_page(page):
-                                return True
-                    except Exception:
-                        pass
-        except Exception as e:
-            log.info("documents nav (%s) failed: %s", role, e)
-    return False
-
-
 def goto_documents(page) -> bool:
-    """Navigate to a document area.
+    """Open the Statements page by its address.
 
-    Order matters. The SPA's own nav is tried FIRST because a hash-route goto
-    silently leaves you on the dashboard - where the account dropdown belongs
-    to a transfer widget, not to a statements list. Only then are the known
-    URLs tried, and failing everything we keep whatever page is open so you
-    can navigate there by hand and the tool still reads it.
+    Discover Bank's Statements page opens from its address, the first way
+    a run has always tried. No menu or link of the site is pressed to get
+    there. When the address does not land on Statements the run says so
+    and stops, and the person opens it in the window themselves.
     """
     dismiss_timeout(page)
     if on_documents_page(page):
         return True
-    # Discover accepts a pasted URL, so try that first here - the reverse of
-    # the Ally/Chase ordering, and confirmed to work.
     for url in DOCUMENT_URL_CANDIDATES[:2]:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -441,9 +398,6 @@ def goto_documents(page) -> bool:
                 return True
         except Exception as e:
             log.info("documents URL %s failed: %s", url, str(e).splitlines()[0][:70])
-    if click_documents_nav(page):
-        log.info("documents area reached at %s", page.url)
-        return True
     # Signed out already? Say so instead of navigating around a dead session.
     if looks_signed_out(page):
         log.info("session is signed out (%s) - not navigating", page.url[:70])
@@ -492,46 +446,14 @@ def ensure_statements(page) -> bool:
 
 
 def scroll_full_page(page, rounds: int = 6, delay_ms: int = 700) -> None:
+    """Scroll with the mouse wheel, for Diagnose. No key is pressed, since
+    a key goes to whatever holds the focus, a menu of accounts among them."""
     try:
         for _ in range(rounds):
             page.mouse.wheel(0, 2500)
             page.wait_for_timeout(delay_ms)
-        page.keyboard.press("End")
-        page.wait_for_timeout(delay_ms)
     except Exception:
         pass
-
-
-def expand_all(page) -> None:
-    """Click only SAFE 'show more / load more / view all' controls."""
-    for _ in range(25):
-        clicked = False
-        try:
-            btn = page.get_by_role("button", name=re.compile(
-                r"(show more|load more|view more|see more|view all|older|"
-                r"more\s+statements|previous\s+statements)", re.I))
-            if btn.count() > 0 and btn.first.is_visible():
-                label = btn.first.inner_text(timeout=1000) or ""
-                if not FORBIDDEN_CONTROL_RE.search(label):
-                    btn.first.click()
-                    page.wait_for_timeout(1500)
-                    clicked = True
-        except Exception:
-            pass
-        if not clicked:
-            break
-
-
-def next_page(page) -> bool:
-    """One page forward, through a control that says it pages forward.
-
-    Judged by an allowlist in the core rather than by FORBIDDEN_CONTROL_RE,
-    because that blocklist refuses the word "next". Correctly, since "Next"
-    is also what a wizard's commit button says, and fatally here, because it
-    meant this could never page forward at all and the run reported success
-    having seen only the first page.
-    """
-    return _click_next_page(page, FALLBACK["next_page"])
 
 
 @dataclass
@@ -1024,6 +946,44 @@ def _read_list(page, url: str):
     return data if isinstance(data, list) else None
 
 
+def answers_its_list(page) -> bool:
+    """Whether the statements page holds an account menu and the statement
+    list of an account on it answers, which a tab that only sits at the
+    page's address does not show. Asks the lists the way discovery does and
+    no PDF, and presses nothing."""
+    for acct in read_account_menu(page) or ():
+        url = statements_url(acct["id"])
+        if not acct["refused"] and url and _read_list(page, url) is not None:
+            return True
+    return False
+
+
+# The list call takes no paging anybody has seen and says no total. Both of
+# the accounts it was first run on answered exactly 100 statements, one of
+# them for 108 months, so 100 is very likely the most one answer holds and
+# older statements past it are not in it. A list that long, or as long as a
+# larger round page size, may be cut short, and so may an empty list for an
+# account the menu holds. Neither is called whole.
+LIST_CAPS = frozenset({100, 200, 250, 500, 1000})
+# What such a list is, as passed_over names it.
+AT_ITS_CAP = "list as long as one answer holds"
+EMPTY_LIST = "empty list of an account"
+
+
+def _short_of_whole(data: list) -> tuple:
+    """The part of the list a list that answered may still be missing, or
+    () for one that may be whole."""
+    if not data:
+        log.warning("An account's statement list answered with no statements, "
+                    "so the list is not read as whole")
+        return (EMPTY_LIST,)
+    if len(data) in LIST_CAPS:
+        log.warning("An account's statement list held %d statements, as many as one "
+                    "answer is seen to hold, so older ones may be missing from it", len(data))
+        return (AT_ITS_CAP,)
+    return ()
+
+
 def discoverbank_collect(page) -> Optional[Listed]:
     """Every statement Discover Bank lists, for every account the statements
     page's account menu holds, or None when there is no list to read.
@@ -1031,9 +991,11 @@ def discoverbank_collect(page) -> Optional[Listed]:
     Each account's list is the page's own call, asked from inside the page
     with the account's id from the menu. An account whose list did not
     answer, whose id is not shaped like one, or that is named the same as
-    another, and a statement the list names that cannot be told apart
-    (parse_statements_api), make the list not whole (passed_over). What was
-    read is kept, and the run stops at its end rather than finish.
+    another, a list that answered empty or as long as one answer is seen to
+    hold (_short_of_whole), and a statement the list names that cannot be
+    told apart (parse_statements_api), make the list not whole
+    (passed_over). What was read is kept, and the run stops at its end
+    rather than finish.
 
     With no menu to read, the calls the page made for itself are read, one
     account at most and never as the whole list, since how many accounts
@@ -1067,6 +1029,7 @@ def discoverbank_collect(page) -> Optional[Listed]:
             if data is None:
                 passed_over.add("statement list")
                 continue
+            passed_over.update(_short_of_whole(data))
             take(parse_statements_api(data, acct["label"], acct["id"]))
         return _listed(docs, passed_over)
 
@@ -1088,6 +1051,7 @@ def discoverbank_collect(page) -> Optional[Listed]:
     data = _read_list(page, lists[0])
     if data is None:
         return None
+    passed_over.update(_short_of_whole(data))
     take(parse_statements_api(data, "", account_id))
     passed_over.add("account menu")
     return _listed(docs, passed_over)
@@ -1096,11 +1060,11 @@ def discoverbank_collect(page) -> Optional[Listed]:
 # ---------------------------------------------------------------------------
 # Download
 #
-# Three mechanisms are tried in order, because which one Discover uses is the key
-# unknown until the live probe: a real browser download event, a blob/PDF tab,
-# and a direct PDF href fetched from the page context (which carries the
-# session cookies). Whichever wins, the bytes are checked for %PDF- before the
-# file is written.
+# One way only. The PDF address the list gave is fetched from inside the
+# signed-in page, which carries the session cookies. The bytes must hold
+# %PDF- within their first 1024 bytes, where a PDF's header may sit, before
+# anything is written, and the saved file must then open as a PDF with a
+# page (receipt_pdf.validate_pdf), or it is moved to Manual Review.
 # ---------------------------------------------------------------------------
 def _write_if_pdf(data: bytes, out_path: Path) -> bool:
     if not data or b"%PDF-" not in data[:1024]:
@@ -1121,7 +1085,8 @@ def _write_if_pdf(data: bytes, out_path: Path) -> bool:
 def discoverbank_download(
     page, ctx, account: str, date: str, out_path: Path, href: str = "", **kw
 ) -> bool:
-    """Downloads statement PDF via authenticated fetch, verifying %PDF- signature."""
+    """Downloads a statement PDF by a fetch from inside the signed-in page,
+    and writes it only when %PDF- is within its first 1024 bytes."""
     href = href or kw.get("document_id", "")
     if href and href.startswith("/"):
         href = urljoin(BASE, href)
@@ -1165,7 +1130,8 @@ def probe_statements_api(page) -> dict:
     address, and what was passed over. Discovery reads the same lists and
     nothing more, so this is the thing to compare after a redesign.
 
-    Read-only, and it neither clicks nor navigates past the statements page.
+    Read-only. It presses nothing but the inactivity dialog's keep-alive
+    (dismiss_timeout) and never navigates past the statements page.
     """
     try:
         ensure_statements(page)
@@ -1197,7 +1163,8 @@ def probe_statements_api(page) -> dict:
 def probe_api(page, seconds: int = 25) -> List[dict]:
     """Watch the SPA's JSON traffic while the statements area loads, and
     report endpoints whose payload looks like a document list. Listen only,
-    nothing on the page is chosen or pressed."""
+    nothing on the page is chosen, and nothing but the inactivity dialog's
+    keep-alive is pressed."""
     hits: List[dict] = []
 
     def on_resp(r):

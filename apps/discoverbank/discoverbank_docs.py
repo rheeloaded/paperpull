@@ -27,7 +27,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -143,6 +144,10 @@ class App:
     # could not choose, so the run goes on with what it read and stops at
     # its end rather than finish (_stop_if_cut_short).
     _list_cut_short = False
+    # Set when all that kept the list from being whole is an account's list
+    # that answered empty or as long as one answer holds, which reading it
+    # again does not change.
+    _only_short_lists = False
 
     def __init__(self, args):
         self.args = args
@@ -212,9 +217,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -308,7 +311,7 @@ class App:
             prefer_real=True,
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
@@ -318,14 +321,22 @@ class App:
         page = self.page()
         ok = site.goto_documents(page)
         challenge = site.detect_security_challenge(page)
+        # The Statements page's address says nothing of the session. Its
+        # account menu and an account's statement list answering do.
+        listed = bool(ok and not challenge and site.answers_its_list(page))
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
             print("Connected, but Discover shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-        elif ok:
-            print("Success: connected and the Documents page is visible.")
+        elif listed:
+            print("Success: connected, and Discover Bank answers with your statement list.")
             print("Keep that browser window OPEN, then run the diagnostics or pilot.")
+        elif ok:
+            print("Connected, and the Statements page is open, but its account menu or")
+            print("statement list did not answer, so this cannot say whether you are")
+            print("signed in. Look at the browser window and answer anything Discover")
+            print("asks there yourself, then run Login again.")
         else:
             print("Connected, but the Documents list did not load, so this cannot say")
             print("whether you are signed in. Look at the browser window and answer")
@@ -454,8 +465,8 @@ class App:
         self.check_session(page)
 
         # Every account on the statements page's account menu, each one's
-        # list asked by the page's own call from inside the page. Nothing
-        # on the page is pressed, and no other reading stands in for it.
+        # list asked by the page's own call from inside the page. Reading
+        # them presses nothing, and no other reading stands in for them.
         raw = site.discoverbank_collect(page)
         if raw is None:
             # No account menu and no list the page asked for itself, so
@@ -470,18 +481,34 @@ class App:
         log.info("Discover Bank: %d statement(s) read from the account lists", len(raw))
         passed_over = list(getattr(raw, "passed_over", ()))
         if passed_over:
-            # An account the menu holds whose list did not answer, or a
-            # statement the list names that could not be told apart, is a
-            # part of the list missing, so the list is not noted whole, and
-            # the run goes on with what it read and stops at its end rather
-            # than finish.
+            # An account the menu holds whose list did not answer, a list
+            # that may be cut short, or a statement the list names that could
+            # not be told apart, is a part of the list missing, so the list
+            # is not noted whole, and the run goes on with what it read and
+            # stops at its end rather than finish.
             self._list_cut_short = True
+            self._only_short_lists = not set(passed_over) - {site.AT_ITS_CAP, site.EMPTY_LIST}
             log.info("Discover Bank: the list was not read through the %s",
                      " and the ".join(passed_over))
-            print("\n  Discover Bank's statement list was not read whole, since an account or")
-            print("  a statement on it could not be read. What was read is kept, and this")
-            print("  run stops at its end rather than finish. The next run reads the list again.")
-            self.write_failure("read the statement list", "some of the list could not be read")
+            print("\n  Discover Bank's statement list was not read whole.")
+            if site.AT_ITS_CAP in passed_over:
+                print("  An account's list held as many statements as one answer from Discover")
+                print("  is seen to hold, so it may have older statements this app cannot reach.")
+                print("  Look for them on Discover's Statements page.")
+            if site.EMPTY_LIST in passed_over:
+                print("  An account on the menu answered with no statements, which a new account")
+                print("  does and a list that did not load can too.")
+            if not self._only_short_lists:
+                print("  An account or a statement on it could not be read.")
+            print("  What was read is kept, and this run stops at its end rather than finish.")
+            print("  Pilot or Run All reads the list again.")
+            if not self._only_short_lists:
+                reason = "some of the list could not be read"
+            elif site.AT_ITS_CAP in passed_over:
+                reason = "a statement list may be missing some statements"
+            else:
+                reason = "an account answered with no statements"
+            self.write_failure("read the statement list", reason)
         n_new = 0
         for d in raw:
             n_new += self._record_discover_doc(d)
@@ -530,8 +557,11 @@ class App:
         panel reports as a run that stopped."""
         if self._list_cut_short:
             print("\nNot all of Discover Bank's statement list was read, so this run stops here")
-            print("rather than finish. Everything it saved is kept. Run it again later to")
-            print("read the rest.")
+            print("rather than finish. Everything it saved is kept.")
+            if self._only_short_lists:
+                print("A later run stops here too while an account's list answers this way.")
+            else:
+                print("Run it again later to read the rest.")
             raise SystemExit(0)
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
@@ -949,7 +979,6 @@ class App:
             info["title"] = page.title()
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            site.expand_all(page)
             site.scroll_full_page(page)
             info["row_counts"] = {}
             for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
@@ -1019,7 +1048,8 @@ class App:
             except Exception as e:
                 info["api_candidates"] = f"ERR {e}"
             # The account menu and each account's list, read the way
-            # discovery reads them. Nothing is pressed.
+            # discovery reads them. Nothing but the inactivity dialog's
+            # keep-alive is pressed.
             try:
                 info["statements_api"] = site.probe_statements_api(page)
             except Exception as e:
@@ -1082,9 +1112,10 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='Discover Bank',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='Discover Bank',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

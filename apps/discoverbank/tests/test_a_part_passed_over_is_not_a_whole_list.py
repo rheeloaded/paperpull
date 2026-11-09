@@ -23,6 +23,12 @@ Discover stop at their end. With no menu to read, the one list the page
 asked for itself is read and the list is never noted whole. With none,
 the run stops with its list unread.
 
+The list call takes no paging anybody has seen, and both accounts it was
+first run on answered exactly 100 statements, so a list of 100, or an
+empty one, is not noted whole either. The one control a run presses is
+the inactivity dialog's keep-alive, by its whole name, and Login says
+signed in only once a statement list answers.
+
 Driven in a real browser on a made-up copy of the page, served for
 bank.discover.com by the test. Every account, id and date is invented.
 """
@@ -63,6 +69,32 @@ for (const u of %s) fetch(u, { credentials: 'include' });
 </script></body></html>"""
 
 
+DASHBOARD = """<!doctype html><html><body><nav>
+<a href="#activity">Activity &amp; Statements</a> <a href="#statements">Statements</a>
+<button>Statements</button></nav><main>Your accounts</main>
+<script>
+history.replaceState({}, '', '/web/dashboard');
+window.pressed = 0;
+document.addEventListener('click', () => {
+  window.pressed += 1;
+  fetch('/web/pressed', { keepalive: true }).catch(() => {});
+}, true);
+</script></body></html>"""
+
+
+def statements(account_id, count):
+    """`count` statements of one account, a month apart back from the newest."""
+    out = []
+    for i in range(count):
+        year, month = 2031 - i // 12, 12 - i % 12
+        sid = "s%s%04d" % (account_id[:4], i)
+        out.append({"name": "Statement %02d/%d" % (month, year), "id": sid,
+                    "statementDate": "%d-%02d-28T00:00:00-05:00" % (year, month),
+                    "links": [{"rel": "self", "href": LIST_PATH % account_id},
+                              {"rel": "binary", "href": (LIST_PATH % account_id) + "/" + sid}]})
+    return out
+
+
 def statement(account_id, month, under=None):
     """One statement as the list names it. `under` puts its PDF under
     another account's id."""
@@ -85,6 +117,8 @@ class Site:
         self.failing = set()
         self.asked = []
         self.pdfs = {}
+        # The Statements address lands on the dashboard instead.
+        self.dashboard = False
 
     def html(self):
         button = ('<button id="menu" class="acct_dropdown_x" aria-expanded="false">%s</button>'
@@ -101,6 +135,8 @@ class Site:
         url = route.request.url
         self.asked.append(url)
         path = url[len(BASE):] if url.startswith(BASE + "/") else ""
+        if url == BASE + "/web/dashboard" or (url == PAGE_URL and self.dashboard):
+            return route.fulfill(status=200, content_type="text/html", body=DASHBOARD)
         if url == PAGE_URL:
             return route.fulfill(status=200, content_type="text/html", body=self.html())
         for acct_id, items in self.lists.items():
@@ -379,3 +415,121 @@ def test_a_menu_on_another_page_of_the_site_is_not_the_statements_page(page):
     assert site.on_documents_page(page)
     page.evaluate("history.pushState({}, '', '/web/dashboard')")
     assert not site.on_documents_page(page)
+
+
+def test_statements_are_opened_by_their_address_and_no_menu_or_link_is_pressed(page, bank):
+    """When the Statements address lands on another page of the site, the
+    run says it could not open Statements. It used to press the site's own
+    Activity or Statements link, past what the README said it pressed."""
+    bank.dashboard = True
+    page.goto(BASE + "/web/dashboard")
+    assert site.ensure_statements(page) is False
+    assert site.goto_documents(page) is False
+    # Each press tells the made-up server, since the page is opened again
+    # after a press and starts its own count over.
+    assert page.evaluate("window.pressed") == 0
+    assert not any(u.endswith("/web/pressed") for u in bank.asked)
+    assert bank.asked.count(PAGE_URL) >= 2
+
+
+# -- a list that may be cut short ----------------------------------------------------
+
+def test_a_list_as_long_as_one_answer_holds_is_never_whole(make_app, bank, tmp_path, capsys):
+    """The list call takes no paging anybody has seen and says no total, and
+    both accounts it was first run on answered exactly 100 statements, one
+    of them for 108 months. So a list of 100 may have older statements past
+    it. What it holds is kept, and the list is not called whole."""
+    bank.lists[SAVINGS["id"]] = statements(SAVINGS["id"], 100)
+    app = make_app("--discover")
+    with pytest.raises(SystemExit) as stopped:
+        app.cmd_discover()
+    assert stopped.value.code == 0
+    assert listing.last(app) == listing.STOPPED
+    assert len(app.discovery.data) == 102
+    out = said(capsys)
+    assert "may have older statements this app cannot reach" in out
+    assert "A later run stops here too" in out
+    assert failure(tmp_path)["reason"] == "a statement list may be missing some statements"
+
+
+@pytest.mark.parametrize("count", [99, 101])
+def test_a_list_shorter_or_longer_than_one_answer_holds_is_whole(make_app, bank, count):
+    bank.lists[SAVINGS["id"]] = statements(SAVINGS["id"], count)
+    app = make_app("--discover")
+    app.cmd_discover()
+    assert listing.last(app) == listing.COMPLETE
+    assert len(app.discovery.data) == count + 2
+
+
+def test_an_account_whose_list_answers_empty_is_not_a_whole_list(make_app, bank, page, tmp_path,
+                                                               capsys):
+    """An empty list for an account the menu holds is what a list that did
+    not load can look like, so it is not called whole either."""
+    bank.lists[SAVINGS["id"]] = []
+    app = make_app("--all")
+    with pytest.raises(SystemExit) as stopped:
+        app.cmd_run("all")
+    assert stopped.value.code == 0
+    assert listing.last(app) == listing.STOPPED
+    assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"]}
+    assert "answered with no statements" in said(capsys)
+    assert failure(tmp_path)["reason"] == "an account answered with no statements"
+    assert_nothing_pressed(page)
+
+
+# -- Login --------------------------------------------------------------------------
+
+def test_login_says_signed_in_once_the_menu_and_a_list_answer(make_app, capsys):
+    make_app("--login").cmd_login()
+    assert "Success" in said(capsys)
+
+
+@pytest.mark.parametrize("how", ["no list answers", "no menu"])
+def test_login_on_the_statements_address_alone_says_nothing_of_a_session(make_app, bank, capsys,
+                                                                          how):
+    """A tab at the Statements address said Success, signed in or not."""
+    if how == "no list answers":
+        bank.failing.update(a["id"] for a in ACCOUNTS)
+    else:
+        bank.menu = None
+    make_app("--login").cmd_login()
+    out = said(capsys)
+    assert "Success" not in out
+    assert "cannot say whether you are signed in" in out
+    assert not any("/statements/s" in u for u in bank.asked)
+
+
+# -- the inactivity dialog -------------------------------------------------------------
+
+KEEP_ALIVE_PAGE = """<!doctype html><html><body>
+<div role="dialog"><p>Are you still there?</p>%s<button>Log out</button></div>
+<script>
+window.pressed = [];
+document.addEventListener('click', e => window.pressed.push(e.target.textContent), true);
+</script></body></html>"""
+
+
+@pytest.mark.parametrize("label", ["I'm still here", "Stay signed in", "Continue session",
+                                   "Keep me signed in"])
+def test_the_inactivity_dialogs_keep_alive_is_the_one_button_pressed(page, label):
+    page.set_content(KEEP_ALIVE_PAGE % ("<button>%s</button>" % label))
+    site.dismiss_timeout(page)
+    assert page.evaluate("window.pressed") == [label]
+
+
+@pytest.mark.parametrize("label", ["Stay signed in and transfer funds",
+                                   "Continue session to pay bills",
+                                   "I'm still here, open an account"])
+def test_a_button_that_only_starts_like_a_keep_alive_is_never_pressed(page, label):
+    page.set_content(KEEP_ALIVE_PAGE % ("<button>%s</button>" % label))
+    site.dismiss_timeout(page)
+    assert page.evaluate("window.pressed") == []
+    assert not site.is_keep_alive(label)
+
+
+def test_a_keep_alive_name_over_other_words_is_never_pressed(page):
+    """A button is found by its accessible name, which an aria-label gives,
+    and what it shows is what a person would be pressing."""
+    page.set_content(KEEP_ALIVE_PAGE % '<button aria-label="Stay signed in">Transfer funds</button>')
+    site.dismiss_timeout(page)
+    assert page.evaluate("window.pressed") == []

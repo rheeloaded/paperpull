@@ -45,7 +45,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
 
   - **Apps that hold a control to an allowlist** (AAFMAA, ADP, Ally, Alpaca,
     American Family, Apple Card, AT&T, Bank of America, Best Buy, Bilt, Chase, Chase Business,
-    Coinbase, Costco, Discover, Dominion, eBay, E*TRADE, Fairfax Water, First
+    Coinbase, Costco, Discover, Discover Bank, Dominion, eBay, E*TRADE, Fairfax Water, First
     Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Nelnet, Newrez,
     PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD, Spectrum,
     State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
@@ -54,11 +54,16 @@ The `.gitignore` already blocks all of the following. Do not override it.
     buy/sell/transfer/pay/delete/change-setting) **plus** a document
     allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass **both**, so
     anything unrecognized is refused, deny by default. AAFMAA runs the same
-    two patterns inline. Alpaca, Best Buy, Bilt, Chase Business, First
-    Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo narrow the
-    allowlist to the whole labels they press, and all of them but
+    two patterns inline. Alpaca, Best Buy, Bilt, Chase Business, Discover
+    Bank, First Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo
+    narrow the allowlist to the whole labels they press, and all of them but
     TreasuryDirect give each control a guard of its own built the same way.
-    Best Buy presses only its year menu and a year in it. Bank of America
+    Best Buy presses only its year menu and a year in it. Discover Bank
+    presses only the keep-alive button of Discover's inactivity dialog, a
+    button whose whole name is I'm still here, Stay signed in, Continue
+    session or Keep me signed in, or logged in for signed in, and that the
+    blocklist passes. It opens its statements page by its address and asks
+    for every list and PDF from inside the page. Bank of America
     presses only the Statements heading of its statements page, a button
     whose whole name is Statements and which says it is shut, when the page
     shows no Download PDF link, and again after a later reload shuts it,
