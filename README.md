@@ -867,7 +867,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 ## Status & roadmap
 
 - ✅ All **eighty-one** apps pass their tests, the seventy-five that are
-  supported and the six still waiting for a tester, 33,387 of them
+  supported and the six still waiting for a tester, 33,910 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).

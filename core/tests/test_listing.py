@@ -547,3 +547,77 @@ def test_an_app_without_its_arguments_reads_whole(tmp_path):
     listing.started(app)
     listing.read_whole(app)
     assert listing.last(app) == listing.COMPLETE
+
+
+# -- when the whole list was last read (#148) ---------------------------------------------
+
+@pytest.fixture()
+def clock(monkeypatch):
+    """now_iso as a clock that moves a day on each time it is read."""
+    days = iter(range(1, 100))
+    monkeypatch.setattr(listing, "now_iso", lambda: "2031-03-%02dT09:00:00" % next(days))
+
+
+def _note(app) -> dict:
+    return json.loads(app.paths.last_listing.read_text(encoding="utf-8"))
+
+
+def test_a_whole_listing_is_when_the_list_was_last_read(tmp_path, clock):
+    app = _app(tmp_path, known=["one"])
+    _run(app)
+    assert listing.whole_at(_note(app)) == "2031-03-02T09:00:00"
+
+
+@pytest.mark.parametrize("scope", [None, *SCOPES], ids=["whole", *[s[0] for s in SCOPES]])
+def test_a_listing_that_stops_keeps_when_the_list_was_last_read(tmp_path, clock, scope):
+    app = _app(tmp_path, known=["one"])
+    _run(app)
+    _run(app, scope, whole=False)
+    assert listing.last(app) == listing.STOPPED
+    assert listing.whole_at(_note(app)) == "2031-03-02T09:00:00"
+
+
+@pytest.mark.parametrize("scope", SCOPES, ids=[s[0] for s in SCOPES])
+def test_a_scoped_listing_is_no_reading_of_the_whole_list(tmp_path, clock, scope):
+    """A part of the history read whole says nothing about the rest."""
+    app = _app(tmp_path, known=["one"])
+    _run(app)
+    _run(app, scope)
+    _run(app, scope, whole=False)
+    _run(app, scope)
+    assert listing.last(app) == listing.COMPLETE
+    assert listing.whole_at(_note(app)) == "2031-03-02T09:00:00"
+    _run(app)
+    assert listing.whole_at(_note(app)) == "2031-03-09T09:00:00"
+
+
+def test_a_list_never_read_whole_was_never_checked(tmp_path, clock):
+    app = _app(tmp_path, known=["one"])
+    _run(app, whole=False)
+    _run(app, ("year", 2026))
+    assert listing.whole_at(_note(app)) is None
+
+
+def test_everything_done_from_a_whole_list_leaves_when_it_was_read(tmp_path, clock, capsys):
+    """A Continue with nothing left to take reads no list, so it is no check."""
+    app = _app(tmp_path, known=["one"])
+    _run(app)
+    before = app.paths.last_listing.read_text(encoding="utf-8")
+    listing.resume(app, [], Process(app))
+    assert app.paths.last_listing.read_text(encoding="utf-8") == before
+
+
+@pytest.mark.parametrize("note, read", [
+    ({"complete": True, "at": "2031-01-05T08:00:00"}, "2031-01-05T08:00:00"),
+    ({"complete": False, "at": "2031-01-05T08:00:00"}, None),
+    ({"complete": True, "at": "2031-01-05T08:00:00", "whole_at": None}, None),
+    ({"complete": False, "at": "2031-02-05T08:00:00", "whole_at": "2031-01-05T08:00:00"},
+     "2031-01-05T08:00:00"),
+    ({"complete": True, "at": 7}, None),
+    ({}, None),
+    ([], None),
+], ids=["older whole", "older stopped", "never whole", "stopped after one", "not a time", "empty",
+        "not a note"])
+def test_a_note_is_read_for_when_the_list_was_last_read(note, read):
+    assert listing.whole_at(note) == read
+

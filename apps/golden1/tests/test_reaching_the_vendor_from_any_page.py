@@ -583,7 +583,7 @@ def _app(tmp_path, monkeypatch, capture_trace):
     app.discovery = storage.JsonStore(tmp_path / "d.json")
     app.index_csv = storage.CsvFile(tmp_path / "i.csv", storage.DOCUMENT_INDEX_COLUMNS)
     app._dl_dir = tmp_path
-    app.stats = {"manual_review": 0, "duplicate_filenames": 0}
+    app.stats = {"manual_review": 0, "failed": 0, "duplicate_filenames": 0}
     app.check_session = lambda page: None
     app.write_failure = lambda *a, **k: None
     monkeypatch.setattr(golden1_docs.site, "goto_documents", lambda page: True)

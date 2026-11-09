@@ -696,6 +696,28 @@ def _year_picker(page):
     return None, [], unread or bool(missed)
 
 
+def _the_only_year_picker(page, sel) -> bool:
+    """Whether `sel` is shown on the page and no other shown dropdown offers
+    years. _year_picker takes the first dropdown of years in the page's
+    order, shown or not, so a hidden picker of another list, or a second
+    picker, could be the one read, and a year it does not offer says
+    nothing for good about the list on screen (#152). It only reads, and
+    anything it cannot read says no."""
+    try:
+        if not sel.is_visible():
+            return False
+        shown = 0
+        for s, _identity in _safe_selects(page):
+            if not s.is_visible():
+                continue
+            opts = [o.strip() for o in s.locator("option").all_inner_texts()]
+            if any(re.fullmatch(r"20\d{2}", o) for o in opts):
+                shown += 1
+        return shown == 1
+    except Exception:
+        return False
+
+
 def _select_option(page, sel, label: str) -> bool:
     """Set a dropdown - but never one attached to a money-movement widget.
 
@@ -1216,13 +1238,32 @@ def _find_row_control(page, date: str, account: str = "", occurrence: int = 0):
 # tax forms on whatever path Ally uses for them.
 SERVED_DOC_ID_RE = re.compile(r"/acs/v\d+/[a-z-]+/(\w{6,})", re.I)
 
+# How long a year picker that does not offer a document's year is given to
+# draw the rest of its years before it is read again.
+LATE_YEARS_MS = 3000
+
+
+class OutOfReach(Exception):
+    """A document Ally lists that its own page cannot open, since its year
+    is older than the first year the page's year picker offers (#152). The
+    picker was read whole twice, so this is the page as it is, and the run
+    leaves the document rather than try it again on every run. It carries
+    the year and the picker's first year, and nothing the page said."""
+
+    def __init__(self, year: str, first: str):
+        super().__init__("%s is older than %s, the first year of the year picker" % (year, first))
+        self.year = year
+        self.first = first
+
 
 def ally_download(page, ctx, account: str, date: str, out_path,
                   occurrence: int = 0, document_id: str = "",
                   kind: str = "statement", title: str = "") -> bool:
     """Download the statement dated `date` for `account` into out_path.
 
-    Returns True only when a real PDF was written.
+    Returns True only when a real PDF was written. Raises OutOfReach, having
+    pressed nothing, for a document whose year the page's own picker does
+    not go back to.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1242,13 +1283,26 @@ def ally_download(page, ctx, account: str, date: str, out_path,
     year = date[:4]
     sel, years, unread = _year_picker(page)
     if sel is not None and year not in years:
+        # A picker read before the rest of its years arrived would make a
+        # year look out of reach for good, so it is read once more first.
+        page.wait_for_timeout(LATE_YEARS_MS)
+        sel, years, unread = _year_picker(page)
+    if sel is not None and year not in years:
         # Ally lists documents in its API that its own year picker cannot
         # reach (the tax picker starts at 2020, but the API returns a 2019
-        # form). Clicking whatever row is on screen would download some
+        # form, #152). Clicking whatever row is on screen would download some
         # other year's document, so stop here and say why.
-        log.warning("%s is not in Ally's year picker (%s..%s) - this "
-                    "document cannot be reached from the page",
-                    year, min(years), max(years))
+        if not unread and year < min(years) and _the_only_year_picker(page, sel):
+            log.warning("%s is older than Ally's year picker (%s..%s), so this "
+                        "document cannot be reached from the page",
+                        year, min(years), max(years))
+            raise OutOfReach(year, min(years))
+        # A year after the picker's last may not have reached it yet, and a
+        # picker found after a dropdown that could not be read may not be
+        # the one the list follows. Neither is out of reach for good.
+        log.warning("%s is not in Ally's year picker (%s..%s)%s, so nothing is pressed",
+                    year, min(years), max(years),
+                    ", which may not be the one the list follows" if unread else "")
         return False
     not_shown = _show_year(page, sel, year, unread)
     # A tax row is found by its form's code, and every year has its own

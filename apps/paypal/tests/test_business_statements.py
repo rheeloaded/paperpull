@@ -499,7 +499,9 @@ def test_a_row_that_changed_between_reading_and_the_press_is_not_pressed(
     said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
     assert fake.pressed == [B.ACCOUNT_ID + "4"], said
     assert B.statements(tmp_path) == {"2031-07-31 PayPal Monthly Statement.pdf": B.JULY}
-    assert result["manual_review"] == 1 and fake.flags == []
+    # Nothing was pressed, so nothing is waiting for review, and the next
+    # run reads the row again (#152).
+    assert result["failed"] == 1 and result["manual_review"] == 0 and fake.flags == []
 
 
 def test_a_row_redrawn_with_a_statement_ending_the_same_day_is_not_pressed(
@@ -520,7 +522,11 @@ def test_a_row_redrawn_with_a_statement_ending_the_same_day_is_not_pressed(
     said, result, _ = _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)
     assert fake.pressed == [], said
     assert B.statements(tmp_path) == {}
-    assert result["manual_review"] == 2 and fake.flags == []
+    # August's press saved nothing and is a failure the next run tries
+    # again (#152). The custom statement is refused before any press, since
+    # its row is no longer the one it was listed by, and a refusal is still
+    # left for a person.
+    assert result["failed"] == 1 and result["manual_review"] == 1 and fake.flags == []
 
 
 def test_no_forbidden_control_is_pressed_on_the_page(business, tmp_path, monkeypatch, capsys):
