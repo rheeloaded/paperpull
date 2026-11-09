@@ -233,3 +233,56 @@ def test_a_rewrite_holding_half_a_character_replaces_the_file(tmp_path):
     first.decode("utf-8")
     f.rewrite(f.read_all())
     assert (tmp_path / "t.csv").read_bytes() == first
+
+
+# -- a file that holds each row once (#152) ----------------------------------
+
+INDEX_COLUMNS = ["Document Date", "Document Summary", "PDF Full Path", "Processing Status", "Notes"]
+FAILED_ROW = {"Document Date": "2019-12-31", "Document Summary": "1099-INT Tax Form",
+              "Processing Status": "Failed", "Notes": "Could not capture the document PDF"}
+
+
+def test_a_row_held_already_is_not_written_again(tmp_path):
+    f = CsvFile(tmp_path / "t.csv", INDEX_COLUMNS, once=True)
+    for _run in range(3):
+        f.append_rows([FAILED_ROW])
+    f.append_rows([FAILED_ROW, dict(FAILED_ROW, Notes="=a formula, held as text"),
+                   dict(FAILED_ROW, Notes="=a formula, held as text")])
+    assert [r["Notes"] for r in f.read_all()] == [FAILED_ROW["Notes"], "=a formula, held as text"]
+    f.append_rows([dict(FAILED_ROW, Notes="=a formula, held as text")])
+    assert len(f.read_all()) == 2
+
+
+def test_alike_rows_of_a_file_not_held_once_are_each_kept(tmp_path):
+    """Two alike items of one order are two rows of its history."""
+    f = CsvFile(tmp_path / "t.csv", ORDER_HISTORY_COLUMNS)
+    item = {"Order or Receipt Number": "1", "Item Name": "Invented Widget", "Unit Price": "4.71"}
+    f.append_rows([item, item])
+    f.append_rows([item])
+    assert len(f.read_all()) == 3
+
+
+def test_a_file_saved_again_in_another_code_page_is_still_appended_to(tmp_path):
+    """Excel's plain CSV is the code page of the person's Windows, so a name
+    with an accent in it is not UTF-8. Reading it to look for the row
+    raised, and every row of a run failed to be written, the saves of that
+    run among them. It is appended to as it was before a file held its rows
+    once, and only the look for a row held already is given up."""
+    path = tmp_path / "t.csv"
+    path.write_bytes(("Document Date,Document Summary,PDF Full Path,Processing Status,Notes\r\n"
+                      "2026-01-06,Statement,C:/Jos\xe9/2026-01-06 Statement.pdf,Completed,\r\n")
+                     .encode("cp1252"))
+    f = CsvFile(path, INDEX_COLUMNS, once=True)
+    f.append_rows([FAILED_ROW])
+    f.append_rows([FAILED_ROW])
+    assert path.read_bytes().count(b"Could not capture the document PDF") == 2
+
+
+def test_a_file_with_a_field_past_the_csv_limit_is_still_appended_to(tmp_path):
+    import csv
+    path = tmp_path / "t.csv"
+    path.write_text("Document Date,Notes\n2026-01-06,\"%s\"\n" % ("x" * (csv.field_size_limit() + 10)),
+                    encoding="utf-8")
+    f = CsvFile(path, INDEX_COLUMNS, once=True)
+    f.append_rows([FAILED_ROW])
+    assert b"Could not capture the document PDF" in path.read_bytes()

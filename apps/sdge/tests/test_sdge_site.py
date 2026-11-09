@@ -2,6 +2,7 @@
 No browser, no network, invented values only."""
 import ast
 import io
+import itertools
 import json
 import logging
 import sys
@@ -9,6 +10,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
@@ -36,6 +38,40 @@ def row(inv, statement, due="Oct 14, 2026"):
 
 
 ROWS = [row(ID1, "Sep 12, 2026"), row(ID2, "Aug 13, 2026"), row(ID3, "Jul 14, 2026")]
+
+
+# These pages stand still, so the wait for rows to settle need not be long.
+# It cannot go under ready.POLL_MS.
+SHORT_WAIT = mock.patch.object(site, "ROWS_QUIET_MS", 1)
+
+
+def setUpModule():
+    SHORT_WAIT.start()
+
+
+def tearDownModule():
+    SHORT_WAIT.stop()
+
+
+# The live table's header, and a bill row led by its hidden number.
+LIVE_HEADS = laid_out("Statement Date", "Due Date", "Days in Billing Cycle", "Current Charges",
+                      "Amount Due", "Status", "Details")
+
+
+def numbered(inv, number, statement):
+    return {"id": inv, "number": number,
+            "cells": laid_out(number, statement, "Oct 14, 2031", "30", "$1.00", "$1.00", "Billed",
+                              "")}
+
+
+LIVE_ROWS = [numbered(ID1, "1", "Sep 12, 2031"), numbered(ID2, "2", "Aug 13, 2031"),
+             numbered(ID3, "3", "Jul 14, 2031")]
+LIVE_DATES = ["2031-09-12", "2031-08-13", "2031-07-14"]
+
+
+def near(said="", press=False, marks=""):
+    """One thing drawn near the table, as the page reader returns it."""
+    return {"said": said, "press": press, "marks": marks}
 # Invented account details, which must never leave through a log, the
 # console or a diagnostic.
 FAKE_ACCOUNT = "987650001234"
@@ -83,9 +119,9 @@ class Page:
 
     def __init__(self, rows=ROWS, empty="", ready=True, settled=None, password=False,
                  answers=(), accounts=1, start=f"https://{HOST}/portal/Dashboard/index",
-                 api=None, info="", heads=HEADS):
+                 api=None, info="", heads=HEADS, around=None):
         self.rows, self.empty, self.ready, self.settled = list(rows), empty, ready, settled
-        self.api, self.info, self.heads = api, info, heads
+        self.api, self.info, self.heads, self.around = api, info, heads, around
         self.password, self.accounts, self.url, self.gotos = password, accounts, start, []
         page = self
 
@@ -114,7 +150,9 @@ class Page:
     def title(self):
         return "My Energy Center"
 
-    def evaluate(self, js):
+    def evaluate(self, js, selector=None):
+        if selector == site.BILL_ROW:
+            return len(self.rows)
         if "accountList" in js:
             words = []
             for i in range(self.accounts):
@@ -122,7 +160,7 @@ class Page:
                           f"100 {FAKE_STREET} Ave San Diego CA", f"{FAKE_ACCOUNT}{i} - 100 {FAKE_STREET} Ave"]
             return {"count": self.accounts, "words": words + [FAKE_CONTRACT]}
         return {"rows": [dict(r) for r in self.rows], "heads": self.heads, "empty": self.empty,
-                "api": self.api, "info": self.info}
+                "api": self.api, "info": self.info, "around": self.around}
 
     def is_closed(self):
         return False
@@ -251,6 +289,41 @@ class Rows(unittest.TestCase):
             self.assertEqual(d.href, site.DOWNLOAD_PATH)
             self.assertEqual(d.account, "")
 
+    def test_the_live_rows_are_read_past_their_hidden_number(self):
+        got = site.bills_of(LIVE_ROWS, LIVE_HEADS)
+        self.assertEqual([d.date_text for d in got], LIVE_DATES)
+
+    def test_the_hidden_number_is_passed_over_only_in_the_live_shape(self):
+        live = numbered(ID1, "1", "Sep 12, 2031")
+        layout = site.header_layout(LIVE_HEADS)
+        self.assertEqual([c["text"] for c in site.past_row_number(live, layout)[:2]],
+                         ["Sep 12, 2031", "Oct 14, 2031"])
+        self.assertEqual([c["at"] for c in site.past_row_number(live, layout)], list(range(7)))
+        # No number, the first header not Statement Date, or a row not
+        # exactly one wider than the header.
+        plain = dict(live, number="")
+        self.assertEqual(site.past_row_number(plain, layout), live["cells"])
+        self.assertEqual(site.past_row_number(live, (1, 7)), live["cells"])
+        for width in (6, 8, 9):
+            self.assertEqual(site.past_row_number(live, (0, width)), live["cells"], width)
+
+    def test_a_numbered_row_with_a_cell_it_cannot_lay_out_stops(self):
+        odd = numbered(ID1, "1", "Sep 12, 2031")
+        del odd["cells"][3]["wide"]
+        with self.assertRaises(site.ListStopped) as stop:
+            site.bills_of([odd], LIVE_HEADS)
+        self.assertIn("does not line up", str(stop.exception))
+
+    def test_a_real_number_column_with_a_headerless_cell_stops(self):
+        # The header has its own first column, so the row's first cell is
+        # that column's, and a row one wider has a cell with no header.
+        heads = laid_out("#", "Statement Date", "Due Date", "Days in Billing Cycle",
+                         "Current Charges", "Amount Due", "Status")
+        with self.assertRaises(site.ListStopped) as stop:
+            site.bills_of(LIVE_ROWS, heads)
+        self.assertIn("does not line up", str(stop.exception))
+        self.assertEqual(stop.exception.docs, [])
+
     def test_unreadable_rows_stop_the_list_with_what_was_read(self):
         for bad, why in [(row("ISU123", "Jun 1, 2026"), "bad id"),
                          (row("", "Jun 1, 2026"), "no id"),
@@ -327,6 +400,186 @@ class ListReady(unittest.TestCase):
             with self.assertRaises(site.ListStopped):
                 site.collect_download_docs(page)
 
+    def test_the_live_table_counts_by_its_hidden_numbers(self):
+        page = Page(rows=LIVE_ROWS, heads=LIVE_HEADS)
+        self.assertEqual([d.date_text for d in site.collect_download_docs(page)], LIVE_DATES)
+
+    def test_hidden_numbers_count_the_rows_from_0_or_1_at_either_end(self):
+        def rows(*numbers):
+            return [{"number": n} for n in numbers]
+        for good in (rows("1", "2", "3"), rows("01", "02", "03"), rows("001"), rows(), None,
+                     rows("", "", ""), rows("1", "", "3"), rows("", "2"),
+                     rows("3", "2", "1"), rows("03", "02", "01"), rows("0", "1", "2"),
+                     rows("00", "01", "02"), rows("2", "1", "0"), rows("0"), rows("1", "0")):
+            self.assertTrue(site.numbers_in_place(good), good)
+        for bad in (rows("2", "3"), rows("11", "12"), rows("1", "2", "4"), rows("0", "1", "3"),
+                    rows("1", "1", "2"), rows("0", "0", "1"), rows("1", "", "2"), rows("10"),
+                    rows("12", "11"), rows("4", "2", "1"), rows("2", "1", "3"),
+                    rows("3", "2", "0"), rows("2", "3", "4")):
+            self.assertFalse(site.numbers_in_place(bad), bad)
+
+    def test_numbers_that_do_not_count_the_rows_stop_with_what_was_read(self):
+        second_page = [numbered(ID1, "11", "Sep 12, 2031"), numbered(ID2, "12", "Aug 13, 2031")]
+        with self.assertRaises(site.ListStopped) as stop:
+            site.collect_download_docs(Page(rows=second_page, heads=LIVE_HEADS))
+        self.assertIn("hidden row numbers do not count the 2 rows read", str(stop.exception))
+        self.assertEqual([d.document_id for d in stop.exception.docs], [ID1, ID2])
+
+    def test_rows_with_no_hidden_number_are_not_asked_about_it(self):
+        # The older shape, and a table carrying numbers on only some rows
+        # where the ones it carries are in their place.
+        self.assertEqual(len(site.collect_download_docs(Page())), 3)
+        some = [LIVE_ROWS[0], {"id": ID2, "cells": laid_out(
+            "Aug 13, 2031", "Oct 14, 2031", "30", "$1.00", "$1.00", "Billed", "")}, LIVE_ROWS[2]]
+        self.assertEqual([d.date_text for d in site.collect_download_docs(
+            Page(rows=some, heads=LIVE_HEADS))], LIVE_DATES)
+
+    def test_what_looks_like_a_pager_or_show_more_is_known(self):
+        steps = ["Next", "next", "Next page", "Next 10", "Next \u203a", "\u2039 Prev", "Previous",
+                 "Older", "Newer", "First", "Last", "Last page", "More", "Page 2", "Go to page 2",
+                 "Next 10 Bills", "Next Bills", "Previous 10 bills", "More statements"]
+        arrows = [">", ">>", "\u00bb", "\u203a", "<", "\u00ab", "\u2039"]
+        for said in steps + arrows:
+            self.assertTrue(site.shows_more([near(said, press=True)], 3), said)
+        for said in ("Show more", "SHOW MORE", "show   more", "Show more \u00bb", "Load more",
+                     "View more", "See more", "See all", "View all", "Show all", "Get more",
+                     "Display more", "Show 10 more", "Show older", "Load previous bills",
+                     "View older bills", "See all statements", "View additional bills",
+                     "View more entries", "Show more rows", "Show more results",
+                     "Show more records", "Show more items", "Show more invoices", "Show earlier",
+                     "View all history", "More bills", "Older bills", "Previous statements",
+                     "Earlier bills", "Showing 1 to 10 of 24 entries", "Bills 1-10 of 24",
+                     "1\u201310 of 24", "Page 1 of 3", "page 2 of 2", "View All 24 Bills",
+                     "Showing 10 of 24 bills", "10 of 24 bills", "Displaying 3 of 1,024 entries"):
+            self.assertTrue(site.shows_more([near(said)], 3), said)
+        self.assertTrue(site.shows_more([near(marks="pagination")], 3))
+        self.assertTrue(site.shows_more([near("1", press=True), near("2", press=True)], 3))
+        self.assertTrue(site.shows_more([near("Billed"), near("Show more")], 3),
+                        "wherever it comes")
+
+    def test_a_steps_words_alone_on_something_not_pressed_are_no_pager(self):
+        # A detail row can head a column Previous, and a tile can hold a number.
+        for said in ("Next", "Previous", "First", "Last", "More", "Page 2", ">", "\u00bb", "2"):
+            self.assertFalse(site.shows_more([near(said)], 3), said)
+        self.assertFalse(site.shows_more([near("12"), near("30")], 3))
+
+    def test_a_pager_is_named_by_a_word_of_its_own(self):
+        for marks in ("pagination", "pagination pagination-sm", "pager-nav", "bill-pager",
+                      "dataTables_paginate paging_simple_numbers", "billPager", "billPagination",
+                      "PAGINATION", "nav Pagination", "table-pagination-wrap", "pager2"):
+            self.assertTrue(site.pager_named(marks), marks)
+            self.assertTrue(site.shows_more([near(marks=marks)], 3), marks)
+        for marks in ("pageRow", "pageRight", "pageRoot", "page-right", "paginated-table",
+                      "page-item page-link", "pages", "homepage", "Bill pages", "", None):
+            self.assertFalse(site.pager_named(marks), marks)
+            self.assertFalse(site.shows_more([near(marks=marks)], 3), marks)
+
+    def test_a_count_that_agrees_with_the_rows_read_is_no_pager(self):
+        for said, read in (("Showing 1 to 3 of 3 entries", 3), ("Page 1 of 1", 3),
+                           ("1-3 of 3", 3), ("Showing 3 of 3 bills", 3), ("3 of 3 bills", 3),
+                           ("View all 3 bills", 3), ("Show all 24", 24), ("View All 9 Bills", 12),
+                           ("Showing 1 to 1,024 of 1,024 entries", 1024)):
+            for press in (True, False):
+                self.assertFalse(site.shows_more([near(said, press=press)], read), said)
+
+    def test_a_count_past_the_rows_read_or_a_later_page_stops(self):
+        for said, read in (("Showing 1 to 3 of 4 entries", 3),
+                           ("Showing 11 to 13 of 13 entries", 13), ("Page 1 of 2", 3),
+                           ("Page 2 of 2", 3), ("Showing 3 of 24 bills", 3),
+                           ("View all 24 bills", 10), ("10 of 24 bills", 10),
+                           ("1 to 3 of 1,024", 3),
+                           ("Show 3 more", 3), ("Show more", 3), ("View all", 3),
+                           # A later page than the line counts does not add up.
+                           ("Page 2 of 1", 3)):
+            self.assertTrue(site.shows_more([near(said)], read), said)
+
+    def test_one_page_number_says_there_are_no_others(self):
+        for around in ([near("1", press=True)], [near("1", press=True), near("1", press=True)],
+                       [near("1", press=True), near("2")],
+                       [near("2031", press=True), near("2030", press=True)]):
+            self.assertFalse(site.shows_more(around, 3), around)
+
+    def test_the_pages_own_words_are_no_pager(self):
+        # The labels this page is known by, and others like them.
+        for said in ("View Your Detailed Bill PDF", "Download Your Solar Bill",
+                     "View Additional Solar Bill Details", "Download billing history (Excel)",
+                     "View Bill", "View Bill History", "Billing History", "Details", "+",
+                     "Make a Payment", "Statement Date", "Days in Billing Cycle", "Billed", "All",
+                     "Show", "Next Bill Date", "Previous Balance", "Last Payment", "Show details",
+                     "$12.34", "Sep 12, 2031", "", None):
+            for press in (True, False):
+                self.assertFalse(site.shows_more([near(said, press=press)], 3), said)
+        for around in (None, []):
+            self.assertFalse(site.shows_more(around, 3))
+
+    def test_something_near_the_table_stops_with_what_was_read(self):
+        for around in ([near("Show more", press=True)], [near(marks="pagination")]):
+            with self.assertRaises(site.ListStopped) as stop:
+                site.collect_download_docs(Page(around=around))
+            self.assertIn("pager or a show-more control", str(stop.exception))
+            self.assertEqual([d.document_id for d in stop.exception.docs], [ID1, ID2, ID3])
+
+    def test_rows_that_keep_arriving_stop_with_what_was_read(self):
+        page = Page()
+        real, asked = page.evaluate, itertools.count()
+
+        def evaluate(js, selector=None):
+            return next(asked) if selector == site.BILL_ROW else real(js)
+        page.evaluate = evaluate
+        with mock.patch.object(site, "ROWS_BUDGET_MS", 300):
+            with self.assertRaises(site.ListStopped) as stop:
+                site.collect_download_docs(page)
+        self.assertIn("still being drawn", str(stop.exception))
+        self.assertEqual([d.document_id for d in stop.exception.docs], [ID1, ID2, ID3])
+
+    def test_a_count_that_cannot_be_asked_is_not_a_settled_one(self):
+        page = Page()
+        real = page.evaluate
+
+        def evaluate(js, selector=None):
+            if selector == site.BILL_ROW:
+                raise RuntimeError("Target page, context or browser has been closed")
+            return real(js)
+        page.evaluate = evaluate
+        with self.assertRaises(site.ListStopped) as stop:
+            site.collect_download_docs(page)
+        self.assertIn("still being drawn", str(stop.exception))
+
+    def test_the_wait_for_rows_reaches_the_journal(self):
+        class Journal:
+            said = []
+
+            def waited(self, name, result):
+                self.said.append((name, [a.outcome for a in result.attempts]))
+        site.set_journal(Journal())
+        self.addCleanup(site.set_journal, None)
+        site.collect_download_docs(Page())
+        self.assertEqual(Journal.said, [("a further bill row", ["not_satisfied"])])
+
+    def test_a_sign_out_while_the_rows_settle_is_session_expired(self):
+        page = Page()
+        real = page.evaluate
+
+        def evaluate(js, selector=None):
+            if selector == site.BILL_ROW:
+                page.url = f"https://{HOST}/portal/PreLogin/Validate"
+            return real(js, selector)
+        page.evaluate = evaluate
+        with self.assertRaises(site.SessionExpired):
+            site.collect_download_docs(page)
+
+    def test_the_rows_are_read_after_they_settle(self):
+        # The first look has one row, and the wait ends on all three.
+        page = Page(rows=ROWS[:1])
+        real = page.evaluate
+
+        def evaluate(js, selector=None):
+            if selector == site.BILL_ROW:
+                page.rows = ROWS
+            return real(js, selector)
+        page.evaluate = evaluate
+        self.assertEqual([d.document_id for d in site.collect_download_docs(page)], [ID1, ID2, ID3])
+
     def test_a_list_that_never_draws_stops(self):
         for page in (Page(ready=False), Page(rows=[], empty="Loading..."), Page(rows=[], empty="")):
             with self.assertRaises(site.ListStopped):
@@ -375,6 +628,13 @@ class Download(unittest.TestCase):
         self.assertEqual(page.context.request.asked, [(PDF_URL, 0)])
         self.assertTrue(out.read_bytes().startswith(b"%PDF-"))
 
+    def test_a_live_row_fetches_its_bill(self):
+        page = Page(rows=LIVE_ROWS, heads=LIVE_HEADS, answers=[Resp()])
+        ok, out = self.fetch(page, date="2031-09-12")
+        self.assertTrue(ok)
+        self.assertEqual(page.context.request.asked, [(PDF_URL, 0)])
+        self.assertTrue(out.read_bytes().startswith(b"%PDF-"))
+
     def test_no_single_matching_row_means_no_request(self):
         for page, kw in [(Page(answers=[Resp()]), dict(date="2026-09-11")),
                          (Page(answers=[Resp()]), dict(inv="ISU000000000999")),
@@ -391,7 +651,9 @@ class Download(unittest.TestCase):
         this bill's False (#126's review)."""
         for page in [Page(rows=ROWS + [dict(ROWS[0])], answers=[Resp()]),
                      Page(rows=[], empty="No data available in table", answers=[Resp()]),
-                     Page(ready=False, answers=[Resp()])]:
+                     Page(ready=False, answers=[Resp()]),
+                     Page(around=[near("Show more")], answers=[Resp()]),
+                     Page(rows=LIVE_ROWS[1:], heads=LIVE_HEADS, answers=[Resp()])]:
             with self.assertRaises(site.ListStopped):
                 self.fetch(page)
             self.assertEqual(page.context.request.asked, [])
@@ -507,6 +769,33 @@ class Orchestrator(unittest.TestCase):
         self.assertIn("could not be read again", said.getvalue())
         self.assertEqual(app.progress.data, {})
         self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0)
+        self.assertEqual(listing.last(app), listing.STOPPED)
+
+    def test_a_pager_that_comes_while_bills_download_stops_the_run_once(self):
+        """A pager on the list a bill reads again, after a listing read
+        whole, is the list every bill after it reads. The run stops on the
+        first bill, as one whose list did not end whole."""
+        from paperpull_core import listing
+        app = make_app(self.tmp, "--resume")
+        listing.started(app)
+        for r in site.bills_of(ROWS, HEADS):
+            app._record_rawdoc(r, site.BILLING_URL)
+        listing.read_whole(app)
+        app.check_session = lambda page: None
+        app._delay = lambda *a, **k: None
+        app.write_failure = lambda *a, **k: None
+        pages = []
+
+        def later():
+            pages.append(Page(around=[near("Next", press=True)], answers=[Resp()]))
+            return pages[-1]
+        app._on_its_site = later
+        with redirect_stdout(io.StringIO()) as said, self.assertRaises(listing.ListNotRead):
+            app.process(app._select())
+        self.assertEqual(len(pages), 1, "one list read, for the first bill only")
+        self.assertEqual(pages[0].context.request.asked, [])
+        self.assertIn("could not be read again", said.getvalue())
+        self.assertEqual(app.progress.data, {})
         self.assertEqual(listing.last(app), listing.STOPPED)
 
     def test_an_expired_session_during_discovery_stops_the_run(self):

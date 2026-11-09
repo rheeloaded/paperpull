@@ -119,6 +119,25 @@ def _last_run(install: Path):
     return stamp, (mode.group(1) if mode else "")
 
 
+def _last_listed(install: Path):
+    """When the provider's whole list was last read, from the note every
+    app keeps in last-listing.json, or None. A Resume, a Verify or a Rename
+    reads no list, so unlike _last_run none of them counts (#148). Read as
+    paperpull_core.listing.whole_at reads it, which this tool cannot import
+    in an install."""
+    note = _read_json(install / "last-listing.json")
+    if "whole_at" in note:
+        got = note["whole_at"]
+    else:
+        got = note.get("at") if note.get("complete") is True else None
+    if not isinstance(got, str) or not got:
+        return None
+    try:
+        return datetime.fromisoformat(got)
+    except ValueError:
+        return None
+
+
 def _gap_median(dates):
     uniq = sorted(set(dates))
     if len(uniq) < 3:
@@ -300,6 +319,7 @@ def scan_install(install: Path):
                     "kind": "DOCUMENT", "documents": 0, "newest": None,
                     "age_days": None, "cadence_days": None, "status": UNREADABLE,
                     "last_download": None, "last_run": None, "last_run_mode": "",
+                    "last_listed": _last_listed(install),
                     "gaps": [], "missing": 0, "odd_dates": 0}
         return None
     records = [r for r in progress.values() if isinstance(r, dict)]
@@ -368,6 +388,7 @@ def scan_install(install: Path):
         "documents": done, "newest": newest, "age_days": age,
         "cadence_days": cadence, "status": status,
         "last_download": last_download, "last_run": run_at, "last_run_mode": run_mode,
+        "last_listed": _last_listed(install),
         "gaps": gaps, "missing": sum(g["missing"] for g in gaps),
         "odd_dates": odd_dates,
     }

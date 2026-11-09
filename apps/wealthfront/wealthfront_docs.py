@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core.journal import Journal
@@ -52,6 +53,14 @@ from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("wealthfront_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
+
+# What a run notes when it finds no safe download control for a row. Up to
+# 0.61.0 it was written with No Receipt Available, which is final, so the
+# document was never asked for again (#152). A record an older version left
+# so is asked for again, by paperpull_core.not_shown.asked_again, which
+# holds these words, so a history moved to another computer carries the
+# note too (tools/migrate.py).
+NO_CONTROL = "No safe download control found for this row"
 
 
 def ask(prompt: str) -> str:
@@ -133,7 +142,7 @@ class App:
         self.progress.load()
         self.discovery.load()
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -488,6 +497,8 @@ class App:
             return False
         if rec.get("downloaded_ok"):
             return True
+        if not_shown.asked_again(rec):
+            return False
         state = rec.get("state")
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
@@ -626,11 +637,15 @@ class App:
                 site.scroll_full_page(page)
             control = site.find_row_download(page, doc.account, doc.title)
             if control is None:
-                self._record(doc, State.NO_RECEIPT_AVAILABLE,
-                             notes="No safe download control found for this row")
-                self._write_row(doc, "No download control", "Review Needed")
-                self.stats["manual_review"] += 1
-                print("  No download control found - marked for manual review.")
+                # A row not found, or not found yet, is no proof there is
+                # nothing to fetch. Recorded as No Receipt Available, which
+                # is final, it was never asked for again, and it was counted
+                # for a Manual Review folder that held nothing (#152). It is
+                # a failure the next run tries again.
+                self._record(doc, State.FAILED, notes=NO_CONTROL)
+                self._write_row(doc, "No download control", State.FAILED.value)
+                self.stats["failed"] += 1
+                print("  No download control found. Nothing was saved, and the next run tries it again.")
                 return
             try:
                 with page.expect_download(timeout=45000) as dl:

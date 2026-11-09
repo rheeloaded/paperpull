@@ -1254,14 +1254,14 @@ def _press_row(page, locator, *, css: str, what: str, guard, step: str, run: Run
     in it, once, through the core, once _guarded has passed it. True when
     pressed. False when the site has turned that control off, which the
     core says only once nothing was pressed and nothing came
-    (pressing.TurnedOff). Its statement is then left for review and the
-    next run, and the run goes on to the next statement."""
+    (pressing.TurnedOff). Its statement is then a failure the next run
+    tries again, and the run goes on to the next statement."""
     _guarded(page, locator, what=what, guard=guard, expect=expect)
     run.pressed()
     try:
         pressing.click(page, locator, css=css, what=what, words=_words(), step=step)
     except pressing.TurnedOff:
-        log.info("%s is turned off, so its statement is left for review", what)
+        log.info("%s is turned off, so its statement is left for the next run", what)
         return False
     check_signed_in(page)
     return True
