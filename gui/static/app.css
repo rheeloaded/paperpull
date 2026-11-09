@@ -487,6 +487,18 @@ table.t.mono td { font-family: var(--mono); font-size: 12.5px; }
 #view-settings #movebox > h2 + * { margin-top: var(--s3); }
 
 /* -- dialogs, as sheets ---------------------------------------------------- */
+#dlg-request .dlg-body, #dlg-request .stack { display: flex; flex-direction: column; gap: var(--s4, 16px); }
+#dlg-request [hidden] { display: none; }
+/* The actions stay in sight on a short window, and only the answers scroll. */
+#dlg-request { overflow: hidden; }
+#dlg-request form { display: flex; flex-direction: column; max-height: calc(100dvh - 48px); }
+#rq-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+#dlg-request .rq-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3, 12px); }
+#dlg-request select, #dlg-request .rq-pair > .field { min-width: 0; width: 100%; }
+@media (max-width: 520px) { #dlg-request .rq-pair { grid-template-columns: 1fr; } }
+#dlg-request textarea { padding: 10px var(--s3, 12px); line-height: 1.4; resize: vertical; min-height: 64px; }
+#dlg-request .seg { align-self: flex-start; }
+#dlg-request [aria-invalid=true] { border-color: var(--bad, var(--bad-text)); }
 dialog { border: 0; padding: 0; border-radius: 14px; width: 600px; max-width: calc(100vw - 32px);
          max-height: calc(100vh - 48px); background: var(--raised); color: var(--ink); box-shadow: var(--shadow-lg); }
 dialog::backdrop { background: var(--overlay); }

@@ -1053,6 +1053,67 @@ def test_every_row_carries_the_name_its_issues_use(root):
     assert rows and all(r.get("slug") for r in rows.values())
 
 
+def _github_form(name):
+    return (Path(app_module.__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE" / name).read_text(encoding="utf-8")
+
+
+def _rq(panel, kind, values):
+    return panel.evaluate("""async ([kind, values]) => {
+        document.addEventListener('click', e => { if (e.target.id === 'rq-go') e.preventDefault(); }, true);
+        await openRequest(kind);
+        for (const [id, v] of Object.entries(values)) $(id).value = v;
+        $('rq-go').click();
+        await new Promise(f => setTimeout(f, 30));
+        return {err: $('rq-err').hidden ? '' : $('rq-err').textContent, href: $('rq-go').href,
+                done: !$('rq-done').hidden, invalid: [...$('dlg-request').querySelectorAll('[aria-invalid=true]')].map(n => n.id)};
+    }""", [kind, values])
+
+
+def test_a_request_needs_its_answers_before_it_goes_to_github(panel):
+    """Blank forms are what the sheet is there to stop."""
+    r = _rq(panel, "feature", {})
+    assert r["err"].startswith("Add a few words") and r["invalid"] == ["rq-title"] and not r["done"]
+    r = _rq(panel, "provider", {"rq-provider": "Acme", "rq-category": "Utility", "rq-documents": "bills", "rq-url": "me@acme.com"})
+    assert "Never a username" in r["err"] and not r["done"]
+
+
+def test_a_request_starts_the_right_github_form_with_its_answers(panel):
+    r = _rq(panel, "provider", {"rq-provider": "Acme Water", "rq-category": "Utility", "rq-documents": "monthly bills"})
+    assert r["done"] and "template=provider-request.yml" in r["href"]
+    for part in ("provider=Acme+Water", "category=Utility", "documents=monthly+bills", "title=%5BProvider+request%5D+Acme+Water"):
+        assert part in r["href"], part
+    assert "url=" not in r["href"], "an answer left blank is left out"
+    r = _rq(panel, "feature", {"rq-title": "A schedule", "rq-area": "Settings", "rq-what": "Run monthly", "rq-why": "I forget",
+                               "rq-importance": "Nice to have"})
+    assert r["done"] and "template=feature-request.yml" in r["href"]
+    for part in ("area=Settings", "what=Run+monthly", "why=I+forget", "importance=Nice+to+have", "version=", "computer="):
+        assert part in r["href"], part
+
+
+def test_the_sheet_offers_exactly_what_each_github_form_accepts():
+    """GitHub fills a dropdown only from one of its own options."""
+    page = app_module.HTML
+    for field, form in (("rq-category", "provider-request.yml"), ("rq-area", "feature-request.yml"), ("rq-importance", "feature-request.yml")):
+        options = re.findall(r"<option>([^<]+)</option>", re.search(r'<select id="%s">(.*?)</select>' % field, page, re.S).group(1))
+        for option in options:
+            assert "- %s\n" % option in _github_form(form), option
+    for name, ids in (("provider-request.yml", ("provider", "category", "url", "documents")),
+                      ("feature-request.yml", ("area", "what", "why", "importance", "version", "computer"))):
+        for field in ids:
+            assert "id: %s\n" % field in _github_form(name), field
+
+
+def test_a_provider_already_read_is_said_before_it_is_requested(panel):
+    said = panel.evaluate("""() => {
+        PROVIDERS = {providers: [{provider: 'SDG&E', slug: 'sdge', installed: false}], templates: true};
+        $('dlg-request').showModal();
+        $('rq-provider').value = 'sdg e';
+        rqKnown();
+        return $('rq-known').textContent;
+    }""")
+    assert said.startswith("PaperPull already works with SDG&E")
+
+
 # -- a gap a whole run could not fill (#149) ---------------------------------------
 #
 # A gap in the middle of a history counts toward "may have something new" on

@@ -1641,6 +1641,85 @@ async function wCreate() {
     'Next, press Sign in beside ' + (n === 1 ? 'it' : 'one of them') + '. A sign-in window opens for you to sign in there.', 'ok');
 }
 
+// -- asking for a provider or a feature ----------------------------------------------
+// One sheet, whose answers start the matching form on GitHub, each answer
+// under the id that form gives its field, so a request arrives filled in
+// and sorted. A link the person follows and sends themselves: PaperPull
+// holds no GitHub sign-in and posts nothing.
+const ISSUES = 'https://github.com/rheeloaded/paperpull/issues';
+const RQ_NEED = {provider: [['rq-provider', 'the provider'], ['rq-category', 'the kind of provider'], ['rq-documents', 'the documents you want']],
+  feature: [['rq-title', 'a few words about it'], ['rq-area', 'the part of PaperPull'], ['rq-what', 'what it should do'],
+            ['rq-why', 'what it would help you with'], ['rq-importance', 'how much it matters']]};
+const rqKind = () => document.querySelector('input[name="rq-kind"]:checked').value;
+const rqVal = id => $(id).value.trim();
+function rqMachine() {
+  if (SERVER) return 'PaperPull Server';
+  const ua = navigator.userAgent;
+  return /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Linux';
+}
+function requestUrl(kind) {
+  const q = kind === 'provider'
+    ? {template: 'provider-request.yml', title: '[Provider request] ' + rqVal('rq-provider'), provider: rqVal('rq-provider'),
+       category: rqVal('rq-category'), url: rqVal('rq-url'), documents: rqVal('rq-documents')}
+    : {template: 'feature-request.yml', title: '[Feature] ' + rqVal('rq-title'), area: rqVal('rq-area'), what: rqVal('rq-what'),
+       why: rqVal('rq-why'), importance: rqVal('rq-importance'), version: document.querySelector('.ver').textContent.replace(/^v/, ''),
+       computer: rqMachine()};
+  for (const k of Object.keys(q)) if (!q[k]) delete q[k];
+  return ISSUES + '/new?' + new URLSearchParams(q);
+}
+function rqSay(text, field) {
+  $('rq-err').textContent = text;
+  $('rq-err').hidden = !text;
+  if (field) { $(field).setAttribute('aria-invalid', 'true'); $(field).focus(); }
+}
+function rqProblem(kind) {
+  for (const id of Object.values(RQ_NEED).flat().map(f => f[0])) $(id).removeAttribute('aria-invalid');
+  const gap = RQ_NEED[kind].find(f => !rqVal(f[0]));
+  if (gap) { rqSay('Add ' + gap[1] + ' first.', gap[0]); return true; }
+  // A sign-in address is one a person may paste with their name in it.
+  if (kind === 'provider' && rqVal('rq-url') && (/[@\s]/.test(rqVal('rq-url')) || !/\.[a-z]{2,}/i.test(rqVal('rq-url')))) {
+    rqSay('Enter just the web address, such as https://www.example.com. Never a username.', 'rq-url');
+    return true;
+  }
+  rqSay('');
+  return false;
+}
+// PaperPull may already read the provider being asked for.
+function rqKnown() {
+  const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const typed = norm(rqVal('rq-provider'));
+  const hit = typed && ((PROVIDERS && PROVIDERS.providers) || []).find(p => norm(p.provider) === typed || norm(p.slug) === typed);
+  $('rq-known').textContent = !hit ? '' : hit.installed ? 'PaperPull already has ' + hit.provider + ' set up here, under Accounts.'
+    : 'PaperPull already works with ' + hit.provider + '. Add it with Add a provider on Accounts.';
+  $('rq-known').hidden = !hit;
+}
+function rqShowKind(kind) {
+  document.querySelector('input[name="rq-kind"][value="' + kind + '"]').checked = true;
+  $('rq-provider-fields').hidden = kind !== 'provider';
+  $('rq-feature-fields').hidden = kind !== 'feature';
+  rqSay('');
+}
+async function openRequest(kind, wanted) {
+  for (const f of $('dlg-request').querySelectorAll('input[type=text], textarea, select')) { f.value = ''; f.removeAttribute('aria-invalid'); }
+  $('rq-body').hidden = false; $('rq-done').hidden = true; $('rq-go').hidden = false; $('rq-cancel').textContent = 'Cancel';
+  rqShowKind(kind || 'provider');
+  $('rq-provider').value = wanted || '';
+  $('dlg-request').showModal();
+  $(kind === 'feature' ? 'rq-title' : 'rq-provider').focus();
+  if (!PROVIDERS) { try { PROVIDERS = await getJSON('/api/providers'); } catch (e) { /* no check, the request still goes */ } }
+  rqKnown();
+}
+$('dlg-request').addEventListener('change', e => { if (e.target.name === 'rq-kind') rqShowKind(e.target.value); });
+$('rq-provider').addEventListener('input', rqKnown);
+$('rq-form').addEventListener('submit', e => e.preventDefault());
+// The link's own click, so the browser opens it as the person's own action.
+$('rq-go').addEventListener('click', e => {
+  const kind = rqKind();
+  if (rqProblem(kind)) { e.preventDefault(); return; }
+  $('rq-go').href = requestUrl(kind);
+  setTimeout(() => { $('rq-body').hidden = true; $('rq-done').hidden = false; $('rq-go').hidden = true; $('rq-cancel').textContent = 'Done'; }, 0);
+});
+
 // -- moving to another computer (#67) ------------------------------------------------
 // One box. On the welcome page of a new computer it brings a history file in,
 // setting up what the file names. In Settings it writes one too.
@@ -2404,6 +2483,8 @@ const DO = {
   },
   'rc-go': () => { $('dlg-record').close(); startRun(DLG_ROW, 'record'); },
   'tm-go': () => tmGo(),
+  'request': el => openRequest(el.dataset.kind, el.id === 'w-request' ? W.search.trim() : ''),
+  'rq-close': () => $('dlg-request').close(),
   'dock-close': () => closeDock(),
   'dismiss-notice': () => notice('', ''),
   'find-clear': () => clearFind(),
