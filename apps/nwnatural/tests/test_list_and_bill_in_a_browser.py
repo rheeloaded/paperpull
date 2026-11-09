@@ -339,7 +339,7 @@ def test_an_html_answer_fails_that_bill_and_the_rest_are_saved(attached, server,
 
     assert "signed out" not in out, folded(out)
     assert saved(tmp_path) == sorted(PDFS[iso] for _, iso in BILLS if iso != BILLS[1][1]), folded(out)
-    assert out.count("marked for manual review") == 1, folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == 1, folded(out)
 
 
 @pytest.mark.parametrize("instead, said", [("signed out", "answered as signed out"),
@@ -393,7 +393,7 @@ def test_bills_refused_right_after_the_list_answered_fail_alone(attached, server
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
     assert "signed out" not in out, folded(out)
-    assert out.count("marked for manual review") == len(BILLS), folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == len(BILLS), folded(out)
     assert saved(tmp_path) == []
 
 
@@ -449,13 +449,14 @@ def test_the_portal_tab_is_taken_over_a_main_site_tab_naming_the_portal(attached
 
 
 def test_a_reissued_bill_is_named_for_what_happens(attached, server, tmp_path, capsys):
-    """Not yet saved, the date goes to Manual Review and the list is read
-    once. Already saved, the saved bill is kept and the other not fetched."""
+    """Not yet saved, neither bill of the date is fetched, the date counts
+    as failed and the list is read once. Already saved, the saved bill is
+    kept and the other not fetched."""
     SITE.reissue = True
     their_tab(attached, server)
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
-    assert "left for Manual Review" in folded(out), folded(out)
-    assert out.count("marked for manual review") == 1, folded(out)
+    assert "Neither bill of that date is fetched" in folded(out), folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == 1, folded(out)
     assert lists_read() == 1, SITE.seen
 
     later = tmp_path / "later"

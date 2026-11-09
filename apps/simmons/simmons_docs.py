@@ -206,7 +206,7 @@ class App:
         # A new app: no key it wrote ever cut an account to forty characters,
         # so there is nothing to move as the stores load.
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
         # The owner's name first, before any page is read. The site adds the
         # userId, every documentId, the account and its last four and the
@@ -724,12 +724,12 @@ class App:
                 "landed_on": site.redact(page.url or ""),
                 "responses": trace[:80]}, words_for('Simmons Bank', site))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name

@@ -444,3 +444,44 @@ def test_a_gap_label_still_names_the_account_when_the_summary_does_not():
              "after": date(2025, 3, 18), "before": date(2025, 5, 17),
              "missing": 1, "every_days": 30}]
     assert status.group_gaps(gaps)[0]["labels"][0] == "Savings *1083 Savings Statement"
+
+
+@pytest.mark.parametrize("note", [
+    {"complete": True, "at": "2031-01-05T08:00:00"},
+    {"complete": False, "at": "2031-01-05T08:00:00"},
+    {"complete": True, "at": "2031-01-05T08:00:00", "whole_at": None},
+    {"complete": False, "at": "2031-02-05T08:00:00", "whole_at": "2031-01-05T08:00:00"},
+    {"complete": True, "at": "2031-02-05T08:00:00", "whole_at": "2031-02-05T08:00:00"},
+    {"complete": True, "at": 7},
+    {"complete": True, "at": "not a time"},
+    {},
+], ids=["older whole", "older stopped", "never whole", "stopped after one", "whole",
+        "not a time", "not a date", "empty"])
+def test_the_status_tool_reads_when_the_list_was_last_read_as_the_core_does(tmp_path, note):
+    """The panel says "checked" from this tool, which an install cannot
+    import the core into, so the two read the note alike (#148)."""
+    from datetime import datetime
+
+    from paperpull_core import listing
+    (tmp_path / "last-listing.json").write_text(json.dumps(note), encoding="utf-8")
+    core = listing.whole_at(note)
+    try:
+        expected = datetime.fromisoformat(core) if core else None
+    except ValueError:
+        expected = None
+    assert status._last_listed(tmp_path) == expected
+
+
+def test_a_resume_after_a_whole_list_is_no_check(tmp_path):
+    """A Resume, a Verify or a Rename writes a run summary and reads no
+    list, so it moves when the app last ran and not when it last checked."""
+    inst = _install(tmp_path, "Bank Statements", _monthly(8))
+    (inst / "last-listing.json").write_text(json.dumps(
+        {"complete": True, "at": "2031-01-05T08:00:00", "whole_at": "2031-01-05T08:00:00"}),
+        encoding="utf-8")
+    (inst / "run-summary.txt").write_text("Mode: resume\nRun end: 2031-02-20T10:00:00\n",
+                                          encoding="utf-8")
+    row = status.scan_install(inst)
+    assert str(row["last_listed"]) == "2031-01-05 08:00:00"
+    assert str(row["last_run"]) == "2031-02-20 10:00:00" and row["last_run_mode"] == "resume"
+
