@@ -1651,7 +1651,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "owner": _owner_of(meta, account),
         # The name its issues use, chase or amex, which a problem report
         # is filed under (static/app.js reportLink).
-        "slug": slug,
+        "slug": _issue_slug(slug, cards),
         "gets": cards.get(slug, {}).get("documents", ""),
         "group": cards.get(slug, {}).get("group", ""),
         "kind": (row or {}).get("kind") or kind,
@@ -1767,6 +1767,16 @@ def _port_note(shared: dict, meta: dict, account: str):
     }
 
 
+def _issue_slug(slug: str, cards: dict) -> str:
+    """The name a problem report about this provider is filed under, which
+    the page puts in a link to GitHub (static/app.js reportLink), or "".
+    Only a provider PaperPull ships, one providers.json names, has one. The
+    slug is read from the entry script's name in the person's own folder,
+    and a script named by hand could carry any words, so a name that is not
+    on that list never goes into a link."""
+    return slug if isinstance(cards, dict) and slug in cards else ""
+
+
 def account_rows() -> list:
     """Every provider and person, with where each stands. One account that
     cannot be read, a config written by hand say, gets a row that says so
@@ -1787,6 +1797,7 @@ def account_rows() -> list:
                 running = _RUNS.get((name, account))
                 row = {
                     "app": name, "account": account, "provider": provider, "owner": "",
+                    "slug": _issue_slug(slug, cards),
                     "gets": cards.get(slug, {}).get("documents", ""),
                     "group": cards.get(slug, {}).get("group", ""), "kind": kind,
                     "state": "nostatus", "settled": False, "documents": 0, "newest": None,

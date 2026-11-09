@@ -1017,7 +1017,7 @@ def test_moving_says_the_pdfs_stay_unless_the_folders_are_copied(panel):
 
 
 def test_a_report_lands_on_its_file_and_where_to_send_it(panel):
-    """About 15 steps from More to an attached file: the dialog said to sign
+    """About 15 steps from More to an attached file. The dialog said to sign
     in with no way to, the folder held several files, and the place to send
     it was under Settings, About."""
     got = panel.evaluate("""() => {
@@ -1053,9 +1053,16 @@ def test_a_report_lands_on_its_file_and_where_to_send_it(panel):
     assert got["plain"] == "https://github.com/rheeloaded/paperpull/issues", "no slug, the issue list"
 
 
-def test_every_row_carries_the_name_its_issues_use(root):
+def test_every_row_carries_the_name_its_issues_use(root, monkeypatch):
+    """Only a provider PaperPull ships, one providers.json names, since the
+    name goes into a link to GitHub and a script named by hand could carry
+    any words."""
+    shipped = dict(app_module._provider_notes(), bank={"documents": "", "group": "banks"})
+    monkeypatch.setattr(app_module, "_provider_notes", lambda: shipped)
     rows = _rows()
-    assert rows and all(r.get("slug") for r in rows.values())
+    assert rows[("Bank Statements", "primary")]["slug"] == "bank"
+    assert rows[("Bank Statements", "second")]["slug"] == "bank"
+    assert rows[("Shop Receipts", "primary")]["slug"] == "", "shop_receipts.py is no provider PaperPull ships"
 
 
 # -- a gap a whole run could not fill (#149) ---------------------------------------

@@ -851,10 +851,12 @@ async function whereSaved(app, account) {
     renderAll();
   } catch (e) { /* the run's own page still says what it saved */ }
 }
-// Where a file to attach goes: a new problem report for this provider, on
+// Where a file to attach goes, a new problem report for this provider, on
 // the form for an app that stopped working, with the provider filled in.
 // A link the person follows in their own browser, carrying the provider's
-// name and nothing from the account; PaperPull itself sends nothing.
+// name and nothing from the account. PaperPull itself sends nothing, and
+// the server gives a row a name only when it is a provider PaperPull ships
+// (gui/app.py _issue_slug).
 const ISSUES = 'https://github.com/rheeloaded/paperpull/issues';
 function reportLink(r) {
   const href = r.slug ? ISSUES + '/new?' + new URLSearchParams({template: 'app-broke.yml',
@@ -2360,6 +2362,10 @@ const DO = {
     if (!DLG_ROW) return;
     $('sp-signsay').textContent = 'Sign in to the provider first and leave its window on the page that has your ' +
       'documents, so the report reads the right page.';
+    // PaperPull Server's sign-in window is docked in this page, and nothing
+    // outside a dialog that is open can be pressed, so there the dialog
+    // offers no sign-in of its own.
+    $('sp-signrow').hidden = SERVER;
     $('dlg-support').showModal();
   },
   'record': el => { DLG_ROW = rowByKey(el.dataset.key); closeMenus(); if (DLG_ROW) $('dlg-record').showModal(); },
@@ -2399,6 +2405,7 @@ const DO = {
   // The report reads a signed-in page, so the dialog that says to sign in
   // first opens the sign-in window itself, and stays open for the report.
   'sp-signin': () => {
+    if (SERVER) return;
     if (startRun(DLG_ROW, 'login', {stay: true})) $('sp-signsay').textContent = 'The sign-in window is opening. ' +
       'Sign in there and go to the page that has your documents, then make the report.';
   },
