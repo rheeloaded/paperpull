@@ -92,17 +92,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   window, where it offered Start, which only opened the account's page, and
   that page leads with signing in until a sign-in has been asked for.
 - **A run that stops says why, and whose it is to fix.** Every stop read
-  "may have signed you out partway … Sign in again, then continue", so a
-  stop at a page that was not what the app expected, most often a
-  provider's site having changed, sent people to sign in and press
-  Continue, which stopped at the same place again. The run's result now
-  carries why it stopped, worked out in the core from what the run is
-  leaving on: the provider needed you (a sign-in or a check nobody was
-  there to answer), its page was not what PaperPull expected (for
-  PaperPull to fix, and Continue is not offered), it was too slow to
-  answer, or PaperPull hit an error it did not expect. Only a stop a
-  sign-in can fix offers one, and a stop with no reason sends you to the
-  technical details instead of guessing a sign-out.
+  "may have signed you out partway … Sign in again, then continue",
+  whatever had stopped it. The run's result now carries why it stopped,
+  worked out in the core from what the run is leaving on. The provider
+  needed you, for a sign-in or a check nobody was there to answer, and the
+  panel says to sign in, then continue. Its page was not what PaperPull
+  expected, and the panel sends you to the technical details for what to
+  do, then Continue, and says a stop at the same place again is for
+  PaperPull to fix. It did not answer in time, or PaperPull hit an error it
+  did not expect, and the panel offers Continue. Only a stop a sign-in can
+  fix offers one, and a stop with no reason sends you to the technical
+  details instead of guessing a sign-out.
 - **The panel never says something happened that did not.** Open sign-in
   window said "Sign-in window opened" in green when no browser could open
   at all, and Record said "Recording saved", ready to attach, when the

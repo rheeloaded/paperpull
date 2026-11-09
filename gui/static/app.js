@@ -932,9 +932,12 @@ function runOutcome() {
       'then run this again.', clean: false, signin: true, first: true, rerun: true};
   // Why it stopped, when the run knows (core run_reporting.stop_reason),
   // and so whose it is to fix. Each says that nothing saved is lost, and
-  // only a stop that a sign-in can fix offers one. A changed page would
-  // stop Continue at the same place, so it is not offered there. A list
-  // left unread has its own next step below, whatever stopped it.
+  // only a stop that a sign-in can fix offers one. Whose it is is said
+  // only where the reason tells. A page that was not what the app expected
+  // is a chat window over a button or a second tab as often as a changed
+  // site, and that stop's own words in the details say what to do, then
+  // Resume, so Continue is offered there too. A list left unread has its
+  // own next step below, whatever stopped it.
   const why = res && res.stopped && !res.list_not_read ? res.stop : '';
   const left = RUN.again ? ' ' + AGAIN_LEFT + '.' : '';
   if (why === 'needs_you') return {tone: 'info', title: who + ' needed you partway',
@@ -943,16 +946,19 @@ function runOutcome() {
       (downloads ? 'continue.' : recheck ? 'check again.' : 'run it again.')),
     clean: false, resume: downloads, recheck, signin: true};
   if (why === 'page') return {tone: 'bad', title: whose(who) + ' page was not what PaperPull expected',
-    say: whose(who) + ' site has most likely changed, which is for PaperPull to fix, not you. ' +
-      'Nothing already saved is lost. Running again will likely stop at the same place until it is fixed.' + left,
-    clean: false, signin: false};
-  if (why === 'slow') return {tone: 'info', title: who + ' was too slow to answer',
-    say: 'Nothing already saved is lost. This is usually ' + whose(who) + ' site being busy. ' +
+    say: 'The run stopped there rather than guess, and nothing already saved is lost. The technical details below say ' +
+      'what it found and what to do. If it stops at the same place again, ' + whose(who) + ' site may have changed, ' +
+      'which is for PaperPull to fix, so make a support report from More.' + left,
+    clean: false, resume: downloads, recheck, signin: false};
+  if (why === 'slow') return {tone: 'info', title: who + ' did not answer in time',
+    say: 'Nothing already saved is lost. PaperPull waited for ' + whose(who) + ' page and it did not come in time, ' +
+      'which can be a busy site or a page that has changed. ' +
       (left ? left.trim() : downloads ? 'Continue in a little while.' : 'Try again in a little while.'),
     clean: false, resume: downloads, recheck, signin: false};
   if (why === 'error') return {tone: 'bad', title: 'PaperPull ran into something it did not expect',
-    say: 'Nothing already saved is lost. The technical details below say what happened, and reporting it is how it gets fixed.' +
-      left, clean: false, resume: downloads, recheck, signin: false};
+    say: 'Nothing already saved is lost. The technical details below say what happened. ' +
+      'If it happens again, make a support report from More.' + left,
+    clean: false, resume: downloads, recheck, signin: false};
   if (code !== '0') return {tone: 'bad', title: 'This run ended with a problem',
     say: 'Progress is saved. The technical details below say what happened. ' + next + '.' +
       ' If it happens again, make a support report from More.', clean: false, resume: downloads, recheck};

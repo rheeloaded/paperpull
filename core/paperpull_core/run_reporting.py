@@ -117,11 +117,20 @@ def list_not_read() -> str:
 # core/tests/test_a_stop_says_why.py holds the two lists to each other.
 #   needs_you  the provider wanted the person, to sign in again, get past
 #              a check or wait for a page, and nobody was at the console
-#   page       a page was not what the app expected (pressing.Stop), most
-#              often the provider's site having changed
-#   slow       the provider's page took too long to answer
+#   page       a page was not what the app expected (pressing.Stop), which
+#              a changed site makes, and so do a chat window over a button
+#              or a second tab, whose stops say to close it and Resume
+#   slow       a wait for the provider's page ran out (a timeout), which a
+#              busy site and a page that has changed both look like
 #   error      anything else the app did not expect
 STOP_REASONS = ("needs_you", "page", "slow", "error")
+
+
+def _timed_out(exc) -> bool:
+    """Whether exc is a wait that ran out, told by its kind and never by
+    its words, which say "exceeded" for a recursion limit or a quota too.
+    Playwright's TimeoutError and Python's own are both named so."""
+    return isinstance(exc, TimeoutError) or "Timeout" in type(exc).__name__
 
 
 def stop_reason() -> str:
@@ -131,7 +140,6 @@ def stop_reason() -> str:
     SystemExit raised while handling it (pressing.stop_run), so the stop is
     found on the exception's context as well as in flight."""
     from .browser import nobody_answered
-    from .failure import error_kind
     from .pressing import Stop
     exc = sys.exc_info()[1]
     if exc is None:
@@ -143,7 +151,7 @@ def stop_reason() -> str:
         seen.add(id(link))
         link = link.__context__
     if not isinstance(exc, SystemExit):
-        return "slow" if error_kind(exc) == "timeout" else "error"
+        return "slow" if _timed_out(exc) else "error"
     if nobody_answered() and exc.code in (0, None):
         return "needs_you"
     return ""
