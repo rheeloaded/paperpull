@@ -161,8 +161,8 @@ def test_nothing_arriving_is_a_capture_failure_not_a_crash(tmp_path, monkeypatch
     app, failures, _pressed = _app(tmp_path, monkeypatch)
     app.process(_docs()[:1])
     assert [c.name for c in spy.calls] == ["deliver"]
-    assert app.stats["failed"] == 0
-    assert app.stats["manual_review"] == 1 and failures
+    assert app.stats["failed"] == 1
+    assert app.stats["manual_review"] == 0 and failures
 
 
 def test_what_the_page_saved_is_placed_through_the_same_check(tmp_path, monkeypatch):

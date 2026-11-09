@@ -473,12 +473,13 @@ def test_an_id_a_later_listing_gave_never_reaches_a_saved_record(home):
 # -- each way the app's own code ends an attempt with nothing saved ------------------
 
 def would_not_capture(home, app, doc, saved):
-    getattr(app, home.record)(doc, State.NEEDS_MANUAL_REVIEW,
+    # A capture that saved nothing is a failure, tried again (#152).
+    getattr(app, home.record)(doc, State.FAILED,
                               notes="Could not capture the document PDF")
-    app._write_row(doc, "Capture failed", "Needs Manual Review")
+    app._write_row(doc, "Capture failed", State.FAILED.value)
 
 
-would_not_capture.state = State.NEEDS_MANUAL_REVIEW
+would_not_capture.state = State.FAILED
 
 
 def _put_aside(home, app, doc, out_path: Path):

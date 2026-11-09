@@ -140,8 +140,8 @@ period labels go missing, at `PERIOD_LABEL_RE`.
 On a full run against the built-against account, 22 of the 24 listed periods
 downloaded cleanly and the **two oldest returned `text/html` instead of
 `application/pdf`**. The app refuses to write a non-PDF body, so those two were
-flagged **Needs Manual Review** rather than saved as broken files, and the log
-says exactly what came back.
+recorded as failed rather than saved as broken files, the next run tries them
+again, and the log says exactly what came back.
 
 The cause is not established. It may be that Discover lists more periods than it
 still serves PDFs for, or that something rate-limited the tail of a 24-file run.
