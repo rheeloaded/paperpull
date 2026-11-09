@@ -64,7 +64,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   list that stops while bills download was made to stop the run once
   with the list unread, a bill answered with JSON was made to fail alone,
   the list was made to be read once a run, and the README was rewritten
-  for this app.
+  for this app. Get new pressed before signing in now says Sign in first,
+  and a sign-in window that did not open or a recording with nothing in
+  it now says so, as every other app does.
 - **Cetera (AdviceWorks), the 85th app, brokerage statements and
   quarterly performance reports (#130).** It downloads every statement of
   every account the AdviceWorks client portal lists, and the quarterly
@@ -81,7 +83,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   document for good, two statements of one account and date were made to
   leave only that date, a list that stops while documents download was
   made to stop the run once with the list unread, and both lists were made
-  to be read once a run.
+  to be read once a run. Get new pressed before signing in now says Sign
+  in first, and a sign-in window that did not open or a recording with
+  nothing in it now says so, as every other app does.
 - **Make a request, from the main page.** A button on Accounts opens one
   sheet for asking for a provider or a feature, with the questions a request
   needs answered, and says so when PaperPull already reads the provider
