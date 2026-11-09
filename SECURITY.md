@@ -90,7 +90,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     the blocklist inline, since a document allowlist would refuse the paging
     they need.
   - **Apps that click nothing at all during a run** (Affirm, Amazon, Anthem,
-    Apple, Citi, E-ZPass Virginia, FedEx, Fidelity, Gap, GitHub, Home Depot,
+    Apple, Citi, DKB, E-ZPass Virginia, FedEx, Fidelity, Gap, GitHub, Home Depot,
     Invest529, IRS, Kroger, Lowe's, MILITARY STAR, myPay, NetBenefits, NW
     Natural, Optum Bank, Paylocity, Portland General Electric, SDG&E, Stripe,
     TSP, Tualatin Water, Uber, UKG and UPS) open the provider's
@@ -99,7 +99,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     with its cookies. On a site that can also change direct deposit and tax
     withholding, not activating a control is the strongest guarantee
     available, and UKG additionally refuses any URL whose path says `EDIT`
-    rather than `VIEW`. The Diagnose command of Affirm, Fidelity, Invest529,
+    rather than `VIEW`. The Diagnose command of Affirm, DKB, Fidelity, Invest529,
     NetBenefits and TSP, run by hand to help repair a provider, may follow up to six
     links whose whole text is a section name it knows, such as Statements or
     Documents, each through `is_safe_control()`.
