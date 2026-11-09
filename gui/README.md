@@ -93,12 +93,13 @@ step.
 | Status | Means | The button |
 |--------|-------|------------|
 | Stopped partway | The last run that downloads ended early, a page closed, a sign-out, an error | Continue, or Get new when the last run was a Continue that stopped because no run had read the provider's whole list, which only a run that lists can carry on from |
+| Sign in first | The last run that downloads found no signed-in window to work in, so nothing was downloaded | Sign in, which opens the sign-in window |
 | Needs a look | The last run set something aside, a document in Manual Review, a wrong document refused, a failure | See what to check |
 | Overdue | The newest document is far past how often this provider sends one | Get new |
 | New one likely | The newest document is past its usual date | Get new |
 | Possible gap | Documents look missing in the middle of the history | Look for them, a run over those dates |
 | Up to date, Checked | Nothing is past its usual date, or a receipt archive that was checked | Get new |
-| Not started | Set up and never run | Start |
+| Not started | Set up and never run | Sign in, which opens the sign-in window |
 
 How current an archive is comes from `tools/status.py`, run on each
 account's own folder, measured against how often that provider sends a

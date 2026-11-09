@@ -90,11 +90,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   that run through `run_reporting.not_signed_in`, which says it in the
   panel's words under the panel and in login.bat's in a terminal, and exits
   `NOT_SIGNED_IN` (7). The panel titles it "Sign in first" and offers the
-  sign-in, then the same run over the same dates, and the account is not
-  listed as stopped. "Sign-in window opened" now offers Get new documents on
-  the same page. A row not started yet offers Sign in, which opens the
-  window, where it offered Start, which only opened the account's page, and
-  that page leads with signing in until a sign-in has been asked for.
+  sign-in, then the same run over the same dates, which the sign-in's own
+  page offers again once its window has opened, and the account is not
+  listed as stopped. A support report, a recording or a restore that found
+  nobody signed in offers its own dialog again, never Get new. Any other
+  "Sign-in window opened" now offers Get new documents on the same page. A
+  row not started yet offers Sign in, which opens the window, where it
+  offered Start, which only opened the account's page, and that page leads
+  with signing in while the account has not started or its last run found
+  nobody signed in.
 - **A run that stops says why, and whose it is to fix.** Every stop read
   "may have signed you out partway … Sign in again, then continue", so a
   stop at a page that was not what the app expected, most often a

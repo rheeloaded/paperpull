@@ -1034,6 +1034,49 @@ def test_a_sign_in_window_that_opened_goes_straight_on_to_get_new(panel):
     assert o["title"] == "Sign-in window opened" and o["rerun"] and o["signin"] is False
 
 
+@pytest.mark.parametrize("action, again, opens", [("diagnose", False, 'data-do="support"'),
+                                                  ("record", False, 'data-do="record"'),
+                                                  ("all", True, 'data-do="restore"')])
+def test_a_run_started_from_its_own_dialog_offers_that_dialog_again(panel, action, again, opens):
+    """A support report, a recording or a restore that found nobody signed
+    in offered Get new documents beside "run this again", a run nobody
+    asked for, and a restore's dates as a Get new over them."""
+    step = panel.evaluate("""([action, again]) => rerunStep({action, again, scope: {year: '2024', start: '', end: ''}},
+                                                            'k', '2', true)""", [action, again])
+    assert opens in step and "data-action" not in step and "Get new" not in step
+    # A run with no step of its own gets none rather than another run.
+    assert panel.evaluate("() => rerunStep({action: 'verify', scope: {}}, 'k', '2', true)") == ""
+
+
+def test_signing_in_from_sign_in_first_keeps_the_run_to_do_next(panel):
+    """Open sign-in window on a Sign in first page replaced that page, and
+    with it the same run over the same dates, by Get new over every date."""
+    got = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'signin',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'pilot', scope: {year: '2024', start: '', end: ''}, again: false, lines: [],
+                            result: null, saved: [], code: NOT_SIGNED_IN, refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date(), savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const btn = document.querySelector('#view-run .nextsteps button[data-action="login"]');
+        let asked = null;
+        const was = startRun;
+        startRun = (row, action, opts) => { asked = {action, opts}; return true; };
+        try { DO.run(btn); } finally { startRun = was; }
+        return [btn.dataset.then || '', asked];
+    }""")
+    assert got[0] == "1"
+    assert got[1]["action"] == "login"
+    assert got[1]["opts"]["then"] == {"action": "pilot", "scope": {"year": "2024", "start": "", "end": ""},
+                                      "again": False}
+    step = panel.evaluate("""() => rerunStep({action: 'login', scope: {}, then: {action: 'pilot',
+                                              scope: {year: '2024', start: '', end: ''}, again: false}}, 'k', '1')""")
+    assert 'data-action="pilot"' in step and 'data-year="2024"' in step and "btn btn-p" in step
+
+
 def test_a_run_with_nobody_signed_in_is_not_a_stop_to_continue():
     entry = {"action": "all", "exit_code": app_module.NOT_SIGNED_IN, "result": None}
     assert app_module._last_outcome(entry) == "signin"
