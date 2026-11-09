@@ -7,6 +7,46 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+
+- **Ziply Fiber, the 82nd app, monthly internet bills (#129).** It
+  downloads every bill My Account's Billing page lists from
+  ziplyfiber.com. Nothing is clicked. The app asks the page's own bill
+  list query from inside the signed-in page with the page's own headers,
+  which stay in memory for the run and are never written down, and
+  fetches each bill's PDF the same way. A list with no bills, an answer
+  the account API marks as failed, a list as long as was asked for, or a
+  page that asks about more than one account stops the list rather than
+  be read as whole. A bill is known by the account's last four digits and
+  its invoice id, its file name carries the account, and a bill listed
+  under another account than the one the page shows stops the run once
+  and names the account to choose. Contributed by crazyhorse90210 and run
+  on the contributor's own account. Before merging, an empty or failed
+  list was made to stop, a second account was made to stop the list, a
+  list that stops while bills download was made to stop the run once
+  with the list unread, a bill answered with JSON was made to fail alone,
+  the list was made to be read once a run, and the README was rewritten
+  for this app.
+- **Cetera (AdviceWorks), the 83rd app, brokerage statements and
+  quarterly performance reports (#130).** It downloads every statement of
+  every account the AdviceWorks client portal lists, and the quarterly
+  performance reports beside them. Nothing is clicked. The app asks the
+  page's own two lists from inside the signed-in page with the page's own
+  headers, which stay in memory for the run and are never written down,
+  and fetches each PDF the way the page's own download does. A list
+  shorter than its own count, a statement of an account the page did not
+  ask about, or a history with no statements stops the list rather than be
+  read as whole. A statement's file name carries its account as the portal
+  masks it. Contributed by crazyhorse90210 and run on the contributor's
+  own account. Before merging, one document answered with something other
+  than a PDF was made to fail alone, where it had stopped every run at that
+  document for good, two statements of one account and date were made to
+  leave only that date, a list that stops while documents download was
+  made to stop the run once with the list unread, and both lists were made
+  to be read once a run.
+
 ## [0.61.1] - 2026-11-08
 
 SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo
