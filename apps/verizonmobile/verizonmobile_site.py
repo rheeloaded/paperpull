@@ -3,35 +3,44 @@ WIRELESS side of My Verizon. The Fios side has its own app, apps/verizon.
 
 When Verizon changes its site, repair this file only.
 
-STATUS: CONFIRMED 2026-10-29 on a real account (24 bills, issue #31), with
-nothing pressed by the app. A signed-in survey showed:
+STATUS. CONFIRMED on a real account on 2026-10-29 (24 bills, issue #31),
+with nothing pressed by the app. A signed-in survey showed what follows.
 
   * Bill & payment history, /digital/nsa/secure/ui/bill/history/, asks
     GET /digital/nsa/secure/gw/bill/billpaymenthistory/bill_history with
     headers of its own (channelId, session_id and others). The answer's
     body.billingHistory.billCycle lists every cycle My Verizon keeps (24),
     each with billEndDate (MM/DD/YYYY), though the page draws nine until
-    Show more. Each cycle offers "Review bill" and "Review bill PDF".
+    Show more. Each cycle offers "Review bill" and "Review bill PDF". The
+    answer's body.billingHistory.address names the account, its
+    accountNumber among the rest.
   * "Review bill PDF" opens GET
     /digital/nsa/secure/gw/bill/billpaymenthistory/bill_pdfdoc?
     startMonthDate=<billEndDate>&channelId=<the page's channelId header>
-    in a new tab: application/pdf, a body starting %PDF, the session's
-    cookies and nothing else.
+    in a new tab, application/pdf, a body starting %PDF, with the
+    session's cookies and nothing else. That address names no account, so
+    it gives the bill of whichever account the session shows.
   * So a run opens the history page by its address, takes the page's own
     bill_history answer and channelId, and asks each cycle's bill_pdfdoc
-    from inside the page. Nothing is clicked; Diagnose follows nothing.
+    from inside the page. Nothing is clicked, and Diagnose follows nothing.
+  * A bill is known by its account and its end date,
+    bill-4321-00001-2026-10-11, the last four digits of the account number
+    with the suffix after its hyphen, then the day. The history is read
+    again for each bill, and a bill is asked for only when the account
+    the history shows is the one it was listed under.
   * --login opens a real Edge or Chrome, since verizon.com runs bot
     protection that walls the Playwright build of Chromium.
 
-SAFETY (this is a phone account with a card on file):
+SAFETY (this is a phone account with a card on file).
   This module is strictly READ-ONLY. It opens the bill history, reads the
   list of past bills, and saves the PDFs Verizon already generated. It
-  must NEVER activate any control that pays a bill, enrolls in autopay or
-  paperless, changes a plan, adds a line, upgrades or trades in a device,
-  suspends or restores service, moves a number, or edits any setting.
-  FORBIDDEN_CONTROL_RE is the guard. A control must ALSO look like a
-  document action (SAFE_DOC_CONTROL_RE) before it may be clicked. There is
-  no code here that submits a form or confirms a dialog.
+  activates no control at all, so it never pays a bill, enrolls in autopay
+  or paperless, changes a plan, adds a line, upgrades or trades in a
+  device, suspends or restores service, moves a number, or edits any
+  setting. FORBIDDEN_CONTROL_RE and SAFE_DOC_CONTROL_RE stay for Diagnose,
+  which says what the guard would make of each control it sees and
+  presses none. There is no code here that submits a form or confirms a
+  dialog.
 """
 from __future__ import annotations
 
@@ -46,7 +55,6 @@ from typing import List, Optional, Tuple
 
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
-from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
 # Everything on its way into a diagnostic file goes through here. It
 # lives in core because seventeen apps each had their own copy and
@@ -56,27 +64,8 @@ from paperpull_core.redact import private_words as _private_words
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import last_day as _last_day
-from paperpull_core.dates import human_date as _human_date
-# re-exported: this app's docs module calls it as site.set_download_dir
-from paperpull_core.capture import set_download_dir  # noqa: F401
-from paperpull_core.capture import snapshot as _snapshot
-from paperpull_core.capture import take_download as _take_download
-from paperpull_core.capture import is_document as _is_document
-from paperpull_core.capture import clear_copies as _clear_copies
-from paperpull_core.capture import ask_again as _ask_again
-from paperpull_core.capture import RequestsSince as _RequestsSince
-from paperpull_core.capture import take_new_pdf as _take_new_pdf
-from paperpull_core.capture import fetch_pdf as _core_fetch_pdf
-from paperpull_core.capture import take_new_tab as _core_take_new_tab
-from paperpull_core.capture import take_same_tab as _core_take_same_tab
-from paperpull_core.controls import control_texts as _control_texts
-from paperpull_core.controls import place_of as _place_of
-from paperpull_core.controls import second_step as _core_second_step
-from paperpull_core.controls import controls_named as _controls_named
-from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
-from paperpull_core import pressing
 from paperpull_core.words import words_for as _words_for
 from paperpull_core.characters import whole_json
 
@@ -90,23 +79,20 @@ def _words():
 
 
 BASE = "https://www.verizon.com"
-# GUESS. My Verizon's wireless pages live under /digital/nsa/secure/ui/.
-# The bill page is where the current and past bills are, with a Download
-# PDF control per bill. The Download Your Bill page is the one the Fios app
-# drives and may serve wireless accounts too, so it is the fallback.
-BILLING_CANDIDATES = [
-    f"{BASE}/digital/nsa/secure/ui/bill/",
-    f"{BASE}/digital/nsa/secure/ui/bill/history/",
-    f"{BASE}/downloadbill/#/download",
-]
-BILLING_URL = BILLING_CANDIDATES[0]
+# The host the history answer and every bill's PDF come from.
+HOST = "www.verizon.com"
+HISTORY_PATH = "/digital/nsa/secure/ui/bill/history/"
+HISTORY_URL = BASE + HISTORY_PATH
+HISTORY_API_PATH = "/digital/nsa/secure/gw/bill/billpaymenthistory/bill_history"
+PDF_PATH = "/digital/nsa/secure/gw/bill/billpaymenthistory/bill_pdfdoc"
+BILLING_URL = HISTORY_URL
 URLS = {
     "home": f"{BASE}/digital/nsa/secure/ui/",
-    # Signing in to the billing page sends an unauthenticated user through
-    # Verizon Mobile's sign-in and back.
-    "login": BILLING_URL,
-    "documents": BILLING_URL,
-    "statements": BILLING_URL,
+    # Bill & payment history sends a signed-out person through Verizon's
+    # sign-in and back.
+    "login": HISTORY_URL,
+    "documents": HISTORY_URL,
+    "statements": HISTORY_URL,
 }
 
 # Sign-in is on secure.verizon.com, a subdomain, so it is inside the
@@ -116,7 +102,9 @@ LOGIN_URL_MARKERS = ["/login", "/signin", "/sign-in", "/auth", "/mfa",
 
 # ---------------------------------------------------------------------------
 # HARD SAFETY GUARD. Tuned for a wireless carrier. Never pay, never change
-# service, never touch a device or a number, never edit the account.
+# service, never touch a device or a number, never edit the account. Nothing
+# in a run presses a control, so these say only, in Diagnose, what the guard
+# would make of each control the page shows.
 # ---------------------------------------------------------------------------
 FORBIDDEN_CONTROL_RE = re.compile(
     r"(pay\b|payment|pay\s+bill|autopay|auto\s*pay|schedule\s+payment|"
@@ -136,15 +124,9 @@ SAFE_DOC_CONTROL_RE = re.compile(
     r"(download|view|open|print|\bpdf\b|statement|document|\bbill\b|bills\b|"
     r"invoice|history|see\s+(more|all|older)|show\s+(more|all|older)|load\s+more)", re.I)
 
-# A control that fetches one bill. GUESS at the wording, wide on purpose.
-# "Download bill (PDF)", "View bill", "Print bill", "See bill", "Bill PDF".
-BILL_CONTROL_RE = re.compile(
-    r"((download|view|print|see|open|get)\s+(my\s+|the\s+|this\s+|your\s+|full\s+|"
-    r"detailed\s+|past\s+)?(bill|statement|invoice)|"
-    r"(bill|statement|invoice)\s*\(?\s*pdf\s*\)?|\bpdf\b)", re.I)
-
-# A link that points straight at a bill PDF, from a row's href.
-PDF_HREF_RE = re.compile(r"\.pdf(\?|$)|/pdf\b|format=pdf|bill.*download|download.*bill", re.I)
+# The page's own controls for one cycle's bill, as the survey saw them.
+# Diagnose marks them, and nothing presses them.
+BILL_CONTROL_RE = re.compile(r"^\s*review\s+bill(\s+pdf)?\s*$", re.I)
 
 SECURITY_CHALLENGE_MARKERS = [
     "enter the code", "verification code", "6-digit", "two-factor",
@@ -254,7 +236,7 @@ def _safe_query(url: str) -> str:
     a digit, a token, an id, anything long, is "...". This is what a
     repair needs to make the same call with a wider filter, and nothing
     else."""
-    from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
+    from urllib.parse import parse_qsl
     try:
         pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
     except ValueError:
@@ -315,22 +297,15 @@ def is_safe_control(name: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Downloads from a real Edge or Chrome attached over CDP. The browser saves
-# the file itself, into its own Downloads folder, and Playwright's download
-# event never fires. So the browser is pointed at a folder of ours and that
-# folder is watched after every click. The Verizon app found this first.
-# AT&T's fourth round found it again, with a trace that showed a clean
-# click and nothing arriving.
+# The bill history and each bill's PDF, asked the way the page asks them.
 # ---------------------------------------------------------------------------
-
-
-HISTORY_PATH = "/digital/nsa/secure/ui/bill/history/"
-HISTORY_URL = BASE + HISTORY_PATH
-HISTORY_API_PATH = "/digital/nsa/secure/gw/bill/billpaymenthistory/bill_history"
-PDF_PATH = "/digital/nsa/secure/gw/bill/billpaymenthistory/bill_pdfdoc"
-BILL_ID_RE = re.compile(r"bill-[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _END_DATE_RE = re.compile(r"([0-9]{2})/([0-9]{2})/([0-9]{4})")
 _CHANNEL_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
+# A wireless account number as the answer writes it, the account's digits
+# and the suffix after its hyphen, "987654321-00001".
+ACCOUNT_RE = re.compile(r"([0-9]{6,15})(?:-([0-9]{1,6}))?")
+# A bill's id, its account's last four digits with the suffix, and its day.
+BILL_ID_RE = re.compile(r"bill-([0-9]{4}(?:-[0-9]{1,6})?)-([0-9]{4}-[0-9]{2}-[0-9]{2})")
 MAX_LIST_BYTES = 5 * 1024 * 1024
 MAX_PDF_BYTES = 25 * 1024 * 1024
 
@@ -363,6 +338,18 @@ class SessionExpired(Exception):
     """Verizon answered as a signed-out session."""
 
 
+class OtherAccountShown(Exception):
+    """The bill history shows another account than the one a bill was
+    listed under. A bill's PDF address names no account, so it would be
+    that other account's bill. Every bill of the one wanted would meet the
+    same, so the run stops once, naming both accounts by their ends."""
+
+    def __init__(self, wanted: str, shown: str):
+        super().__init__(f"the bill history shows the account ending {shown}, "
+                         f"and the bill is of the one ending {wanted}")
+        self.wanted, self.shown = wanted, shown
+
+
 @dataclass
 class _History:
     answer: dict
@@ -374,7 +361,7 @@ def _is_history_answer(url: str) -> bool:
         parts = urlsplit(url)
     except ValueError:
         return False
-    return parts.netloc == "www.verizon.com" and parts.path == HISTORY_API_PATH
+    return parts.netloc == HOST and parts.path == HISTORY_API_PATH
 
 
 def _open(page, timeout_ms: int = 45000) -> _History:
@@ -428,16 +415,44 @@ def _open(page, timeout_ms: int = 45000) -> _History:
     return _History(answer=answer, channel=channel)
 
 
+def _address(answer) -> dict:
+    if not isinstance(answer, dict):
+        return {}
+    found = ((answer.get("body") or {}).get("billingHistory") or {}).get("address")
+    return found if isinstance(found, dict) else {}
+
+
+# What names the account holder in the answer, the account number and the
+# name on the account. The street, the city and the ZIP code are left out,
+# since a part of them such as "Main" turned "Maintenance" into
+# "[name]tenance" in what is said, and ZIP+4 digits masked other numbers.
+_PRIVATE_FIELDS = ("accountNumber", "accountName")
+
+
 def _keep_private(answer) -> None:
-    """Register the account number, name and address in the answer as
-    private words, part by part."""
-    addr = (((answer or {}).get("body") or {}).get("billingHistory") or {}).get("address") or {}
-    found = [str(v) for k, v in addr.items() if isinstance(v, str) and k != "state"]
-    # Four characters or more: a house number like "100" would turn every
-    # "0100" in a diagnostic into "[name]".
-    parts = {part for w in found for part in re.split(r"[\s,.#/-]+", w) if len(part) >= 4}
+    """Register the account number and the name on the account as private
+    words, part by part, so nothing said or written by the run carries
+    them. A part of four characters or more, or one with a digit, since
+    "Li" or "Jo" would turn every word holding them into "[name]"."""
+    addr = _address(answer)
+    found = [addr[k] for k in _PRIVATE_FIELDS if isinstance(addr.get(k), str)]
+    parts = {part for w in found for part in re.split(r"[\s,.#/-]+", w)
+             if len(part) >= 4 or re.search(r"[0-9]", part)}
     if parts - set(_private_words()):
         set_private_words(_private_words() + sorted(parts - set(_private_words())))
+
+
+def account_of(answer) -> str:
+    """What a bill's id names its account by, the last four digits of the
+    account number the history answer is for, with the suffix after its
+    hyphen when it has one, "4321-00001". A history that names no account
+    number of that shape stops the list, since its bills could not be told
+    from another account's."""
+    number = _address(answer).get("accountNumber")
+    m = ACCOUNT_RE.fullmatch(number.strip()) if isinstance(number, str) else None
+    if not m:
+        raise ListStopped("the bill history names no account number")
+    return m.group(1)[-4:] + (f"-{m.group(2)}" if m.group(2) else "")
 
 
 def end_day(text) -> Optional[str]:
@@ -452,10 +467,13 @@ def end_day(text) -> Optional[str]:
 
 
 def bills_of(answer) -> List[RawDoc]:
-    """RawDocs from the bill history answer, one per billing cycle, dated by
-    its bill end date. An answer that is not a bill history, a cycle whose
-    end date is not a calendar date, or two cycles of one end date stops
-    the list, carrying what was read before it."""
+    """RawDocs from the bill history answer, one per billing cycle, known by
+    the account and the bill's end date. An answer that is not a bill
+    history, names no account number or lists no cycle, a cycle whose end
+    date is not a calendar date, or two cycles of one end date stops the
+    list, carrying what was read before it. An empty history is not taken
+    for one with no bills, since nothing tells it from an answer cut
+    short."""
     if not isinstance(answer, dict):
         raise ListStopped("the bill history answer is not an object")
     if (answer.get("responseInfo") or {}).get("responseCode") not in ("00", "0", None):
@@ -463,6 +481,9 @@ def bills_of(answer) -> List[RawDoc]:
     cycles = (((answer.get("body") or {}).get("billingHistory") or {}).get("billCycle"))
     if not isinstance(cycles, list):
         raise ListStopped("the bill history answer holds no billing cycles")
+    account = account_of(answer)
+    if not cycles:
+        raise ListStopped("the bill history lists no bills")
     docs: List[RawDoc] = []
     dates = set()
     for c in cycles:
@@ -476,7 +497,7 @@ def bills_of(answer) -> List[RawDoc]:
         title = f"Verizon Mobile Bill {iso}"
         docs.append(RawDoc(title=title, date_text=iso, href=PDF_PATH, text=title,
                            row_index=len(docs), kind="statement",
-                           document_id=f"bill-{iso}", end_date=str(end)))
+                           document_id=f"bill-{account}-{iso}", end_date=str(end)))
     return docs
 
 
@@ -499,7 +520,7 @@ def is_pdf_url(url: str) -> bool:
     except ValueError:
         return False
     q = parse_qs(parts.query)
-    return (parts.netloc == "www.verizon.com" and parts.path == PDF_PATH and not parts.fragment
+    return (parts.netloc == HOST and parts.path == PDF_PATH and not parts.fragment
             and set(q) == {"startMonthDate", "channelId"}
             and bool(_END_DATE_RE.fullmatch(q["startMonthDate"][0]))
             and bool(_CHANNEL_RE.fullmatch(q["channelId"][0])))
@@ -516,6 +537,17 @@ def goto_documents(page) -> bool:
         return False
 
 
+def bill_list_opens(page) -> bool:
+    """Whether the bill history opened and could be read whole, which only
+    a signed-in page allows."""
+    try:
+        collect_download_docs(page)
+        return True
+    except (SessionExpired, ListStopped) as e:
+        log.info("the bill history could not be read: %s", e)
+        return False
+
+
 def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
     try:
         for _ in range(rounds):
@@ -526,21 +558,17 @@ def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
 
 
 def expand_all(page) -> None:
-    """Nothing to press: the API's answer holds every cycle, even those the
+    """Nothing to press. The API's answer holds every cycle, even those the
     page shows only after Show more."""
     return None
 
 
 def collect_download_docs(page) -> List[RawDoc]:
-    """Every bill in the bill history. Nothing is pressed. A list that
-    cannot be read whole, or a signed-out session, gives no list at all,
-    said in the log, since this app's engine records whatever it is given
-    and a part of the history must never pass for all of it."""
-    try:
-        return bills_of(_open(page).answer)
-    except (SessionExpired, ListStopped) as e:
-        log.warning("the bill history could not be read whole: %s", e)
-        return []
+    """Every bill in the bill history, from the page's own answer. Nothing
+    is pressed. A list that cannot be read whole raises ListStopped
+    holding what was read, and a signed-out session raises SessionExpired,
+    so the engine never takes a part of the history for all of it."""
+    return bills_of(_open(page).answer)
 
 
 _PDF_JS = r"""async ([url, limit]) => {
@@ -562,12 +590,17 @@ _PDF_JS = r"""async ([url, limit]) => {
 
 def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
     """GET a bill's PDF address from inside the signed-in page, the way its
-    Review bill PDF opens it, and keep the body only when it is a PDF."""
+    Review bill PDF opens it, and keep the body only when it is a PDF. A
+    401, a 403, a redirect, or a page or JSON where the PDF should be
+    raises SessionExpired, for download_bill to tell a sign-out from this
+    bill's refusal. Any other answer that is not a PDF is False."""
     if not is_pdf_url(url):
         return False
     try:
         got = intake.evaluate(page, _PDF_JS, [url, MAX_PDF_BYTES], limit=MAX_PDF_BYTES) or {}
     except intake.TooLarge:
+        if trace is not None:
+            trace.append({"note": "larger than any bill"})
         return False
     except Exception as e:
         log.info("fetching the bill failed (%s)", type(e).__name__)
@@ -576,9 +609,13 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
         return False
     ctype = str(got.get("type") or "").split(";", 1)[0].strip().lower()
     if trace is not None:
-        trace.append({"note": "fetched", "host": "www.verizon.com", "status": got.get("status"), "type": ctype[:30]})
+        trace.append({"note": "fetched", "host": HOST, "status": got.get("status"), "type": ctype[:30]})
     if got.get("redirected") or got.get("status") in (401, 403):
         raise SessionExpired("Verizon refused the bill")
+    if got.get("too_big"):
+        if trace is not None:
+            trace.append({"note": "larger than any bill"})
+        return False
     if got.get("status") != 200 or not got.get("b64"):
         return False
     try:
@@ -587,7 +624,7 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
         return False
     if data[:5] != b"%PDF-":
         if data.lstrip()[:1] in (b"<", b"{", b"["):
-            raise SessionExpired("Verizon answered a bill with a sign-in page")
+            raise SessionExpired("Verizon answered a bill with a page")
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
@@ -595,27 +632,51 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
-                  trace: Optional[list] = None) -> bool:
-    """Save the bill whose cycle ended on `iso_date`. The bill history is
-    taken again from the page, and the bill is fetched only when exactly one
-    cycle there ends that day. `dl_dir` is unused: nothing goes through the
-    browser's downloads. Nothing is pressed. SessionExpired propagates."""
+                  trace: Optional[list] = None, document_id: str = "") -> bool:
+    """Save the bill discovery recorded as `document_id`, its account and
+    its end date. The bill history is read again from the page, and the
+    bill is fetched only when the history shows the account it was listed
+    under and exactly one cycle there carries its id. A bill's PDF address
+    names no account, so the history is read for each bill, right before
+    its PDF is asked for, rather than once a run. `dl_dir` is unused,
+    since nothing goes through the browser's downloads. Nothing is pressed.
+
+    A history that shows another account raises OtherAccountShown. A
+    history that cannot be read raises ListStopped or SessionExpired, since
+    every bill after this one would read the same history. A PDF that is
+    refused is asked about once more by reading the history again, so a
+    sign-out stops the run, and a refusal of this one bill with the
+    history still reading is that bill's alone."""
     out_path = Path(out_path)
-    try:
-        history = _open(page)
-        found = [d for d in bills_of(history.answer) if d.date_text == (iso_date or "")]
-    except (SessionExpired, ListStopped) as stop:
-        log.info("the bill list stopped while looking for the bill dated %s: %s", iso_date, stop)
+    m = BILL_ID_RE.fullmatch(document_id or "")
+    if not m or m.group(2) != (iso_date or ""):
+        log.info("no bill was recorded for this document")
+        if trace is not None:
+            trace.append({"note": "no recorded bill"})
         return False
+    wanted = m.group(1)
+    history = _open(page)
+    shown = account_of(history.answer)
+    if shown != wanted:
+        raise OtherAccountShown(wanted, shown)
+    found = [d for d in bills_of(history.answer) if d.document_id == document_id]
     if len(found) != 1:
-        log.info("%d bills match the date %s, none taken", len(found), iso_date)
+        log.info("%d bills carry the id of the bill dated %s, none taken", len(found), iso_date)
         if trace is not None:
             trace.append({"note": "no single bill matches the record", "matches": len(found)})
         return False
     try:
         return _fetch(page, pdf_url(found[0].end_date, history.channel), out_path, trace)
-    except SessionExpired as e:
-        log.info("the bill dated %s was refused: %s", iso_date, e)
+    except SessionExpired as refused:
+        # A refusal may be the session ending or this one bill. The history
+        # just read is read again, and a session that ended shows there and
+        # stops the run. One that still reads leaves this bill failed, so
+        # it never stops every later run at the same bill.
+        _open(page)
+        log.info("the bill dated %s was refused while the history still reads: %s",
+                 iso_date, refused)
+        if trace is not None:
+            trace.append({"note": "refused, the history still reads"})
         return False
 
 
@@ -630,6 +691,7 @@ _ROW_JS = r"""() => {
   return out.slice(0, 200);
 }"""
 
+# A link a survey marks as one to the bills. Diagnose follows none.
 SURVEY_LINK_RE = re.compile(
     r"^\s*((see|view|show)\s+)?(bill(ing)?\s+)?(history|bills|statements|past\s+bills|"
     r"previous\s+bills|documents|billing)\s*$", re.I)
