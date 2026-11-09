@@ -7,14 +7,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [0.61.1] - 2026-11-08
-
-SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo
-reads both tabs of its newer Statements page, and American Express goes on
-past year-end rows that stay at a card switch. A document that could not be
-downloaded no longer reads as one waiting in Manual Review, a gap no run can
-fill no longer keeps an account in "may have something new", and an account
-says it was checked only when its list was read.
+## [Unreleased]
 
 ### Changed
 - **The control panel looks and reads like a Mac app.** It is set in the
@@ -46,6 +39,19 @@ says it was checked only when its list was read.
   the app needs setting up, now reads "This run did not start" with the
   reason, instead of "It exited with code 1" and a Continue for a run that
   never began.
+
+## [0.61.1] - 2026-11-08
+
+SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo
+reads both tabs of its newer Statements page, and American Express goes on
+past year-end rows that stay at a card switch. A document that could not be
+downloaded no longer reads as one waiting in Manual Review, a gap no run can
+fill no longer keeps an account in "may have something new", and an account
+says it was checked only when its list was read.
+
+### Changed
+
+### Fixed
 - **"May have something new" no longer keeps a gap a whole run could not
   fill (#149).** A gap in the middle of a history, years back say, counted
   toward the home page's "may have something new", and Get new for all ran
