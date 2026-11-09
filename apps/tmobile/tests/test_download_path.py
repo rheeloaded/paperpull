@@ -90,8 +90,8 @@ def test_nothing_arriving_is_a_capture_failure_not_a_crash(
     StrictDelivery(outcome=delivery.NOTHING).install(monkeypatch)
     app, failures = _app(tmp_path, monkeypatch)
     app.process(_docs()[:1])
-    assert app.stats["failed"] == 0
-    assert app.stats["manual_review"] == 1 and failures
+    assert app.stats["failed"] == 1
+    assert app.stats["manual_review"] == 0 and failures
 
 
 def test_the_stand_in_refuses_what_the_real_call_would():

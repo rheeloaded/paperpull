@@ -293,9 +293,22 @@ def test_a_tax_list_with_no_year_picker_presses_nothing(ally, caplog, tmp_path, 
 
 def test_a_year_the_picker_cannot_reach_presses_nothing(ally, caplog, tmp_path):
     """Ally's API lists a form older than its picker's first year, and the
-    form on screen is not it. This one was refused before, and still is."""
+    form on screen is not it. This one was refused before, and still is,
+    now with an answer of its own that says so (#152)."""
     page = ally()
-    _pressed_nothing(page, caplog, "cannot be reached from the page", *_tax_form(page, "2019", tmp_path))
+    out = tmp_path / "2019 1099-INT.pdf"
+    with pytest.raises(site.OutOfReach) as beyond:
+        site.ally_download(page, page.context, "", "2019-12-31", out,
+                           kind="tax", title="Form 1099-INT")
+    assert (beyond.value.year, beyond.value.first) == ("2019", "2023")
+    _pressed_nothing(page, caplog, "cannot be reached from the page", False, out)
+
+
+def test_a_year_after_the_pickers_last_is_not_out_of_reach(ally, caplog, tmp_path):
+    """A year the picker has not reached yet is refused as before, and not
+    taken as out of reach for good (#152)."""
+    page = ally()
+    _pressed_nothing(page, caplog, "is not in Ally's year picker", *_tax_form(page, "2026", tmp_path))
 
 
 def test_a_statement_is_found_by_its_own_date_with_the_picker_unread(ally, monkeypatch, tmp_path):

@@ -613,8 +613,9 @@ def test_a_busy_wallet_says_nothing_about_the_balance(app_on, venmo):
 
 
 def test_a_balance_past_its_first_ten_is_never_printed_cut_short(app_on, venmo):
-    """The Balance tab's Show more does nothing, so the month goes to review
-    with no file, and the Wallet's statement is taken as usual."""
+    """The Balance tab's Show more does nothing, so the month is not saved.
+    It is a failure the next run tries again, not a month in review with no
+    file (#152), and the Wallet's statement is taken as usual."""
     venmo.balance["2026-09"] = Part(11)
     app = app_on("--all", "--yes")
     with redirect_stdout(io.StringIO()):
@@ -623,7 +624,7 @@ def test_a_balance_past_its_first_ten_is_never_printed_cut_short(app_on, venmo):
         except SystemExit:
             pass
     saved = saved_by_id(app)
-    assert saved["2026-09-balance"]["state"] == State.NEEDS_MANUAL_REVIEW.value
+    assert saved["2026-09-balance"]["state"] == State.FAILED.value
     assert not saved["2026-09-balance"].get("pdf_path")
     assert saved["2026-09"]["state"] == State.COMPLETED.value
     assert "Balance" not in " ".join(p.name for p in app.paths.folder_for("Statement").glob("*.pdf"))

@@ -729,8 +729,8 @@ def test_a_bill_taken_again_beside_one_that_failed_keeps_its_own_account(home):
     again = body_of(ACCOUNTS[0]).replace(b"%%EOF", b"taken again\n%%EOF")
     downloaded(app, listed[ACCOUNTS[0]], body=again)
     failed = listed[ACCOUNTS[1]]
-    app._record(failed, State.NEEDS_MANUAL_REVIEW, notes="Could not capture the document PDF")
-    app._write_row(failed, "Capture failed", State.NEEDS_MANUAL_REVIEW.value)
+    app._record(failed, State.FAILED, notes="Could not capture the document PDF")
+    app._write_row(failed, "Capture failed", State.FAILED.value)
     saved(app)
     bills = {body_of(ACCOUNTS[0]): ACCOUNTS, again: ACCOUNTS,
              body_of(ACCOUNTS[1]): tuple(reversed(ACCOUNTS))}
