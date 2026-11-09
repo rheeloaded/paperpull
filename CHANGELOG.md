@@ -157,7 +157,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   same link. It is a link the person follows, carrying the provider's short
   name only, and only for a provider PaperPull ships. On PaperPull Server,
   whose sign-in window is docked in the page itself, the dialog still says
-  to sign in first.
+  to sign in first. When the sign-in the dialog started ends, the dialog
+  says whether its window opened, and when none did, the app's own words
+  for why are under it.
 - **Moving to another computer says what comes with you.** The Move card
   offered only a history file, which brings no PDF and marks every document
   it lists as downloaded, so Get new never fetched them, and nothing said
@@ -181,7 +183,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   folder (the same check Set up makes) and says under the field what is
   wrong, the providers already there with Open Accounts to use them, or the
   sync service it is in before going on. Already have PaperPull folders, in
-  Settings, goes on to Accounts once it finds them.
+  Settings, goes on to Accounts once it finds them. A folder slow to
+  answer, on a network share that is offline, say, holds up only its own
+  check and never the panel's other tabs.
 - **The panel calls each thing by one name, and says what to do next.**
   The same thing went by several names from page to page, and some were
   the command line's. The panel now says provider, account, PaperPull
@@ -202,8 +206,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   they went to more than one kind, or the documents folder once they were
   moved there. Open folder elsewhere opens the folder holding the account's
   newest document, never a browser profile, another person's folder, or a
-  documents folder no run would use. What a run set aside opens Manual
-  Review, as the page says it is there. Accounts names the documents
+  documents folder no run would use. Open what was set aside opens Manual
+  Review, as the page says it is there, and when there is no Manual Review
+  folder it opens nothing and says so. Accounts names the documents
   folder once one is set.
 - **Sign in, then get new documents, in one go.** Get new pressed before
   signing in, the likeliest first-run slip, read as a crash ("It exited with
@@ -215,8 +220,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   sign-in, then the same run over the same dates, which the sign-in's own
   page offers again once its window has opened, and the account is not
   listed as stopped. A support report, a recording or a restore that found
-  nobody signed in offers its own dialog again, never Get new. Any other
-  "Sign-in window opened" now offers Get new documents on the same page. A
+  nobody signed in offers its own dialog again, never Get new. A sign-in
+  pressed on the page of a run that stopped carries the step that page
+  offered after it, Check again, Continue, the restore or the recording,
+  and its own page offers that step and names it. Check again checks over
+  the dates of the check that stopped. Any other "Sign-in
+  window opened" now offers Get new documents on the same page. A
   row not started yet offers Sign in, which opens the window, where it
   offered Start, which only opened the account's page, and that page leads
   with signing in while the account has not started or its last run found
@@ -230,7 +239,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   expected, and the panel sends you to the technical details for what to
   do, then Continue, and says a stop at the same place again is for
   PaperPull to fix. It did not answer in time, or PaperPull hit an error it
-  did not expect, and the panel offers Continue. Only a stop a sign-in can
+  did not expect, and the panel offers Continue. Where the run's page says
+  to make a support report, it has a Make a support report button for it,
+  since that page has no More menu. Only a stop a sign-in can
   fix offers one, and a stop with no reason sends you to the technical
   details instead of guessing a sign-out.
 - **The panel never says something happened that did not.** Open sign-in
@@ -244,7 +255,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   app needs setting up or PaperPull Server does not recognize its folder,
   now reads "This run did not start" with the reason, instead of "It
   exited with code 1" and a Continue for a run that never began. None of
-  these offers an earlier run's failure file as one it wrote.
+  these offers an earlier run's failure file as one it wrote. Recent runs
+  says "no sign-in window opened", "nothing was recorded" or, for a run
+  that found nobody signed in, "nobody was signed in", never "ended with a
+  problem".
 
 ## [0.61.1] - 2026-11-08
 

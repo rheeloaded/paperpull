@@ -13,6 +13,7 @@ import inspect
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -776,6 +777,32 @@ def test_a_folder_a_sync_service_keeps_is_named_so_sign_ins_are_not_synced(setti
     root = tmp_path.joinpath(*parts)
     assert app_module._synced_by(root) == service
     assert _check({"root": str(root)})["synced_by"] == service
+
+
+def test_a_folder_slow_to_answer_never_holds_up_the_other_tabs(settings, tmp_path, monkeypatch):
+    """The check read the folder on the event loop, so a path on a network
+    share that is offline held every tab of the panel until the share gave
+    up. Here the folder waits until the loop has answered something else."""
+    _installs(tmp_path, 2)
+    gate = threading.Event()
+    real = app_module._root_problem
+
+    def offline_share(raw):
+        gate.wait(3)
+        return real(raw)
+
+    monkeypatch.setattr(app_module, "_root_problem", offline_share)
+
+    async def both():
+        check = asyncio.ensure_future(app_module.api_root_check(_Req({"root": str(tmp_path)})))
+        await asyncio.sleep(0.2)
+        answered_meanwhile = not check.done()
+        gate.set()
+        return answered_meanwhile, await check
+
+    answered_meanwhile, d = asyncio.run(both())
+    assert answered_meanwhile, "the loop waited for the folder"
+    assert d["ok"] and d["found_count"] == 2
 
 
 def test_set_up_refuses_what_the_welcome_said(settings, tmp_path):

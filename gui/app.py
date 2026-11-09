@@ -1990,6 +1990,14 @@ def _saved_folder(meta: dict, account: str) -> str:
 # or recording, what a run set aside, or the account's own folder with its
 # records.
 REVEAL_FOLDERS = {"diagnostics": "Diagnostics", "aside": "Manual Review"}
+# What the page says when that folder is not there, or is a link to
+# somewhere else, and nothing opens.
+REVEAL_MISSING = {
+    "diagnostics": "This account has no Diagnostics folder of its own, so there is no support file to show. "
+                   "Make a support report, and its file goes there.",
+    "aside": "This account has no Manual Review folder of its own now, so there is nothing set aside to show. "
+             "It may have been moved or emptied since the run.",
+}
 
 
 def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") -> Path:
@@ -2004,8 +2012,12 @@ def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") 
             folder = Path(saved)
         else:
             folder = _account_root(meta, account)
-            inner = folder / REVEAL_FOLDERS.get(what, "")
-            if what in REVEAL_FOLDERS and inner.is_dir() and not inner.is_symlink():
+            # A button named for Manual Review or Diagnostics opens that
+            # folder or nothing, never the account's own folder in its place.
+            if what in REVEAL_FOLDERS:
+                inner = folder / REVEAL_FOLDERS[what]
+                if inner.is_symlink() or not inner.is_dir():
+                    raise HTTPException(404, REVEAL_MISSING[what])
                 folder = inner
     except ValueError:
         raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
@@ -2189,7 +2201,15 @@ async def api_root_check(request: Request):
         body = await request.json()
     except Exception:
         raise HTTPException(400, "expected a JSON body")
-    root, problem = _root_problem((body or {}).get("root"))
+    # A folder on a network share that is offline answers only when the
+    # share gives up, so the check runs in a worker thread, and every other
+    # tab's requests are answered meanwhile.
+    return await run_in_threadpool(_root_check, (body or {}).get("root"))
+
+
+def _root_check(raw) -> dict:
+    """What /api/root/check answers of a typed folder, read from the disk."""
+    root, problem = _root_problem(raw)
     if problem:
         return {"ok": False, "problem": problem}
     found = []

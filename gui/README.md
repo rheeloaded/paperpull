@@ -166,7 +166,11 @@ the files, says the folder that run saved them in with an **Open folder**
 that shows it, and keeps the full output under **Technical details**. A run
 that wrote a failure file offers it right there, to attach to an issue. A
 run that found no signed-in window says **Sign in first**, and offers the
-sign-in, then the same run again, over the same dates.
+sign-in, then the same run again, over the same dates. A sign-in pressed on
+the page of any run that stopped is followed on its own page by the step the
+stopped run's page offered after it, **Continue**, **Check again**, or the
+restore or recording to start again. A stop that may be for PaperPull to fix
+offers **Make a support report** on the run's page.
 
 ## Which dates
 

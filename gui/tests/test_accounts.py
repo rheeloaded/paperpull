@@ -894,10 +894,38 @@ def test_a_support_file_and_what_was_set_aside_open_their_own_folders(root, monk
     _pdf(own / "Statements" / "a.pdf", 100)
     (own / "Diagnostics").mkdir()
     opened = _opened(monkeypatch)
-    for what in ("diagnostics", "aside", "records"):
+    for what in ("diagnostics", "records"):
         asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
-    # Nothing was set aside, so its folder is not there, and the account's is shown.
-    assert opened == [(own / "Diagnostics").resolve(), own.resolve(), own.resolve()]
+    assert opened == [(own / "Diagnostics").resolve(), own.resolve()]
+    (own / "Manual Review").mkdir()
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "aside"})))
+    assert opened[-1] == (own / "Manual Review").resolve()
+
+
+@pytest.mark.parametrize("what, folder", [("aside", "Manual Review"), ("diagnostics", "Diagnostics")])
+def test_a_folder_named_on_a_button_that_is_not_there_opens_nothing(root, monkeypatch, what, folder):
+    """Open what was set aside opened the account's own folder, among its
+    script, config and records, when Manual Review was not there, and said
+    nothing, under a button that names Manual Review."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "a.pdf", 100)
+    opened = _opened(monkeypatch)
+    with pytest.raises(app_module.HTTPException) as e:
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+    assert e.value.status_code == 404 and "no %s folder" % folder in e.value.detail
+    assert opened == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="links need privileges on Windows")
+def test_a_manual_review_that_is_a_link_opens_nothing(root, tmp_path, monkeypatch):
+    own = root / "Bank Statements"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (own / "Manual Review").symlink_to(elsewhere, target_is_directory=True)
+    opened = _opened(monkeypatch)
+    with pytest.raises(app_module.HTTPException) as e:
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "aside"})))
+    assert e.value.status_code == 404 and opened == []
     for what in ("../..", "/etc", "Statements"):
         with pytest.raises(app_module.HTTPException) as e:
             asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
@@ -1121,6 +1149,120 @@ def test_signing_in_from_sign_in_first_keeps_the_run_to_do_next(panel):
     assert 'data-action="pilot"' in step and 'data-year="2024"' in step and "btn btn-p" in step
 
 
+@pytest.mark.parametrize("action, again, code, stop, offers, said", [
+    ("discover", False, "0", "needs_you", ['data-action="discover"', 'data-year="2024"'], "then check what's there"),
+    ("pilot", False, "0", "needs_you", ['data-action="resume"', ">Continue<"], "then continue"),
+    ("all", False, "1", None, ['data-action="resume"', ">Continue<"], "then continue"),
+    ("all", True, "0", "needs_you", ['data-do="restore"'], "then restore deleted files"),
+    ("record", False, "6", None, ['data-do="record"'], "then record steps for support"),
+])
+def test_a_sign_in_on_a_stopped_runs_page_offers_that_run_next(panel, action, again, code, stop, offers, said):
+    """The sign-in on a stopped run's page kept a run only on Sign in
+    first, so a Discover that stopped needing the person ("Sign in in its
+    window, then check again") led to a sign-in whose page offered Get new
+    documents, which downloads. So did Continue after a stop, a restore
+    that stopped, and a recording with nothing in it ("then record
+    again")."""
+    result = dict(_counted(stopped=1), stop=stop) if stop else None
+    got = panel.evaluate("""([action, again, code, result]) => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'stopped',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action, scope: {year: '2024', start: '', end: ''}, again, lines: [], result,
+                            saved: [], code, refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: '', then: null});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const btn = document.querySelector('#view-run .nextsteps button[data-action="login"]');
+        if (!btn) return null;
+        let asked = null;
+        const was = startRun;
+        startRun = (row, action, opts) => { asked = {action, opts}; return true; };
+        try { DO.run(btn); } finally { startRun = was; }
+        // The sign-in's own page, once its window opened.
+        Object.assign(RUN, {action: 'login', scope: {year: '', start: '', end: ''}, again: false, result: null,
+                            code: '0', then: asked.opts.then || null});
+        RUN.outcome = runOutcome();
+        renderRun();
+        return [asked.action, document.querySelector('#view-run .nextsteps').innerHTML, RUN.outcome.say];
+    }""", [action, again, code, result])
+    assert got is not None, "the stopped run's page offers a sign-in"
+    login, step, say = got
+    assert login == "login"
+    assert "Get new" not in step and 'data-action="all"' not in step
+    for want in offers:
+        assert want in step
+    assert said in say and "get new documents" not in say
+
+
+def test_a_sign_in_on_its_own_still_goes_on_to_get_new(panel):
+    """A sign-in pressed anywhere else keeps no run, so its page offers Get
+    new documents and says so."""
+    got = panel.evaluate("""() => {
+        Object.assign(RUN, {result: null, code: '0', action: 'login', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: [], then: null});
+        return [runOutcome().say, rerunStep(RUN, 'k', '1')];
+    }""")
+    assert got[0].endswith("leave it open, then get new documents.")
+    assert 'data-action="all"' in got[1]
+
+
+def test_check_again_checks_over_the_same_dates(panel):
+    got = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'current',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'discover', scope: {year: '', start: '2023-01-01', end: '2023-06-30'}, again: false,
+                            lines: [], result: null, saved: [], code: 'stopped', refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date(), savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const b = document.querySelector('#view-run .nextsteps button[data-action="discover"]');
+        return [b.dataset.start, b.dataset.end];
+    }""")
+    assert got == ["2023-01-01", "2023-06-30"]
+
+
+@pytest.mark.parametrize("code, said", [(5, "no sign-in window opened"), (6, "nothing was recorded"),
+                                        (7, "nobody was signed in"), (1, "ended with a problem")])
+def test_recent_runs_reads_what_did_not_happen_as_no_failure(panel, code, said):
+    """An account in Sign in first showed "Get new documents, ended with a
+    problem" beside it, and a sign-in with no window or a recording with
+    nothing in it read as failures too."""
+    action = {5: "login", 6: "record"}.get(code, "all")
+    line = panel.evaluate("(e) => runLine(e)", {"action": action, "exit_code": code, "result": None})
+    assert ", " + said + "</span>" in line
+
+
+@pytest.mark.parametrize("stop, code", [("page", "0"), ("error", "1"), (None, "1")])
+def test_a_stop_that_says_make_a_support_report_offers_one_on_its_page(panel, stop, code):
+    """The page of a run said "make a support report from More", and a
+    run's page has no More menu."""
+    result = dict(_counted(stopped=1), stop=stop) if stop else None
+    got = panel.evaluate("""([result, code]) => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'stopped',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: [], slug: 'bank'};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'all', scope: {year: '', start: '', end: ''}, again: false, lines: [], result,
+                            saved: [], code, refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const page = $('view-run');
+        const b = page.querySelector('[data-do="support"]');
+        if (b) DO.support(b);
+        return [RUN.outcome.say, Boolean(page.querySelector('[data-do="menu"]')), b ? b.textContent : '',
+                $('dlg-support').open];
+    }""", [result, code])
+    say, has_more, button, opened = got
+    assert "make a support report with the button below" in say and "More" not in say
+    assert not has_more
+    assert button == "Make a support report" and opened
+
+
 def test_a_run_with_nobody_signed_in_is_not_a_stop_to_continue():
     entry = {"action": "all", "exit_code": app_module.NOT_SIGNED_IN, "result": None}
     assert app_module._last_outcome(entry) == "signin"
@@ -1235,8 +1377,11 @@ def test_a_report_lands_on_its_file_and_where_to_send_it(panel):
     assert url.startswith("https://github.com/rheeloaded/paperpull/issues/new?")
     assert "template=app-broke.yml" in url and "app=chase" in url and "title=%5BBroken%5D+chase%2C+" in url
     assert (got["target"], got["rel"]) == ("_blank", "noopener")
-    assert got["asked"] == ["Chase Statements", "login", {"stay": True}]
-    assert got["said"].startswith("The sign-in window is opening.")
+    # Its words come to the dialog, and what it came to is said there when
+    # it ends (test_a_support_report_from_its_own_dialog.py).
+    assert got["asked"][:2] == ["Chase Statements", "login"]
+    assert got["asked"][2]["stay"] is True and got["asked"][2]["sink"] == "sp-log"
+    assert got["said"].startswith("Opening the sign-in window.")
     assert got["plain"] == "https://github.com/rheeloaded/paperpull/issues", "no slug, the issue list"
 
 
