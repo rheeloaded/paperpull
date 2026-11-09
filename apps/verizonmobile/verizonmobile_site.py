@@ -601,7 +601,7 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
         got = intake.evaluate(page, _PDF_JS, [url, MAX_PDF_BYTES], limit=MAX_PDF_BYTES) or {}
     except intake.TooLarge:
         if trace is not None:
-            trace.append({"note": "larger than any bill"})
+            trace.append({"note": "too large for a bill"})
         return False
     except Exception as e:
         log.info("fetching the bill failed (%s)", type(e).__name__)
@@ -615,7 +615,7 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
         raise SessionExpired("Verizon refused the bill")
     if got.get("too_big"):
         if trace is not None:
-            trace.append({"note": "larger than any bill"})
+            trace.append({"note": "too large for a bill"})
         return False
     if got.get("status") != 200 or not got.get("b64"):
         return False
