@@ -31,7 +31,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Settings is drawn in groups the way System Settings draws them.
 - **Accounts puts what needs you first.** The page has one blue button, the
   one for the next step, and each row's own is gray. Once anything has run,
-  the providers never run fold under one Not started line, and a list
+  the providers never run fold under one Not started line, except one
+  whose first run is going or that needs setting up, and a list
   longer than eight gets a search box. Overdue reads in amber, as a new
   document that is likely waiting, instead of a failure's red. Escape gives
   focus back to the More button, and Settings names each provider and

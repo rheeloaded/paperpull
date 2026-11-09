@@ -339,16 +339,25 @@ function queueTargets() {
     (r.state === 'stopped' && !(r.last_run && r.last_run.redownload)) ||
     ['overdue', 'due', 'gap', 'never'].includes(r.state)));
 }
+// Where a row stands on Accounts. A provider never run stands with what
+// needs a look, never folded away under Not started, while its first run
+// is going, in this tab (whose rows were read before it started) or
+// another, and while it cannot run until the person sets it up or fixes
+// its folder.
+function homeGroup(r) {
+  const g = groupOf(r);
+  return g === 'new' && (r.running || ours(r) || !r.runnable || r.needs_setup) ? 'needs' : g;
+}
 function rowHTML(r) {
   const p = present(r);
   let chip = '<span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span>';
   // A row never run says what it gets in its sub line, so the sentence every
   // such row shares is left to the summary above them.
-  let say = groupOf(r) === 'new' ? '' : '<div class="say">' + esc(p.say) + '</div>';
+  let say = homeGroup(r) === 'new' ? '' : '<div class="say">' + esc(p.say) + '</div>';
   const port = r.shared_port ? '<div class="hint warn" style="margin-top:4px">' + esc(r.shared_port.short) + '</div>' : '';
   // One filled button on the page, the summary's, so a row's own is gray.
   let act = actButton(r, p.act && Object.assign({}, p.act, {primary: false}));
-  if (r.running) {
+  if (r.running || ours(r)) {
     if (ours(r)) {
       chip = '<span class="chip info">Running now</span>';
       say = '<div class="progress"><span class="bar"><span style="width:' + runPercent() + '%"></span></span>' +
@@ -385,7 +394,7 @@ function renderHome() {
   const groups = {needs: [], ok: [], new: []};
   // A provider whose first run is going now stands with what needs a look,
   // so its progress is never folded away under Not started.
-  for (const r of ROWS) groups[r.running && groupOf(r) === 'new' ? 'needs' : groupOf(r)].push(r);
+  for (const r of ROWS) groups[homeGroup(r)].push(r);
   let html = '';
   const targets = queueTargets();
   if (targets.length) {
@@ -2322,7 +2331,13 @@ async function dcLoad() {
   // Each one Use it for every provider would change, named before it is pressed.
   const own = d.documents_root ? (d.own || []) : [];
   $('drown').hidden = !own.length;
-  $('drownlist').innerHTML = own.map(o => '<li>' + esc(o.who) + ' keeps ' +
+  // Named as Accounts names them, as the picker below is. The server names
+  // each by its folder, and its person when not the first.
+  const named = o => {
+    const r = (ROWS || []).find(x => (x.account === 'primary' ? x.app : x.app + ', ' + x.account) === o.who);
+    return r ? r.provider + (whoOf(r) ? ', ' + whoOf(r) : '') : o.who;
+  };
+  $('drownlist').innerHTML = own.map(o => '<li>' + esc(named(o)) + ' keeps ' +
     esc(o.folder || "its provider's folder") + '</li>').join('');
   $('drapplyall').hidden = !own.length;
   $('dcleft').hidden = !d.left;
