@@ -57,9 +57,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the list not whole, so the run keeps what it saved and stops at its end.
   A list with nothing read is no longer noted whole. The list call takes no
   paging anybody has seen, and both of the contributor's accounts answered
-  exactly 100 statements, one of them for 108 months, so an account whose
-  list holds exactly 100, or answers with none, now leaves the list not
-  whole too, and the README says so. It no longer presses the site's own
+  exactly 100 statements, one of them for 108 months, so a run says an
+  account whose list holds exactly 100 may have older statements out of
+  reach, and an account whose list answers with none leaves the list not
+  noted whole, without stopping the run. It no longer presses the site's own
   Activity or Statements link when the Statements address lands elsewhere,
   and a keep-alive button is pressed only by its whole name. Login says
   signed in only once the account menu and a statement list answer, and a

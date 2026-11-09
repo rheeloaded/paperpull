@@ -69,17 +69,19 @@ Walmart, Verizon and Chase apps, never the bundled Playwright Chromium.
   at its end rather than finish. Resume reads no list. It carries on with
   what was read and then stops the same way, and Pilot or Run All reads the
   list again.
-- **A list that may be cut short is not called whole either.** The list
-  call takes no paging anybody has seen and gives no total. Both accounts
-  it was first run on answered exactly 100 statements, the savings one for
-  108 months, so 100 is very likely the most one answer holds. An account
-  whose list holds exactly 100 statements (or 200, 250, 500 or 1000) may
-  have older ones this app cannot reach, so its statements are downloaded
-  and the run stops at its end with the list not whole, on every run until
-  that is known. Look for older statements on Discover's Statements page
-  yourself. An account on the menu whose list answers with no statements is
-  treated the same way, since a list that did not load can look like that,
-  so a brand new account stops the run until its first statement.
+- **A list of 100 is what Discover gives.** The list call takes no paging
+  anybody has seen and gives no total. Both accounts it was first run on
+  answered exactly 100 statements, the savings one for 108 months, so 100
+  is very likely the most one answer holds. An account whose list holds
+  exactly 100 statements (or 200, 250, 500 or 1000) may have older ones no
+  call this app knows reaches, so the run says so, downloads what is
+  listed and finishes. Look for older statements on Discover's Statements
+  page yourself.
+- **An account on the menu whose list answers with no statements** is not
+  called whole, since a list that did not load can look like that. The
+  run says so, downloads every other account's statements and finishes,
+  with the list not noted as read whole, so a brand new account is never
+  marked checked until its first statement.
 - **With no account menu to read**, the one statement list the page asked
   for itself is read, and the run still stops at its end, since how many
   accounts there are is then not known. With no list either, the run stops

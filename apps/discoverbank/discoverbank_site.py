@@ -961,9 +961,11 @@ def answers_its_list(page) -> bool:
 # The list call takes no paging anybody has seen and says no total. Both of
 # the accounts it was first run on answered exactly 100 statements, one of
 # them for 108 months, so 100 is very likely the most one answer holds and
-# older statements past it are not in it. A list that long, or as long as a
-# larger round page size, may be cut short, and so may an empty list for an
-# account the menu holds. Neither is called whole.
+# older statements past it are not in it. No call this app knows reaches
+# them, so a list that long is what Discover gives, read as whole with the
+# older ones said to be left out, rather than stop every run at it. An
+# empty list for an account the menu holds is what a list that did not load
+# can look like, so it is not called whole.
 LIST_CAPS = frozenset({100, 200, 250, 500, 1000})
 # What such a list is, as passed_over names it.
 AT_ITS_CAP = "list as long as one answer holds"
@@ -979,7 +981,8 @@ def _short_of_whole(data: list) -> tuple:
         return (EMPTY_LIST,)
     if len(data) in LIST_CAPS:
         log.warning("An account's statement list held %d statements, as many as one "
-                    "answer is seen to hold, so older ones may be missing from it", len(data))
+                    "answer is seen to hold, so any older ones are left out, past what "
+                    "this app can reach", len(data))
         return (AT_ITS_CAP,)
     return ()
 

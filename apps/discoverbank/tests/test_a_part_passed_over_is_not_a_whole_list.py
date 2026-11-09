@@ -434,22 +434,22 @@ def test_statements_are_opened_by_their_address_and_no_menu_or_link_is_pressed(p
 
 # -- a list that may be cut short ----------------------------------------------------
 
-def test_a_list_as_long_as_one_answer_holds_is_never_whole(make_app, bank, tmp_path, capsys):
+def test_a_list_as_long_as_one_answer_holds_says_older_ones_are_out_of_reach(
+        make_app, bank, tmp_path, capsys):
     """The list call takes no paging anybody has seen and says no total, and
     both accounts it was first run on answered exactly 100 statements, one
     of them for 108 months. So a list of 100 may have older statements past
-    it. What it holds is kept, and the list is not called whole."""
+    it that no call this app knows reaches. It is what Discover gives, so it
+    is read as whole and the run says so. A run stopped at it stopped every
+    run of such an account, and the panel then offered a sign-in and a
+    Continue that could not help."""
     bank.lists[SAVINGS["id"]] = statements(SAVINGS["id"], 100)
     app = make_app("--discover")
-    with pytest.raises(SystemExit) as stopped:
-        app.cmd_discover()
-    assert stopped.value.code == 0
-    assert listing.last(app) == listing.STOPPED
+    app.cmd_discover()
+    assert listing.last(app) == listing.COMPLETE
     assert len(app.discovery.data) == 102
-    out = said(capsys)
-    assert "may have older statements this app cannot reach" in out
-    assert "A later run stops here too" in out
-    assert failure(tmp_path)["reason"] == "a statement list may be missing some statements"
+    assert "may have older statements this app cannot reach" in said(capsys)
+    assert not list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
 
 
 @pytest.mark.parametrize("count", [99, 101])
@@ -467,13 +467,11 @@ def test_an_account_whose_list_answers_empty_is_not_a_whole_list(make_app, bank,
     not load can look like, so it is not called whole either."""
     bank.lists[SAVINGS["id"]] = []
     app = make_app("--all")
-    with pytest.raises(SystemExit) as stopped:
-        app.cmd_run("all")
-    assert stopped.value.code == 0
-    assert listing.last(app) == listing.STOPPED
+    app.cmd_run("all")
+    assert listing.last(app) != listing.COMPLETE
     assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"]}
-    assert "answered with no statements" in said(capsys)
-    assert failure(tmp_path)["reason"] == "an account answered with no statements"
+    out = said(capsys)
+    assert "answered with no statements" in out and "this run stops" not in out
     assert_nothing_pressed(page)
 
 

@@ -900,7 +900,8 @@ def _all_rows(page, fresh: bool = False) -> List[dict]:
     if rows and not dated:
         raise ListStopped("no document in the list carries a date this app can read")
     if len(dated) < len(rows):
-        log.warning("%d document(s) carry no date this app can read", len(rows) - len(dated))
+        log.warning("%d document(s) carry no date this app can read, so they are left out",
+                    len(rows) - len(dated))
     _listing.update(rows=dated, at=now, undated=len(rows) - len(dated))
     return dated
 

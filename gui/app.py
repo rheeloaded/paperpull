@@ -1473,8 +1473,8 @@ _NOTHING_TO_TAKE = ("Completed", "No Longer Listed")
 # and PayPal with a report still being made, which is why _settled waits for
 # a second run on another day.
 _LISTS_LEAVE_OUT = frozenset({"aafmaa", "affirm", "ally", "amex", "amfam", "applecard",
-                              "discoverbank", "golden1", "ibkr", "sba", "statefarm", "tsp",
-                              "wellsfargo"})
+                              "discoverbank", "dkb", "golden1", "ibkr", "sba", "statefarm",
+                              "tsp", "wellsfargo"})
 
 
 def _gap_keys(gaps) -> list:

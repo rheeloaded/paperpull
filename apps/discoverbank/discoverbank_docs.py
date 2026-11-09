@@ -480,6 +480,14 @@ class App:
             raise SystemExit(0)
         log.info("Discover Bank: %d statement(s) read from the account lists", len(raw))
         passed_over = list(getattr(raw, "passed_over", ()))
+        if site.AT_ITS_CAP in passed_over:
+            # What Discover gives, with no call this app knows for the rest,
+            # so the list is read as whole and the older ones are said to be
+            # out of reach rather than stop every run at them.
+            passed_over.remove(site.AT_ITS_CAP)
+            print("\n  An account's list held as many statements as one answer from Discover")
+            print("  is seen to hold, so it may have older statements this app cannot reach.")
+            print("  Look for them on Discover's Statements page.")
         if passed_over:
             # An account the menu holds whose list did not answer, a list
             # that may be cut short, or a statement the list names that could
@@ -487,28 +495,19 @@ class App:
             # is not noted whole, and the run goes on with what it read and
             # stops at its end rather than finish.
             self._list_cut_short = True
-            self._only_short_lists = not set(passed_over) - {site.AT_ITS_CAP, site.EMPTY_LIST}
+            self._only_short_lists = not set(passed_over) - {site.EMPTY_LIST}
             log.info("Discover Bank: the list was not read through the %s",
                      " and the ".join(passed_over))
             print("\n  Discover Bank's statement list was not read whole.")
-            if site.AT_ITS_CAP in passed_over:
-                print("  An account's list held as many statements as one answer from Discover")
-                print("  is seen to hold, so it may have older statements this app cannot reach.")
-                print("  Look for them on Discover's Statements page.")
             if site.EMPTY_LIST in passed_over:
                 print("  An account on the menu answered with no statements, which a new account")
-                print("  does and a list that did not load can too.")
+                print("  does and a list that did not load can too, so the list is not noted as")
+                print("  read whole. Everything else is downloaded.")
             if not self._only_short_lists:
                 print("  An account or a statement on it could not be read.")
-            print("  What was read is kept, and this run stops at its end rather than finish.")
-            print("  Pilot or Run All reads the list again.")
-            if not self._only_short_lists:
-                reason = "some of the list could not be read"
-            elif site.AT_ITS_CAP in passed_over:
-                reason = "a statement list may be missing some statements"
-            else:
-                reason = "an account answered with no statements"
-            self.write_failure("read the statement list", reason)
+                print("  What was read is kept, and this run stops at its end rather than finish.")
+                print("  Pilot or Run All reads the list again.")
+                self.write_failure("read the statement list", "some of the list could not be read")
         n_new = 0
         for d in raw:
             n_new += self._record_discover_doc(d)
@@ -555,13 +554,13 @@ class App:
         and must not read as a clean one. Once it has used what came, it
         leaves on SystemExit the way a run leaves on a sign-out, which the
         panel reports as a run that stopped."""
-        if self._list_cut_short:
+        if self._list_cut_short and not self._only_short_lists:
+            # An empty list alone stops nothing. A run stopped for it would
+            # stop on every run of a new account, and the panel would offer a
+            # sign-in and a Continue that cannot change what the list says.
             print("\nNot all of Discover Bank's statement list was read, so this run stops here")
             print("rather than finish. Everything it saved is kept.")
-            if self._only_short_lists:
-                print("A later run stops here too while an account's list answers this way.")
-            else:
-                print("Run it again later to read the rest.")
+            print("Run it again later to read the rest.")
             raise SystemExit(0)
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
