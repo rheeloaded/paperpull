@@ -43,7 +43,12 @@ Walmart, Verizon and Chase apps, never the bundled Playwright Chromium.
   only reads. It never sees a password and never touches 2FA.
 - **The page** is *Statements* at
   `https://bank.discover.com/web/deposits/documents/statements`, opened by
-  its address.
+  its address. No menu or link of the site is pressed to get there. When the
+  address lands anywhere else, the run says it could not open Statements and
+  stops, and you open it in the window yourself.
+- **Login** says you are signed in only once the account menu reads and an
+  account's statement list answers. A tab that only sits at the Statements
+  address says nothing of the session.
 - **The accounts** are read from the page's own account menu, from the
   state the page keeps for it, never by opening the menu or choosing an
   account on it. Every option that is a deposit account is read, with the
@@ -61,17 +66,37 @@ Walmart, Verizon and Chase apps, never the bundled Playwright Chromium.
   option whose name says an action rather than an account, and a statement
   that cannot be told apart, are each a part of the list missing.
   What was read is downloaded, a failure file is written, and the run stops
-  at its end rather than finish, so Resume reads the list again first.
+  at its end rather than finish. Resume reads no list. It carries on with
+  what was read and then stops the same way, and Pilot or Run All reads the
+  list again.
+- **A list that may be cut short is not called whole either.** The list
+  call takes no paging anybody has seen and gives no total. Both accounts
+  it was first run on answered exactly 100 statements, the savings one for
+  108 months, so 100 is very likely the most one answer holds. An account
+  whose list holds exactly 100 statements (or 200, 250, 500 or 1000) may
+  have older ones this app cannot reach, so its statements are downloaded
+  and the run stops at its end with the list not whole, on every run until
+  that is known. Look for older statements on Discover's Statements page
+  yourself. An account on the menu whose list answers with no statements is
+  treated the same way, since a list that did not load can look like that,
+  so a brand new account stops the run until its first statement.
 - **With no account menu to read**, the one statement list the page asked
   for itself is read, and the run still stops at its end, since how many
   accounts there are is then not known. With no list either, the run stops
   with nothing downloaded and says so.
 - **Download is an authenticated in-page fetch** of the address the list
-  gave, which must be a statement PDF on `bank.discover.com`. Bytes must start
-  with `%PDF-` before anything is written to disk.
-- **Read-only.** Nothing on the page is pressed. The guards refuse transfers,
-  wires, Zelle, payments and profile changes, and `card.discover.com` and
-  `cards.discover.com` are refused hosts.
+  gave, which must be a statement PDF on `bank.discover.com`. The bytes must
+  hold `%PDF-` within their first 1024 bytes before anything is written to
+  disk, and the saved file must then open as a PDF with a page, or it is
+  moved to Manual Review.
+- **Read-only.** The one control a run presses is the keep-alive button of
+  Discover's inactivity dialog, when it shows, a button whose whole name is
+  *I'm still here*, *Stay signed in*, *Continue session* or *Keep me signed
+  in* (or *logged in* in either), so a long run is not signed out partway. It only keeps the session.
+  Nothing else on the page is pressed, chosen or typed into, Diagnose
+  included. The guards refuse transfers, wires, Zelle, payments and profile
+  changes, and `card.discover.com` and `cards.discover.com` are refused
+  hosts.
 
 ## Repairing it when Discover changes the site
 
