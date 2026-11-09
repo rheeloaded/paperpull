@@ -1987,21 +1987,40 @@ def _can_make_a_folder_in(folder: Path) -> bool:
     """Whether a folder can be made inside `folder`, which is what setting
     up does there. os.access answers that on macOS and Linux. On Windows it
     reads only the read-only flag, which says nothing of a folder's own
-    rights, so it says yes to every folder, Program Files too. There a
-    folder is made and taken away again to find out. A file is never the
-    test, since a person may make a folder at the top of C:\\ and not a file."""
+    rights, so it says yes to every folder, Program Files too, and there
+    Windows itself is asked (_windows_may_add_a_folder). Nothing is written
+    either way, since the welcome's check changes nothing."""
     if not os.access(folder, os.W_OK):
         return False
     if not _ACCESS_SAYS_YES_TO_FOLDERS:
         return True
+    return _windows_may_add_a_folder(folder)
+
+
+def _windows_may_add_a_folder(folder: Path) -> bool:
+    """Whether Windows lets this person add a folder inside `folder`. The
+    folder is opened asking for that one right, FILE_ADD_SUBDIRECTORY, so
+    Windows checks it against the folder's own rights and nothing on disk
+    changes. It is that right and not the right to add a file, since a
+    person may make a folder at the top of C:\\ and not a file. Anything
+    that cannot be asked says yes, and Set up then says what went wrong."""
     try:
-        made = tempfile.mkdtemp(prefix=".paperpull-check-", dir=str(folder))
-    except OSError:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create = kernel32.CreateFileW
+        create.restype = wintypes.HANDLE
+        create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                           wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    except (ImportError, AttributeError, OSError):
+        return True
+    add_subdirectory, share_all, open_existing, backup_semantics = 0x0004, 0x0007, 3, 0x02000000
+    handle = create(str(folder), add_subdirectory, share_all, None, open_existing,
+                    backup_semantics, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
         return False
-    try:
-        os.rmdir(made)
-    except OSError:
-        pass
+    kernel32.CloseHandle(handle)
     return True
 
 
@@ -2035,8 +2054,7 @@ async def api_root_check(request: Request):
     """What the welcome says of the folder typed in its first step, before
     the person goes on. That is what is wrong with it, the providers already
     set up in it, so they can open those instead of choosing again, and the
-    sync service it sits inside. Changes nothing, though on Windows a folder
-    is made in it and taken away again (_can_make_a_folder_in)."""
+    sync service it sits inside. Changes nothing."""
     try:
         body = await request.json()
     except Exception:

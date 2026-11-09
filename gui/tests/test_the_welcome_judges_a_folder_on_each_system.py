@@ -5,10 +5,14 @@ The check asked os.access whether the folder could be written. On Windows
 that reads only the read-only flag, which says nothing of a folder's own
 rights, so it said yes to every folder, Program Files too, and a folder
 PaperPull could not write was refused only at Set up, two steps on, as
-before the check existed. And a folder was taken for Google Drive or iCloud
+before the check existed. Windows is asked now, by opening the folder for
+the right to add a folder to it, which writes nothing. A first try made a
+folder and took it away again, and the route census caught the check
+changing the disk. And a folder was taken for Google Drive or iCloud
 Drive by the start of its name alone, so "My Drivers" was warned of as
 Google Drive's "My Drive".
 """
+import os
 import sys
 from pathlib import Path
 
@@ -30,41 +34,46 @@ def box(tmp_path, monkeypatch):
     return box
 
 
-def test_where_windows_says_yes_to_every_folder_a_folder_is_made_to_find_out(box, monkeypatch):
+def test_where_windows_says_yes_to_every_folder_windows_is_asked_instead(box, monkeypatch):
     monkeypatch.setattr(app_module, "_ACCESS_SAYS_YES_TO_FOLDERS", True)
     asked = []
 
-    def refused(prefix="", dir=None):
-        asked.append(dir)
-        raise PermissionError(13, "Access is denied", dir)
-    monkeypatch.setattr(app_module.tempfile, "mkdtemp", refused)
+    def refused(folder):
+        asked.append(folder)
+        return False
+    monkeypatch.setattr(app_module, "_windows_may_add_a_folder", refused)
     root, problem = app_module._root_problem(str(box / "Program Files" / "PaperPull"))
     assert root is None and "cannot write there" in problem
-    # In the nearest folder that is there, which is where setting up makes it.
-    assert asked == [str(box)]
+    # Of the nearest folder that is there, which is where setting up makes it.
+    assert asked == [box]
     root, problem = app_module._root_problem(str(box))
     assert root is None and "cannot write there" in problem
 
 
-def test_a_folder_that_can_be_written_is_fine_and_left_as_it_was(box, monkeypatch):
-    monkeypatch.setattr(app_module, "_ACCESS_SAYS_YES_TO_FOLDERS", True)
-    (box / "Documents").mkdir()
-    root, problem = app_module._root_problem(str(box / "Documents" / "PaperPull"))
-    assert problem == "" and root == box / "Documents" / "PaperPull"
-    root, problem = app_module._root_problem(str(box / "Documents"))
-    assert problem == "" and root == box / "Documents"
-    # The folder made to find out is taken away again.
-    assert [p.name for p in box.iterdir()] == ["Documents"]
-    assert list((box / "Documents").iterdir()) == []
-
-
-def test_where_os_access_answers_no_folder_is_made(box, monkeypatch):
+def test_where_os_access_answers_windows_is_not_asked(box, monkeypatch):
     monkeypatch.setattr(app_module, "_ACCESS_SAYS_YES_TO_FOLDERS", False)
 
-    def never(*a, **k):
-        raise AssertionError("a folder was made where os.access answers")
-    monkeypatch.setattr(app_module.tempfile, "mkdtemp", never)
+    def never(folder):
+        raise AssertionError("Windows was asked where os.access answers")
+    monkeypatch.setattr(app_module, "_windows_may_add_a_folder", never)
     assert app_module._root_problem(str(box / "PaperPull"))[1] == ""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="asks Windows itself")
+def test_windows_answers_for_a_folder_of_ones_own_and_for_system32(box):
+    """The real question, put to this computer. It changes nothing on disk,
+    which the route census holds /api/root/check to as well."""
+    import ctypes
+    (box / "Documents").mkdir()
+    assert app_module._windows_may_add_a_folder(box / "Documents")
+    assert app_module._root_problem(str(box / "Documents" / "PaperPull")) == \
+        (box / "Documents" / "PaperPull", "")
+    assert sorted(p.name for p in box.rglob("*")) == ["Documents"], "nothing was made"
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
+        assert app_module._windows_may_add_a_folder(system32) is False
+        assert "cannot write there" in app_module._root_problem(str(system32 / "PaperPull"))[1]
+    assert app_module._windows_may_add_a_folder(box / "not there") is False
 
 
 @pytest.mark.parametrize("parts, service", [
