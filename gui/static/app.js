@@ -342,11 +342,12 @@ function queueTargets() {
 // Where a row stands on Accounts. A provider never run stands with what
 // needs a look, never folded away under Not started, while its first run
 // is going, in this tab (whose rows were read before it started) or
-// another, and while it cannot run until the person sets it up or fixes
-// its folder.
+// another, while it cannot run until the person sets it up or fixes its
+// folder, and while it shares a sign-in browser with another account, so
+// its first run would read whichever account that browser is signed in to.
 function homeGroup(r) {
   const g = groupOf(r);
-  return g === 'new' && (r.running || ours(r) || !r.runnable || r.needs_setup) ? 'needs' : g;
+  return g === 'new' && (r.running || ours(r) || !r.runnable || r.needs_setup || r.shared_port) ? 'needs' : g;
 }
 function rowHTML(r) {
   const p = present(r);

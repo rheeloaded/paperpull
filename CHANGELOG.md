@@ -32,11 +32,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **Accounts puts what needs you first.** The page has one blue button, the
   one for the next step, and each row's own is gray. Once anything has run,
   the providers never run fold under one Not started line, except one
-  whose first run is going or that needs setting up, and a list
-  longer than eight gets a search box. Overdue reads in amber, as a new
-  document that is likely waiting, instead of a failure's red. Escape gives
-  focus back to the More button, and Settings names each provider and
-  person as Accounts does, instead of by folder.
+  whose first run is going, that needs setting up or that shares a
+  sign-in browser with another account, and a list longer than eight gets
+  a search box. Overdue reads in amber, as a new document that is likely
+  waiting, instead of a failure's red. Escape gives focus back to the More
+  button, and Settings names each provider and person as Accounts does,
+  instead of by folder.
 
 ### Fixed
 - **A support report takes three steps, not fifteen.** Its dialog said to

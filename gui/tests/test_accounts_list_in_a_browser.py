@@ -250,6 +250,26 @@ def test_a_first_run_started_in_this_tab_is_never_folded_away(one_stopped):
     assert "Not started (8)" in got["more"]
 
 
+def test_a_row_sharing_a_sign_in_browser_is_never_folded_away(one_stopped):
+    """A provider never run that names the debugging port of another
+    account here would read whichever account that browser is signed in
+    to, so its warning stands in sight while the rest fold."""
+    tab = one_stopped
+    got = tab.evaluate("""name => {
+        const r = ROWS.find(x => x.app === name);
+        r.shared_port = {port: 9300, short: 'Signs in with the same browser as Shop Docs 1, on port 9300.', say: ''};
+        renderHome();
+        const row = document.querySelector('#view-home .acct[data-key^="' + name + '"]');
+        const out = {shown: row.checkVisibility(), folded: Boolean(row.closest('#h-more')), text: row.innerText,
+                     more: $('h-more').querySelector('summary').innerText};
+        delete r.shared_port;
+        renderHome();
+        return out;
+    }""", NAMES[4])
+    assert got["shown"] and not got["folded"]
+    assert "same browser as Shop Docs 1" in got["text"]
+    assert "Not started (8)" in got["more"]
+
 def test_settings_names_each_folder_of_its_own_as_accounts_does(one_stopped):
     """The folders Use it for every provider would replace are named by
     provider and person, as Accounts and the picker beside them name them,
