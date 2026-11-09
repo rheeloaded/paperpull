@@ -166,6 +166,10 @@ ITS_OWN = {
         "a refusal of a View address read earlier in this run, which reads the list "
         "again once, or of one right after a list that answered, which is that bill's "
         "alone. A refusal of the list itself reaches the run",
+    ("cetera", "download_bill", ("_fetch",)):
+        "a refusal of the headers this run kept from an earlier reading, whose token "
+        "may have run out, which reads the lists again once. A refusal right after the "
+        "lists were read reaches the run",
 }
 
 # A handler in a download path that turns a list stop into a stop of the run

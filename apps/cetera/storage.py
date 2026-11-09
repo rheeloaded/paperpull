@@ -15,9 +15,11 @@ from paperpull_core import storage as _core
 from paperpull_core.spec import (AppSpec, CsvSpec, DOCUMENT, Folder,
                                  INFRASTRUCTURE_FOLDERS)
 
-# One row per downloaded Cetera statement or report. Deliberately records NO account
-# numbers, balances, holdings, or other sensitive values from inside
-# the documents, only what is needed to find and verify a file locally.
+# One row per downloaded Cetera statement or report. Deliberately records NO full
+# account numbers, balances, holdings, or other sensitive values from inside
+# the documents, only what is needed to find and verify a file locally. A
+# statement's summary and file name carry its account as the portal masks
+# it, "XXXX-" and the last four digits.
 DOCUMENT_INDEX_COLUMNS = [
     "Account Holder",
     "Document Date", "Category", "Document Summary", "Document Title",

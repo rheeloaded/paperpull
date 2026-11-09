@@ -37,7 +37,24 @@ SEEN SIGNED IN, 2026-10-30 (shapes only, no values kept):
     headers and the account list off the page's own statements request,
     asks the same two lists from inside the page (every quarter, every
     year, page by page), and fetches each PDF the same way. Nothing is
-    clicked. The header values stay in memory and are never written.
+    clicked. The header values stay in memory and are never written. Both
+    lists are read once a run and kept in memory, and read again only for
+    a document not in them or a PDF refused with headers kept from an
+    earlier reading.
+
+KNOWN CEILINGS (left as they are until a run shows otherwise)
+  * The accounts asked about are the ones the page's own first request
+    names. Whether it names closed accounts, or every account when the
+    page remembers a filter, has not been seen.
+  * A history with no statements has not been seen, and stops the list
+    until one has. A portal with no reports has not been seen either, and
+    any answer for the reports but a list as long as its count stops the
+    whole list, statements too.
+  * Two statements of one account and date, a corrected statement or two
+    accounts sharing a last four, are both listed and neither is fetched,
+    since nothing tells them apart.
+  * A PDF asked for and answered 200 with anything but a PDF fails that
+    document alone. This API refuses a session with a 401 or 403.
 
 Sign-in, with any verification code, is the account holder's own, in the
 browser.
@@ -66,6 +83,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 from paperpull_core import intake
+from paperpull_core.characters import whole_json
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -98,7 +116,7 @@ DOCUMENTS_URL = BASE + DOCUMENTS_PATH
 # from the row a fresh list finds for the recorded id, checked.
 DOWNLOAD_PATH = API_PATH + "downloadStatement"
 QPR_DOWNLOAD_PATH = API_PATH + "downloadQPRs"
-STATEMENTS_URL = DOCUMENTS_URL
+# Where discovery records a document's list as, its source_url.
 BILLING_URL = DOCUMENTS_URL
 URLS = {
     "home": f"{BASE}/dashboard",
@@ -224,10 +242,8 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
     return None, ""
 
 
-# A document's date exactly as the API writes it: "09/30/2026".
+# A document's date exactly as the API writes it, "09/30/2026".
 _STATEMENT_DATE_RE = re.compile(r"([0-9]{2})/([0-9]{2})/([0-9]{4})")
-# The words that head the table's date column, for Diagnose.
-STATEMENT_HEAD_WORDS = frozenset({"date"})
 
 
 def statement_date(text) -> Optional[str]:
@@ -247,10 +263,9 @@ def statement_date(text) -> Optional[str]:
 # ---------------------------------------------------------------------------
 
 class SessionExpired(Exception):
-    """The portal answered as a signed-out session: its sign-in page, a
-    redirect where a document was asked for, a 401 or 403, or an HTML or
-    JSON body where a PDF was expected. The run stops for the account
-    holder."""
+    """The portal answered as a signed-out session, with its sign-in page,
+    a redirect where a list or a document was asked for, or a 401 or 403.
+    The run stops for the account holder."""
 
 
 def looks_signed_out(page) -> bool:
@@ -321,7 +336,7 @@ _ACCOUNT_NUM_RE = re.compile(r"XXXX-([0-9]{4})")
 _ACCOUNT_ID_RE = re.compile(r"[0-9]{3,15}")
 _NAME_RE = re.compile(r"[A-Za-z][A-Za-z ]{2,59}")
 _QPR_NAME_RE = re.compile(r"([0-9]{4}) Q([1-4])\b.*")
-_DOC_ID_RE = re.compile(r"statement-([0-9]{4})-([0-9]{8})|qpr-([0-9]{4,12})")
+DOC_ID_RE = re.compile(r"statement-([0-9]{4})-([0-9]{8})|qpr-([0-9]{4,12})")
 # The account fields the page's own request carries, and nothing else is
 # sent back.
 _ACCOUNT_KEYS = frozenset({"accountNum", "accountType", "accountId", "custodian", "isRia"})
@@ -427,7 +442,7 @@ def _accounts_of(method: str, url: str, post_data: Optional[str]) -> Optional[li
     if parts.netloc != HOST or parts.path != LIST_PATH:
         return None
     try:
-        body = json.loads(post_data or "")
+        body = whole_json(json.loads(post_data or ""))
     except (TypeError, ValueError):
         return None
     accounts = body.get("accountList") if isinstance(body, dict) else None
@@ -573,11 +588,12 @@ def statements_of(rows, total: int, accounts=None) -> List[RawDoc]:
     """RawDocs from the statement rows, one per statement, known by its
     account's last four digits and its date. A row that is not one, an
     account the page did not ask for, a date that is not a calendar date,
-    two statements of one account and date, or fewer rows than the list
-    says it holds stops the list, carrying what was read before it."""
+    fewer rows than the list says it holds, or no statements at all stops
+    the list, carrying what was read before it. Two statements of one
+    account and date are both listed, and neither is fetched
+    (colliding_dates)."""
     known = None if accounts is None else {a["accountNum"] for a in accounts}
     docs: List[RawDoc] = []
-    ids = set()
     for r in rows or []:
         if not isinstance(r, dict):
             raise ListStopped("a statement is not an object", docs)
@@ -592,9 +608,6 @@ def statements_of(rows, total: int, accounts=None) -> List[RawDoc]:
         if not iso:
             raise ListStopped("a statement's date is not a calendar date", docs)
         doc_id = f"statement-{m.group(1)}-{iso.replace('-', '')}"
-        if doc_id in ids:
-            raise ListStopped("two statements carry one account and date", docs)
-        ids.add(doc_id)
         name = re.sub(r"\s+", " ", str(r.get("statementName") or "")).strip()
         name = name if _NAME_RE.fullmatch(name) else "Statement"
         title = f"Cetera {name} {iso}"
@@ -603,7 +616,21 @@ def statements_of(rows, total: int, accounts=None) -> List[RawDoc]:
                            statement_id=sid))
     if len(docs) != total:
         raise ListStopped(f"the statement list read {len(docs)} of the {total} it holds", docs)
+    if not docs:
+        raise ListStopped("the statement list holds no statements, and a history with none "
+                          "has not been seen")
     return docs
+
+
+def colliding_dates(docs: List[RawDoc]) -> List[str]:
+    """The dates of the statements that share one account's last four
+    digits and date with another. Neither of such a pair is fetched, since
+    nothing tells the two apart from one reading to the next."""
+    seen, twice = set(), set()
+    for d in docs:
+        if d.kind == "statement":
+            (twice if d.document_id in seen else seen).add(d.document_id)
+    return sorted({d.date_text for d in docs if d.document_id in twice})
 
 
 def reports_of(rows, total: int) -> List[RawDoc]:
@@ -626,13 +653,18 @@ def reports_of(rows, total: int) -> List[RawDoc]:
             raise ListStopped("a report's date is not a calendar date", docs)
         if sid in ids:
             raise ListStopped("two reports carry one id", docs)
+        # The report is asked for as an advisory one or not by this flag,
+        # so anything but true or false is not guessed at.
+        is_ria = r.get("isRia")
+        if not isinstance(is_ria, bool):
+            raise ListStopped("a report's isRia is not true or false", docs)
         ids.add(sid)
         m = _QPR_NAME_RE.fullmatch(re.sub(r"\s+", " ", str(r.get("statementName") or "")).strip())
         quarter = f" {m.group(1)} Q{m.group(2)}" if m else ""
         title = f"Cetera Quarterly Performance Report{quarter} {iso}"
         docs.append(RawDoc(title=title, date_text=iso, href=QPR_DOWNLOAD_PATH, text=title,
                            row_index=len(docs), kind="report", document_id=f"qpr-{sid}",
-                           statement_id=sid, account_id=acct_id, is_ria=r.get("isRia") is True))
+                           statement_id=sid, account_id=acct_id, is_ria=is_ria))
     if len(docs) != total:
         raise ListStopped(f"the report list read {len(docs)} of the {total} it holds", docs)
     return docs
@@ -674,23 +706,32 @@ def expand_all(page) -> None:
     return None
 
 
-def table_header(page) -> dict:
-    """For Diagnose. The lists are read from the API, not a table."""
-    return {"cells": [], "statement_date_column": None}
+# Both lists as this run last read them, with the session they were read
+# with, so each document is not a fresh reading of every page of them. In
+# memory for the run only.
+_RUN: dict = {}
 
 
-def collect_download_docs(page) -> List[RawDoc]:
-    """Every statement and quarterly performance report the portal lists.
-    Nothing is pressed. A list that cannot be read whole raises ListStopped
-    holding what was read, and a signed-out session raises SessionExpired."""
+def _read(page) -> List[RawDoc]:
+    _RUN.clear()
     session = _open(page)
     rows, total = _ask_statements(page, session)
     docs = statements_of(rows, total, session.accounts)
     try:
         rows, total = _ask_reports(page, session)
-        return docs + reports_of(rows, total)
+        docs = docs + reports_of(rows, total)
     except ListStopped as stop:
         raise ListStopped(str(stop), docs + stop.docs)
+    _RUN.update(session=session, docs=docs)
+    return docs
+
+
+def collect_download_docs(page) -> List[RawDoc]:
+    """Every statement and quarterly performance report the portal lists,
+    kept for this run's downloads. Nothing is pressed. A list that cannot
+    be read whole raises ListStopped holding what was read, and a
+    signed-out session raises SessionExpired."""
+    return _read(page)
 
 
 _PDF_JS = r"""async ([url, headers, limit]) => {
@@ -722,7 +763,9 @@ def pdf_request(doc: RawDoc, headers: dict) -> Tuple[str, dict]:
 
 def _fetch(page, doc: RawDoc, session: _Session, out_path: Path, trace: Optional[list]) -> bool:
     """GET the document's PDF address from inside the signed-in page, the
-    way its own download does, and keep the body only when it is a PDF."""
+    way its own download does, and keep the body only when it is a PDF. A
+    401, 403 or redirect raises SessionExpired. Any other answer that is
+    not a PDF fails this document alone."""
     url, headers = pdf_request(doc, session.headers)
     if not url:
         return False
@@ -747,8 +790,12 @@ def _fetch(page, doc: RawDoc, session: _Session, out_path: Path, trace: Optional
     except Exception:
         return False
     if data[:5] != b"%PDF-":
-        if data.lstrip()[:1] in (b"<", b"{", b"["):
-            raise SessionExpired("the portal answered a document with a sign-in page")
+        # This API answers a session it refuses with a 401 or a 403, so a
+        # 200 that is not a PDF, JSON or a page, is about this document. It
+        # fails alone, and the next run tries it again, where a stop here
+        # would stop every run at this document for good.
+        if trace is not None:
+            trace.append({"note": "the answer is not a PDF"})
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
@@ -759,34 +806,44 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None, href: str = "",
                   document_id: str = "") -> bool:
     """Save the document discovery recorded as `document_id`, dated
-    `iso_date`. Both lists are asked again and the document is fetched only
-    when exactly one row there carries that id, address and date. `dl_dir`
-    is unused. Nothing is pressed. SessionExpired propagates to the run."""
+    `iso_date`. The lists this run read are used when there are some, and
+    read again when there are none or the document is not in them, and once
+    more when its PDF is refused with the headers kept from an earlier
+    reading, since the page's token does not last. The document is fetched
+    only when exactly one row there carries that id, address and date.
+    `dl_dir` is unused. Nothing is pressed. SessionExpired from a list just
+    read propagates to the run, and so does ListStopped when the lists
+    cannot be read again, since every document after this one would read
+    the same lists."""
     out_path = Path(out_path)
     doc_id = (document_id or "").strip()
-    if href not in (DOWNLOAD_PATH, QPR_DOWNLOAD_PATH) or not _DOC_ID_RE.fullmatch(doc_id):
+    if href not in (DOWNLOAD_PATH, QPR_DOWNLOAD_PATH) or not DOC_ID_RE.fullmatch(doc_id):
         log.info("no document was recorded for this entry")
         if trace is not None:
             trace.append({"note": "no recorded document"})
         return False
-    try:
-        session = _open(page)
-        if href == DOWNLOAD_PATH:
-            rows, total = _ask_statements(page, session)
-            listed = statements_of(rows, total, session.accounts)
-        else:
-            rows, total = _ask_reports(page, session)
-            listed = reports_of(rows, total)
-    except ListStopped as stop:
-        log.info("the document list stopped while looking for the one dated %s: %s", iso_date, stop)
-        return False
-    found = [d for d in listed if d.document_id == doc_id and d.href == href and d.date_text == (iso_date or "")]
-    if len(found) != 1:
-        log.info("%d documents match the recorded id and date %s, none taken", len(found), iso_date)
-        if trace is not None:
-            trace.append({"note": "no single document matches the record", "matches": len(found)})
-        return False
-    return _fetch(page, found[0], session, out_path, trace)
+    why = ""
+    for fresh in ((False, True) if _RUN else (True,)):
+        if fresh:
+            _read(page)
+        session, listed = _RUN["session"], _RUN["docs"]
+        found = [d for d in listed if d.document_id == doc_id and d.href == href
+                 and d.date_text == (iso_date or "")]
+        if len(found) != 1:
+            why = f"{len(found)} documents match the recorded id and date"
+            continue
+        try:
+            return _fetch(page, found[0], session, out_path, trace)
+        except SessionExpired:
+            # A refusal of headers kept from an earlier reading may be the
+            # page's token running out, so the page is opened again first.
+            if fresh:
+                raise
+        why = "the PDF was refused with the headers kept from an earlier reading"
+    log.info("the document dated %s was not taken: %s", iso_date, why)
+    if trace is not None:
+        trace.append({"note": "not taken", "why": why})
+    return False
 
 
 # ---------------------------------------------------------------------------

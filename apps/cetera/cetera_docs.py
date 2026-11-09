@@ -182,13 +182,18 @@ def migrate_legacy_keys(records: dict) -> int:
 
 def told_apart_by(record: dict) -> str:
     """What a document's file adds to its name when another file already
-    has that name, the same on every run: the end of its id, never
-    " (2)" (core/tests/test_every_app_renames_each_file_for_its_own_record).
-    Two statements of one account and date stop the list (cetera_site), so
-    this is reached only when a file of that name is already in the folder.
-    The download and Rename both ask this, so they agree."""
+    has that name, the same on every run. It is a statement's last four
+    digits and date, or a report's id, never " (2)"
+    (core/tests/test_every_app_renames_each_file_for_its_own_record). Two
+    statements of one account and date are never fetched
+    (cetera_site.colliding_dates), so this is reached when a file of that
+    name is already in the folder. The download and Rename both ask this,
+    so they agree. A record of another id gives the end of it."""
     doc_id = str((record or {}).get("document_id") or "").strip()
-    return doc_id[-6:] if doc_id else ""
+    m = site.DOC_ID_RE.fullmatch(doc_id)
+    if m:
+        return f"{m.group(1)}-{m.group(2)}" if m.group(1) else m.group(3)
+    return doc_id[-6:]
 
 
 class App:
@@ -218,10 +223,10 @@ class App:
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
-        # The owner's name first. The site adds what names the account, its
-        # number and address, once Statements & Notices shows them.
+        # The owner's name first. The site adds the accounts' last four
+        # digits and ids once Statements & Notices asks about them.
         site.set_private_words([self.config.get("owner", "")])
 
         self._pw = None
@@ -495,6 +500,11 @@ class App:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
         log.info("documents: %d listed, %d new", len(docs), n_new)
+        twice = site.colliding_dates(docs)
+        if twice:
+            print(f"\n!! Two statements of one account carry the date {', '.join(twice)}, so neither can be")
+            print("   told apart from the other. Neither statement of that date is fetched, so it is")
+            print("   counted as failed. Every other document is read.")
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -602,6 +612,11 @@ class App:
                 # document after it would get the same answer, so the run stops
                 # here, with nothing recorded against this one.
                 self.session_ended()
+            except site.ListStopped as stop:
+                # The lists could not be read again for this document.
+                # Every document after it reads the same lists, so the run
+                # stops here rather than fail each one in turn.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -618,21 +633,32 @@ class App:
             "window, then run Resume to carry on from where this stopped.",
         ])
 
+    def list_changed(self, stop) -> None:
+        """Stop the run because the lists could not be read again while a
+        document was sought. Nothing is recorded against the document, and
+        the run leaves as one whose list did not end whole, which only a run
+        that lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        listing.read_again_stopped(self, (
+            "The Cetera document list could not be read again, so this "
+            "run stops here."))
+
     def download_one(self, page, doc: Document, filename: str):
-        """Save one document. The site layer opens Statements & Notices
-        again and fetches the document by its id, only when exactly one row
-        there carries the recorded id and date. Nothing is pressed."""
+        """Save one document. The site layer finds the document by its id in
+        the lists this run read, or reads them, and fetches it only when
+        exactly one row there carries the recorded id and date. Nothing is
+        pressed."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        # Only a name already taken in the folder gets the end of the
-        # document id (told_apart_by).
+        # Only a name already taken in the folder gets the document's last
+        # four digits and date, or its report id (told_apart_by).
         out_path = unique_path(folder, filename, self.config["max_path_length"],
                                distinguisher=told_apart_by(doc.to_dict()))
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # The site layer opens Statements & Notices itself, finds this document and
-        # fetches it.
+        # The site layer finds this document and fetches it.
         trace: list = []
         saved = site.download_bill(page, None, doc.date, out_path,
                                    title=doc.title, trace=trace, href=doc.href,
@@ -649,12 +675,12 @@ class App:
                 "landed_on": site.redact(page.url or ""),
                 "responses": trace[:80]}, words_for('Cetera', site))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
@@ -966,20 +992,15 @@ class App:
             if found:
                 site.expand_all(page)
                 site.scroll_full_page(page)
-                # Where a document's date is read from, so a list that stops
-                # for want of its Statement Date column can be repaired.
-                info["bill_table_header"] = site.table_header(page)
             info["row_counts"] = {}
             for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
-                              ("table rows", "table tbody tr"),
-                              ("bill rows", site.BILL_ROW),
-                              ("account options", "select#accountList option")]:
+                              ("table rows", "table tbody tr")]:
                 try:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
             found_docs = site.collect_download_docs(page) if found else []
-            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_invoice_id": bool(b.document_id)}
+            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_id": bool(b.document_id)}
                                             for b in found_docs[:40]]
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)

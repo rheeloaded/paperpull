@@ -16,6 +16,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 import cetera_site as site  # noqa: E402
 import cetera_docs as docs  # noqa: E402
+from paperpull_core.run_reporting import ListNotRead  # noqa: E402
 
 FAKE_TOKEN = "Bearer fake-token-not-real-0000"
 FAKE_SESSION = "fake-session-not-real-1111"
@@ -70,6 +71,9 @@ class Page:
         self.url = "about:blank"
         self.pdf, self.pdf_status, self.page_size = pdf, pdf_status, page_size
         self.handlers, self.asked = [], []
+        self.loads = 0
+        # PDF answers to give, one each, before the page's usual one.
+        self.pdf_first = []
 
     def on(self, event, h):
         self.handlers.append(h)
@@ -81,6 +85,7 @@ class Page:
         pass
 
     def goto(self, url, **k):
+        self.loads += 1
         self.url = self.settled
         if self.asks:
             for h in list(self.handlers):
@@ -102,9 +107,15 @@ class Page:
             return {"status": 200, "data": {"statementData": part, "totalItems": str(total)}}
         if path == site.QPR_LIST_PATH:
             return {"status": 200, "data": {"statementData": self.qprs, "totalItems": str(len(self.qprs))}}
+        if self.pdf_first:
+            return {"status": self.pdf_first.pop(0), "type": "application/json"}
         if self.pdf_status != 200:
             return {"status": self.pdf_status, "type": "text/html"}
         return {"status": 200, "type": "application/pdf", "b64": base64.b64encode(self.pdf).decode()}
+
+    def lists_read(self):
+        return sum(1 for a in self.asked if urlsplit(a[0]).path == site.LIST_PATH
+                   and a[0].endswith("pageNum=1"))
 
 
 class Hosts(unittest.TestCase):
@@ -155,8 +166,7 @@ class Rows(unittest.TestCase):
 
     def test_unreadable_statements_stop_the_list_with_what_was_read(self):
         for broken in (stmt("XXXX-3333", "07/31/2026"), stmt("1234", "07/31/2026"), stmt("XXXX-1111", "02/30/2026"),
-                       stmt("XXXX-1111", "09/30/2026", sid="Zmother-id-0000000"), stmt("XXXX-1111", "07/31/2026", sid="x"),
-                       "not a row"):
+                       stmt("XXXX-1111", "07/31/2026", sid="x"), "not a row"):
             with self.assertRaises(site.ListStopped) as stop:
                 site.statements_of(ROWS + [broken], 4, ACCOUNTS)
             self.assertEqual(len(stop.exception.docs), 3, broken)
@@ -165,6 +175,21 @@ class Rows(unittest.TestCase):
         with self.assertRaises(site.ListStopped) as stop:
             site.statements_of(ROWS, 4, ACCOUNTS)
         self.assertEqual(len(stop.exception.docs), 3)
+
+    def test_a_history_with_no_statements_is_never_whole(self):
+        """totalItems 0 with no rows was read as a whole history with
+        nothing in it."""
+        with self.assertRaises(site.ListStopped):
+            site.statements_of([], 0, ACCOUNTS)
+
+    def test_two_statements_of_one_account_and_date_leave_that_date_alone(self):
+        """A corrected statement, or two accounts sharing a last four,
+        stopped the whole list on every run."""
+        rows = ROWS + [stmt("XXXX-1111", "09/30/2026", sid="Zmother-id-0000000")]
+        got = site.statements_of(rows, 4, ACCOUNTS)
+        self.assertEqual(len(got), 4)
+        self.assertEqual(site.colliding_dates(got), ["2026-09-30"])
+        self.assertEqual(site.colliding_dates(site.statements_of(ROWS, 3, ACCOUNTS)), [])
 
     def test_an_odd_statement_name_is_not_kept(self):
         got = site.statements_of([stmt("XXXX-1111", "09/30/2026", name="<b>x</b> 1234")], 1, ACCOUNTS)
@@ -180,11 +205,22 @@ class Rows(unittest.TestCase):
             with self.assertRaises(site.ListStopped):
                 site.reports_of(QPRS + [broken], 3)
 
+    def test_a_report_whose_isria_is_not_true_or_false_stops(self):
+        """Anything but a JSON true asked isRiaStatement=false without a
+        word."""
+        self.assertTrue(site.reports_of([dict(QPRS[0], isRia=True)], 1)[0].is_ria)
+        for flag in ("true", "Y", 1, None):
+            with self.assertRaises(site.ListStopped, msg=flag):
+                site.reports_of([dict(QPRS[0], isRia=flag)], 1)
+
     def test_rules_classify(self):
         self.assertIsInstance(json.loads((HERE / "document_rules.json").read_text()), dict)
 
 
 class ListWhole(unittest.TestCase):
+    def setUp(self):
+        site._RUN.clear()
+
     def test_every_page_of_every_quarter_and_the_reports_are_asked_with_the_pages_headers(self):
         rows = ROWS + [stmt("XXXX-2222", "08/31/2026"), stmt("XXXX-1111", "07/31/2026")]
         page = Page(rows=rows)
@@ -221,6 +257,7 @@ class ListWhole(unittest.TestCase):
 
 class Download(unittest.TestCase):
     def setUp(self):
+        site._RUN.clear()
         self.out = Path(tempfile.mkdtemp()) / "Statements" / "doc.pdf"
 
     def test_the_statement_with_that_account_and_date_is_fetched(self):
@@ -248,17 +285,66 @@ class Download(unittest.TestCase):
                                   ("statement-2222-20260930", "2026-09-30", "/other"),
                                   ("anything", "2026-09-30", site.DOWNLOAD_PATH)):
             page = Page()
+            site._RUN.clear()
             self.assertFalse(site.download_bill(page, None, day, self.out, href=href, document_id=doc_id))
             self.assertFalse(any("/download" in str(a[0]) for a in page.asked))
             self.assertFalse(self.out.exists())
 
-    def test_refused_and_sign_in_answers_raise_and_save_nothing(self):
-        for page in (Page(pdf_status=401), Page(pdf_status=403), Page(pdf=b"<html>sign in</html>"),
-                     Page(pdf=b'{"statusCode": 401}')):
+    def test_refused_answers_raise_and_save_nothing(self):
+        for page in (Page(pdf_status=401), Page(pdf_status=403)):
+            site._RUN.clear()
             with self.assertRaises(site.SessionExpired):
                 site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
                                    document_id="statement-1111-20260930")
             self.assertFalse(self.out.exists())
+
+    def test_an_answer_that_is_not_a_pdf_fails_that_document_alone(self):
+        """A 200 JSON or page for one statement was read as a sign-out, so
+        every run stopped at that statement for good, nothing recorded."""
+        for body in (b'{"message":"Statement not available"}', b"<html>error</html>", b"[]"):
+            site._RUN.clear()
+            self.assertFalse(site.download_bill(Page(pdf=body), None, "2026-09-30", self.out,
+                                                href=site.DOWNLOAD_PATH, document_id="statement-1111-20260930"))
+            self.assertFalse(self.out.exists())
+
+    def test_the_lists_this_run_read_are_used_for_each_document(self):
+        """Each document opened the page again and read every page of its
+        list."""
+        page = Page()
+        site.collect_download_docs(page)
+        for doc_id, day, href in (("statement-1111-20260930", "2026-09-30", site.DOWNLOAD_PATH),
+                                  ("statement-2222-20260930", "2026-09-30", site.DOWNLOAD_PATH),
+                                  ("qpr-70000001", "2026-06-30", site.QPR_DOWNLOAD_PATH)):
+            self.assertTrue(site.download_bill(page, None, day, self.out, href=href, document_id=doc_id))
+        self.assertEqual((page.loads, page.lists_read()), (1, 1))
+
+    def test_headers_kept_from_an_earlier_reading_are_taken_again_once(self):
+        page = Page()
+        site.collect_download_docs(page)
+        page.pdf_first = [401]
+        self.assertTrue(site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
+                                           document_id="statement-1111-20260930"))
+        self.assertEqual((page.loads, page.lists_read()), (2, 2))
+        # Refused again right after the page gave fresh ones, the session
+        # has ended.
+        page.pdf_first = [401, 401]
+        with self.assertRaises(site.SessionExpired):
+            site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
+                               document_id="statement-1111-20260930")
+
+    def test_a_list_that_stops_while_documents_download_reaches_the_run(self):
+        for page in (Page(rows=[]), Page(listing_status=500), Page(total=5)):
+            site._RUN.clear()
+            with self.assertRaises(site.ListStopped):
+                site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
+                                   document_id="statement-1111-20260930")
+            self.assertFalse(self.out.exists())
+
+    def test_two_statements_of_one_account_and_date_are_never_fetched(self):
+        page = Page(rows=ROWS + [stmt("XXXX-1111", "09/30/2026", sid="Zmother-id-0000000")])
+        self.assertFalse(site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
+                                            document_id="statement-1111-20260930"))
+        self.assertFalse(any("/download" in str(a[0]) for a in page.asked))
 
 
 def make_app(tmp, *args):
@@ -281,9 +367,32 @@ class Orchestrator(unittest.TestCase):
         self.assertEqual((rec["href"], rec["summary"], rec["category"]),
                          (site.QPR_DOWNLOAD_PATH, "Quarterly Performance Report", "Statement"))
 
+    def test_a_file_is_told_apart_by_its_account_and_date_or_its_report(self):
+        """The last six characters of statement-1111-20260930 are its date,
+        which every account's statement of that day shares."""
+        self.assertEqual(docs.told_apart_by({"document_id": "statement-1111-20260930"}), "1111-20260930")
+        self.assertEqual(docs.told_apart_by({"document_id": "qpr-70000002"}), "70000002")
+
+    def test_a_list_that_stops_while_documents_download_stops_the_run_once_unread(self):
+        site._RUN.clear()
+        app = make_app(tempfile.mkdtemp(), "--resume")
+        for r in site.statements_of(ROWS, 3, ACCOUNTS):
+            app._record_rawdoc(r, site.BILLING_URL)
+        app.discovery.save()
+        page = Page(listing_status=500)
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        out = io.StringIO()
+        with redirect_stdout(out), self.assertRaises(ListNotRead):
+            app.process(app._select())
+        self.assertEqual(page.loads, 1)
+        self.assertNotIn("Nothing was saved", out.getvalue())
+        self.assertEqual(app.progress.data, {})
+
 
 class Privacy(unittest.TestCase):
     def test_the_headers_and_account_ids_stay_out_of_logs_stdout_and_files(self):
+        site._RUN.clear()
         tmp = tempfile.mkdtemp()
         app = make_app(tmp, "--all")
         seen = io.StringIO()
