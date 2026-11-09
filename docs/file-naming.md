@@ -119,6 +119,7 @@ number or a document id, **kind** is the document type or category, and
 | chase | 185 | 100% | 100% | 100% | 100% | 0% | 100% | 0% |  |  |  |  |
 | citi | 24 | 100% | 100% | 100% | 100% | 0% | 100% | 0% |  |  |  |  |
 | costco | 7 | 100% | 100% | 100% |  | 100% |  |  | 100% | 100% | 100% | 100% |
+| discoverbank |  | yes | yes | yes | yes | yes | yes | yes |  |  |  |  |
 | discovercard |  | yes | yes | yes | yes | yes | yes | yes |  |  |  |  |
 | dominion | 43 | 100% | 100% | 100% | 100% | 0% | 0% | 0% |  |  |  |  |
 | ebay | 47 | 100% | 100% | 100% |  | 100% |  |  | 98% | 100% | 100% | 0% |
