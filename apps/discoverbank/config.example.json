@@ -4,7 +4,7 @@
   "output_dir": ".",
   "profile_dir": "./browser-profile",
   "browser": "auto",
-  "cdp_url": "http://127.0.0.1:9237",
+  "cdp_url": "http://127.0.0.1:9306",
   "document_types": [
     "Statement"
   ],

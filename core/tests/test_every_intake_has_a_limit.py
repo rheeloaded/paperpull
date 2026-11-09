@@ -649,6 +649,7 @@ ANSWERS = {
     ("apps/chasebusiness/chasebusiness_site.py", "read_answer"): PAGE_ANSWER,
     ("apps/coinbase/coinbase_site.py", "on_response"): PAGE_ANSWER,
     ("apps/discoverbank/discoverbank_site.py", "on_resp"): PAGE_ANSWER,
+    ("apps/discovercard/discovercard_site.py", "on_resp"): PAGE_ANSWER,
     ("apps/etrade/etrade_site.py", "on_response"): PAGE_ANSWER_PDF,
     ("apps/fairfaxwater/fairfaxwater_site.py", "on_response"): PAGE_ANSWER,
     ("apps/fedex/fedex_site.py", "on_response"): PAGE_ANSWER,

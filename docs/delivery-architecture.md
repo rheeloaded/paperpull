@@ -55,6 +55,7 @@ unclassified rather than guessed at.
 | citi |  |  |  |  |  | x |  |
 | costco |  |  |  |  |  |  | x |
 | discoverbank |  |  |  |  |  |  |  |
+| discovercard |  |  |  |  |  |  |  |
 | dominion | x |  |  |  | x | x |  |
 | ebay |  |  |  |  |  |  | x |
 | etrade | x | x | x |  | x | x |  |

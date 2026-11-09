@@ -12,7 +12,7 @@ Loan accounts (personal, student, home) and tax documents are not covered.
 
 ```bash
 ./setup.command                   # one-time: venv + Playwright
-./login.command                   # opens Edge/Chrome on port 9237, sign in yourself
+./login.command                   # opens Edge/Chrome on port 9306, sign in yourself
 paperpull discoverbank diagnose   # a safe look: reads the page, downloads nothing
 paperpull discoverbank pilot      # download the newest few as a test
 paperpull discoverbank all        # download everything available

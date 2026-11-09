@@ -629,7 +629,8 @@ def test_the_apps_that_ask_their_opener_twice_are_found():
     """Found by what their Discover does, never by a name. Not a check that
     passes because it found nobody."""
     assert len(ASKERS) >= 20, ASKER_IDS
-    assert {"aafmaa", "anthem", "discoverbank", "mtb", "pge", "wealthfront"} <= set(ASKER_IDS)
+    assert {"aafmaa", "anthem", "discoverbank", "discovercard", "mtb", "pge",
+            "wealthfront"} <= set(ASKER_IDS)
     assert other_lists(REPO / "apps" / "anthem" / "anthem_docs.py") == [
         "cmd_documents", "cmd_id_cards", "cmd_letters"]
 
@@ -663,7 +664,7 @@ def test_a_discover_whose_documents_page_will_not_open_stops(home):
     assert home.listed_nothing()
 
 
-@pytest.mark.parametrize("home", [REPO / "apps" / "discoverbank"], ids=["discoverbank"],
+@pytest.mark.parametrize("home", [REPO / "apps" / "discovercard"], ids=["discovercard"],
                          indirect=True)
 def test_a_discover_account_moved_to_capital_one_still_ends_clean(home, monkeypatch):
     """The person is told what happened and that there is nothing to fix,
