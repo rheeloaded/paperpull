@@ -45,7 +45,7 @@ LOGIN_URL_MARKERS = [
 ]
 
 FORBIDDEN_CONTROL_RE = re.compile(
-    r"(pay\b|pay\s+bill|make\s+a?\s*payment|autopay|auto\s*pay|"
+    r"(pay\b|pay\s+bill|payments?\b|autopay|auto\s*pay|"
     r"transfer|wire\b|withdraw|deposit|move\s+money|send\s+money|"
     r"apply|apply\s+now|open\s+(a\s+)?(new\s+)?account|new\s+account|"
     r"link\s+(bank|account)|order\b|give\b|gift|rewards?\b|line\s+of\s+credit|"

@@ -228,6 +228,7 @@ def test_the_first_record_discovered_does_not_choose_the_account(tmp_path):
     # Every control the 2026-11-08 survey marked safe that is not a document
     "Open New Account", "View All Account Details", "View All Gift Cards",
     "Download the App", "Order Checks", "Give Feedback", "Go to Business Line of Credit",
+    "Send a Payment", "Make a Payment", "Scheduled Payments",
 ])
 def test_controls_that_are_not_documents_are_not_safe(name):
     assert site.is_safe_control(name) is False
