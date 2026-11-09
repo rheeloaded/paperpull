@@ -1645,8 +1645,8 @@ async function wCreate() {
 // One sheet, whose answers start the matching form on GitHub, each answer
 // under the id that form gives its field, so a request arrives filled in
 // and sorted. A link the person follows and sends themselves: PaperPull
-// holds no GitHub sign-in and posts nothing.
-const ISSUES = 'https://github.com/rheeloaded/paperpull/issues';
+// holds no GitHub sign-in and posts nothing. ISSUES is the support
+// report's, above.
 const RQ_NEED = {provider: [['rq-provider', 'the provider'], ['rq-category', 'the kind of provider'], ['rq-documents', 'the documents you want']],
   feature: [['rq-title', 'a few words about it'], ['rq-area', 'the part of PaperPull'], ['rq-what', 'what it should do'],
             ['rq-why', 'what it would help you with'], ['rq-importance', 'how much it matters']]};
@@ -1660,7 +1660,7 @@ function rqMachine() {
 function requestUrl(kind) {
   const q = kind === 'provider'
     ? {template: 'provider-request.yml', title: '[Provider request] ' + rqVal('rq-provider'), provider: rqVal('rq-provider'),
-       category: rqVal('rq-category'), url: rqVal('rq-url'), documents: rqVal('rq-documents')}
+       category: rqVal('rq-category'), url: rqSite(rqVal('rq-url')), documents: rqVal('rq-documents')}
     : {template: 'feature-request.yml', title: '[Feature] ' + rqVal('rq-title'), area: rqVal('rq-area'), what: rqVal('rq-what'),
        why: rqVal('rq-why'), importance: rqVal('rq-importance'), version: document.querySelector('.ver').textContent.replace(/^v/, ''),
        computer: rqMachine()};
@@ -1672,12 +1672,23 @@ function rqSay(text, field) {
   $('rq-err').hidden = !text;
   if (field) { $(field).setAttribute('aria-invalid', 'true'); $(field).focus(); }
 }
+// The site of a sign-in address, its scheme and host and nothing after
+// them, since the link carries it to GitHub as it opens, and a sign-in
+// page's path or query can hold a username, an email or a token. '' for
+// text that is not a web address or names a user.
+function rqSite(text) {
+  if (!text || /[@\s]/.test(text)) return '';
+  let u;
+  try { u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : 'https://' + text); } catch (e) { return ''; }
+  if (!/^https?:$/.test(u.protocol) || u.username || u.password || !/\.[a-z]{2,}$/i.test(u.hostname)) return '';
+  return u.protocol + '//' + u.hostname;
+}
 function rqProblem(kind) {
-  for (const id of Object.values(RQ_NEED).flat().map(f => f[0])) $(id).removeAttribute('aria-invalid');
+  for (const id of Object.values(RQ_NEED).flat().map(f => f[0]).concat(['rq-url'])) $(id).removeAttribute('aria-invalid');
   const gap = RQ_NEED[kind].find(f => !rqVal(f[0]));
   if (gap) { rqSay('Add ' + gap[1] + ' first.', gap[0]); return true; }
   // A sign-in address is one a person may paste with their name in it.
-  if (kind === 'provider' && rqVal('rq-url') && (/[@\s]/.test(rqVal('rq-url')) || !/\.[a-z]{2,}/i.test(rqVal('rq-url')))) {
+  if (kind === 'provider' && rqVal('rq-url') && !rqSite(rqVal('rq-url'))) {
     rqSay('Enter just the web address, such as https://www.example.com. Never a username.', 'rq-url');
     return true;
   }

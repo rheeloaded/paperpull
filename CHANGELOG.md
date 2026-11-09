@@ -15,7 +15,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   needs answered, and says so when PaperPull already reads the provider
   asked for. The answers start the matching form on GitHub in the person's
   own browser, for them to read and send, so PaperPull still sends nothing
-  itself. Settings and the list of providers open the same sheet.
+  itself. Of where you sign in, only the site goes, never the page's path
+  or what follows it, which can hold a username. Settings and the list of
+  providers open the same sheet.
 
 ### Changed
 - **The control panel looks and reads like a Mac app.** It is set in the
