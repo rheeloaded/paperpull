@@ -207,3 +207,79 @@ def test_a_first_run_going_now_is_never_folded_away(browser, base, tmp_path, mon
     finally:
         app_module._RUNS.clear()
         context.close()
+
+
+def test_a_row_that_needs_setting_up_is_never_folded_away(browser, base, tmp_path, monkeypatch):
+    """A provider never run that cannot run until the person runs setup-all
+    is what needs them, so it stands in sight with what to do, while the
+    rest fold."""
+    _apps(tmp_path, monkeypatch, stopped=True)
+    monkeypatch.setattr(app_module, "_is_packaged", lambda: False)
+    monkeypatch.setattr(app_module, "_runs_apps", lambda: False)
+    monkeypatch.setattr(app_module, "_venv_python",
+                        lambda d: None if Path(d).name == NAMES[2] else Path(d) / ".venv" / "bin" / "python")
+    context, tab = _open(browser, base)
+    try:
+        row = tab.locator("#view-home .acct[data-key^='%s']" % NAMES[2])
+        assert row.evaluate("a => a.checkVisibility()")
+        assert row.evaluate("a => !a.closest('#h-more')")
+        assert "Needs setup" in row.inner_text() and "Run setup-all" in row.inner_text()
+        assert "Not started (8)" in tab.locator("#h-more summary").inner_text()
+    finally:
+        context.close()
+
+
+def test_a_first_run_started_in_this_tab_is_never_folded_away(one_stopped):
+    """The rows were read before the run started here, so none of them says
+    it is running. The run's own row still stands in sight with its
+    progress."""
+    tab = one_stopped
+    got = tab.evaluate("""name => {
+        Object.assign(RUN, {state: 'running', app: name, account: 'primary', provider: name, action: 'all',
+                            lines: [], found: null, total: 0, step: 0, connected: false});
+        renderHome();
+        const row = document.querySelector('#view-home .acct[data-key^="' + name + '"]');
+        const out = {shown: row.checkVisibility(), folded: Boolean(row.closest('#h-more')), text: row.innerText,
+                     more: $('h-more').querySelector('summary').innerText};
+        RUN.state = 'idle';
+        renderHome();
+        return out;
+    }""", NAMES[3])
+    assert got["shown"] and not got["folded"]
+    assert "Running now" in got["text"]
+    assert "Not started (8)" in got["more"]
+
+
+def test_a_row_sharing_a_sign_in_browser_is_never_folded_away(one_stopped):
+    """A provider never run that names the debugging port of another
+    account here would read whichever account that browser is signed in
+    to, so its warning stands in sight while the rest fold."""
+    tab = one_stopped
+    got = tab.evaluate("""name => {
+        const r = ROWS.find(x => x.app === name);
+        r.shared_port = {port: 9300, short: 'Signs in with the same browser as Shop Docs 1, on port 9300.', say: ''};
+        renderHome();
+        const row = document.querySelector('#view-home .acct[data-key^="' + name + '"]');
+        const out = {shown: row.checkVisibility(), folded: Boolean(row.closest('#h-more')), text: row.innerText,
+                     more: $('h-more').querySelector('summary').innerText};
+        delete r.shared_port;
+        renderHome();
+        return out;
+    }""", NAMES[4])
+    assert got["shown"] and not got["folded"]
+    assert "same browser as Shop Docs 1" in got["text"]
+    assert "Not started (8)" in got["more"]
+
+def test_settings_names_each_folder_of_its_own_as_accounts_does(one_stopped):
+    """The folders Use it for every provider would replace are named by
+    provider and person, as Accounts and the picker beside them name them,
+    never by the provider's folder."""
+    said = one_stopped.evaluate("""async () => {
+        ROWS = [{app: 'Bank Statements', account: 'second', provider: 'Bank', owner: 'Pat Doe'}];
+        $('dcpick').innerHTML = '<option value="Bank Statements\\nsecond" selected>Bank, Pat Doe</option>';
+        window.fetch = async () => ({json: async () => ({documents_root: 'D:\\\\Docs', output_dir: 'C:\\\\PaperPull\\\\x',
+            own: [{who: 'Bank Statements, second', folder: 'E:\\\\Mine'}]})});
+        await dcLoad();
+        return $('drownlist').textContent;
+    }""")
+    assert said == "Bank, Pat Doe keeps E:\\Mine"

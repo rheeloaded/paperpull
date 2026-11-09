@@ -29,6 +29,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and account are now told apart by their ids, so neither is saved with
   the other's bytes, and Login says signed in only once DKB answers with
   the list.
+- **Make a request, from the main page.** A button on Accounts opens one
+  sheet for asking for a provider or a feature, with the questions a request
+  needs answered, and says so when PaperPull already reads the provider
+  asked for. The answers start the matching form on GitHub in the person's
+  own browser, for them to read and send, so PaperPull still sends nothing
+  itself. Of where you sign in, only the site goes, never the page's path
+  or what follows it, which can hold a username. Settings and the list of
+  providers open the same sheet.
 
 ### Changed
 - **The control panel looks and reads like a Mac app.** It is set in the
@@ -42,11 +50,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Settings is drawn in groups the way System Settings draws them.
 - **Accounts puts what needs you first.** The page has one blue button, the
   one for the next step, and each row's own is gray. Once anything has run,
-  the providers never run fold under one Not started line, and a list
-  longer than eight gets a search box. Overdue reads in amber, as a new
-  document that is likely waiting, instead of a failure's red. Escape gives
-  focus back to the More button, and Settings names each provider and
-  person as Accounts does, instead of by folder.
+  the providers never run fold under one Not started line, except one
+  whose first run is going, that needs setting up or that shares a
+  sign-in browser with another account, and a list longer than eight gets
+  a search box. Overdue reads in amber, as a new document that is likely
+  waiting, instead of a failure's red. Escape gives focus back to the More
+  button, and Settings names each provider and person as Accounts does,
+  instead of by folder.
 
 ### Fixed
 - **A run started outside its app's folder keeps to that folder (#165).** An

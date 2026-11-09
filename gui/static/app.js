@@ -339,16 +339,26 @@ function queueTargets() {
     (r.state === 'stopped' && !(r.last_run && r.last_run.redownload)) ||
     ['overdue', 'due', 'gap', 'never'].includes(r.state)));
 }
+// Where a row stands on Accounts. A provider never run stands with what
+// needs a look, never folded away under Not started, while its first run
+// is going, in this tab (whose rows were read before it started) or
+// another, while it cannot run until the person sets it up or fixes its
+// folder, and while it shares a sign-in browser with another account, so
+// its first run would read whichever account that browser is signed in to.
+function homeGroup(r) {
+  const g = groupOf(r);
+  return g === 'new' && (r.running || ours(r) || !r.runnable || r.needs_setup || r.shared_port) ? 'needs' : g;
+}
 function rowHTML(r) {
   const p = present(r);
   let chip = '<span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span>';
   // A row never run says what it gets in its sub line, so the sentence every
   // such row shares is left to the summary above them.
-  let say = groupOf(r) === 'new' ? '' : '<div class="say">' + esc(p.say) + '</div>';
+  let say = homeGroup(r) === 'new' ? '' : '<div class="say">' + esc(p.say) + '</div>';
   const port = r.shared_port ? '<div class="hint warn" style="margin-top:4px">' + esc(r.shared_port.short) + '</div>' : '';
   // One filled button on the page, the summary's, so a row's own is gray.
   let act = actButton(r, p.act && Object.assign({}, p.act, {primary: false}));
-  if (r.running) {
+  if (r.running || ours(r)) {
     if (ours(r)) {
       chip = '<span class="chip info">Running now</span>';
       say = '<div class="progress"><span class="bar"><span style="width:' + runPercent() + '%"></span></span>' +
@@ -385,7 +395,7 @@ function renderHome() {
   const groups = {needs: [], ok: [], new: []};
   // A provider whose first run is going now stands with what needs a look,
   // so its progress is never folded away under Not started.
-  for (const r of ROWS) groups[r.running && groupOf(r) === 'new' ? 'needs' : groupOf(r)].push(r);
+  for (const r of ROWS) groups[homeGroup(r)].push(r);
   let html = '';
   const targets = queueTargets();
   if (targets.length) {
@@ -1644,6 +1654,96 @@ async function wCreate() {
     'Next, press Sign in beside ' + (n === 1 ? 'it' : 'one of them') + '. A sign-in window opens for you to sign in there.', 'ok');
 }
 
+// -- asking for a provider or a feature ----------------------------------------------
+// One sheet, whose answers start the matching form on GitHub, each answer
+// under the id that form gives its field, so a request arrives filled in
+// and sorted. A link the person follows and sends themselves: PaperPull
+// holds no GitHub sign-in and posts nothing. ISSUES is the support
+// report's, above.
+const RQ_NEED = {provider: [['rq-provider', 'the provider'], ['rq-category', 'the kind of provider'], ['rq-documents', 'the documents you want']],
+  feature: [['rq-title', 'a few words about it'], ['rq-area', 'the part of PaperPull'], ['rq-what', 'what it should do'],
+            ['rq-why', 'what it would help you with'], ['rq-importance', 'how much it matters']]};
+const rqKind = () => document.querySelector('input[name="rq-kind"]:checked').value;
+const rqVal = id => $(id).value.trim();
+function rqMachine() {
+  if (SERVER) return 'PaperPull Server';
+  const ua = navigator.userAgent;
+  return /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : 'Linux';
+}
+function requestUrl(kind) {
+  const q = kind === 'provider'
+    ? {template: 'provider-request.yml', title: '[Provider request] ' + rqVal('rq-provider'), provider: rqVal('rq-provider'),
+       category: rqVal('rq-category'), url: rqSite(rqVal('rq-url')), documents: rqVal('rq-documents')}
+    : {template: 'feature-request.yml', title: '[Feature] ' + rqVal('rq-title'), area: rqVal('rq-area'), what: rqVal('rq-what'),
+       why: rqVal('rq-why'), importance: rqVal('rq-importance'), version: document.querySelector('.ver').textContent.replace(/^v/, ''),
+       computer: rqMachine()};
+  for (const k of Object.keys(q)) if (!q[k]) delete q[k];
+  return ISSUES + '/new?' + new URLSearchParams(q);
+}
+function rqSay(text, field) {
+  $('rq-err').textContent = text;
+  $('rq-err').hidden = !text;
+  if (field) { $(field).setAttribute('aria-invalid', 'true'); $(field).focus(); }
+}
+// The site of a sign-in address, its scheme and host and nothing after
+// them, since the link carries it to GitHub as it opens, and a sign-in
+// page's path or query can hold a username, an email or a token. '' for
+// text that is not a web address or names a user.
+function rqSite(text) {
+  if (!text || /[@\s]/.test(text)) return '';
+  let u;
+  try { u = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : 'https://' + text); } catch (e) { return ''; }
+  if (!/^https?:$/.test(u.protocol) || u.username || u.password || !/\.[a-z]{2,}$/i.test(u.hostname)) return '';
+  return u.protocol + '//' + u.hostname;
+}
+function rqProblem(kind) {
+  for (const id of Object.values(RQ_NEED).flat().map(f => f[0]).concat(['rq-url'])) $(id).removeAttribute('aria-invalid');
+  const gap = RQ_NEED[kind].find(f => !rqVal(f[0]));
+  if (gap) { rqSay('Add ' + gap[1] + ' first.', gap[0]); return true; }
+  // A sign-in address is one a person may paste with their name in it.
+  if (kind === 'provider' && rqVal('rq-url') && !rqSite(rqVal('rq-url'))) {
+    rqSay('Enter just the web address, such as https://www.example.com. Never a username.', 'rq-url');
+    return true;
+  }
+  rqSay('');
+  return false;
+}
+// PaperPull may already read the provider being asked for.
+function rqKnown() {
+  const norm = t => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const typed = norm(rqVal('rq-provider'));
+  const hit = typed && ((PROVIDERS && PROVIDERS.providers) || []).find(p => norm(p.provider) === typed || norm(p.slug) === typed);
+  $('rq-known').textContent = !hit ? '' : hit.installed ? 'PaperPull already has ' + hit.provider + ' set up here, under Accounts.'
+    : 'PaperPull already works with ' + hit.provider + '. Add it with Add a provider on Accounts.';
+  $('rq-known').hidden = !hit;
+}
+function rqShowKind(kind) {
+  document.querySelector('input[name="rq-kind"][value="' + kind + '"]').checked = true;
+  $('rq-provider-fields').hidden = kind !== 'provider';
+  $('rq-feature-fields').hidden = kind !== 'feature';
+  rqSay('');
+}
+async function openRequest(kind, wanted) {
+  for (const f of $('dlg-request').querySelectorAll('input[type=text], textarea, select')) { f.value = ''; f.removeAttribute('aria-invalid'); }
+  $('rq-body').hidden = false; $('rq-done').hidden = true; $('rq-go').hidden = false; $('rq-cancel').textContent = 'Cancel';
+  rqShowKind(kind || 'provider');
+  $('rq-provider').value = wanted || '';
+  $('dlg-request').showModal();
+  $(kind === 'feature' ? 'rq-title' : 'rq-provider').focus();
+  if (!PROVIDERS) { try { PROVIDERS = await getJSON('/api/providers'); } catch (e) { /* no check, the request still goes */ } }
+  rqKnown();
+}
+$('dlg-request').addEventListener('change', e => { if (e.target.name === 'rq-kind') rqShowKind(e.target.value); });
+$('rq-provider').addEventListener('input', rqKnown);
+$('rq-form').addEventListener('submit', e => e.preventDefault());
+// The link's own click, so the browser opens it as the person's own action.
+$('rq-go').addEventListener('click', e => {
+  const kind = rqKind();
+  if (rqProblem(kind)) { e.preventDefault(); return; }
+  $('rq-go').href = requestUrl(kind);
+  setTimeout(() => { $('rq-body').hidden = true; $('rq-done').hidden = false; $('rq-go').hidden = true; $('rq-cancel').textContent = 'Done'; }, 0);
+});
+
 // -- moving to another computer (#67) ------------------------------------------------
 // One box. On the welcome page of a new computer it brings a history file in,
 // setting up what the file names. In Settings it writes one too.
@@ -2240,7 +2340,13 @@ async function dcLoad() {
   // Each one Apply to every account would change, named before it is pressed.
   const own = d.documents_root ? (d.own || []) : [];
   $('drown').hidden = !own.length;
-  $('drownlist').innerHTML = own.map(o => '<li>' + esc(o.who) + ' keeps ' +
+  // Named as Accounts names them, as the picker below is. The server names
+  // each by its folder, and its person when not the first.
+  const named = o => {
+    const r = (ROWS || []).find(x => (x.account === 'primary' ? x.app : x.app + ', ' + x.account) === o.who);
+    return r ? r.provider + (whoOf(r) ? ', ' + whoOf(r) : '') : o.who;
+  };
+  $('drownlist').innerHTML = own.map(o => '<li>' + esc(named(o)) + ' keeps ' +
     esc(o.folder || "its provider's folder") + '</li>').join('');
   $('drapplyall').hidden = !own.length;
   $('dcleft').hidden = !d.left;
@@ -2417,6 +2523,8 @@ const DO = {
   },
   'rc-go': () => { $('dlg-record').close(); startRun(DLG_ROW, 'record'); },
   'tm-go': () => tmGo(),
+  'request': el => openRequest(el.dataset.kind, el.id === 'w-request' ? W.search.trim() : ''),
+  'rq-close': () => $('dlg-request').close(),
   'dock-close': () => closeDock(),
   'dismiss-notice': () => notice('', ''),
   'find-clear': () => clearFind(),
