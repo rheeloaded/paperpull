@@ -265,7 +265,7 @@ class App:
     def cmd_open_browser(self):
         profile = Path(self.config["profile_dir"]).resolve()
         profile.mkdir(parents=True, exist_ok=True)
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9303")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9307")
         url = site.URLS.get("login") or site.URLS["home"]
         name = browser_launcher.open_signin_browser(profile, port, url,
                                                     mode=self.config.get("browser", "auto"),

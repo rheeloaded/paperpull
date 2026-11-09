@@ -629,7 +629,8 @@ def test_the_apps_that_ask_their_opener_twice_are_found():
     """Found by what their Discover does, never by a name. Not a check that
     passes because it found nobody."""
     assert len(ASKERS) >= 20, ASKER_IDS
-    assert {"aafmaa", "anthem", "discovercard", "mtb", "pge", "wealthfront"} <= set(ASKER_IDS)
+    assert {"aafmaa", "anthem", "discoverbank", "discovercard", "mtb", "pge",
+            "wealthfront"} <= set(ASKER_IDS)
     assert other_lists(REPO / "apps" / "anthem" / "anthem_docs.py") == [
         "cmd_documents", "cmd_id_cards", "cmd_letters"]
 

@@ -375,22 +375,118 @@ def test_a_run_that_saved_documents_never_says_nothing_new(panel, action, saved)
     o = _outcome(panel, _counted(new_files=23), saved, action)
     assert (o["tone"], o["title"]) == ("ok", "23 new documents saved")
     entry = {"action": action, "exit_code": 0, "result": _counted(new_files=23), "saved": saved}
-    assert ", 23 new files</span>" in panel.evaluate("(e) => runLine(e)", entry)
+    assert ", 23 new documents</span>" in panel.evaluate("(e) => runLine(e)", entry)
     o = _outcome(panel, _counted(new_files=23, failed=1), saved, action)
     assert o["title"] == "23 new documents saved, some need a look"
+
+
+@pytest.mark.parametrize("stop, code, title, signin, resume", [
+    ("needs_you", "0", "Citi needed you partway", True, True),
+    ("page", "0", "Citi's page was not what PaperPull expected", False, True),
+    ("slow", "1", "Citi did not answer in time", False, True),
+    ("error", "1", "PaperPull ran into something it did not expect", False, True),
+    ("", "0", "Stopped before finishing", True, True),
+])
+def test_a_stop_says_why_and_whose_it_is_to_fix(panel, stop, code, title, signin, resume):
+    """A changed page used to read as a sign-out, so the person signed in
+    and pressed Continue, which stopped at the same place again. Only a
+    stop a sign-in can fix offers one, and no stop guesses a sign-out."""
+    o = panel.evaluate("""([result, code]) => {
+        Object.assign(RUN, {result, code, action: 'all', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", [dict(_counted(stopped=1), stop=stop), code])
+    assert o["title"] == title
+    assert "may have signed you out" not in o["say"] and "exited with code" not in o["say"]
+    assert (o.get("signin") is not False) is signin and bool(o.get("resume")) is resume
+    # Whose it is to fix is said only where it is known. A page that was
+    # not what the app expected is a chat window over a button as often as
+    # a changed site, and that stop's own words say to close it and press
+    # Resume. A wait that ran out is a changed page or a sign-out as often
+    # as a busy site, and an error can be a window the person closed.
+    assert "not you" not in o["say"] and "busy" not in o["title"]
+    assert "too slow" not in o["title"] and "how it gets fixed" not in o["say"]
+    if stop == "page":
+        assert "If it stops at the same place again" in o["say"]
+
+
+def test_a_page_stop_of_a_check_offers_to_check_again(panel):
+    """A stop at a page offers what the stop's own words say, Resume, and
+    a Discover that stopped there offers Check again in its place."""
+    o = panel.evaluate("""(result) => {
+        Object.assign(RUN, {result, code: '0', action: 'discover', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", dict(_counted(stopped=1), stop="page"))
+    assert o.get("recheck") and not o.get("resume") and o.get("signin") is False
+
+
+@pytest.mark.parametrize("code, refused, asked", [
+    ("5", "", False),
+    ("6", "", False),
+    ("7", "", False),
+    ("1", "Citi is already running for this account, in another tab or window.", False),
+    ("1", "", True),
+])
+def test_a_run_that_wrote_no_failure_file_is_never_offered_one(panel, code, refused, asked):
+    """A sign-in with no window, a recording with nothing in it, a run
+    that found nobody signed in and a run that did not start write no
+    failure file. The panel asked for the
+    newest one all the same, since their codes are not 0, and an older
+    run's from the last hour then read 'This run wrote a file about what
+    went wrong'."""
+    seen = panel.evaluate("""([code, refused]) => {
+        window.checkFailure = () => { window.askedForFailure = true; };
+        window.askedForFailure = false;
+        Object.assign(RUN, {state: 'running', result: null, action: code === '5' ? 'login' : 'all',
+                            again: false, saved: [], provider: 'Citi', kind: 'DOCUMENT', lines: [],
+                            app: 'Citi Documents', account: 'primary', onDone: null, queue: false});
+        finishRun(code, refused, true);
+        return window.askedForFailure;
+    }""", [code, refused])
+    assert seen is asked
+
+
+def test_a_list_left_unread_keeps_its_own_next_step_whatever_stopped_it(panel):
+    o = panel.evaluate("""(result) => {
+        Object.assign(RUN, {result, code: '0', action: 'resume', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", dict(_counted(stopped=1, list_not_read=1), stop="page"))
+    assert o.get("relist") and "was not read to its end" in o["say"]
+
+
+@pytest.mark.parametrize("action, code, refused, tone, title, signin", [
+    ("login", "5", "", "bad", "No sign-in window opened", False),
+    ("record", "6", "", "info", "Nothing was recorded", True),
+    ("all", "1", "Citi is already running for this account, in another tab or window.",
+     "bad", "This run did not start", False),
+])
+def test_what_did_not_happen_is_never_said_to_have(panel, action, code, refused, tone, title, signin):
+    """A sign-in with no window, an empty or refused recording and a run
+    the server would not start each say so, and never 'Sign-in window
+    opened', 'Recording saved' or an exit code."""
+    o = panel.evaluate("""([action, code, refused]) => {
+        Object.assign(RUN, {result: null, code, action, again: false, refused, saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", [action, code, refused])
+    assert (o["tone"], o["title"]) == (tone, title)
+    assert "exited with code" not in o["say"]
+    assert bool(o.get("signin")) is signin and not o.get("resume")
 
 
 def test_a_run_that_saved_nothing_still_says_so(panel):
     o = _outcome(panel, _counted(), [])
     assert (o["tone"], o["title"]) == ("ok", "Nothing new")
-    assert _outcome(panel, _counted(failed=1), [])["title"] == "Finished, needs attention"
+    assert _outcome(panel, _counted(failed=1), [])["title"] == "Finished, some need a look"
     # A log in the run's folder can hold anything, and an odd count in it
     # is no count.
     for odd in ("23", -1, 2.5, None, [3]):
         entry = {"action": "all", "exit_code": 0, "result": {"new_files": odd}, "saved": []}
         assert ", nothing new</span>" in panel.evaluate("(e) => runLine(e)", entry), odd
     entry = {"action": "all", "exit_code": 0, "result": {}, "saved": ["a.pdf", "b.pdf"]}
-    assert ", 2 new files</span>" in panel.evaluate("(e) => runLine(e)", entry)
+    assert ", 2 new documents</span>" in panel.evaluate("(e) => runLine(e)", entry)
 
 
 def test_a_broken_log_is_no_log(root):
@@ -567,6 +663,9 @@ def test_a_second_run_of_one_account_waits_for_the_first(base, root):
     assert running and running["action"] == "pilot"
     second = run(base, {"app": "Bank Statements", "action": "all"})
     assert "already running for this account" in second and events(second, "done") == ["1"]
+    # Said as a run that did not start, not as one that began and failed.
+    refused = events(second, "refused")
+    assert len(refused) == 1 and "already running for this account" in refused[0]
     # Another person on the same app is not held up.
     other = run(base, {"app": "Bank Statements", "account": "second", "action": "discover"})
     assert "already running" not in other
@@ -620,6 +719,241 @@ class _Req:
 
     async def json(self):
         return self._body
+
+
+def _pdf(path, age):
+    """A PDF written `age` seconds ago."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"%PDF-1.4\n")
+    when = time.time() - age
+    os.utime(path, (when, when))
+    return path
+
+
+def _opened(monkeypatch):
+    opened = []
+
+    class Popen:
+        def __init__(self, cmd, *a, **k):
+            opened.append(Path(cmd[-1]).resolve())
+
+    monkeypatch.setattr(app_module.subprocess, "Popen", Popen)
+    return opened
+
+
+def test_open_folder_shows_the_documents_not_the_programs_beside_them(root, monkeypatch):
+    """The account's own folder holds its script, config and records, and
+    the PDFs one folder down, so Open folder opens the one holding them."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "2024" / "march.pdf", 100)
+    # Newer, but none of these is where its documents are.
+    for records in ("Logs", "Diagnostics", "Backups", "Manual Review", ".cache"):
+        _pdf(own / records / "x.pdf", 1)
+    opened = _opened(monkeypatch)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements"})))
+    assert opened == [(own / "Statements").resolve()]
+    # No run has said what it saved, so a run's page says nowhere.
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": ""}
+
+
+def test_open_folder_follows_the_newest_document_into_a_documents_folder(root, tmp_path, monkeypatch):
+    """Once a documents folder is set, only what is saved from then on goes
+    there, so it is shown once it holds the newest document, and not before."""
+    own, docs = root / "Bank Statements", tmp_path / "Documents" / "Bank"
+    docs.mkdir(parents=True)
+    _pdf(own / "Statements" / "old.pdf", 500)
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    _pdf(docs / "Statements" / "new.pdf", 10)
+    assert app_module._where_documents_are(meta, "primary") == docs
+
+
+def test_with_no_document_yet_it_is_the_documents_folder_or_the_accounts_own(root, tmp_path, monkeypatch):
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == root / "Bank Statements"
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    assert app_module._where_documents_are(meta, "primary") == docs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="links need privileges on Windows")
+def test_a_link_in_the_folder_is_never_followed_to_find_documents(root, tmp_path, monkeypatch):
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf(tmp_path / "elsewhere" / "newer.pdf", 1)
+    (own / "Linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+
+
+def test_open_folder_never_looks_in_a_browser_profile_or_another_persons_folder(root):
+    """The signed-in browser's profile sits in the account's own folder, and
+    a config can put another person's folder there too. Neither is where
+    this account's documents are, whatever PDF is newest in it."""
+    own = root / "Bank Statements"
+    (own / "config.json").write_text(json.dumps({"output_dir": ".", "profile_dir": "./browser-profile"}),
+                                     encoding="utf-8")
+    (own / "config.inside.json").write_text(json.dumps(
+        {"output_dir": "./inside", "profile_dir": "./inside/browser-profile"}), encoding="utf-8")
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf(own / "browser-profile" / "Default" / "viewed.pdf", 1)
+    _pdf(own / "inside" / "Statements" / "theirs.pdf", 50)
+    _pdf(own / "inside" / "browser-profile" / "Default" / "viewed.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    assert app_module._where_documents_are(meta, "inside") == own / "inside" / "Statements"
+
+
+@pytest.mark.parametrize("docs", ["Elsewhere", "{own}/browser-profile", "{own}/Manual Review/docs", "{apps}"])
+def test_a_documents_folder_no_run_would_use_is_never_shown(root, tmp_path, monkeypatch, docs):
+    """Core keeps documents in the account's own folder when documents_dir
+    is not a full path, is the browser profile, is in its records or holds
+    the account's own folder (storage.set_documents_dir), so the panel
+    never shows such a folder either. One that is not a full path was read
+    from wherever the panel was started."""
+    own = root / "Bank Statements"
+    docs = docs.format(own=own, apps=root)
+    monkeypatch.chdir(tmp_path)
+    (own / "config.json").write_text(json.dumps(
+        {"output_dir": ".", "profile_dir": "./browser-profile", "documents_dir": docs}), encoding="utf-8")
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf((tmp_path / docs) / "Statements" / "newer.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+
+
+def _ran(own, saved, lines, action="all"):
+    """A download run's log entry naming what it saved, and the
+    new-this-run.txt it wrote, each line where it saved a file."""
+    app_module._note_run(own, {"action": action, "exit_code": 0, "result": {"new_files": len(saved)},
+                               "saved": saved})
+    (own / "new-this-run.txt").write_text("# %d file(s)\n" % len(lines) + "".join(
+        line + "\n" for line in lines), encoding="utf-8")
+
+
+def test_saved_to_names_where_that_runs_documents_are(root, monkeypatch):
+    """The folder a run's page names, and its Open folder shows, is the one
+    that run's files are in, never the one holding a newer document of
+    another kind, and the account's own when they are of two kinds."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "2024" / "march.pdf", 100)
+    _pdf(own / "Tax Documents" / "2023" / "1099.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Tax Documents"
+    _ran(own, ["march.pdf"], ["Statements/2024/march.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(own / "Statements")}
+    opened = _opened(monkeypatch)
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "saved"})))
+    assert opened == [(own / "Statements").resolve()]
+    _ran(own, ["march.pdf", "1099.pdf"], ["Statements/2024/march.pdf", "Tax Documents/2023/1099.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(own)}
+
+
+def test_saved_to_follows_a_run_moved_into_the_documents_folder(root, tmp_path, monkeypatch):
+    own, docs = root / "Bank Statements", tmp_path / "Documents" / "Bank"
+    # Moved there by the panel once the run ended, keeping its folders.
+    _pdf(docs / "Statements" / "2024" / "march.pdf", 100)
+    _pdf(own / "Statements" / "2019" / "kept.pdf", 1)
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    _ran(own, ["march.pdf"], ["Statements/2024/march.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(docs)}
+    # Moved in part, so in two places with nothing in common, and none is said.
+    _pdf(own / "Statements" / "2024" / "april.pdf", 100)
+    _ran(own, ["march.pdf", "april.pdf"], ["Statements/2024/march.pdf", "Statements/2024/april.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": ""}
+
+
+def test_saved_to_takes_only_that_runs_own_files_in_its_own_folders(root, tmp_path, monkeypatch):
+    """A line naming a file outside the person's folder, a list its run's
+    log does not name and a run that downloads nothing name no folder, and
+    Open folder beside it then opens nothing."""
+    second = root / "Bank Statements - second"
+    _pdf(second / "Statements" / "a.pdf", 10)
+    outside = _pdf(tmp_path / "elsewhere" / "Statements" / "b.pdf", 10)
+    mine = "../Bank Statements - second/Statements/a.pdf"
+    _ran(second, ["a.pdf", "b.pdf"], [mine, str(outside)])
+    assert app_module.api_saved_in("Bank Statements", "second") == {"folder": str(second / "Statements")}
+    opened = _opened(monkeypatch)
+    for saved, lines, action in ((["b.pdf"], [str(outside)], "all"), (["c.pdf"], [mine], "all"),
+                                 (["a.pdf"], [mine], "discover")):
+        _ran(second, saved, lines, action)
+        assert app_module.api_saved_in("Bank Statements", "second") == {"folder": ""}
+        with pytest.raises(app_module.HTTPException) as e:
+            asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "account": "second",
+                                                     "what": "saved"})))
+        assert e.value.status_code == 404
+    assert opened == []
+
+
+def test_a_support_file_and_what_was_set_aside_open_their_own_folders(root, monkeypatch):
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "a.pdf", 100)
+    (own / "Diagnostics").mkdir()
+    opened = _opened(monkeypatch)
+    for what in ("diagnostics", "records"):
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+    assert opened == [(own / "Diagnostics").resolve(), own.resolve()]
+    (own / "Manual Review").mkdir()
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "aside"})))
+    assert opened[-1] == (own / "Manual Review").resolve()
+
+
+@pytest.mark.parametrize("what, folder", [("aside", "Manual Review"), ("diagnostics", "Diagnostics")])
+def test_a_folder_named_on_a_button_that_is_not_there_opens_nothing(root, monkeypatch, what, folder):
+    """Open what was set aside opened the account's own folder, among its
+    script, config and records, when Manual Review was not there, and said
+    nothing, under a button that names Manual Review."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "a.pdf", 100)
+    opened = _opened(monkeypatch)
+    with pytest.raises(app_module.HTTPException) as e:
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+    assert e.value.status_code == 404 and "no %s folder" % folder in e.value.detail
+    assert opened == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="links need privileges on Windows")
+def test_a_manual_review_that_is_a_link_opens_nothing(root, tmp_path, monkeypatch):
+    own = root / "Bank Statements"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (own / "Manual Review").symlink_to(elsewhere, target_is_directory=True)
+    opened = _opened(monkeypatch)
+    with pytest.raises(app_module.HTTPException) as e:
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "aside"})))
+    assert e.value.status_code == 404 and opened == []
+    for what in ("../..", "/etc", "Statements"):
+        with pytest.raises(app_module.HTTPException) as e:
+            asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+        assert e.value.status_code == 400
+
+
+def test_a_run_that_saved_documents_says_where_and_offers_to_show_them(panel):
+    """Where the documents went was asked where it was answered least, on
+    the page that lists them."""
+    js = panel.evaluate("() => [whereSaved.toString(), finishRun.toString(), renderRun.toString()]")
+    assert "/api/saved-in?" in js[0]
+    assert "savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(" in js[1]
+    shown = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'current',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'all', scope: {year: '', start: '', end: ''}, again: false, lines: [], result: null,
+                            saved: ['a.pdf'], code: '0',
+                            refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: '/Users/me/Documents/Bank/Statements'});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const keep = document.querySelector('#view-run .keepopen');
+        return [keep.innerText, keep.querySelector('button').dataset.what || ''];
+    }""")
+    assert "Saved to /Users/me/Documents/Bank/Statements" in shown[0] and "Open folder" in shown[0]
+    assert shown[1] == "saved", "the folder named beside it, where that run's documents are"
 
 
 def test_open_folder_shows_only_the_accounts_own_folder(root, monkeypatch):
@@ -734,6 +1068,394 @@ def test_a_run_that_ended_by_itself_before_its_page_closed_keeps_its_code(base, 
     assert log[0]["exit_code"] == 0 and log[0]["closed"] is False
     assert log[0]["result"]["new_files"] == 1
     assert _rows()[("Bank Statements", "primary")]["last_outcome"] == ""
+
+
+@pytest.mark.parametrize("action", ["all", "pilot", "discover", "resume"])
+def test_a_run_with_nobody_signed_in_says_sign_in_first(panel, action):
+    """Get new before Open sign-in window read as a crash with an exit code,
+    said 'Sign in again' to somebody who never had, and offered Continue
+    for a run that never started."""
+    o = panel.evaluate("""(action) => {
+        Object.assign(RUN, {result: null, code: NOT_SIGNED_IN, action, again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", action)
+    assert (o["tone"], o["title"]) == ("info", "Sign in first")
+    assert "exited with code" not in o["say"] and "nothing was downloaded" in o["say"]
+    assert o["signin"] and o["first"] and o["rerun"] and not o.get("resume")
+
+
+def test_once_signed_in_the_same_run_is_the_next_step_over_the_same_dates(panel):
+    step = panel.evaluate("""() => rerunStep({action: 'pilot', scope: {year: '2024', start: '', end: ''}}, 'k', '2')""")
+    assert 'data-action="pilot"' in step and 'data-year="2024"' in step and ">2</div>" in step
+    # After a sign-in, Get new over all dates, as the row's own button runs.
+    step = panel.evaluate("""() => rerunStep({action: 'login', scope: {year: '2024'}}, 'k', '1')""")
+    assert 'data-action="all"' in step and "data-year" not in step and "Get new documents" in step
+    assert 'btn btn-p' in step and 'stepnum on' in step
+    # After a sign-in still to do, which then carries the weight itself.
+    step = panel.evaluate("""() => rerunStep({action: 'all', scope: {}}, 'k', '2', true)""")
+    assert 'btn btn-s' in step and 'stepnum on' not in step
+
+
+def test_a_sign_in_window_that_opened_goes_straight_on_to_get_new(panel):
+    o = panel.evaluate("""() => {
+        Object.assign(RUN, {result: null, code: '0', action: 'login', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""")
+    assert o["title"] == "Sign-in window opened" and o["rerun"] and o["signin"] is False
+
+
+@pytest.mark.parametrize("action, again, opens", [("diagnose", False, 'data-do="support"'),
+                                                  ("record", False, 'data-do="record"'),
+                                                  ("all", True, 'data-do="restore"')])
+def test_a_run_started_from_its_own_dialog_offers_that_dialog_again(panel, action, again, opens):
+    """A support report, a recording or a restore that found nobody signed
+    in offered Get new documents beside "run this again", a run nobody
+    asked for, and a restore's dates as a Get new over them."""
+    step = panel.evaluate("""([action, again]) => rerunStep({action, again, scope: {year: '2024', start: '', end: ''}},
+                                                            'k', '2', true)""", [action, again])
+    assert opens in step and "data-action" not in step and "Get new" not in step
+    # A run with no step of its own gets none rather than another run.
+    assert panel.evaluate("() => rerunStep({action: 'verify', scope: {}}, 'k', '2', true)") == ""
+
+
+def test_signing_in_from_sign_in_first_keeps_the_run_to_do_next(panel):
+    """Open sign-in window on a Sign in first page replaced that page, and
+    with it the same run over the same dates, by Get new over every date."""
+    got = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'signin',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'pilot', scope: {year: '2024', start: '', end: ''}, again: false, lines: [],
+                            result: null, saved: [], code: NOT_SIGNED_IN, refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date(), savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const btn = document.querySelector('#view-run .nextsteps button[data-action="login"]');
+        let asked = null;
+        const was = startRun;
+        startRun = (row, action, opts) => { asked = {action, opts}; return true; };
+        try { DO.run(btn); } finally { startRun = was; }
+        return [btn.dataset.then || '', asked];
+    }""")
+    assert got[0] == "1"
+    assert got[1]["action"] == "login"
+    assert got[1]["opts"]["then"] == {"action": "pilot", "scope": {"year": "2024", "start": "", "end": ""},
+                                      "again": False}
+    step = panel.evaluate("""() => rerunStep({action: 'login', scope: {}, then: {action: 'pilot',
+                                              scope: {year: '2024', start: '', end: ''}, again: false}}, 'k', '1')""")
+    assert 'data-action="pilot"' in step and 'data-year="2024"' in step and "btn btn-p" in step
+
+
+@pytest.mark.parametrize("action, again, code, stop, offers, said", [
+    ("discover", False, "0", "needs_you", ['data-action="discover"', 'data-year="2024"'], "then check what's there"),
+    ("pilot", False, "0", "needs_you", ['data-action="resume"', ">Continue<"], "then continue"),
+    ("all", False, "1", None, ['data-action="resume"', ">Continue<"], "then continue"),
+    ("all", True, "0", "needs_you", ['data-do="restore"'], "then restore deleted files"),
+    ("record", False, "6", None, ['data-do="record"'], "then record steps for support"),
+])
+def test_a_sign_in_on_a_stopped_runs_page_offers_that_run_next(panel, action, again, code, stop, offers, said):
+    """The sign-in on a stopped run's page kept a run only on Sign in
+    first, so a Discover that stopped needing the person ("Sign in in its
+    window, then check again") led to a sign-in whose page offered Get new
+    documents, which downloads. So did Continue after a stop, a restore
+    that stopped, and a recording with nothing in it ("then record
+    again")."""
+    result = dict(_counted(stopped=1), stop=stop) if stop else None
+    got = panel.evaluate("""([action, again, code, result]) => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'stopped',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action, scope: {year: '2024', start: '', end: ''}, again, lines: [], result,
+                            saved: [], code, refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: '', then: null});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const btn = document.querySelector('#view-run .nextsteps button[data-action="login"]');
+        if (!btn) return null;
+        let asked = null;
+        const was = startRun;
+        startRun = (row, action, opts) => { asked = {action, opts}; return true; };
+        try { DO.run(btn); } finally { startRun = was; }
+        // The sign-in's own page, once its window opened.
+        Object.assign(RUN, {action: 'login', scope: {year: '', start: '', end: ''}, again: false, result: null,
+                            code: '0', then: asked.opts.then || null});
+        RUN.outcome = runOutcome();
+        renderRun();
+        return [asked.action, document.querySelector('#view-run .nextsteps').innerHTML, RUN.outcome.say];
+    }""", [action, again, code, result])
+    assert got is not None, "the stopped run's page offers a sign-in"
+    login, step, say = got
+    assert login == "login"
+    assert "Get new" not in step and 'data-action="all"' not in step
+    for want in offers:
+        assert want in step
+    assert said in say and "get new documents" not in say
+
+
+def test_a_sign_in_on_its_own_still_goes_on_to_get_new(panel):
+    """A sign-in pressed anywhere else keeps no run, so its page offers Get
+    new documents and says so."""
+    got = panel.evaluate("""() => {
+        Object.assign(RUN, {result: null, code: '0', action: 'login', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: [], then: null});
+        return [runOutcome().say, rerunStep(RUN, 'k', '1')];
+    }""")
+    assert got[0].endswith("leave it open, then get new documents.")
+    assert 'data-action="all"' in got[1]
+
+
+def test_check_again_checks_over_the_same_dates(panel):
+    got = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'current',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'discover', scope: {year: '', start: '2023-01-01', end: '2023-06-30'}, again: false,
+                            lines: [], result: null, saved: [], code: 'stopped', refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date(), savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const b = document.querySelector('#view-run .nextsteps button[data-action="discover"]');
+        return [b.dataset.start, b.dataset.end];
+    }""")
+    assert got == ["2023-01-01", "2023-06-30"]
+
+
+@pytest.mark.parametrize("code, said", [(5, "no sign-in window opened"), (6, "nothing was recorded"),
+                                        (7, "nobody was signed in"), (1, "ended with a problem")])
+def test_recent_runs_reads_what_did_not_happen_as_no_failure(panel, code, said):
+    """An account in Sign in first showed "Get new documents, ended with a
+    problem" beside it, and a sign-in with no window or a recording with
+    nothing in it read as failures too."""
+    action = {5: "login", 6: "record"}.get(code, "all")
+    line = panel.evaluate("(e) => runLine(e)", {"action": action, "exit_code": code, "result": None})
+    assert ", " + said + "</span>" in line
+
+
+@pytest.mark.parametrize("stop, code", [("page", "0"), ("error", "1"), (None, "1")])
+def test_a_stop_that_says_make_a_support_report_offers_one_on_its_page(panel, stop, code):
+    """The page of a run said "make a support report from More", and a
+    run's page has no More menu."""
+    result = dict(_counted(stopped=1), stop=stop) if stop else None
+    got = panel.evaluate("""([result, code]) => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'stopped',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: [], slug: 'bank'};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'all', scope: {year: '', start: '', end: ''}, again: false, lines: [], result,
+                            saved: [], code, refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const page = $('view-run');
+        const b = page.querySelector('[data-do="support"]');
+        if (b) DO.support(b);
+        return [RUN.outcome.say, Boolean(page.querySelector('[data-do="menu"]')), b ? b.textContent : '',
+                $('dlg-support').open];
+    }""", [result, code])
+    say, has_more, button, opened = got
+    assert "make a support report with the button below" in say and "More" not in say
+    assert not has_more
+    assert button == "Make a support report" and opened
+
+
+def test_a_run_with_nobody_signed_in_is_not_a_stop_to_continue():
+    entry = {"action": "all", "exit_code": app_module.NOT_SIGNED_IN, "result": None}
+    assert app_module._last_outcome(entry) == "signin"
+    assert app_module._account_state(None, "signin", []) == "signin"
+    assert app_module.STATE_ORDER.index("signin") < app_module.STATE_ORDER.index("not_started")
+
+
+def test_an_account_not_started_offers_to_sign_in_not_to_open_its_page(panel):
+    acts = panel.evaluate("""() => ['not_started', 'signin'].map(state =>
+        present({state, provider: 'Citi', kind: 'DOCUMENT', runnable: true, documents: 0, gaps: [], latest: []}).act)""")
+    assert all(a == {"label": "Sign in", "run": "login", "primary": True} for a in acts), acts
+
+
+def test_the_welcome_says_what_its_folder_holds_before_providers_are_chosen(panel):
+    """The folder was checked only at Set up, two steps on. One already
+    holding providers was not noticed, and one in a sync service, which
+    would sync each sign-in, was not said."""
+    reply = {}
+    panel.route("**/api/root/check", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(reply)))
+
+    def press(answer, typed="/Users/me/PaperPull"):
+        reply.clear()
+        reply.update(answer)
+        return panel.evaluate("""async (typed) => {
+            PROVIDERS = {providers: [], templates: true};
+            if ($('newroot').value !== typed) { $('newroot').value = typed; $('newroot').oninput && $('newroot').oninput(); }
+            W.step = 1; W.add = false; wShow();
+            await DO['w-next']();
+            return {step: W.step, said: $('rootcheck').hidden ? '' : $('rootcheck').textContent,
+                    use: !$('w-useroot').hidden, next: $('w-next1').textContent};
+        }""", typed)
+
+    panel.evaluate("() => openWelcome(false).catch(() => {})")
+    bad = press({"ok": False, "problem": "That is a file, not a folder. Choose a folder."})
+    assert bad["step"] == 1 and bad["said"].startswith("That is a file") and not bad["use"]
+
+    found = {"ok": True, "found": ["Chase Statements", "Amex Statements"], "found_count": 2, "synced_by": ""}
+    first = press(found, "/Users/me/Old")
+    assert first["step"] == 1 and first["use"]
+    assert "Found 2 providers already set up here (Chase Statements, Amex Statements)." in first["said"]
+    assert press(found, "/Users/me/Old")["step"] == 2, "a second Continue goes on, to add more"
+
+    synced = {"ok": True, "found": [], "found_count": 0, "synced_by": "iCloud Drive"}
+    warned = press(synced, "/Users/me/Library/Mobile Documents/PaperPull")
+    assert warned["step"] == 1 and "in iCloud Drive" in warned["said"] and warned["next"] == "Continue anyway"
+    assert press(synced, "/Users/me/Library/Mobile Documents/PaperPull")["step"] == 2
+
+    assert press({"ok": True, "found": [], "found_count": 0, "synced_by": ""}, "/Users/me/New")["step"] == 2
+
+
+def test_moving_says_the_pdfs_stay_unless_the_folders_are_copied(panel):
+    """A history file marks every document it lists as downloaded and brings
+    no PDF, so Get new never fetched them, and nothing said so. The Move card
+    now leads with copying the folders, which brings everything."""
+    said = panel.evaluate("""async () => {
+        const was = META;
+        META = null;
+        placeMove(false);                   // as at start, before META is read
+        const early = $('hxlead').textContent;
+        META = Object.assign({}, was || {}, {apps_root: '/Users/me/PaperPull', documents_root: '/Users/me/Drive/Docs'});
+        placeMove(false);
+        const card = [$('hxlead').textContent, $('hxfilelead').hidden ? '' : $('hxfilelead').textContent];
+        placeMove(true);
+        const welcome = $('hxlead').textContent;
+        await openWelcome(false).catch(() => {});
+        return {early, card, welcome, aside: $('movesay').textContent};
+    }""")
+    assert "Export history saves a file" in said["early"]
+    copy, file_ = said["card"]
+    assert copy.startswith("To move everything, your PDFs included, copy your PaperPull folder, /Users/me/PaperPull")
+    assert "your Documents folder, /Users/me/Drive/Docs" in copy and "choose the Documents folder again" in copy
+    # Each config names the documents folder by its full path, and so do the
+    # records of what was moved there, so a copy elsewhere would point at
+    # the old computer's folder.
+    assert "/Users/me/Drive/Docs, to the same place on the new computer, since PaperPull keeps its full path" in copy
+    assert "Any folder you chose for one account's documents goes to the same place too" in copy
+    assert file_.startswith("No way to copy the folders?") and "no PDF" in file_
+    assert "The PDFs stay on the other computer. Copy them over, or use Restore deleted files" in said["welcome"]
+    assert said["aside"].startswith("Copy your PaperPull folder from the old computer, then type where it is above")
+
+
+def test_a_report_lands_on_its_file_and_where_to_send_it(panel):
+    """About 15 steps from More to an attached file. The dialog said to sign
+    in with no way to, the folder held several files, and the place to send
+    it was under Settings, About."""
+    got = panel.evaluate("""() => {
+        const r = {app: 'Chase Statements', account: 'primary', provider: 'Chase', slug: 'chase', kind: 'DOCUMENT',
+                   state: 'current', runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'diagnose', scope: {year: '', start: '', end: ''}, again: false, lines: [],
+                            result: null, saved: [], code: '0', refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date()});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const keep = document.querySelector('#view-run .keepopen');
+        const show = keep.querySelector('[data-do="report-reveal"]');
+        const link = keep.querySelector('a');
+        // The dialog's own sign-in, which keeps the person, and the dialog, where they are.
+        let asked = null;
+        const real = startRun;
+        startRun = (row, action, opts) => { asked = [row.app, action, opts]; return true; };
+        DLG_ROW = r;
+        DO['sp-signin']();
+        startRun = real;
+        return {kind: show && show.dataset.kind, text: show && show.textContent, href: link.href, target: link.target,
+                rel: link.rel, asked, said: $('sp-signsay').textContent, plain: reportLink({}).match(/href="([^"]+)"/)[1]};
+    }""")
+    assert got["kind"] == "diagnose" and got["text"] == "Show the file"
+    url = got["href"]
+    assert url.startswith("https://github.com/rheeloaded/paperpull/issues/new?")
+    assert "template=app-broke.yml" in url and "app=chase" in url and "title=%5BBroken%5D+chase%2C+" in url
+    assert (got["target"], got["rel"]) == ("_blank", "noopener")
+    # Its words come to the dialog, and what it came to is said there when
+    # it ends (test_a_support_report_from_its_own_dialog.py).
+    assert got["asked"][:2] == ["Chase Statements", "login"]
+    assert got["asked"][2]["stay"] is True and got["asked"][2]["sink"] == "sp-log"
+    assert got["said"].startswith("Opening the sign-in window.")
+    assert got["plain"] == "https://github.com/rheeloaded/paperpull/issues", "no slug, the issue list"
+
+
+def test_every_row_carries_the_name_its_issues_use(root, monkeypatch):
+    """Only a provider PaperPull ships, one providers.json names, since the
+    name goes into a link to GitHub and a script named by hand could carry
+    any words."""
+    shipped = dict(app_module._provider_notes(), bank={"documents": "", "group": "banks"})
+    monkeypatch.setattr(app_module, "_provider_notes", lambda: shipped)
+    rows = _rows()
+    assert rows[("Bank Statements", "primary")]["slug"] == "bank"
+    assert rows[("Bank Statements", "second")]["slug"] == "bank"
+    assert rows[("Shop Receipts", "primary")]["slug"] == "", "shop_receipts.py is no provider PaperPull ships"
+
+
+def _github_form(name):
+    return (Path(app_module.__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE" / name).read_text(encoding="utf-8")
+
+
+def _rq(panel, kind, values):
+    return panel.evaluate("""async ([kind, values]) => {
+        document.addEventListener('click', e => { if (e.target.id === 'rq-go') e.preventDefault(); }, true);
+        await openRequest(kind);
+        for (const [id, v] of Object.entries(values)) $(id).value = v;
+        $('rq-go').click();
+        await new Promise(f => setTimeout(f, 30));
+        return {err: $('rq-err').hidden ? '' : $('rq-err').textContent, href: $('rq-go').href,
+                done: !$('rq-done').hidden, invalid: [...$('dlg-request').querySelectorAll('[aria-invalid=true]')].map(n => n.id)};
+    }""", [kind, values])
+
+
+def test_a_request_needs_its_answers_before_it_goes_to_github(panel):
+    """Blank forms are what the sheet is there to stop."""
+    r = _rq(panel, "feature", {})
+    assert r["err"].startswith("Add a few words") and r["invalid"] == ["rq-title"] and not r["done"]
+    r = _rq(panel, "provider", {"rq-provider": "Acme", "rq-category": "Utility", "rq-documents": "bills", "rq-url": "me@acme.com"})
+    assert "Never a username" in r["err"] and not r["done"]
+
+
+def test_a_request_starts_the_right_github_form_with_its_answers(panel):
+    r = _rq(panel, "provider", {"rq-provider": "Acme Water", "rq-category": "Utility", "rq-documents": "monthly bills"})
+    assert r["done"] and "template=provider-request.yml" in r["href"]
+    for part in ("provider=Acme+Water", "category=Utility", "documents=monthly+bills", "title=%5BProvider+request%5D+Acme+Water"):
+        assert part in r["href"], part
+    assert "url=" not in r["href"], "an answer left blank is left out"
+    r = _rq(panel, "feature", {"rq-title": "A schedule", "rq-area": "Settings", "rq-what": "Run monthly", "rq-why": "I forget",
+                               "rq-importance": "Nice to have"})
+    assert r["done"] and "template=feature-request.yml" in r["href"]
+    for part in ("area=Settings", "what=Run+monthly", "why=I+forget", "importance=Nice+to+have", "version=", "computer="):
+        assert part in r["href"], part
+
+
+def test_the_sheet_offers_exactly_what_each_github_form_accepts():
+    """GitHub fills a dropdown only from one of its own options."""
+    page = app_module.HTML
+    for field, form in (("rq-category", "provider-request.yml"), ("rq-area", "feature-request.yml"), ("rq-importance", "feature-request.yml")):
+        options = re.findall(r"<option>([^<]+)</option>", re.search(r'<select id="%s">(.*?)</select>' % field, page, re.S).group(1))
+        for option in options:
+            assert "- %s\n" % option in _github_form(form), option
+    for name, ids in (("provider-request.yml", ("provider", "category", "url", "documents")),
+                      ("feature-request.yml", ("area", "what", "why", "importance", "version", "computer"))):
+        for field in ids:
+            assert "id: %s\n" % field in _github_form(name), field
+
+
+def test_a_provider_already_read_is_said_before_it_is_requested(panel):
+    said = panel.evaluate("""() => {
+        PROVIDERS = {providers: [{provider: 'SDG&E', slug: 'sdge', installed: false}], templates: true};
+        $('dlg-request').showModal();
+        $('rq-provider').value = 'sdg e';
+        rqKnown();
+        return $('rq-known').textContent;
+    }""")
+    assert said.startswith("PaperPull already works with SDG&E")
 
 
 # -- a gap a whole run could not fill (#149) ---------------------------------------

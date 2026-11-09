@@ -553,7 +553,7 @@ def test_a_spreadsheet_that_grows_while_it_is_sent_is_sent_at_the_length_it_was_
 
 def test_a_spreadsheet_that_is_gone_says_nothing_was_exported(shop, monkeypatch):
     exported(shop, monkeypatch).unlink()
-    assert asked(app_module.api_export_download) == (404, "nothing exported yet")
+    assert asked(app_module.api_export_download) == (404, "Create the file first.")
 
 
 def test_a_spreadsheet_swapped_after_its_check_is_still_read_from_the_checked_open(

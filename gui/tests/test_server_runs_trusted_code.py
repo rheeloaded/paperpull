@@ -205,8 +205,10 @@ def test_start_run_refuses_an_unmapped_install(layout):
         chunk if isinstance(chunk, bytes) else chunk.encode()
         for chunk in _drain(resp))
     text = body.decode("utf-8", "replace")
-    assert "does not match a provider PaperPull ships" in text
+    assert "PaperPull does not recognize this provider's folder" in text
     assert "event: done\ndata: 1" in text
+    # Said as a run that did not start, never one that began and failed.
+    assert "event: refused\ndata: PaperPull does not recognize this provider's folder" in text
 
 
 def test_renamed_folder_still_resolves(layout):

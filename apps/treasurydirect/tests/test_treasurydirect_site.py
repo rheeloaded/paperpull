@@ -973,7 +973,7 @@ class OwnBrowser(unittest.TestCase):
 
         opened = {}
         original = docs.browser_launcher.open_signin_browser
-        docs.browser_launcher.open_signin_browser = lambda profile, port, url, **kw: opened.update(port=port)
+        docs.browser_launcher.open_signin_browser = lambda profile, port, url, **kw: opened.update(port=port) or "Chrome"
         try:
             with redirect_stdout(io.StringIO()):
                 app.cmd_open_browser()

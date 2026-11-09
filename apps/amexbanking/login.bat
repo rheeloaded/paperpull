@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-rem  login.bat          -> your account (config.json, port 9303)
+rem  login.bat          -> your account (config.json, port 9307)
 rem  login.bat biz2     -> config.biz2.json (own folders, profile, port)
 if "%~1"=="" (set "CFG=") else (set "CFG=--config config.%~1.json")
 echo ============================================================

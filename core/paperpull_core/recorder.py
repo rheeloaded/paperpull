@@ -1445,7 +1445,8 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
     """Start a recording on `page`, wait for the person, write the file.
 
     `site` is the app's own site module, for the two host checks and its
-    control guard. Returns the path written, or None if it refused."""
+    control guard. Returns the path written, or None if it refused or
+    recorded no step, so an app never ends an empty one as a saved file."""
     from .redact import set_private_words
     from .words import write_shaped
     from pathlib import Path
@@ -1506,6 +1507,7 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
     if not report["steps"]:
         say("  Nothing was recorded. If you clicked, the page may have been")
         say("  replaced between starting and clicking. Try again.")
+        return None
 
     # The file has already been built from the word list. This is the
     # second pair of eyes over the result, and it runs here rather than

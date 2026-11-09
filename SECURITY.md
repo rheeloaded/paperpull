@@ -45,20 +45,25 @@ The `.gitignore` already blocks all of the following. Do not override it.
 
   - **Apps that hold a control to an allowlist** (AAFMAA, ADP, Ally, Alpaca,
     American Family, Apple Card, AT&T, Bank of America, Best Buy, Bilt, Chase, Chase Business,
-    Coinbase, Costco, Discover, Dominion, eBay, E*TRADE, Fairfax Water, First
+    Coinbase, Costco, Discover, Discover Bank, Dominion, eBay, E*TRADE, Fairfax Water, First
     Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Nelnet, Newrez,
     PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD, Spectrum,
-    State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo, Verizon
-    Mobile and Wells Fargo) decide which of the page's controls may be
+    State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
+    Wells Fargo) decide which of the page's controls may be
     pressed with `is_safe_control()`, a hard blocklist (`FORBIDDEN_CONTROL_RE`,
     buy/sell/transfer/pay/delete/change-setting) **plus** a document
     allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass **both**, so
     anything unrecognized is refused, deny by default. AAFMAA runs the same
-    two patterns inline. Alpaca, Best Buy, Bilt, Chase Business, First
-    Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo narrow the
-    allowlist to the whole labels they press, and all of them but
+    two patterns inline. Alpaca, Best Buy, Bilt, Chase Business, Discover
+    Bank, First Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo
+    narrow the allowlist to the whole labels they press, and all of them but
     TreasuryDirect give each control a guard of its own built the same way.
-    Best Buy presses only its year menu and a year in it. Bank of America
+    Best Buy presses only its year menu and a year in it. Discover Bank
+    presses only the keep-alive button of Discover's inactivity dialog, a
+    button whose whole name is I'm still here, Stay signed in, Continue
+    session or Keep me signed in, or logged in for signed in, and that the
+    blocklist passes. It opens its statements page by its address and asks
+    for every list and PDF from inside the page. Bank of America
     presses only the Statements heading of its statements page, a button
     whose whole name is Statements and which says it is shut, when the page
     shows no Download PDF link, and again after a later reload shuts it,
@@ -90,16 +95,17 @@ The `.gitignore` already blocks all of the following. Do not override it.
     the blocklist inline, since a document allowlist would refuse the paging
     they need.
   - **Apps that click nothing at all during a run** (Affirm, Amazon, Anthem,
-    Apple, Citi, E-ZPass Virginia, FedEx, Fidelity, Gap, GitHub, Home Depot,
-    Invest529, IRS, Kroger, Lowe's, MILITARY STAR, myPay, NetBenefits, NW
-    Natural, Optum Bank, Paylocity, Portland General Electric, SDG&E, Stripe,
-    TSP, Tualatin Water, Uber, UKG and UPS) open the provider's
+    Apple, Cetera, Citi, DKB, E-ZPass Virginia, FedEx, Fidelity, Gap, GitHub,
+    Home Depot, Invest529, IRS, Kroger, Lowe's, MILITARY STAR, myPay,
+    NetBenefits, NW Natural, Optum Bank, Paylocity, Portland General Electric,
+    SDG&E, Stripe, TSP, Tualatin Water, Uber, UKG, UPS, Verizon Mobile and
+    Ziply Fiber) open the provider's
     pages by their address and read them, or ask for the same lists and
     files the provider's own page asks for, from inside the signed-in page or
     with its cookies. On a site that can also change direct deposit and tax
     withholding, not activating a control is the strongest guarantee
     available, and UKG additionally refuses any URL whose path says `EDIT`
-    rather than `VIEW`. The Diagnose command of Affirm, Fidelity, Invest529,
+    rather than `VIEW`. The Diagnose command of Affirm, DKB, Fidelity, Invest529,
     NetBenefits and TSP, run by hand to help repair a provider, may follow up to six
     links whose whole text is a section name it knows, such as Statements or
     Documents, each through `is_safe_control()`.

@@ -1,0 +1,15 @@
+{
+  "_comment": "Editable rules mapping Ziply Fiber ziplyfiber.com document titles to filename summaries. Checked in order: tax (unused), then insurance (unused), then statement. Every bill on Billing's list is titled 'Ziply Fiber Bill <date>' by ziply_site.py, and its file name then adds its masked account number.",
+  "tax_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "\\bbill\\b",
+      "summary": "Internet Bill"
+    }
+  ],
+  "skip_patterns": [
+    "payment\\s+history",
+    "\\bexcel\\b"
+  ]
+}

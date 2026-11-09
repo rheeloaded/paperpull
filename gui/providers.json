@@ -26,12 +26,15 @@
     "bilt": {"gets": "Bilt Card statements from the wallet", "group": "banks"},
     "bofa": {"gets": "Checking, savings and credit card statements", "group": "banks", "note": "Tested on checking and credit card statements, not yet on savings"},
     "capitalone": {"gets": "Bank and card statements, tax forms, letters", "group": "banks"},
+    "cetera": {"gets": "Brokerage statements, quarterly performance reports", "group": "investing"},
     "chase": {"gets": "Credit card statements", "group": "banks"},
     "chasebusiness": {"gets": "Business checking and business card statements, up to seven years", "group": "banks", "note": "Tested on one profile"},
     "citi": {"gets": "Credit card statements, about two years online", "group": "banks"},
     "coinbase": {"gets": "Monthly statements, One Card statements and tax documents", "group": "investing", "note": "One Card statements tested on one account"},
     "costco": {"gets": "Warehouse, gas, pharmacy and costco.com receipts", "group": "shopping", "note": "Tested on one membership so far"},
+    "discoverbank": {"gets": "Checking and savings statements", "group": "banks", "note": "Tested on checking and savings. For a Discover credit card, choose Discover"},
     "discovercard": {"gets": "Credit card statements", "group": "banks", "note": "For a card moved to Capital One, choose Capital One"},
+    "dkb": {"gets": "Kontoauszüge, card statements, securities documents and tax certificates", "group": "banks", "note": "Tested on one account"},
     "dominion": {"gets": "Billing statements", "group": "bills"},
     "ebay": {"gets": "Order receipts, up to ten years back", "group": "shopping"},
     "etrade": {"gets": "Statements, trade confirmations, tax forms", "group": "investing"},
@@ -87,9 +90,10 @@
     "vanguard": {"gets": "Statements for every account, a 401(k) included", "group": "investing"},
     "venmo": {"gets": "Monthly account statements, printed from the statement page", "group": "banks", "note": "Run on one personal account so far"},
     "verizon": {"gets": "Fios bill statements", "group": "bills"},
-    "verizonmobile": {"gets": "Wireless monthly bills", "group": "bills", "tested": false},
+    "verizonmobile": {"gets": "Wireless monthly bills, about two years online", "group": "bills"},
     "walmart": {"gets": "Receipts", "group": "shopping"},
     "wealthfront": {"gets": "Statements, tax documents", "group": "investing"},
-    "wellsfargo": {"gets": "Account statements, tax documents", "group": "banks", "note": "Tested on credit card statements, not yet on checking, savings, mortgage or tax forms"}
+    "wellsfargo": {"gets": "Account statements, tax documents", "group": "banks", "note": "Tested on credit card statements, not yet on checking, savings, mortgage or tax forms"},
+    "ziply": {"gets": "Monthly internet bills, the whole history My Account lists", "group": "bills"}
   }
 }

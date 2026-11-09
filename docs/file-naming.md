@@ -119,6 +119,7 @@ number or a document id, **kind** is the document type or category, and
 | chase | 185 | 100% | 100% | 100% | 100% | 0% | 100% | 0% |  |  |  |  |
 | citi | 24 | 100% | 100% | 100% | 100% | 0% | 100% | 0% |  |  |  |  |
 | costco | 7 | 100% | 100% | 100% |  | 100% |  |  | 100% | 100% | 100% | 100% |
+| discoverbank |  | yes | yes | yes | yes | yes | yes | yes |  |  |  |  |
 | discovercard |  | yes | yes | yes | yes | yes | yes | yes |  |  |  |  |
 | dominion | 43 | 100% | 100% | 100% | 100% | 0% | 0% | 0% |  |  |  |  |
 | ebay | 47 | 100% | 100% | 100% |  | 100% |  |  | 98% | 100% | 100% | 0% |
@@ -238,10 +239,10 @@ in that app's `Backups` folder first. Saving renames nothing.
 After a save that changed something, the page offers to rename the files
 you already have, in every app and every account the save changed. An
 app with its own pattern is left out of a shared change, because the
-shared pattern does not name its files. **Preview renames** runs each
-app's `--rename` in turn and lists every file that would change, in the
-Output tab. **Rename them** is offered only once that preview has
-finished, asks once more, and runs `--rename --apply` the same way. If
+shared pattern does not name its files. **1. Preview** runs each
+app's `--rename` in turn and lists every file that would change, below
+the buttons. **2. Rename** is offered only once that preview has
+finished, and runs `--rename --apply` the same way. If
 any app does not finish, the rest are not started and the page says
 which one stopped.
 

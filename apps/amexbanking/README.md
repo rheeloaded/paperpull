@@ -18,7 +18,7 @@ For American Express credit cards, use the [`amex`](../amex) app instead.
 
 ```bash
 ./setup.command                  # one-time: venv + Playwright
-./login.command                  # opens Edge/Chrome on port 9303, sign in yourself
+./login.command                  # opens Edge/Chrome on port 9307, sign in yourself
 paperpull amexbanking diagnose   # a safe look: reads the page, downloads nothing
 paperpull amexbanking pilot      # download the newest few as a test
 paperpull amexbanking all        # download everything available

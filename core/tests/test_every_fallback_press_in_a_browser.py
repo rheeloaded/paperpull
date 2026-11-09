@@ -225,7 +225,7 @@ def test_every_app_that_pressed_through_the_page_is_here():
     """Not vacuous. The eleven whose capture had the page press and that a
     run still calls, by what the capture does."""
     assert {d.name for d in APPS} >= {"amfam", "applecard", "att", "etrade", "golden1",
-                                       "newrez", "sba", "smud", "statefarm", "verizonmobile",
+                                       "newrez", "sba", "smud", "statefarm",
                                        "wellsfargo"}
 
 

@@ -519,13 +519,29 @@ def ask_or_none(prompt: str):
     on its own, because a Windows process handed DEVNULL reports
     `isatty()` as True and then raises at the first read. Both are
     handled here so that no caller has to remember either.
+
+    Every question an app asks here is one for the person at the
+    provider's window, to sign in again, get past a check, or wait for a
+    page. When nobody is there to answer, that is noted, so a run that then
+    stops can say it stopped for them (run_reporting.stop_reason).
     """
+    global _NOBODY_ANSWERED
     if not can_ask():
+        _NOBODY_ANSWERED = True
         return None
     try:
         return input(prompt)
     except (EOFError, KeyboardInterrupt, OSError):
+        _NOBODY_ANSWERED = True
         return None
+
+
+_NOBODY_ANSWERED = False
+
+
+def nobody_answered() -> bool:
+    """Whether a question this run asked found nobody to answer it."""
+    return _NOBODY_ANSWERED
 
 
 def pause_for_sign_in(say=print, next_step: str = "Discover or Pilot") -> bool:
