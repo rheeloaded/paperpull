@@ -15,6 +15,7 @@
  "bilt": 5,
  "bofa": 69,
  "capitalone": 20,
+ "cetera": 36,
  "chase": 76,
  "chasebusiness": 7,
  "citi": 4,
@@ -25,6 +26,7 @@
  "costco": 54,
  "discoverbank": 56,
  "discovercard": 56,
+ "dkb": 8,
  "dominion": 47,
  "ebay": 43,
  "etrade": 373,
@@ -82,8 +84,9 @@
  "vanguard": 91,
  "venmo": 73,
  "verizon": 0,
- "verizonmobile": 0,
+ "verizonmobile": 62,
  "walmart": 444,
  "wealthfront": 24,
- "wellsfargo": 135
+ "wellsfargo": 135,
+ "ziply": 83
 }
