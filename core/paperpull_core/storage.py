@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import csv
 import json
+import ntpath
 import os
 import re
 import sys
@@ -87,7 +88,11 @@ def spec():
 def load_config(path: Optional[Path] = None) -> dict:
     """Read config.json and fill in this provider's defaults."""
     sp = spec()
-    path = Path(path) if path else (sp.project_dir / "config.json")
+    if path:
+        p = Path(path)
+        path = p if p.is_absolute() or p.exists() else (sp.project_dir / p)
+    else:
+        path = sp.project_dir / "config.json"
     if not path.exists():
         copy_cmd = ("copy config.example.json config.json"
                     if sys.platform == "win32"
@@ -114,6 +119,7 @@ def load_config(path: Optional[Path] = None) -> dict:
             "and names, and the control panel reads what it prints line by line, so a "
             "name has to be one line of plain text. Rename it, or change the setting, "
             "and run again." % held)
+    _anchor_to_config(cfg, path)
     if os.environ.get("PAPERPULL_SERVER") == "1":
         hold_to_the_server(cfg, path)
         refuse_links_out(cfg["output_dir"], path)
@@ -158,6 +164,30 @@ def config_read() -> Optional[Path]:
 # owner is not, since no run prints it (a name typed at the prompt is one
 # line), and the control panel writes it from what a person types.
 _NAMED_SETTINGS = ("output_dir", "profile_dir", "documents_dir")
+# The folder settings a relative path is read from the config's folder for.
+_ANCHORED_SETTINGS = ("output_dir", "profile_dir")
+
+
+def _anchor_to_config(cfg, path) -> None:
+    """Make each relative folder setting absolute, read from the config
+    file's own folder rather than from wherever the run was started, so
+    "output_dir": "." means the same folder from the app folder, the repo
+    root or the control panel. Done once, before anything checks or uses
+    a folder, so the server's checks, Paths, the documents-folder keys and
+    the browser profile all see the one path. abspath, not resolve: a
+    folder reached through a link keeps the name it was given, as an
+    absolute setting always has. documents_dir is left as written, since
+    set_documents_dir refuses one that is not absolute (#102)."""
+    if not isinstance(cfg, dict):
+        return
+    base = Path(path).absolute().parent
+    for key in _ANCHORED_SETTINGS:
+        value = cfg.get(key)
+        # A Windows path (C:\\... or \\\\server\\...) is absolute wherever the
+        # config is read, so it is never joined onto this folder.
+        if (isinstance(value, str) and value.strip()
+                and not os.path.isabs(value) and not ntpath.isabs(value)):
+            cfg[key] = os.path.abspath(os.path.join(base, value))
 
 
 def _not_on_one_line(cfg, path) -> str:

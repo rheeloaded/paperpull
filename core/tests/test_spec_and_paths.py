@@ -167,3 +167,127 @@ def test_config_saved_with_a_bom_still_loads(tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text('{"owner": "Sam"}', encoding="utf-8-sig")
     assert storage.load_config(cfg)["owner"] == "Sam"
+
+
+def test_relative_output_dir_resolves_to_app_folder_when_cwd_is_outside(tmp_path, monkeypatch):
+    """When a script is run from the parent/root folder, output_dir='.' must resolve
+    to the app's own directory, not the parent/cwd."""
+    app_dir = tmp_path / "Discover Statements"
+    app_dir.mkdir()
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.json").write_text('{"output_dir": "."}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == app_dir.resolve()
+    paths.ensure()
+    assert (app_dir / "Backups").is_dir()
+    assert (app_dir / "Statements").is_dir()
+    assert not (tmp_path / "Backups").exists()
+    assert not (tmp_path / "Statements").exists()
+
+
+def test_relative_output_dir_sibling_resolves_relative_to_app_folder(tmp_path, monkeypatch):
+    """Multi-account configs like config.biz.json often specify '../App - biz'."""
+    app_dir = tmp_path / "American Express Statements"
+    app_dir.mkdir()
+    biz_dir = tmp_path / "American Express Statements - biz"
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.biz.json").write_text(
+        '{"output_dir": "../American Express Statements - biz"}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.biz.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == biz_dir.resolve()
+
+
+def test_documents_dir_for_matches_relative_output_dir_when_run_from_outside(tmp_path, monkeypatch):
+    """documents_dir mapping works correctly even when output_dir='.' is loaded from outside."""
+    app_dir = tmp_path / "Discover Statements"
+    app_dir.mkdir()
+    docs = tmp_path / "0GDrive" / "Discover Statements"
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.json").write_text(
+        f'{{"output_dir": ".", "documents_dir": "{docs.as_posix()}"}}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == app_dir.resolve()
+    assert paths.documents == docs.resolve()
+
+
+
+def test_relative_profile_dir_resolves_to_the_config_folder(tmp_path, monkeypatch):
+    """--open-browser from the repo root must open the same signed-in profile
+    as a run from the app folder."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    storage.bind(document_spec(app_dir))
+    (app_dir / "config.json").write_text(
+        '{"output_dir": ".", "profile_dir": "./browser-profile"}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.json")
+
+    assert Path(cfg["profile_dir"]) == app_dir / "browser-profile"
+
+
+def test_the_server_checks_the_folder_that_is_written_to(tmp_path, monkeypatch):
+    """On PaperPull Server the output_dir checked for links out is the one
+    Paths writes to, read from the config's folder, not from the cwd."""
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    storage.bind(document_spec(app_dir))
+    (app_dir / "config.json").write_text('{"output_dir": "../out"}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path / "app")
+    seen = []
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    monkeypatch.setattr(storage, "hold_to_the_server", lambda cfg, path: None)
+    monkeypatch.setattr(storage, "refuse_links_out", lambda out, path: seen.append(out))
+    monkeypatch.chdir(tmp_path.parent)  # somewhere else entirely
+
+    cfg = storage.load_config(app_dir / "config.json")
+
+    assert seen == [str(tmp_path / "out")]
+    assert storage.Paths(Path(cfg["output_dir"])).root == tmp_path / "out"
+
+
+def test_a_folder_reached_through_a_link_keeps_one_documents_key(tmp_path, monkeypatch):
+    """A config under a linked folder (macOS /tmp, a Drive alias) maps its
+    documents folder by the same key whether output_dir was "." or absolute."""
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    docs = tmp_path / "docs"
+    storage.bind(document_spec(link))
+    (link / "config.json").write_text(
+        f'{{"output_dir": ".", "documents_dir": "{docs.as_posix()}"}}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    storage.load_config(link / "config.json")
+
+    assert storage.documents_dir_for(str(link)) == str(docs)
+    assert storage.Paths(link).documents == docs
+
+
+def test_a_relative_documents_dir_is_still_refused(tmp_path, monkeypatch):
+    app_dir = tmp_path / "app"
+    app_dir.mkdir()
+    storage.bind(document_spec(app_dir))
+    (app_dir / "config.json").write_text(
+        '{"output_dir": ".", "documents_dir": "docs"}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    storage.load_config(app_dir / "config.json")
+
+    assert storage.documents_dir_for(str(app_dir)) == ""

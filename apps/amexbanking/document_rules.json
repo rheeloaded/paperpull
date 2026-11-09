@@ -1,0 +1,36 @@
+{
+  "_comment": "Editable rules mapping American Express Banking document titles to filename summaries. Checked in order: tax, then year-end, then insurance, then statement.",
+  "tax_rules": [
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?K\\b", "summary": "1099-K Tax Form"},
+    {"pattern": "1099-?B\\b", "summary": "1099-B Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "tax\\s+(document|form|statement)", "summary": "Tax Document"}
+  ],
+  "year_end_rules": [
+    {"pattern": "year.?end\\s+summary", "summary": "Year-End Summary"},
+    {"pattern": "annual\\s+summary", "summary": "Year-End Summary"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "business\\s+checking\\s+statement", "summary": "Business Checking Statement"},
+    {"pattern": "rewards\\s+checking\\s+statement", "summary": "Rewards Checking Statement"},
+    {"pattern": "personal\\s+checking\\s+statement", "summary": "Personal Checking Statement"},
+    {"pattern": "high\\s+yield\\s+savings\\s+statement", "summary": "High Yield Savings Statement"},
+    {"pattern": "savings\\s+(account\\s+)?statement", "summary": "Savings Statement"},
+    {"pattern": "monthly\\s+(account\\s+)?statement", "summary": "Monthly Statement"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"},
+    {"pattern": "checking\\s+statement", "summary": "Checking Statement"},
+    {"pattern": "\\bstatement\\b", "summary": "Statement"}
+  ],
+  "skip_patterns": [
+    "deposit\\s+account\\s+agreement",
+    "\\bagreement\\b",
+    "disclosure",
+    "privacy\\s+(notice|policy|statement)",
+    "fee\\s+schedule",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "change\\s+in\\s+terms"
+  ]
+}
