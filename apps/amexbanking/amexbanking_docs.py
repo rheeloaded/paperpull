@@ -162,7 +162,7 @@ class App:
             site.SESSION.account_label = configured_account
             site.SESSION.label_configured = True
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -503,12 +503,14 @@ class App:
         )
         saved = site.amexbanking_download(page, raw_doc, out_path)
         if not saved:
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            # Nothing was saved, so nothing is in Manual Review: a failure,
+            # which the next run tries again (#152).
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF (see the log)")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
