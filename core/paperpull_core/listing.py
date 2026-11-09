@@ -44,6 +44,12 @@ it leaves the note as it was before it began. An unscoped run that stopped
 stays stopped through any number of scoped ones, until a run reads the
 whole list, and someone who always sets a scope is never asked to read
 the list again for it.
+
+The note also keeps when a run that was not scoped last read the whole
+list, carried on through a listing that stops and through a scoped one, so
+the panel can say when a provider was last checked. A Resume reads no list,
+and a Verify or a Rename reads none either, so none of them is a check, and
+a card that said "checked" after one said something nobody had done (#148).
 """
 from __future__ import annotations
 
@@ -56,6 +62,8 @@ from .storage import atomic_write_json, now_iso, spec
 
 COMPLETE = "complete"
 STOPPED = "stopped"
+# When a run that was not scoped last read the whole list.
+WHOLE_AT = "whole_at"
 
 # The mark six receipt apps kept beside discovery.json while a Discover ran
 # and after one that did not end whole, before this note took its place. An
@@ -80,6 +88,27 @@ def _write(app, note: dict) -> bool:
 
 def _note(app, whole: bool, **more) -> bool:
     return _write(app, dict({"complete": bool(whole), "at": now_iso()}, **more))
+
+
+def whole_at(note):
+    """When a note says the whole list was last read, or None. A note from
+    before it kept that time is taken at its word when it says complete, as
+    Resume takes it, and as having no such time when it says stopped.
+    tools/status.py reads the note the same way, for the panel."""
+    if not isinstance(note, dict):
+        return None
+    if WHOLE_AT in note:
+        got = note[WHOLE_AT]
+    else:
+        got = note.get("at") if note.get("complete") is True else None
+    return got if isinstance(got, str) and got else None
+
+
+def _whole_at(app):
+    try:
+        return whole_at(json.loads(app.paths.last_listing.read_text(encoding="utf-8")))
+    except Exception:
+        return None
 
 
 def _old_mark(app):
@@ -129,7 +158,7 @@ def started(app) -> None:
         app._listing_before = _NOT_STARTED
     except Exception:
         pass
-    if _note(app, False, before=before, scoped=scoped(app)):
+    if _note(app, False, before=before, scoped=scoped(app), **{WHOLE_AT: _whole_at(app)}):
         try:
             app._listing_before = before
         except Exception:
@@ -147,14 +176,15 @@ def read_whole(app) -> None:
     nothing about the rest, so a scoped listing puts back what the note
     said before it began, and no note when there was none."""
     if not scoped(app):
-        _note(app, True)
+        at = now_iso()
+        _write(app, {"complete": True, "at": at, WHOLE_AT: at})
         return
     before = getattr(app, "_listing_before", _NOT_STARTED)
     if before is _NOT_STARTED:
         return
     app._listing_before = _NOT_STARTED
     if isinstance(before, bool):
-        _note(app, before)
+        _note(app, before, **{WHOLE_AT: _whole_at(app)})
         return
     try:
         app.paths.last_listing.unlink(missing_ok=True)

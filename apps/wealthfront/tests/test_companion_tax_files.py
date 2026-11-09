@@ -178,8 +178,54 @@ def test_no_folder_is_made_when_the_dialog_gives_no_link(tmp_path, monkeypatch):
     page = MagicMock()
     page.locator().count.return_value = 1
     app.download_one(page, doc, storage.build_pdf_filename(doc.date, doc.summary, "", record=doc))
-    assert doc.state == State.NO_RECEIPT_AVAILABLE.value
+    # A row with no control found is no proof there is nothing to fetch. It
+    # was recorded as No Receipt Available, which is final, and counted for
+    # a Manual Review folder that held nothing (#152). It is a failure the
+    # next run tries again, written in the index once.
+    assert doc.state == State.FAILED.value
+    assert (app.stats["failed"], app.stats["manual_review"]) == (1, 0), app.stats
+    assert not app._already_done(doc)
     assert not (app.paths.tax_documents / "Wealthfront").exists()
+    again = a_form()
+    app.download_one(page, again, storage.build_pdf_filename(again.date, again.summary, "", record=again))
+    assert len(app.index_csv.read_all()) == 1, app.index_csv.read_all()
+
+
+@pytest.mark.parametrize("rec, asked", [
+    # What up to 0.61.0 wrote for a row with no control found.
+    ({"state": State.NO_RECEIPT_AVAILABLE.value,
+      "notes": "Invented earlier note; No safe download control found for this row"}, True),
+    ({"state": State.NO_RECEIPT_AVAILABLE.value, "notes": "No safe download control found for this row"}, True),
+    # The twins, final for another reason or saved once.
+    ({"state": State.NO_RECEIPT_AVAILABLE.value, "notes": "Invented reason with nothing to fetch"}, False),
+    ({"state": State.NO_RECEIPT_AVAILABLE.value, "notes": "No safe download control found for this row",
+      "downloaded_ok": True}, False),
+    ({"state": State.COMPLETED.value, "notes": "No safe download control found for this row"}, False),
+])
+def test_a_row_an_older_version_left_final_for_no_control_is_asked_again(tmp_path, rec, asked):
+    """Recorded as No Receipt Available, which is final, a row whose control
+    was not found was never asked for again. Only the runs after the fix
+    would have tried it, so a record left so before is asked for again (#152)."""
+    app = make_app(tmp_path)
+    doc = a_form()
+    app.progress.update(doc.key, dict(doc.to_dict(), **rec))
+    assert app._already_done(doc) is (not asked)
+
+
+def test_a_history_moved_to_another_computer_still_asks_for_such_a_row(monkeypatch, tmp_path):
+    """tools/migrate.py takes a record that is not done as one to ask for,
+    and --minimal carries a record's note only where the note says it is
+    asked for again. A history moved after the update would otherwise hold
+    the row final on the other computer, with no note left to say why."""
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "tools"))
+    import migrate
+    app = make_app(tmp_path)
+    doc = a_form()
+    rec = dict(doc.to_dict(), state=State.NO_RECEIPT_AVAILABLE.value,
+               notes="Invented earlier note; " + app_mod.NO_CONTROL)
+    assert not migrate._done(rec)
+    app.progress.update(doc.key, migrate._skip_fields(rec, "Wealthfront"))
+    assert app._already_done(doc) is False
 
 
 def test_no_folder_is_made_when_no_download_arrives(tmp_path, monkeypatch):

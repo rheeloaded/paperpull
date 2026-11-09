@@ -1439,6 +1439,180 @@ def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
     return status if status in STATE_ORDER else "unknown"
 
 
+# What in a run's result says it may not have read the provider's whole list
+# or taken everything on it, so the gaps it left say nothing about whether a
+# run could fill them.
+_UNSETTLING = ("stopped", "list_not_read", "failed", "validation_failures",
+               "manual_review", "wrong_document")
+
+# What a record says of a document with nothing left to take, beside
+# downloaded_ok. Of the states the document apps write, Completed is a
+# document taken, and No Longer Listed is one the provider's list, read
+# whole, has stopped showing. Every other state they write is left. No Receipt
+# Available is a download control not found, or Dominion's placeholder for a
+# bill it keeps no PDF of, and a record set aside for review is not counted
+# as saved by status.py, though a run does not ask for either again, so
+# either may be what the gap is missing. gui/tests/test_accounts.py holds
+# this to the states the apps write.
+_NOTHING_TO_TAKE = ("Completed", "No Longer Listed")
+
+# The apps whose list says in its log, in words of its own, that it saw a
+# document and did not list it. What they leave out is in no record, so their
+# records cannot say a run took everything, and a run of theirs settles no
+# gap (_took_everything). Wells Fargo, AmFam and SBA pass over a control that
+# would not answer and say the next run takes it, and one read two ways, for a
+# person. American Express leaves out a year-end row that stays at a card
+# switch, since whose it is cannot be told. The others pass over a row they
+# cannot date or open.
+# gui/tests/test_accounts.py finds these by a log line written out as one
+# string. An app can also pass over a document and say so some other way, or
+# leave no trace at all, as Citi does with a requested statement not ready yet
+# and PayPal with a report still being made, which is why _settled waits for
+# a second run on another day.
+_LISTS_LEAVE_OUT = frozenset({"aafmaa", "affirm", "ally", "amex", "amfam", "applecard", "golden1",
+                              "ibkr", "sba", "statefarm", "tsp", "wellsfargo"})
+
+
+def _gap_keys(gaps) -> list:
+    """Each gap status.py found, as one string per series and dates, sorted.
+    What a whole run leaves is noted in these terms and compared in them. A
+    JSON list, so no account or summary holding a separator can make one
+    series' gap read as another's."""
+    keys = set()
+    for g in gaps or []:
+        if isinstance(g, dict):
+            keys.add(json.dumps([str(_jsonable(g.get(k)) or "")
+                                 for k in ("account", "summary", "after", "before")]))
+    return sorted(keys)
+
+
+def _whole_clean_run(entry) -> bool:
+    """A Run All with no dates set that finished on its own, with nothing
+    stopped, failed or set aside. Only such a run can settle a gap, and only
+    when it left nothing to take (_took_everything). A Pilot takes the newest
+    few, a scoped run part of the history, and Download again is a restore."""
+    if not isinstance(entry, dict) or entry.get("action") != "all":
+        return False
+    if entry.get("exit_code") != 0 or entry.get("closed") or entry.get("redownload"):
+        return False
+    if entry.get("scope"):
+        return False
+    result = entry.get("result")
+    if not isinstance(result, dict):
+        return False
+    return not any(result.get(k) for k in _UNSETTLING)
+
+
+def _day(entry) -> str:
+    """The calendar day a run ended, or "" when its log entry does not say."""
+    ended = str(entry.get("ended") or "")
+    try:
+        return date.fromisoformat(ended[:10]).isoformat()
+    except ValueError:
+        return ""
+
+
+def _noted(entry) -> set:
+    """The gaps a whole run's log entry noted as left, none when it noted none."""
+    left = entry.get("gaps_left")
+    return {str(k) for k in left} if isinstance(left, list) else set()
+
+
+def _settled(state: str, gaps, log: list) -> bool:
+    """Whether a gap row is one a run cannot fill (#149). It is when the
+    newest whole, clean Run All noted every gap the row shows now as left
+    after it had read the provider's list and left nothing to take, and an
+    earlier one, ended on another day, noted each of them too. A run can
+    leave a document its records do not show, a statement not ready yet, a
+    year that did not answer, and the next run usually takes it, so one run
+    alone settles nothing. Neither says anything of what the person's own
+    settings kept a run from looking at. A newest whole run that noted no
+    gaps, as one that left something notes none, settles nothing. A gap that
+    appears afterwards, from a history put back, say, still counts, and a
+    row that is due, stopped or anything but a gap is never settled, since a
+    new document may be waiting there."""
+    if state != "gap":
+        return False
+    now = _gap_keys(gaps)
+    if not now:
+        return False
+    whole = [e for e in log if _whole_clean_run(e)]
+    if not whole:
+        return False
+    day = _day(whole[0])
+    if not day or not set(now) <= _noted(whole[0]):
+        return False
+    earlier = [_noted(e) for e in whole[1:] if _day(e) not in ("", day)]
+    return all(any(key in noted for noted in earlier) for key in now)
+
+
+def _settings_leave_out(row: dict, config: dict) -> bool:
+    """Whether the person's own settings keep a listed document out of a run,
+    by the two rules of every app's _in_scope that a Run All with no dates
+    set is held to. A gap they leave out is their choice, and may settle.
+    Only what the account's config file itself says counts here."""
+    floor = config.get("default_start_date")
+    if isinstance(floor, str) and str(row.get("date") or "") < floor:
+        return True
+    types = config.get("document_types")
+    return isinstance(types, list) and bool(types) and row.get("category") not in types
+
+
+def _nothing_left(root: Path, config: dict) -> bool:
+    """Whether an account's own records say its last run left nothing to take.
+
+    A run does not report what it leaves in one way. First Horizon, Bilt,
+    Simmons and Alpaca leave a document whose Download is turned off with no
+    record at all and finish clean, and the next run takes it. So the records
+    are read. The list has to be noted as read to its end, and every document
+    in discovery.json has to have a record in progress.json saying it is
+    taken or gone, unless the person's own settings leave it out. Every app
+    keeps these under one key (gui/tests/test_accounts.py), and a key that
+    does not match reads as left. Records that cannot be read, or that say
+    nothing was listed, answer False. A document the list passed over and
+    never wrote to discovery.json cannot be seen here at all."""
+    note = _read_json(root / "last-listing.json")
+    if not isinstance(note, dict) or note.get("complete") is not True:
+        return False
+    listed = _read_json(root / "discovery.json")
+    kept = _read_json(root / "progress.json")
+    if not isinstance(listed, dict) or not listed or not isinstance(kept, dict):
+        return False
+    for key, row in listed.items():
+        if not isinstance(row, dict):
+            return False
+        if _settings_leave_out(row, config):
+            continue
+        rec = kept.get(key)
+        if not isinstance(rec, dict):
+            return False
+        if not (rec.get("downloaded_ok") or rec.get("state") in _NOTHING_TO_TAKE):
+            return False
+    return True
+
+
+def _took_everything(meta: dict, account: str, root: Path, result) -> bool:
+    """Whether a whole, clean run left nothing to take, as far as anything
+    can tell. Documents a run counts as left unsaved, an app whose list can
+    leave a document out, or records that do not show it all, answer False,
+    and the run then settles no gap."""
+    slug = str(meta.get("script_name") or "").rsplit("_", 1)[0]
+    if slug in _LISTS_LEAVE_OUT or result.get("alike"):
+        return False
+    config = _read_json(Path(meta["dir"]) / ("config.json" if account == "primary"
+                                             else "config.%s.json" % account))
+    return _nothing_left(root, config if isinstance(config, dict) else {})
+
+
+def _gaps_left(root: Path) -> list:
+    """The gaps an account's archive shows now, for a whole run's log entry."""
+    mod = _status_module()
+    if mod is None:
+        return None
+    row = mod.scan_install(root)
+    return _gap_keys((row or {}).get("gaps"))
+
+
 def _owner_of(meta: dict, account: str) -> str:
     """The account holder's name as the account's config gives it, or ""."""
     config = Path(meta["dir"]) / ("config.json" if account == "primary"
@@ -1470,18 +1644,26 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
     outcome = _last_outcome(last)
     running = _RUNS.get((name, account))
+    state = _account_state(row, outcome, gaps, known)
     return {
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
         "gets": cards.get(slug, {}).get("documents", ""),
         "group": cards.get(slug, {}).get("group", ""),
         "kind": (row or {}).get("kind") or kind,
-        "state": _account_state(row, outcome, gaps, known),
+        "state": state,
+        # A gap a whole, clean run could not fill, left out of "may have
+        # something new" on the home page (#149).
+        "settled": _settled(state, (row or {}).get("gaps"), log),
         "documents": (row or {}).get("documents") or 0,
         "newest": _jsonable((row or {}).get("newest")),
-        # When the app last finished a run at all, from its own run
-        # summary, so a run from a terminal counts as a check too.
-        "checked": _jsonable((row or {}).get("last_run")),
+        # When the app last read the provider's whole list, from the note
+        # it keeps, so a run from a terminal counts as a check too, and a
+        # Resume, a Verify or a Rename, which read no list, does not (#148).
+        "checked": _jsonable((row or {}).get("last_listed")),
+        # When the app last finished a run at all, from its own run summary,
+        # for a run from a terminal, which the panel's log never sees.
+        "ran": _jsonable((row or {}).get("last_run")),
         "age_days": (row or {}).get("age_days"),
         "cadence_days": (row or {}).get("cadence_days"),
         "cadence": mod._fmt_cadence((row or {}).get("cadence_days")) if mod else "-",
@@ -1603,7 +1785,8 @@ def account_rows() -> list:
                     "app": name, "account": account, "provider": provider, "owner": "",
                     "gets": cards.get(slug, {}).get("documents", ""),
                     "group": cards.get(slug, {}).get("group", ""), "kind": kind,
-                    "state": "nostatus", "documents": 0, "newest": None, "checked": None,
+                    "state": "nostatus", "settled": False, "documents": 0, "newest": None,
+                    "checked": None, "ran": None,
                     "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
                     "last_run": None, "last_outcome": "", "runs": [], "latest": [],
                     "running": dict(running) if running else None,
@@ -3710,13 +3893,24 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             if root is None:
                 return
             try:
-                _note_run(root, {
+                entry = {
                     "action": action, "account": account,
                     "started": _RUNS.get((app, account), {}).get("started", ""),
                     "ended": datetime.now().isoformat(timespec="seconds"),
                     "exit_code": code, "closed": closed, "result": result,
                     "scope": list(scope_flags), "redownload": bool(redownload),
-                    "saved": _saved_this_run(root, started) if saved is None else saved})
+                    "saved": _saved_this_run(root, started) if saved is None else saved}
+                if _whole_clean_run(entry):
+                    # The gaps a whole run that left nothing to take could
+                    # not fill, which settles them on the home page
+                    # (_settled). A run that left something, or a scan that
+                    # fails, notes none, and the gaps keep counting.
+                    try:
+                        if _took_everything(meta, account, root, result):
+                            entry["gaps_left"] = _gaps_left(root)
+                    except Exception:
+                        pass
+                _note_run(root, entry)
             except Exception:
                 pass
         try:

@@ -568,7 +568,7 @@ class Orchestrator(unittest.TestCase):
             self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0, why)
             self.assertEqual(app.progress.data, {}, why)
 
-    def test_a_transcript_that_drops_off_the_list_goes_to_review_and_the_run_goes_on(self):
+    def test_a_transcript_that_drops_off_the_list_fails_and_the_run_goes_on(self):
         from types import SimpleNamespace
         from unittest import mock
         from paperpull_core import listing
@@ -595,8 +595,10 @@ class Orchestrator(unittest.TestCase):
         with mock.patch.object(docs.receipt_pdf, "validate_pdf", lambda *a, **k: valid):
             with redirect_stdout(io.StringIO()):
                 app.process(first)
-        self.assertEqual(app.progress.get(gone)["state"], State.NEEDS_MANUAL_REVIEW.value)
-        self.assertEqual((app.stats["manual_review"], app.stats["tax_documents"]), (1, 3))
+        # Nothing was saved, so it is a failure the next run tries again (#152).
+        self.assertEqual(app.progress.get(gone)["state"], State.FAILED.value)
+        self.assertEqual((app.stats["failed"], app.stats["manual_review"], app.stats["tax_documents"]),
+                         (1, 0, 3))
         self.assertNotIn((T_ACCT, 0), pages[0].context.request.asked)
         self.assertEqual(listing.last(app), listing.COMPLETE)
 

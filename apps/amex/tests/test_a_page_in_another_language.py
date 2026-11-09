@@ -358,6 +358,44 @@ def test_statements_drawn_where_the_address_stays_are_taken_as_come(open_site, q
     assert presses(pg) == ["/activity?inav=x", OUR_CARD]
 
 
+# A note pinned over the activity page as American Express showed a tester
+# on a first visit to its new Statements & Activity, over Go to PDF
+# Statements (#135), with a button that closes it and one that starts a
+# tour. Its words here are made up.
+WELCOME = ('<div id="welcome" style="position: fixed; inset: 0; background: #fff; z-index: 9">'
+           '<p>Welcome to the New Statements &amp; Activity. We have added new ways to see it.</p>'
+           '<button type="button" aria-label="Close" '
+           'onclick="window.welcomePresses.push(\'close\')">X</button>'
+           '<button type="button" onclick="window.welcomePresses.push(\'tour\')">Take a tour</button>'
+           '</div>')
+
+
+def test_a_welcome_note_over_the_link_stops_with_nothing_of_it_pressed(open_site, quick):
+    """The note covers Go to PDF Statements, so the link is not pressed, and
+    nor is anything on the note. Its close button is not told from its tour
+    by anything this app has seen, so the person is told to close it. Once
+    it is closed, the way in goes on from the page it stopped on."""
+    fake = SPA({
+        "/dashboard": '<a href="/activity?inav=x">Statements &amp; Activity</a>',
+        "/activity": ('<a data-testid="goToPdfLinkLg" href="%s">Go to PDF Statements</a>'
+                      % OUR_CARD) + WELCOME},
+        header="<script>window.welcomePresses = [];</script>")
+    pg = open_site(fake, "/dashboard")
+    with pytest.raises(pressing.Covered) as stop:
+        site.goto_documents(pg)
+    said = " ".join(stop.value.lines)
+    assert "covers the Go to PDF Statements link, so nothing was pressed" in said
+    assert "Close it in the browser window yourself" in said
+    assert stop.value.facts["fixed"] is True
+    assert presses(pg) == ["/activity?inav=x"]
+    assert pg.evaluate("window.welcomePresses") == []
+
+    pg.evaluate("document.getElementById('welcome').remove()")
+    assert site.goto_documents(pg) is True
+    assert presses(pg) == ["/activity?inav=x", OUR_CARD]
+    assert pg.evaluate("window.welcomePresses") == []
+
+
 def test_links_to_two_cards_are_never_pressed(open_site, quick):
     fake = SPA({"/dashboard": (
         '<a href="%s">Abrechnung(en) runterladen</a>'
