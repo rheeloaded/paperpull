@@ -456,6 +456,20 @@ def account_of(answer) -> str:
     return m.group(1)[-4:] + (f"-{m.group(2)}" if m.group(2) else "")
 
 
+def account_in(document_id) -> str:
+    """The account a bill's id names, "4321-00001", or "" for an id of
+    another shape."""
+    m = BILL_ID_RE.fullmatch(str(document_id or ""))
+    return m.group(1) if m else ""
+
+
+def account_shown(page) -> str:
+    """The account Bill & payment history shows, named the way a bill's id
+    names it, from the page's own answer. Raises SessionExpired or
+    ListStopped as a read of the list does. Nothing is pressed."""
+    return account_of(_open(page).answer)
+
+
 def end_day(text) -> Optional[str]:
     """A cycle's billEndDate, "10/21/2026", as YYYY-MM-DD, or None."""
     m = _END_DATE_RE.fullmatch(str(text or "").strip())

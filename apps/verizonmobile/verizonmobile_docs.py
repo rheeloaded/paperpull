@@ -193,6 +193,9 @@ class App:
         self._context = None
         self._work_page = None
         self._cdp_mode = False
+        # The account Bill & payment history showed when this run listed it,
+        # whose bills the run takes first (_shown_first).
+        self._shown_account = ""
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -483,6 +486,9 @@ class App:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
         log.info("bill history: %d bills, %d new", len(docs), n_new)
+        # Every bill of one history is of the account it shows (bills_of).
+        shown = {site.account_in(r.document_id) for r in docs}
+        self._shown_account = shown.pop() if len(shown) == 1 else ""
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -560,7 +566,41 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
 
+    def _shown_first(self, docs: List[Document]) -> List[Document]:
+        """The bills in the order a run takes them, those of the account My
+        Verizon shows first, newest first, then those of every other account.
+
+        A bill's PDF address names no account, so a bill is fetched only
+        while its own account is shown (verizonmobile_site.download_bill),
+        and the first bill of another account stops the run once, naming
+        the account to choose. Taken newest first across accounts, one bill
+        of another account that was refused or interrupted stopped every
+        run at it, and the older bills of the account shown were never
+        reached. Now such a bill waits for a run with its own account shown.
+
+        With the bills not yet done all of one account there is nothing to
+        order and the history is not read for it. A run that listed knows
+        the account from its list, and a Resume reads the history once."""
+        waiting = {site.account_in(d.document_id) for d in docs
+                   if not self._already_done(d)} - {""}
+        if len(waiting) < 2:
+            return docs
+        shown = self._shown_account
+        if not shown:
+            page = self._on_its_site()
+            self.check_session(page)
+            try:
+                shown = site.account_shown(page)
+            except site.SessionExpired:
+                self.session_ended()
+            except site.ListStopped as stop:
+                self.list_changed(stop)
+        # A stable sort, so each account's bills stay newest first.
+        return sorted(docs, key=lambda d: site.account_in(d.document_id) not in ("", shown))
+
     def process(self, docs: List[Document], dry_run: bool = False):
+        if not dry_run:
+            docs = self._shown_first(docs)
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
