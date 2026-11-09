@@ -29,12 +29,14 @@ ukg_docs = importlib.import_module("ukg_docs")
 
 @pytest.fixture()
 def opened(monkeypatch):
-    """Every page a sign-in browser was asked to open, with none opened."""
+    """Every page a sign-in browser was asked to open. No browser starts,
+    and the fake answers as one that did, since a window that did not open
+    ends the sign-in with NOTHING_OPENED instead."""
     pages = []
 
     def open_signin_browser(profile, port, url, **_kw):
         pages.append(url)
-        return None
+        return "Chrome"
 
     monkeypatch.setattr(ukg_docs.browser_launcher, "open_signin_browser", open_signin_browser)
     # A run's log file is not what this is about, and the root logger lasts

@@ -209,7 +209,7 @@ def test_a_body_that_is_not_json_is_refused(started):
 @pytest.mark.parametrize("action", OTHER_ACTIONS)
 def test_any_other_action_is_refused(started, action):
     status, said = post(again(action))
-    assert status == 400 and "Pilot and Run All" in said, said
+    assert status == 400 and "Get new documents or Try the newest few" in said, said
     assert started == []
 
 
@@ -254,7 +254,7 @@ def test_no_confirmation_is_refused(started, action, confirmation):
     else:
         body["confirmed"] = confirmation
     status, said = post(body)
-    assert status == 400 and "question" in said, said
+    assert status == 400 and "Confirm the restore in its dialog" in said, said
     assert started == []
 
 
@@ -387,13 +387,13 @@ def test_it_is_sent_only_in_a_post_body_with_the_agreement():
 def test_the_dialog_says_what_happens():
     dialog = _dialog(page())
     for words in ("PaperPull remembers every document it saved, so it never downloads one twice",
-                  "Restore fetches the missing ones again, for the dates you pick",
-                  "the ones already downloaded included, and fetches again each one whose file is gone",
+                  "Restore downloads the missing ones again, for the dates you pick",
+                  "Downloads again every document in those dates whose file is gone",
                   "Nothing is overwritten.", "A file you still have stays as it is",
-                  "the app may save a second copy beside it, under a name of its own",
-                  "The provider is asked again for each document fetched",
+                  "PaperPull may save a second copy beside it, under a name of its own",
+                  "The provider is asked again for each document downloaded again",
                   "For this run only.", "Continue never restores",
-                  "A year, or both a From and a To date, is needed"):
+                  "Choose a year, or both a From and a To date"):
         assert words in dialog, words
     # True of every app, Target's invoices still on file included, so it
     # promises no new copy of every document.
@@ -406,9 +406,9 @@ def test_a_restore_that_ends_early_says_continue_will_not_download_again():
     and then call the run finished with no issues."""
     body = " ".join(page().split())
     left = re.search(r"const AGAIN_LEFT = (.*?);", body).group(1)
-    for words in ("Continue will not download again",
-                  "restoring the same dates again ' + 'fetches again what this run already restored",
-                  "so choose the dates that are left"):
+    for words in ("Continue does not restore.",
+                  "Restore again with only the dates this run did not reach, ' + "
+                  "'since the same dates would download again what it already restored"):
         assert words in left, words
     outcome = " ".join(function("runOutcome").split())
     # Every way a run can end without finishing says it, and offers Continue
@@ -416,7 +416,9 @@ def test_a_restore_that_ends_early_says_continue_will_not_download_again():
     assert "const next = RUN.again ? AGAIN_LEFT :" in outcome
     assert "const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again;" in outcome
     assert outcome.count("+ next + '.'") + outcome.count("say: next + '.'") >= 4
-    assert outcome.count("resume: downloads") == 5 and "resume: !RUN.again" not in outcome
+    # The five ways a run ends early, and the three stops the run can name
+    # (needs you, too slow, an error) after which Continue picks it up.
+    assert outcome.count("resume: downloads") == 8 and "resume: !RUN.again" not in outcome
     assert "say: RUN.again ? AGAIN_LEFT + '.'" in outcome
     assert "if (RUN.again && !RUN.outcome.clean && RUN.sink)" in function("finishRun")
     # A row whose last run was a restore that stopped offers the rest of the
@@ -448,8 +450,8 @@ def test_the_server_page_does_not_offer_it():
 
 def test_the_safe_to_rerun_note_names_the_way_back():
     text = " ".join(function("renderAccount").split())
-    assert "nothing is ever downloaded twice, even if you deleted the PDFs" in text
-    assert "To get deleted files back, use Restore deleted files under More." in text
+    assert "Nothing downloads twice, even PDFs you deleted after moving them elsewhere." in text
+    assert "To get those back, use Restore deleted files under More." in text
 
 
 def test_the_page_and_the_server_name_the_same_actions():

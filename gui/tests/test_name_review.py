@@ -146,7 +146,7 @@ def test_one_set_aside_still_points_to_the_manual_review_folder(page):
     both = outcome(page, manual_review=3, name_review=2)
     assert both["names"] and both["aside"]
     assert "2 receipts were saved under a name" in both["say"] and "Manual Review folder" in both["say"]
-    assert "(2 saved under a name to review, 1 set aside)" in both["say"]
+    assert "Finished, with 2 saved under a name to review, 1 set aside." in both["say"]
 
 
 def test_an_invoice_put_aside_beside_a_name_to_review_still_points_to_the_folder(page):

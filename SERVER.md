@@ -461,7 +461,7 @@ documents that run saved are copied into it.
   into tags when `PAPERLESS_CONSUMER_SUBDIRS_AS_TAGS` is on in Paperless.
 - **A documents folder stays inside /data.** The panel's Documents folder
   setting works on the server for a folder inside the data folder, the
-  folder for every provider and each provider's folder in it included, and
+  Documents folder itself and each account's folder in it included, and
   a run's checked documents move there once the plug-ins have copied them.
   The panel refuses one anywhere else, or one reached through a link out
   of /data, and so does a run before it saves anything, so Paperless gets

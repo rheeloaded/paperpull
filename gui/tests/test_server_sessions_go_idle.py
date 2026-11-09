@@ -231,7 +231,6 @@ def test_another_programs_page_on_the_same_machine_does_not_keep_the_session():
     image = [("host", HOST), ("sec-fetch-site", "same-site"), ("sec-fetch-dest", "image"),
              ("referer", "http://nas.local:5000/"), cookie]
     ask("GET", "/favicon.ico", headers=image)
-    ask("GET", "/fonts/AtkinsonHyperlegibleNext.ttf", headers=image)
     assert server_mode._SESSIONS[token]["used"] == before
     # An address the browser opened by itself, typed or from a bookmark, is use.
     ask("GET", "/", headers=[("host", HOST), ("sec-fetch-site", "none"), cookie])
@@ -538,7 +537,7 @@ def test_the_proxys_address_is_looked_up_again(monkeypatch):
 
 # -- the answers say what they are --------------------------------------------------------
 
-@pytest.mark.parametrize("target", ["/", "/api/apps", "/screen", "/fonts/nothing"])
+@pytest.mark.parametrize("target", ["/", "/api/apps", "/screen", "/nothing/here"])
 def test_the_gates_own_answers_are_kept_private(target):
     status, headers, _ = ask("GET", target)
     assert status in (303, 401)

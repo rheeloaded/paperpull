@@ -30,6 +30,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the other's bytes, and Login says signed in only once DKB answers with
   the list.
 
+### Changed
+- **The control panel looks and reads like a Mac app.** It is set in the
+  computer's own font, San Francisco on a Mac and Segoe UI on Windows, so
+  the two bundled Atkinson Hyperlegible files are gone. Accounts,
+  Spreadsheets, File names and Settings sit in a sidebar, a bar along the
+  top on a narrow window. Colors are Apple's, with a blue of its own in dark
+  mode, and every text color is checked to 4.5:1 against what it sits on.
+  A status is a colored dot and its words, each provider has the symbol of
+  its kind, a bank's building or a shop's bag, instead of a letter, and
+  Settings is drawn in groups the way System Settings draws them.
+- **Accounts puts what needs you first.** The page has one blue button, the
+  one for the next step, and each row's own is gray. Once anything has run,
+  the providers never run fold under one Not started line, and a list
+  longer than eight gets a search box. Overdue reads in amber, as a new
+  document that is likely waiting, instead of a failure's red. Escape gives
+  focus back to the More button, and Settings names each provider and
+  person as Accounts does, instead of by folder.
+
 ### Fixed
 - **A run started outside its app's folder keeps to that folder (#165).** An
   `output_dir` of `.`, a second person's `../<app> - <name>` and a relative
@@ -117,6 +135,98 @@ All notable changes to PaperPull are recorded here. Versioning follows
   leave only that date, a list that stops while documents download was
   made to stop the run once with the list unread, and both lists were made
   to be read once a run.
+- **A support report takes three steps, not fifteen.** Its dialog said to
+  sign in first with no way to, so a person canceled, signed in and came
+  back through More. Open folder then opened a folder of two or three
+  files to pick the one to attach from, and where to send it was under
+  Settings, About. The dialog now opens the sign-in window itself and stays
+  open for the report, Show the file selects the survey or recording in
+  the file manager, and Report a problem opens a new problem report for
+  that provider, on the form for an app that stopped working with the
+  provider filled in. The note about a file a failed run wrote offers the
+  same link. It is a link the person follows, carrying the provider's short
+  name only, and only for a provider PaperPull ships. On PaperPull Server,
+  whose sign-in window is docked in the page itself, the dialog still says
+  to sign in first.
+- **Moving to another computer says what comes with you.** The Move card
+  offered only a history file, which brings no PDF and marks every document
+  it lists as downloaded, so Get new never fetched them, and nothing said
+  so. Somebody who moved had an empty archive PaperPull believed complete.
+  The card now leads with copying the PaperPull folder, and the Documents
+  folder, naming both, which brings everything. The PaperPull folder works
+  wherever it lands, since each config.json names its folders relative to
+  its own. The Documents folder is named by its full path, in each config
+  and in the records of what was moved there, so the card says to copy it
+  to the same place and choose it again. The history
+  file follows as the way when the folders cannot be copied, and its
+  import, on the welcome and in Settings, says the PDFs stay on the other
+  computer and to copy them over or use Restore deleted files.
+- **The welcome's folder step says what it thinks of the folder.** A
+  folder that could not be used was refused only at Set up, two steps on
+  and away from its field. One already holding PaperPull providers, the
+  obvious one to type for somebody who has them, was not noticed. They were
+  asked to choose providers again, and Set up said it set up 0. One inside
+  iCloud Drive, Google Drive, Dropbox or OneDrive was taken without a word,
+  though it holds each provider's signed-in browser. Continue now checks the
+  folder (the same check Set up makes) and says under the field what is
+  wrong, the providers already there with Open Accounts to use them, or the
+  sync service it is in before going on. Already have PaperPull folders, in
+  Settings, goes on to Accounts once it finds them.
+- **The panel calls each thing by one name, and says what to do next.**
+  The same thing went by several names from page to page, and some were
+  the command line's. The panel now says provider, account, PaperPull
+  folder, Documents folder, download history and Technical details, each
+  for one thing only, and never Pilot, Run All, Resume, Discover, Login,
+  Scope or Download again, or a folder slug where a provider's name
+  belongs. Messages from PaperPull itself start with a capital, end with a
+  period and say what to do next, such as "That folder does not exist.
+  Check the path, or create the folder first."
+- **A run says where its documents went, and Open folder opens them.** A
+  run's page listed the names it saved and never where, and Open folder
+  opened the account's own folder, among its script, config and records,
+  with the PDFs a folder down, or, once a documents folder was set in
+  Settings, a folder they had moved out of. A run that saved documents now
+  says "Saved to" the folder with an Open folder button, and Open folder
+  everywhere opens the folder holding the account's newest document: its
+  documents folder once that is where they land, or Statements, say, in its
+  own. A support report or recording opens its Diagnostics folder and what
+  a run set aside opens Manual Review, as the page says they are there.
+  Accounts names the documents folder once one is set.
+- **Sign in, then get new documents, in one go.** Get new pressed before
+  signing in, the likeliest first-run slip, read as a crash ("It exited with
+  code 1", "Run login.bat first"), said "Sign in again" to somebody who never
+  had, and offered Continue for a run that never started. Each app now ends
+  that run through `run_reporting.not_signed_in`, which says it in the
+  panel's words under the panel and in login.bat's in a terminal, and exits
+  `NOT_SIGNED_IN` (7). The panel titles it "Sign in first" and offers the
+  sign-in, then the same run over the same dates, and the account is not
+  listed as stopped. "Sign-in window opened" now offers Get new documents on
+  the same page. A row not started yet offers Sign in, which opens the
+  window, where it offered Start, which only opened the account's page, and
+  that page leads with signing in until a sign-in has been asked for.
+- **A run that stops says why, and whose it is to fix.** Every stop read
+  "may have signed you out partway … Sign in again, then continue", so a
+  stop at a page that was not what the app expected, most often a
+  provider's site having changed, sent people to sign in and press
+  Continue, which stopped at the same place again. The run's result now
+  carries why it stopped, worked out in the core from what the run is
+  leaving on: the provider needed you (a sign-in or a check nobody was
+  there to answer), its page was not what PaperPull expected (for
+  PaperPull to fix, and Continue is not offered), it was too slow to
+  answer, or PaperPull hit an error it did not expect. Only a stop a
+  sign-in can fix offers one, and a stop with no reason sends you to the
+  technical details instead of guessing a sign-out.
+- **The panel never says something happened that did not.** Open sign-in
+  window said "Sign-in window opened" in green when no browser could open
+  at all, and Record said "Recording saved", ready to attach, when the
+  recorder refused on a sign-in page or nothing was clicked. Each app now
+  ends those as the core's NOTHING_OPENED and NOTHING_RECORDED, and the
+  panel says "No sign-in window opened" or "Nothing was recorded", with the
+  app's own words for why under it. A run the panel would not start,
+  because another tab is running it, a history file is being imported or
+  the app needs setting up, now reads "This run did not start" with the
+  reason, instead of "It exited with code 1" and a Continue for a run that
+  never began.
 
 ## [0.61.1] - 2026-11-08
 

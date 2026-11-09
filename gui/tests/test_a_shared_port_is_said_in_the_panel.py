@@ -89,17 +89,17 @@ def test_each_account_on_a_shared_port_names_the_other_and_the_cdp_url_to_change
     card = got[("Card Statements", "primary")]["shared_port"]
     assert card["port"] == 9262
     assert card["say"] == (
-        'The "spouse" account of Grocer Receipts names debugging port 9262 too. A sign-in '
-        "joins the browser already on its port, so these accounts sign in to one browser, "
-        "and a run of any of them reads whichever account that browser is signed in to. "
-        "To keep them apart, change cdp_url in config.spouse.json in the Grocer Receipts "
-        "folder to http://127.0.0.1:9400, a port no other account here names and no "
-        "provider PaperPull ships comes with. Nothing is stopped for this.")
-    assert card["short"] == ('Shares debugging port 9262 with the "spouse" account of '
-                             "Grocer Receipts. Open it to see the setting to change.")
+        'The "spouse" account of Grocer Receipts signs in with the same browser as this '
+        "account, on port 9262, so a run of any of them reads whichever account that "
+        "browser is signed in to. To keep them apart, change cdp_url in config.spouse.json "
+        "in the Grocer Receipts folder to http://127.0.0.1:9400, a port no other account "
+        "here names and no provider uses by default. Nothing is stopped for this.")
+    assert card["short"] == ('Signs in with the same browser as the "spouse" account of '
+                             "Grocer Receipts, on port 9262. Open it to see how to keep "
+                             "them apart.")
     spouse = got[("Grocer Receipts", "spouse")]["shared_port"]
-    assert spouse["say"].startswith("The first account of Card Statements names "
-                                    "debugging port 9262 too.")
+    assert spouse["say"].startswith("The first account of Card Statements signs in "
+                                    "with the same browser as this account, on port 9262,")
     assert ("change cdp_url in this account's config, config.spouse.json in the Grocer "
             "Receipts folder, to http://127.0.0.1:9400, a port") in spouse["say"]
     assert got[("Grocer Receipts", "primary")]["shared_port"] is None
@@ -244,7 +244,8 @@ def test_the_account_page_says_it_above_a_sign_in_it_still_offers(pair, base, ta
     tab.goto(base + "/#/a/Card%20Statements/primary")
     tab.wait_for_selector("#view-account [data-do=run][data-action=login]")
     said = tab.inner_text("#view-account .callout.warn")
-    assert 'The "spouse" account of Grocer Receipts names debugging port 9262 too.' in said
+    assert ('The "spouse" account of Grocer Receipts signs in with the same browser as '
+            "this account, on port 9262") in said
     assert "http://127.0.0.1:9400" in said
     assert tab.is_enabled("#view-account [data-do=run][data-action=login]")
 
@@ -256,6 +257,6 @@ def test_the_home_row_says_it_and_a_row_on_its_own_port_does_not(pair, base, tab
     def row(provider):
         return tab.locator("#view-home .acct").filter(
             has=tab.locator(".who a", has_text=provider))
-    assert ("Shares debugging port 9262 with the \"spouse\" account of Grocer Receipts."
-            in row("Card").inner_text())
-    assert "Shares debugging port" not in row("Store").inner_text()
+    assert ("Signs in with the same browser as the \"spouse\" account of Grocer Receipts, "
+            "on port 9262." in row("Card").inner_text())
+    assert "Signs in with the same browser" not in row("Store").inner_text()

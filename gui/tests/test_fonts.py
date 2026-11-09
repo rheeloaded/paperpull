@@ -1,9 +1,8 @@
-"""The panel's typefaces, served from gui/static/fonts by name only.
+"""The panel's typefaces are the computer's own.
 
-Atkinson Hyperlegible Next and Mono, under the SIL Open Font License, ship
-inside the panel so no page ever fetches a font from the web. The route
-answers the two names on its list and nothing else, and each font travels
-with its license.
+San Francisco on a Mac and Segoe UI on Windows, as each system's own apps
+use, so the page ships no font file and never fetches one, from the web or
+from the panel. Code and file names use the system's monospaced face.
 """
 import re
 import sys
@@ -17,43 +16,38 @@ fastapi = pytest.importorskip("fastapi")
 
 GUI = Path(__file__).resolve().parents[1]
 REPO = GUI.parent
-FONTS = GUI / "static" / "fonts"
+CSS = (GUI / "static" / "app.css").read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("name", app_module.FONTS)
-def test_each_font_is_served_whole_as_a_font(name):
-    answer = app_module.font(name)
-    assert answer.media_type == "font/ttf"
-    body = answer.body
-    assert body == (FONTS / name).read_bytes()
-    assert body[:4] == b"\x00\x01\x00\x00", "not a TrueType font"
-    assert "max-age" in answer.headers["cache-control"]
+def _token(name: str) -> str:
+    m = re.search(r"--%s:\s*([^;]+);" % name, CSS)
+    assert m, "app.css defines no --%s" % name
+    return m.group(1)
 
 
-@pytest.mark.parametrize("name", ["../app.py", "..\\app.py", "app.py", "x.ttf",
-                                  "OFL-AtkinsonHyperlegibleNext.txt", "", "%2e%2e%2fapp.py",
-                                  "AtkinsonHyperlegibleNext.TTF"])
-def test_nothing_but_the_two_fonts_is_served(name):
-    with pytest.raises(app_module.HTTPException) as e:
-        app_module.font(name)
-    assert e.value.status_code == 404
-
-
-def test_the_page_asks_for_exactly_the_fonts_the_route_serves():
-    css = (GUI / "static" / "app.css").read_text(encoding="utf-8")
-    asked = re.findall(r'url\("/fonts/([^"]+)"\)', css)
-    assert sorted(asked) == sorted(app_module.FONTS)
-    # Never from the web, which the house privacy promise rules out.
+def test_the_page_loads_no_font_file():
+    assert "@font-face" not in CSS
+    assert "/fonts/" not in CSS
+    assert not (GUI / "static" / "fonts").exists()
+    # Never from the web either, which the house privacy promise rules out.
     assert "fonts.googleapis" not in app_module.HTML and "fonts.gstatic" not in app_module.HTML
 
 
-def test_each_font_travels_with_its_license_and_notice_names_them():
-    for name in app_module.FONTS:
-        family = name[:-len(".ttf")]
-        license_file = FONTS / ("OFL-%s.txt" % family)
-        text = license_file.read_text(encoding="utf-8")
-        assert "SIL Open Font License, Version 1.1" in text
-        assert ("The %s Project Authors" % family.replace("AtkinsonHyperlegible", "Atkinson Hyperlegible ")) in text
-    notice = " ".join((REPO / "NOTICE.md").read_text(encoding="utf-8").split())
-    assert "Atkinson Hyperlegible Next and Atkinson Hyperlegible Mono" in notice
-    assert "SIL Open Font License, Version 1.1" in notice and "gui/static/fonts/" in notice
+def test_text_is_set_in_the_systems_own_faces():
+    sans = _token("sans")
+    assert sans.startswith("-apple-system") and "Segoe UI" in sans and sans.rstrip().endswith("sans-serif")
+    mono = _token("mono")
+    assert mono.startswith("ui-monospace") and mono.rstrip().endswith("monospace")
+
+
+def test_no_route_serves_fonts_any_more():
+    assert not hasattr(app_module, "FONTS")
+    paths = {getattr(r, "path", "") for r in app_module.app.routes}
+    assert not any(p.startswith("/fonts") for p in paths)
+    # Nothing under /fonts/ is kept by a browser as the same for everyone.
+    assert not any(p.startswith("/fonts") for p in app_module._ANYONES_UNDER)
+
+
+def test_notice_no_longer_lists_bundled_typefaces():
+    notice = (REPO / "NOTICE.md").read_text(encoding="utf-8")
+    assert "Atkinson Hyperlegible" not in notice

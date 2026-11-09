@@ -257,8 +257,10 @@ ROUTES = {
     ("GET", "/api/accounts"): dict(desktop="reads", server="reads"),
     ("POST", "/api/reveal"): dict(body={"app": SHOP, "account": "primary"},
                                   desktop="changes", server="reads"),
+    ("GET", "/api/saved-in"): dict(ask="/api/saved-in?app=Shop%20Receipts", desktop="reads", server="reads"),
     ("POST", "/api/sample"): dict(body={"on": True}, desktop="changes", server="changes"),
     ("GET", "/api/root"): dict(desktop="reads", server="reads"),
+    ("POST", "/api/root/check"): dict(body=lambda box: {"root": str(box.elsewhere)}, desktop="reads", server="reads"),
     ("POST", "/api/root"): dict(body=lambda box: {"root": str(box.elsewhere)},
                                 desktop="changes", server="reads"),
     ("GET", "/api/providers"): dict(desktop="reads", server="reads"),
@@ -320,8 +322,6 @@ ROUTES = {
                                  desktop="changes", server="changes"),
     ("GET", "/"): dict(page=True, desktop="reads", server="reads"),
     ("GET", "/favicon.ico"): dict(page=True, desktop="reads", server="reads"),
-    ("GET", "/fonts/{name}"): dict(page=True, ask="/fonts/AtkinsonHyperlegibleNext.ttf",
-                                   desktop="reads", server="reads"),
     ("GET", "/login"): dict(page=True, desktop="reads", server="reads"),
     ("POST", "/login"): dict(form=True, body={"password": PASSWORD},
                              desktop="reads", server="changes"),
@@ -518,7 +518,7 @@ def to_refuse(edition: str, page: bool) -> list:
 
 
 # The answers the same for everyone, which a browser may keep.
-ANYONES = ("/favicon.ico", "/fonts/{name}", "/screen/novnc/{rest:path}")
+ANYONES = ("/favicon.ico", "/screen/novnc/{rest:path}")
 
 
 def header_problem(path: str, answer: dict) -> str:

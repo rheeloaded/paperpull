@@ -146,7 +146,7 @@ the rest are under **More**, and every one says what it does.
 | **Open sign-in window** | Opens that provider's own browser (Chromium, or Edge/Chrome for bot-protected sites). **You** sign in and leave it open |
 | **Get new documents** | Downloads everything you do not already have (`--all --yes`) |
 | **Try the newest few first** | Downloads the newest few as a test (`--pilot`) |
-| **Only check what's there** | Lists what the provider has and downloads nothing (`--discover`) |
+| **Check what's there** | Lists what the provider has and downloads nothing (`--discover`) |
 | **Continue** | Shown after a run that stopped. Picks up where it ended (`--resume --yes`) |
 
 | Under More | What it runs |
@@ -234,7 +234,17 @@ language stays editable under **Edit as text**, see
 
 ## Moving to another computer
 
-In **Settings**, **Export history** hands the browser a file listing each
+Copying the PaperPull folder, and the Documents folder if one is set,
+moves everything, the PDFs included. Typed into the welcome's first step
+on the new computer, the copied folder's providers are found and Open
+Accounts uses them. The PaperPull folder may land anywhere, since each
+config.json names its folders relative to its own. The Documents folder has
+to land at the same path, since each config names it by its full path and
+so do the records of what was moved there, and so does a folder one account
+was given for its own documents. Settings' Move card says this first,
+naming both folders.
+
+When the folders cannot be copied, in **Settings**, **Export history** hands the browser a file listing each
 provider and person here, their settings, and every document each one has
 already downloaded. **Import a history file** on the other computer, or on
 PaperPull Server, reads it and shows what it will do before anything is
@@ -248,7 +258,9 @@ set up.
 - A provider or person already set up keeps its own settings and only
   gains the history. Nothing is ever taken out of a history, and each
   `progress.json` is backed up in its Backups folder before it is written.
-- No sign-in, password or PDF is in the file. It does hold document titles,
+- No sign-in, password or PDF is in the file, and what it lists is marked
+  downloaded, so Get new never fetches those PDFs. The import says so, and
+  points to copying them over or Restore deleted files. It does hold document titles,
   order numbers, totals and the account holders' names.
 - Nothing is imported while a provider is running.
 

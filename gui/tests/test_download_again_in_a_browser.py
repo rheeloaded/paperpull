@@ -173,7 +173,7 @@ def test_a_refusal_from_the_panel_is_shown_and_nothing_starts(panel, shop):
     tab.click("#rs-go")
     finished(tab)
     assert tab.inner_text("#r-title") == "This run did not start"
-    assert tab.inner_text("#statustext") == "unknown app"
+    assert tab.inner_text("#statustext") == "That account is no longer here. Reload the page."
     assert started(gone) == [] and panel.asked == []
 
 
@@ -211,28 +211,28 @@ def test_a_restore_that_stops_partway_says_continue_will_not_download_again(pane
                               "--end-date", "2023-12-31", FLAG]]
     assert tab.inner_text("#r-title") == "Stopped before finishing"
     said = tab.inner_text("#statustext")
-    assert said.startswith("Continue will not download again"), said
-    assert "fetches again what this run already restored, so choose the dates that are left" in said
+    assert said.startswith("Continue does not restore."), said
+    assert "Restore again with only the dates this run did not reach" in said
     assert tab.locator("#view-run [data-action=resume]").count() == 0
     # An ordinary run that stops still offers Continue, which is right for it.
     back(panel)
     tab.get_by_role("button", name="Try the newest few first").click()
     finished(tab)
     assert tab.inner_text("#r-title") == "Stopped before finishing"
-    assert "may have signed you out" in tab.inner_text("#statustext")
+    assert "If Shop Docs signed you out, sign in again, then continue." in tab.inner_text("#statustext")
     assert tab.locator("#view-run [data-action=resume]").count() == 1
 
 
 def test_a_discover_that_stops_offers_to_check_again_never_continue(panel, shop):
-    """Continue downloads, and somebody who pressed Only check what's there
+    """Continue downloads, and somebody who pressed Check what's there
     asked only to see what the provider has."""
     (shop / "stop").write_text("", encoding="utf-8")
     tab = panel.tab
-    tab.get_by_role("button", name="Only check what's there").click()
+    tab.get_by_role("button", name="Check what's there").click()
     finished(tab)
     assert started(shop) == [["--discover"]]
     assert tab.inner_text("#r-title") == "Stopped before finishing"
-    assert tab.inner_text("#statustext").endswith("Sign in again, then check again.")
+    assert tab.inner_text("#statustext").endswith("sign in again, then check again.")
     assert tab.locator("#view-run [data-action=resume]").count() == 0
     assert tab.locator("#view-run [data-action=discover]").count() == 1
 

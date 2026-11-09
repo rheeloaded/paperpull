@@ -206,8 +206,8 @@ def test_what_diagnose_prints_names_the_safe_file(tmp_path):
 def test_the_panel_says_how_each_file_diagnose_writes_is_built():
     page = "".join((REPO / "gui" / "static" / name).read_text(encoding="utf-8")
                    for name in ("index.html", "app.js"))
-    start = page.index("<b>Diagnose</b>")
+    start = page.index('<p id="sp-diagnose">')
     blurb = " ".join(page[start:start + 900].split())
     assert "survey-" in blurb, "the panel does not say which file to attach"
     assert "fixed list" in blurb, "the panel does not say how the detailed file is built"
-    assert "screenshot" in blurb and "stays on this machine" in blurb
+    assert "screenshot" in blurb and "stays on this computer" in blurb

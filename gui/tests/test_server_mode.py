@@ -1172,7 +1172,7 @@ def test_both_editions_say_what_discover_is_for(base, on_server, monkeypatch):
         main = account.index('data-action="all"')
         assert main < account.index('data-action="pilot"') < account.index('data-action="discover"')
         assert "Try the newest few first</button>" in account
-        assert "Only check what\\'s there</button>" in account
+        assert "Check what\\'s there</button>" in account
         assert "discover: ['Checked ' + who" in page and "Nothing was downloaded." in page
 
 

@@ -375,8 +375,8 @@ slug or provider, runs it on the right Python, and passes anything else
 straight through, so `paperpull chase all --year 2025 --account spouse` works.
 The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
 `verify`, `diagnose` and `dry-run`. The panel names them for what they do.
-Sign in, Get new documents, Try the newest few first and Only check what's
-there sit on each provider's page, Continue appears after a run that
+Open sign-in window, Get new documents, Try the newest few first and Check
+what's there sit on each provider's page, Continue appears after a run that
 stopped, and the rest are under More, each with a line saying what it does.
 A receipt provider's More also has **Review names**, for the receipts it
 was unsure how to name.
@@ -549,19 +549,19 @@ in [docs/file-naming.md](docs/file-naming.md).
 Documents can go to a folder apart from the browser profiles, records and
 logs in your PaperPull folder, such as one Google Drive or another sync
 program keeps, one Paperless-ngx watches or a share on a NAS. In Settings,
-under **Documents folder**, give one folder for every provider, and each
+under **Documents folder**, give one folder for every account, and each
 provider and person gets a folder of their own inside it, named as their
 PaperPull folder is, such as `Chase Statements` and
-`Costco Receipts - spouse`. Below it, pick a provider and person to give
-them a folder of their own instead, or keep their documents in the
-provider's own folder. One set that way keeps it when the folder for every
-provider changes, and **Use the folder for every provider** sets it back.
+`Costco Receipts - spouse`. Below it, pick an account to give it a folder
+of its own instead, or **Keep documents in the provider's folder**. One set
+that way keeps it when the Documents folder changes, and **Use the
+Documents folder** sets it back.
 The first save gives a folder in it to everyone whose config names no
 documents folder, one set back to the provider's own folder in an earlier
 version included, since that left no setting, so set those again below
 after it.
-The page lists each one that keeps a folder of their own, and **Use it for
-every provider** gives all of them their folder inside it at once, a copy
+The page lists each one that keeps a folder of their own, and **Apply to
+every account** gives all of them their folder inside it at once, a copy
 of each config kept in the provider's Backups folder first.
 
 Each download is still saved and checked in the provider's own folder, and
@@ -577,14 +577,14 @@ lists what the run saved, each file where the run saved it, before the move.
 Saving the setting moves nothing that is already there. Documents saved
 before stay where they are, and PaperPull still finds them, so nothing is
 downloaded again. The page says how many are still in the provider's
-folder and offers **Preview move** and then **Move**, which moves each one
+folder and offers **1. Preview** and then **2. Move**, which moves each one
 under the name it has, with its records following it, and puts everything
 back if a record cannot be written. Change the folder or set it back, and
 the same Move brings the documents to where it now points. A browser
 profile, a folder inside or around one, a folder holding a provider's own
 folder and a folder inside or around a person's own folder are refused. A
-provider or person added later gets their folder inside the folder for
-every provider as their first download run from the panel starts, and the
+provider or person added later gets their folder inside the Documents
+folder as their first download run from the panel starts, and the
 run says so. One whose config already names a documents folder, their own folder
 included, is never changed by a run. The panel writes each one's folder
 into their config.json as `"documents_dir"`, a full path, so a run from a
@@ -595,9 +595,24 @@ folder has to be inside the data folder, see
 
 ## Moving to another computer
 
-The record of what each provider already downloaded is what keeps
-PaperPull from downloading a document twice, and it can move with you. On
-the old computer, press **Export history** in the panel's Settings. On
+The simplest move brings everything. Copy your PaperPull folder to the new
+computer. Each provider's config.json names its own folders relative to
+itself, so that copy works wherever it lands. On the new computer, type
+where the PaperPull folder is in the welcome's first step, and PaperPull
+finds its providers. A Documents folder is different. Each account's
+config.json names it by its full path, as `"documents_dir"`, and so do the
+records of every document moved there, so copy it to the same place on the
+new computer, and any folder of its own you gave one account the same way.
+Then choose the Documents folder again in Settings, since that setting
+belongs to each computer, and sign in to each provider once, since a
+sign-in rarely survives a copy.
+
+When copying the folders is not an option, the record of what each
+provider already downloaded, which is what keeps PaperPull from
+downloading a document twice, can move on its own. It brings no PDF, and
+marks every document it lists as downloaded, so Get new never fetches them
+again. Copy the PDFs over too, or use **Restore deleted files** to download
+them. On the old computer, press **Export history** in the panel's Settings. On
 the new one, or on [PaperPull Server](SERVER.md#coming-from-the-desktop-app),
 choose that file under **Moving from another computer?** on the welcome
 page, or under **Import a history file** in Settings. Every provider
