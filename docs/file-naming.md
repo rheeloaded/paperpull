@@ -238,10 +238,10 @@ in that app's `Backups` folder first. Saving renames nothing.
 After a save that changed something, the page offers to rename the files
 you already have, in every app and every account the save changed. An
 app with its own pattern is left out of a shared change, because the
-shared pattern does not name its files. **Preview renames** runs each
-app's `--rename` in turn and lists every file that would change, in the
-Output tab. **Rename them** is offered only once that preview has
-finished, asks once more, and runs `--rename --apply` the same way. If
+shared pattern does not name its files. **1. Preview** runs each
+app's `--rename` in turn and lists every file that would change, below
+the buttons. **2. Rename** is offered only once that preview has
+finished, and runs `--rename --apply` the same way. If
 any app does not finish, the rest are not started and the page says
 which one stopped.
 

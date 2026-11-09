@@ -873,7 +873,7 @@ def test_a_folder_of_their_own_never_holds_the_folder_for_every_provider(
     folder = docs.parent if where == "just around it" else tmp_path / "Drive"
     with pytest.raises(HTTPException) as e:
         save({"app": "Chase Statements", "account": "spouse", "folder": str(folder)})
-    assert e.value.status_code == 400 and "folder for every provider" in e.value.detail, \
+    assert e.value.status_code == 400 and "holds the Documents folder" in e.value.detail, \
         e.value.detail
     assert config(apps["Chase Statements"], "config.spouse.json")["documents_dir"] == \
         str(docs / "Chase Statements - spouse")

@@ -2173,8 +2173,8 @@ function renderSettings() {
 // own Rename, offered only once a preview of the same person has finished
 // cleanly.
 let DC_PREVIEWED = false;
-// The folder for every provider as saved, the one Use it for every provider
-// applies, since the list beside it is of the folders it would replace there.
+// The Documents folder as saved, the one Apply to every account applies,
+// since the list beside it is of the folders it would replace there.
 let DR_ROOT = '';
 function dcPick() {
   const [app, account] = ($('dcpick').value || '').split('\n');
@@ -2229,7 +2229,7 @@ async function dcLoad() {
   const isUnix = SERVER || Boolean(META.apps_root && META.apps_root.startsWith('/'));
   $('dcinput').placeholder = d.in_root || (SERVER ? '/data/Documents' : (isUnix ? '/Users/you/Documents/Statements' : 'C:\\Users\\you\\Documents\\Statements'));
   $('dcfollow').hidden = !d.documents_root || d.follows;
-  // Each one Use it for every provider would change, named before it is pressed.
+  // Each one Apply to every account would change, named before it is pressed.
   const own = d.documents_root ? (d.own || []) : [];
   $('drown').hidden = !own.length;
   $('drownlist').innerHTML = own.map(o => '<li>' + esc(o.who) + ' keeps ' +

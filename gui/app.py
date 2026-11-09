@@ -2836,6 +2836,13 @@ async def api_account(request: Request):
             "owner": cfg.get("owner", "")}
 
 
+# Said of a provider's folder with no config.json, which a sign-in never
+# writes. Setting a provider up copies its config.example.json to it, so
+# only a folder made some other way has none, and the copy is what mends it.
+NO_CONFIG_YET = ("%s has no config.json yet. In its folder, copy config.example.json to "
+                 "config.json, then try again.")
+
+
 def _make_account(app_dir: Path, label: str, owner: str) -> Path:
     """config.<label>.json for a second person on an install, with its
     profile on the profiles volume on PaperPull Server. The label is
@@ -2844,8 +2851,7 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
     if mod is None:
         raise HTTPException(500, "This copy of PaperPull is missing add_account.py. Download PaperPull again to repair it.")
     if not (app_dir / "config.json").is_file():
-        raise HTTPException(409, "Sign in to %s once with Open sign-in window, then "
-                                 "add another person." % app_dir.name)
+        raise HTTPException(409, NO_CONFIG_YET % app_dir.name)
     if server_mode.enabled():
         # make_config copies the first person's config into the new one and
         # makes the new person's folder, so a config left as a link in the
@@ -2866,7 +2872,7 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
     except Exception as e:
         raise HTTPException(500, "Could not add this person (%s). Try again." % str(e).splitlines()[0][:160])
     if dest is None:
-        raise HTTPException(409, "Sign in to %s once with Open sign-in window, then add another person." % app_dir.name)
+        raise HTTPException(409, NO_CONFIG_YET % app_dir.name)
     if server_mode.enabled():
         # make_config puts the profile in the account's own folder, which on
         # the server is the shared folder, so it moves to the profiles volume.
@@ -4809,7 +4815,7 @@ def _root_held_problem(apps: dict, root: str, skip=None):
     into a folder in it, or None (_root_held_by)."""
     held = _root_held_by(apps, root, root, skip=skip)
     if held:
-        return ("%s has a folder of their own, %s, that holds the folder for every provider. "
+        return ("%s has a folder of their own, %s, that holds the Documents folder. "
                 "Choose another folder for them first." % held)
     return None
 
@@ -4822,16 +4828,16 @@ def _own_in_root_problem(apps: dict, app_name: str, account: str, folder: str, r
     if not root:
         return None
     if _within(folder, root) and _within(root, folder):
-        return ("That is the folder for every provider itself. Use the folder for every "
-                "provider gives this one its folder inside it, or choose another folder.")
+        return ("That is the Documents folder itself. Use the Documents folder gives "
+                "this one its folder inside it, or choose another folder.")
     if _within(root, folder):
-        return ("That folder holds the folder for every provider, so every provider's folder "
+        return ("That folder holds the Documents folder, so every account's folder "
                 "would be inside it. Choose another folder.")
     for other_name, other in apps.items():
         for other_account in other.get("accounts", ()):
             if (other_name, other_account) != (app_name, account) and \
                     _within(folder, _documents_for(other, other_account, root)):
-                return ("That folder is %s's folder inside the folder for every provider, or "
+                return ("That folder is %s's folder inside the Documents folder, or "
                         "inside it. Choose a folder of their own."
                         % _who(other_name, other_account))
     return None
@@ -4903,15 +4909,15 @@ def _documents_before_run(apps: dict, app_name: str, account: str) -> list:
     want = _documents_for(meta, account, root)
     problem = _in_root_problem(apps, app_name, account, root) or _root_held_problem(apps, root)
     if problem:
-        return ["Documents stay where they were. %s would get %s inside the folder for every "
-                "provider. %s" % (_who(app_name, account), want, problem)]
+        return ["Documents stay where they were. %s would get %s inside the Documents "
+                "folder. %s" % (_who(app_name, account), want, problem)]
     missed = []
     if _sync_documents(apps, root, only=(app_name, account), missed=missed):
-        return ["Documents go to %s from this run on, inside the folder for every provider "
+        return ["Documents go to %s from this run on, inside the Documents folder "
                 "set in Settings." % want]
     if missed:
-        return ["Documents stay where they were. %s would get %s inside the folder for every "
-                "provider, and its config could not be written." % (missed[0], want)]
+        return ["Documents stay where they were. %s would get %s inside the Documents "
+                "folder, and its config could not be written." % (missed[0], want)]
     return []
 
 
@@ -5137,7 +5143,7 @@ def _save_account_documents(body: dict) -> dict:
         folder = os.path.normpath(folder)
     cfg_path = _account_config(meta, account)
     if not cfg_path.is_file():
-        raise HTTPException(404, "That account has no settings yet. Sign in to it once with Open sign-in window first.")
+        raise HTTPException(404, NO_CONFIG_YET % _who(app_name, account))
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     # Its own folder is written as "" while a documents folder is set, so
     # the account stays out of it, and is no setting at all when none is.

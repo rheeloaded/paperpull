@@ -146,7 +146,7 @@ the rest are under **More**, and every one says what it does.
 | **Open sign-in window** | Opens that provider's own browser (Chromium, or Edge/Chrome for bot-protected sites). **You** sign in and leave it open |
 | **Get new documents** | Downloads everything you do not already have (`--all --yes`) |
 | **Try the newest few first** | Downloads the newest few as a test (`--pilot`) |
-| **Only check what's there** | Lists what the provider has and downloads nothing (`--discover`) |
+| **Check what's there** | Lists what the provider has and downloads nothing (`--discover`) |
 | **Continue** | Shown after a run that stopped. Picks up where it ended (`--resume --yes`) |
 
 | Under More | What it runs |
