@@ -1107,7 +1107,7 @@ function renderRun() {
     }
     if (r && RUN.savedIn) {
       html += '<div class="keepopen"><p>Saved to <span class="mono">' + esc(RUN.savedIn) + '</span></p>' +
-        '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>';
+        '<button type="button" class="btn btn-s" data-do="reveal" data-what="saved" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>';
     }
     if (r && (o.resume || o.recheck || o.signin || o.relist || o.rerun)) {
       // Signing in again comes first, unless the outcome knows the stop had

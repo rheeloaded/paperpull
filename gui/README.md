@@ -158,11 +158,14 @@ the rest are under **More**, and every one says what it does.
 | **Record steps for support** | Watches while you click to a document (`--record`), with Stop recording |
 | **Add another person** | A second account on the same provider, with its own folder, sign-in window and history |
 | **Remove from PaperPull** | Moves the provider's folder into Removed. Nothing is deleted |
-| **Open folder** | Shows the account's folder on this computer |
+| **Open folder** | Shows the folder holding the account's newest document, its documents folder once they go there, never its browser profile |
 
 A run's page leads with what it came to, "3 new documents saved", lists
-the files, and keeps the full output under **Technical details**. A run
-that wrote a failure file offers it right there, to attach to an issue.
+the files, says the folder that run saved them in with an **Open folder**
+that shows it, and keeps the full output under **Technical details**. A run
+that wrote a failure file offers it right there, to attach to an issue. A
+run that found no signed-in window says **Sign in first**, and offers the
+sign-in, then the same run again, over the same dates.
 
 ## Which dates
 

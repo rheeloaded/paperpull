@@ -710,7 +710,8 @@ def test_open_folder_shows_the_documents_not_the_programs_beside_them(root, monk
     assert app_module._where_documents_are(meta, "primary") == own / "Statements"
     asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements"})))
     assert opened == [(own / "Statements").resolve()]
-    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(own / "Statements")}
+    # No run has said what it saved, so a run's page says nowhere.
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": ""}
 
 
 def test_open_folder_follows_the_newest_document_into_a_documents_folder(root, tmp_path, monkeypatch):
@@ -743,6 +744,105 @@ def test_a_link_in_the_folder_is_never_followed_to_find_documents(root, tmp_path
     (own / "Linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
     meta = app_module.discover_apps()["Bank Statements"]
     assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+
+
+def test_open_folder_never_looks_in_a_browser_profile_or_another_persons_folder(root):
+    """The signed-in browser's profile sits in the account's own folder, and
+    a config can put another person's folder there too. Neither is where
+    this account's documents are, whatever PDF is newest in it."""
+    own = root / "Bank Statements"
+    (own / "config.json").write_text(json.dumps({"output_dir": ".", "profile_dir": "./browser-profile"}),
+                                     encoding="utf-8")
+    (own / "config.inside.json").write_text(json.dumps(
+        {"output_dir": "./inside", "profile_dir": "./inside/browser-profile"}), encoding="utf-8")
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf(own / "browser-profile" / "Default" / "viewed.pdf", 1)
+    _pdf(own / "inside" / "Statements" / "theirs.pdf", 50)
+    _pdf(own / "inside" / "browser-profile" / "Default" / "viewed.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    assert app_module._where_documents_are(meta, "inside") == own / "inside" / "Statements"
+
+
+@pytest.mark.parametrize("docs", ["Elsewhere", "{own}/browser-profile", "{own}/Manual Review/docs", "{apps}"])
+def test_a_documents_folder_no_run_would_use_is_never_shown(root, tmp_path, monkeypatch, docs):
+    """Core keeps documents in the account's own folder when documents_dir
+    is not a full path, is the browser profile, is in its records or holds
+    the account's own folder (storage.set_documents_dir), so the panel
+    never shows such a folder either. One that is not a full path was read
+    from wherever the panel was started."""
+    own = root / "Bank Statements"
+    docs = docs.format(own=own, apps=root)
+    monkeypatch.chdir(tmp_path)
+    (own / "config.json").write_text(json.dumps(
+        {"output_dir": ".", "profile_dir": "./browser-profile", "documents_dir": docs}), encoding="utf-8")
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf((tmp_path / docs) / "Statements" / "newer.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+
+
+def _ran(own, saved, lines, action="all"):
+    """A download run's log entry naming what it saved, and the
+    new-this-run.txt it wrote, each line where it saved a file."""
+    app_module._note_run(own, {"action": action, "exit_code": 0, "result": {"new_files": len(saved)},
+                               "saved": saved})
+    (own / "new-this-run.txt").write_text("# %d file(s)\n" % len(lines) + "".join(
+        line + "\n" for line in lines), encoding="utf-8")
+
+
+def test_saved_to_names_where_that_runs_documents_are(root, monkeypatch):
+    """The folder a run's page names, and its Open folder shows, is the one
+    that run's files are in, never the one holding a newer document of
+    another kind, and the account's own when they are of two kinds."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "2024" / "march.pdf", 100)
+    _pdf(own / "Tax Documents" / "2023" / "1099.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Tax Documents"
+    _ran(own, ["march.pdf"], ["Statements/2024/march.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(own / "Statements")}
+    opened = _opened(monkeypatch)
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "saved"})))
+    assert opened == [(own / "Statements").resolve()]
+    _ran(own, ["march.pdf", "1099.pdf"], ["Statements/2024/march.pdf", "Tax Documents/2023/1099.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(own)}
+
+
+def test_saved_to_follows_a_run_moved_into_the_documents_folder(root, tmp_path, monkeypatch):
+    own, docs = root / "Bank Statements", tmp_path / "Documents" / "Bank"
+    # Moved there by the panel once the run ended, keeping its folders.
+    _pdf(docs / "Statements" / "2024" / "march.pdf", 100)
+    _pdf(own / "Statements" / "2019" / "kept.pdf", 1)
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    _ran(own, ["march.pdf"], ["Statements/2024/march.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(docs)}
+    # Moved in part, so in two places with nothing in common, and none is said.
+    _pdf(own / "Statements" / "2024" / "april.pdf", 100)
+    _ran(own, ["march.pdf", "april.pdf"], ["Statements/2024/march.pdf", "Statements/2024/april.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": ""}
+
+
+def test_saved_to_takes_only_that_runs_own_files_in_its_own_folders(root, tmp_path, monkeypatch):
+    """A line naming a file outside the person's folder, a list its run's
+    log does not name and a run that downloads nothing name no folder, and
+    Open folder beside it then opens nothing."""
+    second = root / "Bank Statements - second"
+    _pdf(second / "Statements" / "a.pdf", 10)
+    outside = _pdf(tmp_path / "elsewhere" / "Statements" / "b.pdf", 10)
+    mine = "../Bank Statements - second/Statements/a.pdf"
+    _ran(second, ["a.pdf", "b.pdf"], [mine, str(outside)])
+    assert app_module.api_saved_in("Bank Statements", "second") == {"folder": str(second / "Statements")}
+    opened = _opened(monkeypatch)
+    for saved, lines, action in ((["b.pdf"], [str(outside)], "all"), (["c.pdf"], [mine], "all"),
+                                 (["a.pdf"], [mine], "discover")):
+        _ran(second, saved, lines, action)
+        assert app_module.api_saved_in("Bank Statements", "second") == {"folder": ""}
+        with pytest.raises(app_module.HTTPException) as e:
+            asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "account": "second",
+                                                     "what": "saved"})))
+        assert e.value.status_code == 404
+    assert opened == []
 
 
 def test_a_support_file_and_what_was_set_aside_open_their_own_folders(root, monkeypatch):
@@ -781,7 +881,7 @@ def test_a_run_that_saved_documents_says_where_and_offers_to_show_them(panel):
         return [keep.innerText, keep.querySelector('button').dataset.what || ''];
     }""")
     assert "Saved to /Users/me/Documents/Bank/Statements" in shown[0] and "Open folder" in shown[0]
-    assert shown[1] == "", "the documents, which reveal shows unless told otherwise"
+    assert shown[1] == "saved", "the folder named beside it, where that run's documents are"
 
 
 def test_open_folder_shows_only_the_accounts_own_folder(root, monkeypatch):

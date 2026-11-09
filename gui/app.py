@@ -1823,23 +1823,85 @@ def api_accounts():
 NOT_DOCUMENTS = frozenset({"Manual Review", "Logs", "Diagnostics", "Backups"})
 
 
+def _documents_in_use(meta: dict, account: str, root: Path) -> str:
+    """The documents folder an account's runs move its documents to, or ""
+    when they stay in its own folder. Core takes documents_dir only when it
+    is a full path that is no browser profile, holds no profile, does not
+    hold the account's own folder and is not in its records
+    (storage.set_documents_dir), and keeps documents in the account's own
+    folder otherwise, so a value it would not use names no folder here
+    either. A path that is not full would otherwise be read from wherever
+    the panel was started."""
+    raw = _documents_of(meta, account).strip()
+    if not raw or not run_result.on_one_line(raw) or not Path(raw).is_absolute():
+        return ""
+    docs = Path(os.path.normpath(raw))
+    profile = _config_of(meta, account).get("profile_dir")
+    if isinstance(profile, str) and profile.strip():
+        held = Path(profile.strip())
+        held = held if held.is_absolute() else Path(meta["dir"]) / held
+        if _within(docs, held) or _within(held, docs):
+            return ""
+    if _within(root, docs) and not _within(docs, root):
+        return ""
+    if _within(docs, root):
+        try:
+            first = docs.resolve().relative_to(root.resolve()).parts[:1]
+        except (ValueError, OSError, RuntimeError):
+            first = ()
+        if first and (first[0].lower() in {f.lower() for f in KEPT_FOLDERS} or first[0].startswith(".")):
+            return ""
+    return str(docs)
+
+
+def _not_for_documents(meta: dict, account: str) -> list:
+    """The folders inside an install or a person's folder that are never
+    where their documents are, each account's browser profile, signed in,
+    and each other account's own folder, which a config can put inside
+    this one's."""
+    out = []
+    install = Path(meta["dir"])
+    for other in meta.get("accounts", ()):
+        profile = _config_of(meta, other).get("profile_dir")
+        if isinstance(profile, str) and profile.strip():
+            path = Path(profile.strip())
+            out.append(path if path.is_absolute() else install / path)
+        if other != account:
+            try:
+                out.append(_account_root(meta, other))
+            except (ValueError, OSError):
+                continue
+    return out
+
+
+def _document_folders(base: Path, kept_out: list) -> list:
+    """The folders directly in base that can hold its documents, in name
+    order, never a link, a record folder, a hidden one or one that is or
+    holds a folder in kept_out."""
+    try:
+        children = sorted(base.iterdir())
+    except OSError:
+        return []
+    return [c for c in children if c.is_dir() and not c.is_symlink()
+            and c.name not in NOT_DOCUMENTS and not c.name.startswith((".", "_"))
+            and not any(_within(other, c) for other in kept_out)]
+
+
 def _where_documents_are(meta: dict, account: str) -> Path:
     """The folder to show for an account's documents. Its own folder holds
     its program and records beside them, and once a documents folder is
     set only what is saved from then on goes there, so it is the folder
     holding the newest PDF: the documents folder itself when that is where
     it is, or the folder of its own that holds it, Statements, say. With
-    no PDF yet, the documents folder when set, or its own folder."""
+    no PDF yet, the documents folder when set, or its own folder. Never a
+    browser profile or another person's folder (_not_for_documents)."""
     root = _account_root(meta, account)
-    docs = _documents_of(meta, account)
+    docs = _documents_in_use(meta, account, root)
     bases = ([Path(docs)] if docs and Path(docs).is_dir() else []) + [root]
+    kept_out = _not_for_documents(meta, account)
     newest = None
     for base in bases:
-        try:
-            children = [c for c in sorted(base.iterdir()) if c.is_dir() and not c.is_symlink()
-                        and c.name not in NOT_DOCUMENTS and not c.name.startswith((".", "_"))]
-        except OSError:
-            continue
+        children = _document_folders(base, kept_out)
         for child in children:
             try:
                 # In name order, so of two saved the same second the
@@ -1857,9 +1919,65 @@ def _where_documents_are(meta: dict, account: str) -> Path:
     return base if base is not root else child
 
 
+def _saved_folder(meta: dict, account: str) -> str:
+    """Where the documents an account's last download run saved are now,
+    for its page to say "Saved to" it, or "" when that is more than one
+    place or cannot be told. Read from the new-this-run.txt the run wrote,
+    each file where it saved it, in a folder of its kind in the account's
+    own folder, or at the same place in the documents folder once the panel
+    moved it there (_move_new_documents). It is that folder of its kind
+    when they are all in one, the account's own folder when they are in
+    several of its own, and the documents folder when they were moved. The
+    newest PDF would name the folder of an older document of another kind,
+    and one folder of two a run saved in. Only the files the run's own log
+    entry names are taken, and only in a folder of documents of this
+    account, so a list left from an earlier run, or a line naming any other
+    place, is not."""
+    root = _account_root(meta, account)
+    last = next(iter(_read_run_log(root)), None)
+    if not last or last.get("action") not in DOWNLOAD_ACTIONS:
+        return ""
+    names = {n for n in (last.get("saved") or ()) if isinstance(n, str)}
+    if not names:
+        return ""
+    try:
+        lines = (root / "new-this-run.txt").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    docs = _documents_in_use(meta, account, root)
+    kinds = {c.name: c for c in _document_folders(root, _not_for_documents(meta, account))}
+    try:
+        home = root.resolve()
+    except (OSError, RuntimeError):
+        return ""
+    places = set()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or re.split(r"[\\/]", line)[-1] not in names:
+            continue
+        saved = Path(line)
+        saved = saved if saved.is_absolute() else Path(meta["dir"]) / saved
+        try:
+            parts = saved.resolve().relative_to(home).parts
+        except (ValueError, OSError, RuntimeError):
+            continue
+        if len(parts) < 2 or parts[0] not in kinds:
+            continue
+        if saved.is_file():
+            places.add(kinds[parts[0]])
+        elif docs and Path(docs).joinpath(*parts).is_file():
+            places.add(Path(docs))
+    if len(places) == 1:
+        return str(places.pop())
+    if places and places <= set(kinds.values()):
+        return str(root)
+    return ""
+
+
 # What Open folder can be asked to show, each a folder the panel works out
-# itself: the documents, a run's support file or recording, what a run set
-# aside, or the account's own folder with its records.
+# itself: the documents, where a run's documents are, a run's support file
+# or recording, what a run set aside, or the account's own folder with its
+# records.
 REVEAL_FOLDERS = {"diagnostics": "Diagnostics", "aside": "Manual Review"}
 
 
@@ -1867,6 +1985,12 @@ def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") 
     try:
         if what == "documents":
             folder = _where_documents_are(meta, account)
+        elif what == "saved":
+            saved = _saved_folder(meta, account)
+            if not saved:
+                raise HTTPException(404, "Where the last run's documents are cannot be told now. "
+                                         "Open folder on the account's page shows its documents.")
+            folder = Path(saved)
         else:
             folder = _account_root(meta, account)
             inner = folder / REVEAL_FOLDERS.get(what, "")
@@ -1882,14 +2006,20 @@ def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") 
 
 @app.get("/api/saved-in", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
 def api_saved_in(app: str = "", account: str = "primary"):
-    """The folder Open folder shows for an account, named for the page to
-    say where a run's documents went. Takes the app's name and the
-    account, both checked against what the panel itself found, and never
-    a path. A plain def, so the walk runs in a worker thread."""
+    """Where an account's last download run saved its documents
+    (_saved_folder), for the page to say "Saved to" it beside an Open folder
+    that shows the same folder, or "" when that cannot be told and the page
+    says nothing. Takes the app's name and the account, both checked
+    against what the panel itself found, and never a path. A plain def, so
+    the reading runs in a worker thread."""
     apps = discover_apps()
     if app not in apps or account not in apps[app]["accounts"]:
         raise HTTPException(404, "That account is no longer here. Reload the page.")
-    return {"folder": str(_documents_folder_or_404(apps[app], account))}
+    try:
+        folder = _saved_folder(apps[app], account)
+    except ValueError:
+        folder = ""
+    return {"folder": folder if folder and Path(folder).is_dir() else ""}
 
 
 @app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
@@ -1904,7 +2034,7 @@ async def api_reveal(request: Request):
     name = str((body or {}).get("app") or "")
     account = str((body or {}).get("account") or "primary")
     what = str((body or {}).get("what") or "documents")
-    if what not in ("documents", "records", *REVEAL_FOLDERS):
+    if what not in ("documents", "saved", "records", *REVEAL_FOLDERS):
         raise HTTPException(400, "unknown folder to show")
     apps = discover_apps()
     if name not in apps or account not in apps[name]["accounts"]:
