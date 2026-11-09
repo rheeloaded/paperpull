@@ -241,13 +241,10 @@ class App:
             self._work_page = dom[0] if dom else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        # A real Edge or Chrome attached over CDP saves a download itself,
-        # into its own Downloads folder, and Playwright never sees it. So
-        # the browser is pointed at a folder under the output and the site
-        # layer watches that folder after every click, alongside the
-        # download event, PDF response and new tab it already catches.
+        # Nothing goes through the browser's downloads: each bill is asked
+        # for from inside the page (verizonmobile_site._fetch). The folder
+        # a former build pointed the browser at is still cleared of copies.
         self._dl_dir = Path(self.config["output_dir"]) / ".verizonmobile-downloads"
-        site.set_download_dir(self._work_page, self._dl_dir)
         # A file here that is an exact copy of a document in the archive
         # is one the browser was left holding, and goes. Nothing else is
         # touched (capture.clear_archived_copies).
@@ -553,9 +550,9 @@ class App:
             self._delay()
 
     def download_one(self, page, doc: Document, filename: str):
-        """Save one bill. The site layer fetches the row's PDF link from
-        inside the page when there is one, and otherwise clicks the row's
-        own control and catches what arrives."""
+        """Save one bill. The site layer takes the bill history again and
+        asks for this cycle's PDF from inside the page. Nothing is
+        pressed."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
@@ -567,8 +564,8 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Open the bill-history page and click this bill's "Download detailed
-        # bill" button; Playwright captures the resulting download event.
+        # Open Bill & payment history; the site layer reads its bill list
+        # and fetches this cycle's PDF.
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)

@@ -3,30 +3,25 @@ WIRELESS side of My Verizon. The Fios side has its own app, apps/verizon.
 
 When Verizon changes its site, repair this file only.
 
-STATUS: UNVERIFIED. This app was written without a Verizon Mobile account,
-from what is publicly known about My Verizon and from the Fios app that
-does work, so that someone who holds a wireless account can test it
-without writing code. Nothing below has run against the live signed-in
-site. On a first run it is deliberately cautious:
+STATUS: CONFIRMED 2026-10-29 on a real account (24 bills, issue #31), with
+nothing pressed by the app. A signed-in survey showed:
 
+  * Bill & payment history, /digital/nsa/secure/ui/bill/history/, asks
+    GET /digital/nsa/secure/gw/bill/billpaymenthistory/bill_history with
+    headers of its own (channelId, session_id and others). The answer's
+    body.billingHistory.billCycle lists every cycle My Verizon keeps (24),
+    each with billEndDate (MM/DD/YYYY), though the page draws nine until
+    Show more. Each cycle offers "Review bill" and "Review bill PDF".
+  * "Review bill PDF" opens GET
+    /digital/nsa/secure/gw/bill/billpaymenthistory/bill_pdfdoc?
+    startMonthDate=<billEndDate>&channelId=<the page's channelId header>
+    in a new tab: application/pdf, a body starting %PDF, the session's
+    cookies and nothing else.
+  * So a run opens the history page by its address, takes the page's own
+    bill_history answer and channelId, and asks each cycle's bill_pdfdoc
+    from inside the page. Nothing is clicked; Diagnose follows nothing.
   * --login opens a real Edge or Chrome, since verizon.com runs bot
-    protection that walls the Playwright build of Chromium. The Fios app
-    learned that the hard way.
-  * --diagnose surveys whatever the billing page turns out to be, records
-    its headings, its controls with the guard's verdict on each, and the
-    shape of every JSON response, with digit runs masked, and takes no
-    screenshot. That file is what a tester attaches to the GitHub issue.
-  * --discover reads bill dates from any control that looks like a bill
-    download, wherever it sits on the page.
-  * --pilot tries to save the newest few, first by fetching a PDF link the
-    row carries from inside the page, then by clicking the row's own
-    download control and catching either the download event or a PDF
-    response, whichever the site produces.
-
-The guesses that most need confirming from a survey are marked GUESS. The
-wireless bill pages live under /digital/nsa/secure/ui/, and the same
-Download Your Bill page the Fios app uses may serve wireless accounts too,
-so it is on the list.
+    protection that walls the Playwright build of Chromium.
 
 SAFETY (this is a phone account with a card on file):
   This module is strictly READ-ONLY. It opens the bill history, reads the
@@ -41,6 +36,8 @@ SAFETY (this is a phone account with a card on file):
 from __future__ import annotations
 
 import logging
+from datetime import date as _date
+from urllib.parse import parse_qs, urlencode, urlsplit
 import re
 import sys
 from dataclasses import dataclass
@@ -55,6 +52,7 @@ from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 # lives in core because seventeen apps each had their own copy and
 # they drifted into three different versions.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
+from paperpull_core.redact import private_words as _private_words
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import last_day as _last_day
@@ -256,7 +254,7 @@ def _safe_query(url: str) -> str:
     a digit, a token, an id, anything long, is "...". This is what a
     repair needs to make the same call with a wider filter, and nothing
     else."""
-    from urllib.parse import urlsplit, parse_qsl
+    from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit
     try:
         pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
     except ValueError:
@@ -283,7 +281,7 @@ def detect_security_challenge(page) -> Optional[str]:
     Visible text only. A page's source can carry every string its scripts
     could ever show, "verification code" included, on a normal day."""
     try:
-        if _bill_controls(page).count() > 0:
+        if page.get_by_text(re.compile(r"^Review bill PDF$")).count() > 0:
             return None
     except Exception:
         pass
@@ -326,102 +324,15 @@ def is_safe_control(name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _take_new_tab(page, new_pages, out_path: Path) -> bool:
-    """A PDF a click opened in a new tab. The core does the reading, this
-    app's guard decides which addresses it may read."""
-    return _core_take_new_tab(page, new_pages, out_path, is_safe_url)
-
-
-# ---------------------------------------------------------------------------
-# Billing page
-# ---------------------------------------------------------------------------
-
-def dismiss_overlay(page) -> None:
-    """Put away a cookie banner, a survey prompt or a notice overlay, the
-    things that sit over signed-in pages and intercept clicks. Escape
-    first, then only a button whose every label says close, dismiss, no
-    thanks or not now and nothing else, never accept, and never what
-    closes an account or signs out (controls.dismiss_overlays)."""
-    _dismiss_overlays(page, FORBIDDEN_CONTROL_RE)
-
-
-def _bill_controls(page):
-    """Every control on the page whose name says it fetches a document.
-    The words are this provider's, the rest is the core's."""
-    return _controls_named(page, BILL_CONTROL_RE)
-
-
-def _looks_like_billing(page) -> bool:
-    try:
-        if _bill_controls(page).count() > 0:
-            return True
-    except Exception:
-        pass
-    try:
-        body = page.locator("body").inner_text(timeout=5000)
-    except Exception:
-        return False
-    return bool(re.search(r"bill(ing)?\s+(history|period|date)|past\s+bills|previous\s+bills",
-                          body, re.I))
-
-
-def goto_documents(page) -> bool:
-    """Open the bill history. The first candidate that is not a sign-in
-    page and shows something bill-shaped wins, and the URL it lands on is
-    remembered so a later call does not walk the list again."""
-    global BILLING_URL
-    dismiss_overlay(page)
-    if is_safe_url(page.url or "") and not looks_signed_out(page) and _looks_like_billing(page):
-        return True
-    for url in [BILLING_URL] + [u for u in BILLING_CANDIDATES if u != BILLING_URL]:
-        try:
-            page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(5000)
-        except Exception as e:
-            log.info("goto %s failed: %s", url, e)
-            continue
-        dismiss_overlay(page)
-        if looks_signed_out(page):
-            return False
-        if _looks_like_billing(page):
-            BILLING_URL = url
-            return True
-    return False
-
-
-def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
-    try:
-        for _ in range(rounds):
-            page.mouse.wheel(0, 3000)
-            page.wait_for_timeout(delay_ms)
-        page.keyboard.press("End")
-        page.wait_for_timeout(delay_ms)
-    except Exception:
-        pass
-
-
-def expand_all(page) -> None:
-    """Click 'See more' / 'Show more' / 'View more bills' repeatedly to
-    surface any older bills the history page loads on demand. The label is
-    checked against the guard before every click."""
-    pat = re.compile(r"^\s*(show|load|view|see)\s+(more|all|older)(\s+bills?)?\s*$|"
-                     r"^\s*(older|previous)\s+bills?\s*$", re.I)
-    for _ in range(30):
-        clicked = False
-        for role in ("button", "link"):
-            try:
-                loc = page.get_by_role(role, name=pat)
-                if loc.count() > 0 and loc.first.is_visible():
-                    label = loc.first.inner_text(timeout=1000) or ""
-                    if is_safe_control(label):
-                        loc.first.click()
-                        page.wait_for_timeout(1500)
-                        clicked = True
-                        break
-            except Exception:
-                continue
-        if not clicked:
-            break
+HISTORY_PATH = "/digital/nsa/secure/ui/bill/history/"
+HISTORY_URL = BASE + HISTORY_PATH
+HISTORY_API_PATH = "/digital/nsa/secure/gw/bill/billpaymenthistory/bill_history"
+PDF_PATH = "/digital/nsa/secure/gw/bill/billpaymenthistory/bill_pdfdoc"
+BILL_ID_RE = re.compile(r"bill-[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_END_DATE_RE = re.compile(r"([0-9]{2})/([0-9]{2})/([0-9]{4})")
+_CHANNEL_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
+MAX_LIST_BYTES = 5 * 1024 * 1024
+MAX_PDF_BYTES = 25 * 1024 * 1024
 
 
 @dataclass
@@ -433,355 +344,281 @@ class RawDoc:
     text: str = ""
     row_index: int = -1
     kind: str = "doc"
+    document_id: str = ""
+    # The cycle's bill end date as the API writes it, MM/DD/YYYY, which is
+    # what a bill's PDF is asked for by. Not recorded.
+    end_date: str = ""
 
 
-# The date a bill control belongs to. The control's own name first, then
-# the nearest enclosing row or card whose text carries a date, up to six
-# levels up. Returned with the container's text so a repair can see what
-# the row looked like.
-_ROW_OF_JS = r"""el => {
-  const dateRe = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}|\d{1,2}\/\d{1,2}\/\d{2,4}|\d{4}-\d{2}-\d{2}/i;
-  let node = el, depth = 0;
-  while (node && depth < 6) {
-    const txt = (node.innerText || '').trim();
-    if (dateRe.test(txt)) return txt.slice(0, 300);
-    node = node.parentElement; depth++;
-  }
-  return '';
-}"""
+class ListStopped(Exception):
+    """The list has a part this could not read, so what was read is not all
+    of it. `docs` holds what was read before it stopped."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
-def collect_download_docs(page) -> List[RawDoc]:
-    """Read every bill the history page offers. Each bill control's own
-    name, or the row it sits in, carries the bill date."""
+class SessionExpired(Exception):
+    """Verizon answered as a signed-out session."""
+
+
+@dataclass
+class _History:
+    answer: dict
+    channel: str
+
+
+def _is_history_answer(url: str) -> bool:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    return parts.netloc == "www.verizon.com" and parts.path == HISTORY_API_PATH
+
+
+def _open(page, timeout_ms: int = 45000) -> _History:
+    """Open Bill & payment history by its address and take the bill history
+    the page itself asks for, with the channelId its own request carries.
+    Raises SessionExpired when the site shows its sign-in and ListStopped
+    when the page never asks. Nothing is pressed."""
+    got = []
+
+    def seen(resp):
+        try:
+            if not got and _is_history_answer(resp.url) and resp.request.method == "GET":
+                got.append(resp)
+        except Exception:
+            pass
+
+    page.on("response", seen)
+    try:
+        try:
+            page.goto(HISTORY_URL, wait_until="domcontentloaded", timeout=60000)
+        except Exception as e:
+            log.info("opening Bill & payment history failed (%s)", type(e).__name__)
+        waited = 0
+        while not got and waited < timeout_ms:
+            page.wait_for_timeout(250)
+            waited += 250
+    finally:
+        try:
+            page.remove_listener("response", seen)
+        except Exception:
+            pass
+    if looks_signed_out(page):
+        raise SessionExpired("Verizon showed its sign-in page")
+    if not got:
+        raise ListStopped("Bill & payment history did not ask for its bills")
+    resp = got[0]
+    if resp.status in (401, 403):
+        raise SessionExpired("Verizon refused the bill history")
+    if resp.status != 200:
+        raise ListStopped(f"the bill history was answered with {resp.status}")
+    try:
+        answer = intake.json_of(resp, MAX_LIST_BYTES)
+        channel = resp.request.all_headers().get("channelid") or ""
+    except intake.TooLarge:
+        raise ListStopped("the bill history answer is larger than any history")
+    except Exception as e:
+        raise ListStopped(f"the bill history answer could not be read ({type(e).__name__})")
+    if not _CHANNEL_RE.fullmatch(channel):
+        raise ListStopped("the page's own bill history request carried no channel")
+    _keep_private(answer)
+    return _History(answer=answer, channel=channel)
+
+
+def _keep_private(answer) -> None:
+    """Register the account number, name and address in the answer as
+    private words, part by part."""
+    addr = (((answer or {}).get("body") or {}).get("billingHistory") or {}).get("address") or {}
+    found = [str(v) for k, v in addr.items() if isinstance(v, str) and k != "state"]
+    # Four characters or more: a house number like "100" would turn every
+    # "0100" in a diagnostic into "[name]".
+    parts = {part for w in found for part in re.split(r"[\s,.#/-]+", w) if len(part) >= 4}
+    if parts - set(_private_words()):
+        set_private_words(_private_words() + sorted(parts - set(_private_words())))
+
+
+def end_day(text) -> Optional[str]:
+    """A cycle's billEndDate, "10/21/2026", as YYYY-MM-DD, or None."""
+    m = _END_DATE_RE.fullmatch(str(text or "").strip())
+    if not m:
+        return None
+    try:
+        return _date(int(m.group(3)), int(m.group(1)), int(m.group(2))).isoformat()
+    except ValueError:
+        return None
+
+
+def bills_of(answer) -> List[RawDoc]:
+    """RawDocs from the bill history answer, one per billing cycle, dated by
+    its bill end date. An answer that is not a bill history, a cycle whose
+    end date is not a calendar date, or two cycles of one end date stops
+    the list, carrying what was read before it."""
+    if not isinstance(answer, dict):
+        raise ListStopped("the bill history answer is not an object")
+    if (answer.get("responseInfo") or {}).get("responseCode") not in ("00", "0", None):
+        raise ListStopped("Verizon answered the bill history with an error code")
+    cycles = (((answer.get("body") or {}).get("billingHistory") or {}).get("billCycle"))
+    if not isinstance(cycles, list):
+        raise ListStopped("the bill history answer holds no billing cycles")
     docs: List[RawDoc] = []
-    seen = set()
-    expand_all(page)
-    scroll_full_page(page)
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
-        except Exception:
-            name = ""
-        if not is_safe_control(name):
-            continue
-        try:
-            href = el.get_attribute("href") or ""
-        except Exception:
-            href = ""
-        row_text = ""
-        iso = parse_date(name)
+    dates = set()
+    for c in cycles:
+        end = (c or {}).get("billEndDate") if isinstance(c, dict) else None
+        iso = end_day(end)
         if not iso:
-            try:
-                row_text = el.evaluate(_ROW_OF_JS) or ""
-            except Exception:
-                row_text = ""
-            iso = parse_date(row_text)
-        if not iso or iso in seen:
-            continue
-        seen.add(iso)
-        disp = _human_date(iso)
-        docs.append(RawDoc(title=f"Monthly Statement - {disp}", date_text=iso,
-                           href=href if PDF_HREF_RE.search(href or "") else "",
-                           text=f"Verizon Mobile Bill {disp}", row_index=i, kind="statement"))
+            raise ListStopped("a bill's end date is not a calendar date", docs)
+        if iso in dates:
+            raise ListStopped("two bills carry one end date", docs)
+        dates.add(iso)
+        title = f"Verizon Mobile Bill {iso}"
+        docs.append(RawDoc(title=title, date_text=iso, href=PDF_PATH, text=title,
+                           row_index=len(docs), kind="statement",
+                           document_id=f"bill-{iso}", end_date=str(end)))
     return docs
 
 
-def _control_for(page, iso: str):
-    """The bill control for the bill dated `iso`, matched the same way
-    discovery found it, or None."""
-    ctrls = _bill_controls(page)
-    for i in range(ctrls.count()):
-        el = ctrls.nth(i)
-        try:
-            name = (el.get_attribute("aria-label") or el.inner_text(timeout=800) or "").strip()
-        except Exception:
-            name = ""
-        found = parse_date(name)
-        if not found:
-            try:
-                found = parse_date(el.evaluate(_ROW_OF_JS) or "")
-            except Exception:
-                found = None
-        if found == iso:
-            return el, name
-    return None, ""
+def pdf_url(end_date: str, channel: str) -> str:
+    """The address a cycle's PDF is asked from, the one the page's own
+    Review bill PDF opens, or "" when either part is not one."""
+    if not _END_DATE_RE.fullmatch(end_date or "") or not _CHANNEL_RE.fullmatch(channel or ""):
+        return ""
+    url = f"{BASE}{PDF_PATH}?" + urlencode({"startMonthDate": end_date, "channelId": channel})
+    return url if is_pdf_url(url) else ""
 
 
-def _fetch_pdf(page, href: str, zip_ok: bool = False) -> Optional[bytes]:
-    """A PDF link fetched from inside the signed-in page, cookies and all.
-    The fetching is the core's, the hosts are this app's."""
-    return _core_fetch_pdf(page, href, is_safe_url, zip_ok=zip_ok)
-
-
-def _take_same_tab(page, start_url: str, out_path: Path, trace) -> bool:
-    """A PDF the click opened in this very tab. The core does the reading,
-    this app's guard decides which addresses it may read."""
-    return _core_take_same_tab(page, start_url, out_path, trace, is_safe_url)
-
-
-_SECOND_STEP_RE = re.compile(
-    r"^\s*(download|download\s+(pdf|now|file|statement|document)|save|save\s+(as\s+)?pdf|"
-    r"(regular|standard|full|detailed)\s+pdf|pdf|view\s*/\s*print\s+pdf|print|open\s+pdf)\s*$", re.I)
-
-
-def _second_step(page, appeared: set, place, trace: Optional[list] = None):
-    """A control the click revealed whose text says it finishes a download,
-    once it has passed the guard and sits where the press at `place` put
-    it, or None. The choosing is the core's, the words this provider uses
-    and the guard are this app's."""
-    return _core_second_step(page, appeared, _SECOND_STEP_RE, is_safe_control, place, trace)
-
-
-def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = None,
-               dl_dir=None) -> bool:
-    """Click `el` and save whatever PDF the site produces, a file landing
-    in `dl_dir`, a download event, a PDF response, a new tab, this tab
-    moving to the document, or a second control the click revealed.
-    `trace` collects what happened, the click's own outcome included."""
-    ctx = page.context
-    got: dict = {}
-    downloads: list = []
-    # Answers to a request this press made, from its tab or one it opened,
-    # that called themselves a PDF and read empty. Asked for once more only
-    # when nothing else brings the document (capture.ask_again).
-    empty_answers: list = []
-    made_here = _RequestsSince(page, ctx.pages)
-    start_url = page.url or ""
-
-    def on_download(dl):
-        downloads.append(dl)
-
-    def on_response(res):
-        try:
-            url = res.url or ""
-            if not is_safe_url(url):
-                return
-            ct = (res.headers.get("content-type") or "").lower()
-            if trace is not None and ("json" in ct or "pdf" in ct or "octet" in ct or "zip" in ct):
-                trace.append({"status": res.status, "type": ct[:40], "url": redact(url)[:160]})
-            if got:
-                return
-            if "pdf" in ct or "octet" in ct:
-                try:
-                    body = intake.body(res)
-                except intake.TooLarge:
-                    # Larger than a document may be, and never asked again.
-                    body = b""
-                except Exception:
-                    body = b""
-                    got["refetch"] = url
-                if body[:5] == b"%PDF-":
-                    got["body"] = body
-                elif not body and not got and made_here.made(res.request) \
-                        and (res.request.method, url) not in empty_answers:
-                    # A PDF the page reads into a blob leaves its answer
-                    # empty under Playwright 1.63 (capture.ask_again).
-                    empty_answers.append((res.request.method, url))
-        except Exception:
-            pass
-
-    ctx.on("response", on_response)
-    page.on("download", on_download)
-    before = set(ctx.pages)
-    seen = _snapshot(dl_dir)
-    controls_before = _control_texts(page)
-
-    def landed() -> bool:
-        # Pointed at a folder, the browser can save the only copy there and
-        # leave the event's own file empty, so that file is taken rather than
-        # the document asked for a second time (capture.take_download).
-        if downloads and _take_download(downloads[0], dl_dir, seen, out_path, zip_ok=True):
-            return True
-        if got.get("body"):
-            out_path.write_bytes(got["body"])
-            return True
-        if got.get("refetch"):
-            try:
-                # This address answered the press directly, so asking it
-                # again needs no redirect, and one would take the
-                # browser's cookies wherever it led.
-                resp = page.context.request.get(got.pop("refetch"), max_redirects=0,
-                                                timeout=60000)
-                body = intake.body(resp) if resp.ok else b""
-                if _is_document(body, zip_ok=True):
-                    out_path.write_bytes(body)
-                    return True
-            except Exception:
-                pass
-        return _take_new_pdf(dl_dir, seen, out_path, zip_ok=True)
-
-    def wait_for_pdf(seconds: int) -> bool:
-        for _ in range(seconds):
-            if landed():
-                return True
-            page.wait_for_timeout(1000)
-        return landed()
-
-    try:
-        try:
-            el.scroll_into_view_if_needed(timeout=4000)
-        except Exception:
-            pass
-        # Where the press is made, read just before it, so a control the
-        # press reveals is taken only where the press put it
-        # (controls.second_step).
-        place = _place_of(page, el)
-        # Playwright's own press, and through the page only when nothing
-        # covered the control, its press never reached the page and nothing
-        # it should bring came. What cannot be told stops the run, and the
-        # control is never pressed twice (pressing.press_once).
-        try:
-            outcome = pressing.press_once(
-                page, el, what="the control for this document", words=_words(),
-                guard=is_safe_control, dl_dir=dl_dir,
-                brought=lambda: bool(downloads or got or (_control_texts(page) - controls_before)))
-        except pressing.TurnedOff:
-            # The page has turned the control off, so nothing was pressed and
-            # nothing this document brings can come. No second step is looked
-            # for, and the document is left for review and the next run while
-            # the run goes on (pressing.TurnedOff).
-            if trace is not None:
-                trace.append({"note": "the control is turned off on the page, so nothing was pressed"})
-            return False
-        if trace is not None:
-            if outcome.error is None:
-                trace.append({"note": "clicked", "control": redact(label)[:60]})
-            else:
-                trace.append({"note": "click failed", "control": redact(label)[:60],
-                              "error": str(outcome.error)[:160]})
-            if outcome.how == pressing.MADE:
-                trace.append({"note": "the press reached the page although it raised, "
-                                      "so it was not made again", "control": redact(label)[:60]})
-            elif outcome.how == pressing.THROUGH_THE_PAGE and outcome.page_error is None:
-                trace.append({"note": "clicked through the DOM instead", "control": redact(label)[:60]})
-            elif outcome.how == pressing.THROUGH_THE_PAGE:
-                trace.append({"note": "DOM click failed too", "error": str(outcome.page_error)[:160]})
-        if outcome.how == pressing.GONE:
-            # Nothing was pressed, so nothing this document brings can come,
-            # and whatever the page shows now is not this press's. No second
-            # step is looked for, and the document is left for another run.
-            if trace is not None:
-                trace.append({"note": "the control left the page before it was pressed"})
-            return False
-        if wait_for_pdf(10):
-            return True
-        if _take_same_tab(page, start_url, out_path, trace):
-            return True
-        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-            return True
-        # The press through the page raised, so it may have been made, and
-        # nothing more is pressed (pressing.Pressed). No second step is
-        # looked for, and what the press brought is still waited for.
-        unsure_press = outcome.page_error is not None
-        if unsure_press and trace is not None:
-            trace.append({"note": "the press through the page raised, so nothing more is pressed"})
-        appeared = _control_texts(page) - controls_before
-        if trace is not None:
-            trace.append({"note": "after the click", "url": redact(page.url or "")[:160],
-                          "appeared": [redact(t) for t in sorted(appeared)[:15]],
-                          "new_tabs": len([p for p in ctx.pages if p not in before])})
-        step, step_label = (None, "") if unsure_press else _second_step(page, appeared, place, trace)
-        if step is not None:
-            try:
-                step.click(timeout=8000)
-                if trace is not None:
-                    trace.append({"note": "second step clicked", "control": redact(step_label)[:60]})
-            except Exception as e:
-                if trace is not None:
-                    trace.append({"note": "second step click failed", "control": redact(step_label)[:60],
-                                  "error": str(e)[:160]})
-            if wait_for_pdf(20):
-                return True
-            if _take_same_tab(page, start_url, out_path, trace) or \
-                    _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-                return True
-        if wait_for_pdf(15):
-            return True
-        if _take_new_tab(page, [p for p in ctx.pages if p not in before], out_path):
-            return True
-        # Nothing else brought it, so the one answer that read empty is asked
-        # for once more (capture.ask_again).
-        if _ask_again(page, empty_answers, out_path, is_safe_url, zip_ok=True):
-            return True
-        log.info("click on %r produced no PDF", label)
+def is_pdf_url(url: str) -> bool:
+    """True only for the bill PDF address on www.verizon.com with exactly
+    its two parameters, each of the right shape."""
+    if not is_safe_url(url):
         return False
-    finally:
-        made_here.stop()
-        try:
-            ctx.remove_listener("response", on_response)
-        except Exception:
-            pass
-        try:
-            page.remove_listener("download", on_download)
-        except Exception:
-            pass
-        for extra in [p for p in ctx.pages if p not in before]:
-            try:
-                extra.close()
-            except Exception:
-                pass
-        # What the browser saved into the folder while the document came
-        # some other way, read off the answer or asked for again, goes when
-        # it is an exact copy of the one saved (capture.clear_copies).
-        try:
-            _clear_copies(dl_dir, seen, out_path)
-        except Exception:
-            pass
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    q = parse_qs(parts.query)
+    return (parts.netloc == "www.verizon.com" and parts.path == PDF_PATH and not parts.fragment
+            and set(q) == {"startMonthDate", "channelId"}
+            and bool(_END_DATE_RE.fullmatch(q["startMonthDate"][0]))
+            and bool(_CHANNEL_RE.fullmatch(q["channelId"][0])))
+
+
+def goto_documents(page) -> bool:
+    """Open Bill & payment history and take its bill list. False when it
+    showed the sign-in page or never asked."""
+    try:
+        _open(page)
+        return True
+    except (SessionExpired, ListStopped) as e:
+        log.info("Bill & payment history did not open: %s", e)
+        return False
+
+
+def scroll_full_page(page, rounds: int = 8, delay_ms: int = 600) -> None:
+    try:
+        for _ in range(rounds):
+            page.mouse.wheel(0, 3000)
+            page.wait_for_timeout(delay_ms)
+    except Exception:
+        pass
+
+
+def expand_all(page) -> None:
+    """Nothing to press: the API's answer holds every cycle, even those the
+    page shows only after Show more."""
+    return None
+
+
+def collect_download_docs(page) -> List[RawDoc]:
+    """Every bill in the bill history. Nothing is pressed. A list that
+    cannot be read whole, or a signed-out session, gives no list at all,
+    said in the log, since this app's engine records whatever it is given
+    and a part of the history must never pass for all of it."""
+    try:
+        return bills_of(_open(page).answer)
+    except (SessionExpired, ListStopped) as e:
+        log.warning("the bill history could not be read whole: %s", e)
+        return []
+
+
+_PDF_JS = r"""async ([url, limit]) => {
+  let r;
+  try { r = await fetch(url, {credentials: 'include', redirect: 'manual'}); }
+  catch (e) { return {status: 0, failed: true}; }
+  if (r.type === 'opaqueredirect' || r.redirected) return {status: r.status, redirected: true};
+  const type = r.headers.get('content-type') || '';
+  if (r.status !== 200) return {status: r.status, type: type};
+  const buf = await ppRead(r);
+  if (buf.length > limit) return {status: r.status, type: type, too_big: true};
+  let s = '';
+  for (let i = 0; i < buf.length; i += 0x8000) {
+    s += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  }
+  return {status: r.status, type: type, b64: btoa(s)};
+}"""
+
+
+def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
+    """GET a bill's PDF address from inside the signed-in page, the way its
+    Review bill PDF opens it, and keep the body only when it is a PDF."""
+    if not is_pdf_url(url):
+        return False
+    try:
+        got = intake.evaluate(page, _PDF_JS, [url, MAX_PDF_BYTES], limit=MAX_PDF_BYTES) or {}
+    except intake.TooLarge:
+        return False
+    except Exception as e:
+        log.info("fetching the bill failed (%s)", type(e).__name__)
+        if trace is not None:
+            trace.append({"note": "fetch failed", "error": type(e).__name__})
+        return False
+    ctype = str(got.get("type") or "").split(";", 1)[0].strip().lower()
+    if trace is not None:
+        trace.append({"note": "fetched", "host": "www.verizon.com", "status": got.get("status"), "type": ctype[:30]})
+    if got.get("redirected") or got.get("status") in (401, 403):
+        raise SessionExpired("Verizon refused the bill")
+    if got.get("status") != 200 or not got.get("b64"):
+        return False
+    try:
+        data = intake.decode(got["b64"], validate=True, limit=MAX_PDF_BYTES)
+    except Exception:
+        return False
+    if data[:5] != b"%PDF-":
+        if data.lstrip()[:1] in (b"<", b"{", b"["):
+            raise SessionExpired("Verizon answered a bill with a sign-in page")
+        return False
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(data)
+    return True
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None) -> bool:
-    """Save the bill dated `iso_date`. A PDF link on the row is fetched
-    from inside the page. Otherwise the row's own control is clicked, once
-    it has passed the guard, and whichever the site produces is caught, a
-    download event or a PDF response, in this tab or one it opens.
-
-    `dl_dir` is where the attached browser saves a download, watched
-    after every click."""
+    """Save the bill whose cycle ended on `iso_date`. The bill history is
+    taken again from the page, and the bill is fetched only when exactly one
+    cycle there ends that day. `dl_dir` is unused: nothing goes through the
+    browser's downloads. Nothing is pressed. SessionExpired propagates."""
     out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    if not goto_documents(page):
-        log.info("could not open bill history for %s", iso_date)
-        return False
-    expand_all(page)
-
-    el, label = _control_for(page, iso_date)
-    if el is None:
-        log.info("no bill control found for %s", iso_date)
-        return False
-    if not is_safe_control(label):
-        log.info("refusing unsafe control %r for %s", label, iso_date)
-        return False
-
     try:
-        href = el.get_attribute("href") or ""
-    except Exception:
-        href = ""
-    if href and not href.lower().startswith(("javascript", "#")):
-        from urllib.parse import urljoin
-        target = urljoin(page.url, href)
-        # A link on the provider's own hosts is fetched through the session
-        # first. A PDF answer is the document. Anything else means the link
-        # is a page or a handoff, and the click below follows it.
-        if is_safe_url(target):
-            body = _fetch_pdf(page, target, zip_ok=True)
-            if body:
-                out_path.write_bytes(body)
-                return True
-            if trace is not None:
-                trace.append({"note": "the control's own link did not answer with a PDF",
-                              "url": redact(target)[:160]})
-    return _catch_pdf(page, el, label, out_path, trace, dl_dir)
+        history = _open(page)
+        found = [d for d in bills_of(history.answer) if d.date_text == (iso_date or "")]
+    except (SessionExpired, ListStopped) as stop:
+        log.info("the bill list stopped while looking for the bill dated %s: %s", iso_date, stop)
+        return False
+    if len(found) != 1:
+        log.info("%d bills match the date %s, none taken", len(found), iso_date)
+        if trace is not None:
+            trace.append({"note": "no single bill matches the record", "matches": len(found)})
+        return False
+    try:
+        return _fetch(page, pdf_url(found[0].end_date, history.channel), out_path, trace)
+    except SessionExpired as e:
+        log.info("the bill dated %s was refused: %s", iso_date, e)
+        return False
 
 
-# ---------------------------------------------------------------------------
-# Diagnose. A survey a tester can attach to an issue. No screenshot, since a
-# billing page shows names, numbers and amounts. Digit runs are masked and
-# JSON bodies are recorded as shape only.
-# ---------------------------------------------------------------------------
 _ROW_JS = r"""() => {
   const out = [];
   for (const tr of document.querySelectorAll('table tr, [role=row], li, [class*="bill" i]')) {
@@ -876,12 +713,12 @@ def _page_summary(page) -> dict:
     return out
 
 
-def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
+def survey(page, dwell_ms: int = 4000, max_follow: int = 0) -> dict:
     """What the signed-in billing area looks like, without downloading
-    anything. Records each page, its headings and controls with the
-    guard's verdict on each, and every JSON or PDF response verizon.com sends
-    while the page settles. Then follows, one at a time and back again,
-    the few links whose text is a billing word. No screenshot."""
+    anything. Records the page, its headings and controls with the guard's
+    verdict on each, and every JSON or PDF response verizon.com sends while
+    the page settles. Follows nothing, since this app presses no control at
+    all and a survey is not a reason to start. No screenshot."""
     seen: list = []
 
     def on_response(res):
@@ -919,54 +756,7 @@ def survey(page, dwell_ms: int = 4000, max_follow: int = 6) -> dict:
     report = {"pages": [], "responses": seen}
     try:
         page.wait_for_timeout(dwell_ms)
-        start = _page_summary(page)
-        report["pages"].append(start)
-        followed = 0
-        for c in start["controls"]:
-            if followed >= max_follow or c["role"] not in ("link", "button") or not c["survey"]:
-                continue
-            if not is_safe_control(c["text"]):
-                continue
-            try:
-                link = page.get_by_role(c["role"], name=re.compile(
-                    "^" + escape_for_locator(c["text"].replace("#", "")) + "$", re.I)).first
-                if link.count() == 0:
-                    continue
-                before = page.url
-                tabs_before = set(page.context.pages)
-                link.click(timeout=5000)
-                page.wait_for_timeout(dwell_ms)
-                # A control that opened a new tab (a document vendor behind
-                # a single sign-on, a PDF) is surveyed there, then the tab
-                # is closed. Off the provider's hosts it is still recorded,
-                # marked, and nothing on it is followed.
-                for extra in [p for p in page.context.pages if p not in tabs_before]:
-                    try:
-                        extra.wait_for_load_state("domcontentloaded", timeout=15000)
-                        tab = _page_summary(extra)
-                        tab["opened_tab_from"] = c["text"]
-                        tab["off_host"] = not is_safe_url(extra.url or "")
-                        report["pages"].append(tab)
-                    except Exception as e:
-                        report.setdefault("notes", []).append(
-                            "could not read the tab %r opened: %s" % (c["text"], str(e)[:120]))
-                    try:
-                        extra.close()
-                    except Exception:
-                        pass
-                if not is_safe_url(page.url or ""):
-                    page.go_back()
-                    continue
-                summary = _page_summary(page)
-                summary["followed_from"] = c["text"]
-                report["pages"].append(summary)
-                followed += 1
-                if page.url != before:
-                    page.go_back(wait_until="domcontentloaded", timeout=15000)
-                    page.wait_for_timeout(1500)
-            except Exception as e:
-                report.setdefault("notes", []).append(
-                    "could not follow %r: %s" % (c["text"], str(e)[:120]))
+        report["pages"].append(_page_summary(page))
     finally:
         try:
             page.remove_listener("response", on_response)
