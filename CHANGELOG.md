@@ -9,6 +9,117 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **DKB, the 82nd app, the Postfach and its archive (#164).** It saves
+  every PDF in a DKB (Deutsche Kreditbank) Postfach and in its older
+  archive, account and card statements, securities documents, tax
+  certificates, contract information and messages, each kind in a folder
+  of its own named as the Postfach names it. Nothing is clicked. The list, the messages that
+  say each document's kind, the archive's folders and each PDF come from
+  the same GET calls the Postfach page makes, from inside the signed-in
+  page, and the call that marks a message read is never sent. DKB signs a
+  tab out about six minutes after the last thing the person did in it, and
+  a run's calls do not count, so a long run stops as signed out and Resume
+  carries on after a new sign-in. Contributed by @tabacha and run on the
+  contributor's own account, 611 documents saved. Before merging, a part
+  of the list that does not answer as a list, the archive or the messages
+  among them, was made to stop the run rather than be passed over with the
+  list called whole, and to stop a run that reads it again while documents
+  download once with the list unread. Two documents of one day, subject
+  and account are now told apart by their ids, so neither is saved with
+  the other's bytes, and Login says signed in only once DKB answers with
+  the list. An archive folder's subfolders are read too. A Postfach
+  document its messages leave out, a Postfach that answers empty while its
+  messages name documents, and a folder list with no folder in it stop the
+  list, a document with no date is left out and said rather than dropped
+  unseen, and a statement held in both the Postfach and the archive is
+  saved once. Like every other app, it says Sign in first when nobody is
+  signed in, and says when no sign-in window opened or nothing was
+  recorded.
+- **Discover Bank, the 83rd app, checking and savings statements (#151).**
+  `discoverbank` reads Discover Bank deposit accounts on bank.discover.com.
+  It reads every account on the Statements page's account menu from the
+  state the page keeps for it, asks each account's statement list the way
+  the page does, from inside the page, and saves each PDF under its own
+  account, named for it. Nothing on the page is pressed but the keep-alive
+  button of Discover's inactivity dialog, by its whole name, so a long run
+  is not signed out partway. Contributed by
+  @appchamp, whose full run saved 100 checking and 100 savings statements.
+  Money market and CD accounts are untested. Before merging, the Discover
+  card app was kept beside it, since Capital One moves Discover cards onto
+  its own site in waves into 2027, and the new app was given a port of its
+  own where it had taken the card app's. It no longer opens the account
+  menu and chooses each account when the menu's state cannot be read, nor
+  reads the page's text in place of the lists. An account whose list did
+  not answer, an account with no id or another's name, an option named for
+  an action, and a statement whose PDF is not its own account's, whose date
+  is no day, or whose kind its account's name and id disagree on, now leave
+  the list not whole, so the run keeps what it saved and stops at its end.
+  A list with nothing read is no longer noted whole. The list call takes no
+  paging anybody has seen, and both of the contributor's accounts answered
+  exactly 100 statements, one of them for 108 months, so a run says an
+  account whose list holds exactly 100 may have older statements out of
+  reach, and an account whose list answers with none leaves the list not
+  noted whole, without stopping the run. It no longer presses the site's own
+  Activity or Statements link when the Statements address lands elsewhere,
+  and a keep-alive button is pressed only by its whole name. Login says
+  signed in only once the account menu and a statement list answer, and a
+  run with nobody signed in, a sign-in window that did not open and an
+  empty recording end the way every other app's do.
+- **Ziply Fiber, the 84th app, monthly internet bills (#129).** It
+  downloads every bill My Account's Billing page lists from
+  ziplyfiber.com. Nothing is clicked. The app asks the page's own bill
+  list query from inside the signed-in page with the page's own headers,
+  which stay in memory for the run and are never written down, and
+  fetches each bill's PDF the same way. A list with no bills, an answer
+  the account API marks as failed, a list as long as was asked for, or a
+  page that asks about more than one account stops the list rather than
+  be read as whole. A bill is known by the account's last four digits and
+  its invoice id, its file name carries the account, and a bill listed
+  under another account than the one the page shows stops the run once
+  and names the account to choose. Contributed by crazyhorse90210 and run
+  on the contributor's own account. Before merging, an empty or failed
+  list was made to stop, a second account was made to stop the list, a
+  list that stops while bills download was made to stop the run once
+  with the list unread, a bill answered with JSON was made to fail alone,
+  the list was made to be read once a run, and the README was rewritten
+  for this app. Get new pressed before signing in now says Sign in first,
+  and a sign-in window that did not open or a recording with nothing in
+  it now says so, as every other app does.
+- **Cetera (AdviceWorks), the 85th app, brokerage statements and
+  quarterly performance reports (#130).** It downloads every statement of
+  every account the AdviceWorks client portal lists, and the quarterly
+  performance reports beside them. Nothing is clicked. The app asks the
+  page's own two lists from inside the signed-in page with the page's own
+  headers, which stay in memory for the run and are never written down,
+  and fetches each PDF the way the page's own download does. A list
+  shorter than its own count, a statement of an account the page did not
+  ask about, or a history with no statements stops the list rather than be
+  read as whole. A statement's file name carries its account as the portal
+  masks it. Contributed by crazyhorse90210 and run on the contributor's
+  own account. Before merging, one document answered with something other
+  than a PDF was made to fail alone, where it had stopped every run at that
+  document for good, two statements of one account and date were made to
+  leave only that date, a list that stops while documents download was
+  made to stop the run once with the list unread, and both lists were made
+  to be read once a run. A statement that comes back twice as the list is
+  read page by page now stops the list, where one row given twice could
+  hide a statement left out. A PDF refused while the lists still answer
+  now fails that document alone, where it stopped every run there as
+  signed out. A statement keeps the name the list gives it, so a
+  confirmation or a tax form is never filed as an account statement. Get
+  new pressed before signing in now says Sign in first, and a sign-in
+  window that did not open or a recording with nothing in it now says so,
+  as every other app does.
+- **Make a request, from the main page.** A button on Accounts opens one
+  sheet for asking for a provider or a feature, with the questions a request
+  needs answered, and says so when PaperPull already reads the provider
+  asked for. The answers start the matching form on GitHub in the person's
+  own browser, for them to read and send, so PaperPull still sends nothing
+  itself. Of where you sign in, only the site goes, never the page's path
+  or what follows it, which can hold a username. Settings and the list of
+  providers open the same sheet.
+
 ### Changed
 - **The control panel looks and reads like a Mac app.** It is set in the
   computer's own font, San Francisco on a Mac and Segoe UI on Windows, so
@@ -21,11 +132,164 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Settings is drawn in groups the way System Settings draws them.
 - **Accounts puts what needs you first.** The page has one blue button, the
   one for the next step, and each row's own is gray. Once anything has run,
-  the providers never run fold under one Not started line, and a list
-  longer than eight gets a search box. Overdue reads in amber, as a new
-  document that is likely waiting, instead of a failure's red. Escape gives
-  focus back to the More button, and Settings names each provider and
-  person as Accounts does, instead of by folder.
+  the providers never run fold under one Not started line, except one
+  whose first run is going, that needs setting up or that shares a
+  sign-in browser with another account, and a list longer than eight gets
+  a search box. Overdue reads in amber, as a new document that is likely
+  waiting, instead of a failure's red. Escape gives focus back to the More
+  button, and Settings names each provider and person as Accounts does,
+  instead of by folder.
+
+### Fixed
+- **A run started outside its app's folder keeps to that folder (#165).** An
+  `output_dir` of `.`, a second person's `../<app> - <name>` and a relative
+  `profile_dir` were read from wherever the run was started, so a run started
+  from a shell in the folder that holds the installs made Logs, Backups, a
+  folder of each kind and a browser profile there. A run started outside both
+  its app's folder and its config's folder now reads them from the config's
+  folder, and `--config config.<name>.json` given there finds the app's own
+  file of that name. The control panel, `paperpull`, `login.bat` and
+  `login.command` start every run in the app's folder, and those runs read
+  their folders and record their paths exactly as before. Contributed by
+  @appchamp. Before merging, the folders were kept as written for a run
+  started in the app's folder or its config's, since every path such a run
+  records is relative to that folder, and the search for a config was kept to
+  a bare file name.
+- **Verizon Mobile downloads your wireless bills (#31).** The app had been
+  built without an account, and on a real one it found no bills. It now
+  opens Bill & payment history by its address, takes the page's own list of
+  every bill My Verizon keeps, about two years of them, and asks each bill's
+  PDF from inside the signed-in page the way the page's own Review bill PDF
+  does. Nothing is clicked, and Diagnose follows no link. A bill is known by
+  the last four digits of its account number with the suffix after the
+  hyphen and by the day its cycle ended, so two accounts on one sign-in
+  keep their bills apart, and a bill is asked for only while My Verizon
+  shows the account it was listed under. A run takes the bills of the
+  account shown first, so one account's bill left for later never holds
+  back another's, and stops once when only other accounts' bills are left,
+  naming the account to choose. A history that cannot be read
+  whole, one that lists no bills among them, stops the run and is never
+  taken for the whole list, and a sign-out partway through stops the run
+  once instead of sending every bill to Manual Review. Each bill reads the
+  history once, where it used to read it twice. Records the earlier build
+  wrote are not carried over, so a bill it saved downloads once more under
+  its new name. Contributed by @crazyhorse90210, who ran it on his own
+  account and saved all 24 bills. Before merging, the list stops, the sign-out,
+  the account and the history read once a bill were done on our side.
+- **A support report takes three steps, not fifteen.** Its dialog said to
+  sign in first with no way to, so a person canceled, signed in and came
+  back through More. Open folder then opened a folder of two or three
+  files to pick the one to attach from, and where to send it was under
+  Settings, About. The dialog now opens the sign-in window itself and stays
+  open for the report, Show the file selects the survey or recording in
+  the file manager, and Report a problem opens a new problem report for
+  that provider, on the form for an app that stopped working with the
+  provider filled in. The note about a file a failed run wrote offers the
+  same link. It is a link the person follows, carrying the provider's short
+  name only, and only for a provider PaperPull ships. On PaperPull Server,
+  whose sign-in window is docked in the page itself, the dialog still says
+  to sign in first. When the sign-in the dialog started ends, the dialog
+  says whether its window opened, and when none did, the app's own words
+  for why are under it.
+- **Moving to another computer says what comes with you.** The Move card
+  offered only a history file, which brings no PDF and marks every document
+  it lists as downloaded, so Get new never fetched them, and nothing said
+  so. Somebody who moved had an empty archive PaperPull believed complete.
+  The card now leads with copying the PaperPull folder, and the Documents
+  folder, naming both, which brings everything. The PaperPull folder works
+  wherever it lands, since each config.json names its folders relative to
+  its own. The Documents folder is named by its full path, in each config
+  and in the records of what was moved there, so the card says to copy it
+  to the same place and choose it again. The history
+  file follows as the way when the folders cannot be copied, and its
+  import, on the welcome and in Settings, says the PDFs stay on the other
+  computer and to copy them over or use Restore deleted files.
+- **The welcome's folder step says what it thinks of the folder.** A
+  folder that could not be used was refused only at Set up, two steps on
+  and away from its field. One already holding PaperPull providers, the
+  obvious one to type for somebody who has them, was not noticed. They were
+  asked to choose providers again, and Set up said it set up 0. One inside
+  iCloud Drive, Google Drive, Dropbox or OneDrive was taken without a word,
+  though it holds each provider's signed-in browser. Continue now checks the
+  folder (the same check Set up makes) and says under the field what is
+  wrong, the providers already there with Open Accounts to use them, or the
+  sync service it is in before going on. Already have PaperPull folders, in
+  Settings, goes on to Accounts once it finds them. A folder slow to
+  answer, on a network share that is offline, say, holds up only its own
+  check and never the panel's other tabs.
+- **The panel calls each thing by one name, and says what to do next.**
+  The same thing went by several names from page to page, and some were
+  the command line's. The panel now says provider, account, PaperPull
+  folder, Documents folder, download history and Technical details, each
+  for one thing only, and never Pilot, Run All, Resume, Discover, Login,
+  Scope or Download again, or a folder slug where a provider's name
+  belongs. Messages from PaperPull itself start with a capital, end with a
+  period and say what to do next, such as "That folder does not exist.
+  Check the path, or create the folder first."
+- **A run says where its documents went, and Open folder opens them.** A
+  run's page listed the names it saved and never where, and Open folder
+  opened the account's own folder, among its script, config and records,
+  with the PDFs a folder down, or, once a documents folder was set in
+  Settings, a folder they had moved out of. A run that saved documents now
+  says "Saved to" the folder they are in, read from what that run saved,
+  with an Open folder button that opens that same folder. That is the
+  folder of their kind, Statements, say, or the account's own folder when
+  they went to more than one kind, or the documents folder once they were
+  moved there. Open folder elsewhere opens the folder holding the account's
+  newest document, never a browser profile, another person's folder, or a
+  documents folder no run would use. Open what was set aside opens Manual
+  Review, as the page says it is there, and when there is no Manual Review
+  folder it opens nothing and says so. Accounts names the documents
+  folder once one is set.
+- **Sign in, then get new documents, in one go.** Get new pressed before
+  signing in, the likeliest first-run slip, read as a crash ("It exited with
+  code 1", "Run login.bat first"), said "Sign in again" to somebody who never
+  had, and offered Continue for a run that never started. Each app now ends
+  that run through `run_reporting.not_signed_in`, which says it in the
+  panel's words under the panel and in login.bat's in a terminal, and exits
+  `NOT_SIGNED_IN` (7). The panel titles it "Sign in first" and offers the
+  sign-in, then the same run over the same dates, which the sign-in's own
+  page offers again once its window has opened, and the account is not
+  listed as stopped. A support report, a recording or a restore that found
+  nobody signed in offers its own dialog again, never Get new. A sign-in
+  pressed on the page of a run that stopped carries the step that page
+  offered after it, Check again, Continue, the restore or the recording,
+  and its own page offers that step and names it. Check again checks over
+  the dates of the check that stopped. Any other "Sign-in
+  window opened" now offers Get new documents on the same page. A
+  row not started yet offers Sign in, which opens the window, where it
+  offered Start, which only opened the account's page, and that page leads
+  with signing in while the account has not started or its last run found
+  nobody signed in.
+- **A run that stops says why, and whose it is to fix.** Every stop read
+  "may have signed you out partway … Sign in again, then continue",
+  whatever had stopped it. The run's result now carries why it stopped,
+  worked out in the core from what the run is leaving on. The provider
+  needed you, for a sign-in or a check nobody was there to answer, and the
+  panel says to sign in, then continue. Its page was not what PaperPull
+  expected, and the panel sends you to the technical details for what to
+  do, then Continue, and says a stop at the same place again is for
+  PaperPull to fix. It did not answer in time, or PaperPull hit an error it
+  did not expect, and the panel offers Continue. Where the run's page says
+  to make a support report, it has a Make a support report button for it,
+  since that page has no More menu. Only a stop a sign-in can
+  fix offers one, and a stop with no reason sends you to the technical
+  details instead of guessing a sign-out.
+- **The panel never says something happened that did not.** Open sign-in
+  window said "Sign-in window opened" in green when no browser could open
+  at all, and Record said "Recording saved", ready to attach, when the
+  recorder refused on a sign-in page or nothing was clicked. Each app now
+  ends those as the core's NOTHING_OPENED and NOTHING_RECORDED, and the
+  panel says "No sign-in window opened" or "Nothing was recorded", with the
+  app's own words for why under it. A run the panel would not start,
+  because another tab is running it, a history file is being imported, the
+  app needs setting up or PaperPull Server does not recognize its folder,
+  now reads "This run did not start" with the reason, instead of "It
+  exited with code 1" and a Continue for a run that never began. None of
+  these offers an earlier run's failure file as one it wrote. Recent runs
+  says "no sign-in window opened", "nothing was recorded" or, for a run
+  that found nobody signed in, "nobody was signed in", never "ended with a
+  problem".
 
 ## [0.61.1] - 2026-11-08
 
@@ -35,8 +299,6 @@ past year-end rows that stay at a card switch. A document that could not be
 downloaded no longer reads as one waiting in Manual Review, a gap no run can
 fill no longer keeps an account in "may have something new", and an account
 says it was checked only when its list was read.
-
-### Changed
 
 ### Fixed
 - **"May have something new" no longer keeps a gap a whole run could not

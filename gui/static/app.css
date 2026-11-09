@@ -41,7 +41,7 @@
     --accent-soft: #1d3557; --accent-text: #8cc4ff; --link: #58a6ff;
     --ok: #30d158; --ok-soft: #173823; --ok-text: #5fe07f;
     --warn: #ff9f0a; --warn-soft: #3a2c12; --warn-text: #ffc46b; --warn-line: #a8752a; --warn-band: #2e2614;
-    --bad: #ff453a; --bad-soft: #3d1d1b; --bad-text: #ff8a80;
+    --bad: #ff453a; --bad-soft: #3d1d1b; --bad-text: #ff9189;
     --code-bg: #141416; --code-ink: #e5e5ea;
     --overlay: rgba(0, 0, 0, .5);
     --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .35);
@@ -62,7 +62,7 @@
   --accent-soft: #1d3557; --accent-text: #8cc4ff; --link: #58a6ff;
   --ok: #30d158; --ok-soft: #173823; --ok-text: #5fe07f;
   --warn: #ff9f0a; --warn-soft: #3a2c12; --warn-text: #ffc46b; --warn-line: #a8752a; --warn-band: #2e2614;
-  --bad: #ff453a; --bad-soft: #3d1d1b; --bad-text: #ff8a80;
+  --bad: #ff453a; --bad-soft: #3d1d1b; --bad-text: #ff9189;
   --code-bg: #141416; --code-ink: #e5e5ea;
   --overlay: rgba(0, 0, 0, .5);
   --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .35);
@@ -421,6 +421,9 @@ pre.log.short { max-height: 220px; }
 .ptile:has(input:disabled) { cursor: default; opacity: .6; }
 .ptile b { display: block; font-weight: 600; }
 .ptile .gets { display: block; font-size: 13px; color: var(--muted); }
+/* On the blue of a picked tile or option the lighter gray falls under 4.5:1,
+   so the darker one. */
+.ptile:has(input:checked) .gets { color: var(--ink-2); }
 .ptile .tag { display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 500; }
 .ptile .tag.warn { background: var(--warn-soft); color: var(--warn-text); }
 .ptile .tag.plain { background: var(--fill); color: var(--ink-2); }
@@ -487,6 +490,18 @@ table.t.mono td { font-family: var(--mono); font-size: 12.5px; }
 #view-settings #movebox > h2 + * { margin-top: var(--s3); }
 
 /* -- dialogs, as sheets ---------------------------------------------------- */
+#dlg-request .dlg-body, #dlg-request .stack { display: flex; flex-direction: column; gap: var(--s4, 16px); }
+#dlg-request [hidden] { display: none; }
+/* The actions stay in sight on a short window, and only the answers scroll. */
+#dlg-request { overflow: hidden; }
+#dlg-request form { display: flex; flex-direction: column; max-height: calc(100dvh - 48px); }
+#rq-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+#dlg-request .rq-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3, 12px); }
+#dlg-request select, #dlg-request .rq-pair > .field { min-width: 0; width: 100%; }
+@media (max-width: 520px) { #dlg-request .rq-pair { grid-template-columns: 1fr; } }
+#dlg-request textarea { padding: 10px var(--s3, 12px); line-height: 1.4; resize: vertical; min-height: 64px; }
+#dlg-request .seg { align-self: flex-start; }
+#dlg-request [aria-invalid=true] { border-color: var(--bad, var(--bad-text)); }
 dialog { border: 0; padding: 0; border-radius: 14px; width: 600px; max-width: calc(100vw - 32px);
          max-height: calc(100vh - 48px); background: var(--raised); color: var(--ink); box-shadow: var(--shadow-lg); }
 dialog::backdrop { background: var(--overlay); }
@@ -522,6 +537,7 @@ dialog::backdrop { background: var(--overlay); }
 .opt input { margin: 3px 0 0; width: 18px; height: 18px; flex: none; }
 .opt b { display: block; font-weight: 600; }
 .opt span span { display: block; font-size: 14px; color: var(--muted); }
+.opt:has(input:checked) span span { color: var(--ink-2); }
 .err { color: var(--bad-text); font-size: 14px; }
 
 /* -- the server's sign-in window ------------------------------------------- */

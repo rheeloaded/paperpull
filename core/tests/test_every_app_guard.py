@@ -413,10 +413,10 @@ _ALLOWLIST_NAMES = {"is_safe_control", "SAFE_DOC_CONTROL_RE", "SAFE_DOC_CONTROL_
 # third list. Amazon defines no guard, so it is not here, and Gap only its
 # document allowlist.
 CLICK_NOTHING = {
-    "affirm", "anthem", "apple", "citi", "ezpassva", "fedex", "fidelity", "gap", "github",
-    "homedepot", "invest529", "irs", "kroger", "lowes", "myecp", "mypay", "netbenefits",
-    "nwnatural", "optum", "paylocity", "portlandgeneral", "sdge", "stripe", "tsp",
-    "tualatin", "uber", "ukg", "ups",
+    "affirm", "anthem", "apple", "cetera", "citi", "dkb", "ezpassva", "fedex", "fidelity",
+    "gap", "github", "homedepot", "invest529", "irs", "kroger", "lowes", "myecp", "mypay",
+    "netbenefits", "nwnatural", "optum", "paylocity", "portlandgeneral", "sdge", "stripe",
+    "tsp", "tualatin", "uber", "ukg", "ups", "verizonmobile", "ziply",
 }
 # Apps that press only controls they find by a selector or by words written
 # in the app, and keep is_safe_control() for Diagnose, SECURITY.md's second

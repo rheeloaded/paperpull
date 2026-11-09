@@ -817,8 +817,10 @@ def _row_link_fetches(app: Path) -> list:
 
 
 def test_the_row_link_fetches_are_found():
-    """Not vacuous. Ten scaffold apps fetch a control's own link first."""
-    assert len([d for d in TAKING if _row_link_fetches(d)]) >= 10
+    """Not vacuous. Nine scaffold apps fetch a control's own link first.
+    Verizon Mobile was the tenth until it took each bill from its history
+    API (#128)."""
+    assert len([d for d in TAKING if _row_link_fetches(d)]) >= 9
 
 
 @pytest.mark.parametrize("app", census([d for d in TAKING if _row_link_fetches(d)]))

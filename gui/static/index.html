@@ -43,10 +43,11 @@ __CSS__
     <div class="main-col">
       <div id="w-step1">
         <h1 id="w-title">Welcome to PaperPull</h1>
-        <p class="muted" style="margin:6px 0 22px">PaperPull saves your statements and receipts from the sites
-          you choose, into a folder on this computer. First, where should they go?</p>
+        <p class="muted" style="margin:6px 0 22px">PaperPull saves your statements and receipts from the providers
+          you choose, your banks, cards, shops and bills, into a folder on this computer. First, where
+          should they go?</p>
         <div class="card pad stack">
-          <label class="field" for="newroot" id="newrootlabel">Folder for your documents</label>
+          <label class="field" for="newroot" id="newrootlabel">Your PaperPull folder</label>
           <input id="newroot" type="text" spellcheck="false" autocomplete="off">
           <p class="hint" id="serverroot" hidden><b>/data</b> is the container's name for its data folder.
             On your server it is the folder named <b>data</b> inside the folder that holds compose.yaml,
@@ -54,17 +55,20 @@ __CSS__
             its own in there, and its documents go in that folder.</p>
           <p class="hint" id="rootsay">Each provider you choose gets a folder of its own inside it. Nothing
             is downloaded until you ask.</p>
-          <div class="row-actions"><button class="btn btn-p" type="button" data-do="w-next">Continue</button></div>
+          <p class="hint" id="rootcheck" aria-live="polite" hidden></p>
+          <div class="row-actions"><button class="btn btn-p" type="button" data-do="w-next" id="w-next1">Continue</button>
+            <button class="btn btn-s" type="button" data-do="w-use-root" id="w-useroot" hidden>Open Accounts</button></div>
         </div>
       </div>
       <div id="w-step2" hidden>
         <h1 id="w-title2" tabindex="-1">Which providers do you use?</h1>
-        <p class="muted" style="margin:6px 0 20px">Pick any you have an account with. Each gets its own
-          folder, and nothing downloads until you ask. You can add more later.</p>
+        <p class="muted" style="margin:6px 0 20px">Pick any you have an account with. Each gets a folder of
+          its own, and you can add more later.</p>
         <label class="searchbox"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           <span class="sr">Search providers</span><input id="w-search" type="search" autocomplete="off" placeholder="Search providers, like Chase or Verizon"></label>
         <div class="chips" id="w-groups" role="group" aria-label="Kinds of provider"></div>
         <div class="tiles" id="providers"></div>
+        <p class="hint" style="margin-top:12px">Not in the list? <button type="button" class="link" data-do="request" data-kind="provider" id="w-request">Request a provider</button></p>
         <p class="hint" id="w-count" style="margin-top:14px"></p>
         <div class="tray">
           <b id="w-picked-n">None chosen yet</b><span class="picked" id="w-picked"></span>
@@ -75,13 +79,13 @@ __CSS__
       <div id="w-step3" hidden>
         <h1 tabindex="-1" id="w-title3">Whose documents are these?</h1>
         <p class="muted" style="margin:6px 0 20px">The name on the account, as the provider writes it.
-          It never leaves this computer. It is what lets PaperPull remove your name from a file before
-          you send it to anyone, and it can go in your file names.</p>
+          It stays on this computer, and lets PaperPull take your name out of a file you share or put it
+          in your file names.</p>
         <div class="card pad stack">
-          <label class="field" for="owner">Account holder's name</label>
+          <label class="field" for="owner">Name on the account</label>
           <input id="owner" type="text" autocomplete="name" spellcheck="false" maxlength="80">
-          <p class="hint">Leave it blank to skip. A second person on the same provider is added later, from
-            that provider's More menu.</p>
+          <p class="hint">Leave it blank to skip. To add a second person at the same provider, use Add another
+            person in its More menu later.</p>
           <div class="row-actions">
             <button class="btn btn-s" type="button" data-do="w-back">Back</button>
             <button class="btn btn-p" type="button" data-do="w-create" id="w-create">Set up</button>
@@ -94,8 +98,8 @@ __CSS__
     <aside class="side-col" id="w-aside">
       <section class="card aside-card" id="movelink">
         <h2>Moving from another computer?</h2>
-        <p>Bring its providers and download history with the file from Export history. Nothing you already
-          have downloads again.</p>
+        <p id="movesay">On the old computer, use Export history in Settings. Import that file here, and nothing you
+          already have downloads again.</p>
         <button class="btn btn-s" type="button" data-do="w-import">Import a history file</button>
       </section>
       <section class="card aside-card" id="w-sample">
@@ -119,6 +123,7 @@ __CSS__
   <div class="head">
     <div><h1 id="h-title" tabindex="-1">Accounts</h1><p id="h-sub"></p></div>
     <button class="btn btn-s" type="button" data-do="add-provider" id="addlink"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add a provider</button>
+    <button class="btn btn-s" type="button" data-do="request" id="h-request"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Make a request</button>
   </div>
   <label class="finder" id="h-findbox" hidden><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
     <span class="sr">Search accounts</span><input id="h-find" type="search" autocomplete="off" spellcheck="false" placeholder="Search accounts"></label>
@@ -191,10 +196,10 @@ __CSS__
   <div class="head"><div><h1 id="n-title" tabindex="-1">File names</h1>
     <p>How new downloads are named. Saving touches nothing on disk. Renaming the files you already have is
       a separate step, with a preview first.</p></div></div>
-  <p id="nmunavail" class="hint warn" hidden>File naming is not available in this install. Update PaperPull to get it.</p>
+  <p id="nmunavail" class="hint warn" hidden>File naming is not available in this copy of PaperPull. Update PaperPull to get it.</p>
   <div id="nmbody">
     <div class="opts" style="margin:0 0 18px">
-      <label class="field">Show examples from<select id="nmapp"></select></label>
+      <label class="field">Provider<select id="nmapp"></select></label>
       <fieldset><legend>Use this naming for</legend><div class="seg">
         <label><input type="radio" name="nmscope" value="shared" checked><span id="nmsharedlabel">Every provider of this kind</span></label>
         <label><input type="radio" name="nmscope" value="own"><span id="nmownlabel">Only this provider</span></label></div></fieldset>
@@ -229,14 +234,13 @@ __CSS__
       <div class="text">
         <h2>Rename the files you already have to match?</h2>
         <p id="nmofferapps"></p>
-        <p>Preview first. It lists every file that would change and changes nothing. Renaming then does
-          exactly that. Nothing is downloaded or deleted, a file moves only into or out of the folders a
-          pattern with a / names, and each app's index follows its files, so nothing is ever downloaded
-          twice. The preview can also list files an app would now describe better than when it saved
-          them.</p>
+        <p>Preview lists every file that would change, and changes nothing. Rename then renames them.
+          Nothing is downloaded or deleted, and PaperPull's download history follows each file, so nothing
+          downloads twice. A file moves to another folder only if the pattern has a /. The preview can also
+          list files PaperPull would now describe better than when it saved them.</p>
         <div class="row-actions">
-          <button class="btn btn-s" type="button" id="nmprevbtn" data-do="nm-preview">1. Preview the changes</button>
-          <button class="btn btn-p" type="button" id="nmapplybtn" data-do="nm-apply" disabled>2. Rename them</button>
+          <button class="btn btn-s" type="button" id="nmprevbtn" data-do="nm-preview">1. Preview</button>
+          <button class="btn btn-p" type="button" id="nmapplybtn" data-do="nm-apply" disabled>2. Rename</button>
           <button class="link" type="button" data-do="nm-notnow">Not now</button>
           <span class="hint" id="nmofferstate" role="status"></span>
         </div>
@@ -268,7 +272,7 @@ __CSS__
       <p class="mono small" id="root" style="word-break:break-all"></p>
       <p class="hint" id="rootwhy"></p>
       <div id="existing" class="stack" hidden>
-        <label class="field" for="rootinput">Use another folder, the one that holds your provider folders</label>
+        <label class="field" for="rootinput">Use another folder, the one that holds your providers' folders</label>
         <input id="rootinput" type="text" spellcheck="false" placeholder="C:\Users\you\Documents\PaperPull">
         <div class="row-actions"><button class="btn btn-s" type="button" data-do="save-root">Use this folder</button>
           <span class="hint" id="rootmsg" role="status"></span></div>
@@ -277,38 +281,37 @@ __CSS__
     <section class="card pad stack" aria-labelledby="g-docs" id="g-docscard">
       <h2 id="g-docs">Documents folder</h2>
       <div class="group">
-      <p class="hint">Where statements, tax documents and receipts go, in folders of their kind, such as a folder
-        Google Drive, Paperless or another program watches. Each download is checked in the provider's own folder
-        first, and when a run ends, what it saved moves there. The provider's records, Manual Review, logs and browser
-        profile never move, so that folder only ever gets documents that passed their checks. Saving moves nothing
-        already saved.</p>
+      <p class="hint">An optional folder for finished documents, such as one Google Drive or Paperless watches. Each
+        document is checked in the provider's folder first and moves there when its run ends, so only documents that
+        pass their checks arrive. Download history, Manual Review, logs and sign-ins stay in the provider's folder.
+        Saving moves nothing already saved.</p>
       <p class="small" id="drnow" style="overflow-wrap:anywhere"></p>
-      <label class="field" for="drinput">One folder for every provider, as its full path</label>
+      <label class="field" for="drinput">Documents folder, as its full path</label>
       <input id="drinput" type="text" spellcheck="false" autocomplete="off">
-      <p class="hint">Each provider and person gets a folder of their own inside it, named as their PaperPull folder is.
-        One given a folder of its own below keeps it.</p>
+      <p class="hint">Each account gets a folder inside it, named like its provider's folder. An account given a
+        folder of its own below keeps that one.</p>
       <div class="row-actions"><button class="btn btn-s" type="button" data-do="dr-save">Save</button>
-        <button class="btn btn-ghost" type="button" id="drclear" data-do="dr-clear">Use each provider's own folder</button>
-        <button class="btn btn-ghost" type="button" id="drapplyall" data-do="dr-apply-all" hidden>Use it for every provider</button>
+        <button class="btn btn-ghost" type="button" id="drclear" data-do="dr-clear">Keep documents in the provider's folder</button>
+        <button class="btn btn-ghost" type="button" id="drapplyall" data-do="dr-apply-all" hidden>Apply to every account</button>
         <span class="hint" id="drmsg" role="status"></span></div>
       <div id="drown" class="stack" hidden>
-        <p class="hint">These keep a folder of their own. Use it for every provider gives each of them their folder
-          inside it instead, a copy of their config kept in the provider's Backups folder first. Nothing is moved.</p>
+        <p class="hint">These accounts have a folder of their own. Apply to every account moves their setting to the
+          Documents folder, keeping a copy of the old setting in Backups. No files move.</p>
         <ul class="mono small" id="drownlist" style="word-break:break-all;margin:0;padding-left:20px"></ul>
       </div>
-      <label class="field" for="dcpick">Provider and person<select id="dcpick"></select></label>
+      <label class="field" for="dcpick">Account<select id="dcpick"></select></label>
       <p class="small" id="dcnow" style="overflow-wrap:anywhere"></p>
       <label class="field" for="dcinput">A folder of their own instead, as its full path</label>
       <input id="dcinput" type="text" spellcheck="false" autocomplete="off">
       <div class="row-actions"><button class="btn btn-s" type="button" data-do="dc-save">Save</button>
-        <button class="btn btn-ghost" type="button" data-do="dc-clear">Use the provider's own folder</button>
-        <button class="btn btn-ghost" type="button" id="dcfollow" data-do="dc-follow" hidden>Use the folder for every provider</button>
+        <button class="btn btn-ghost" type="button" data-do="dc-clear">Keep documents in the provider's folder</button>
+        <button class="btn btn-ghost" type="button" id="dcfollow" data-do="dc-follow" hidden>Use the Documents folder</button>
         <span class="hint" id="dcmsg" role="status"></span></div>
       <div id="dcleft" class="stack" hidden>
         <p id="dclefttext"></p>
         <div class="row-actions">
-          <button class="btn btn-s" type="button" id="dcprevbtn" data-do="dc-preview">Preview move</button>
-          <button class="btn btn-p" type="button" id="dcmovebtn" data-do="dc-move" disabled>Move</button>
+          <button class="btn btn-s" type="button" id="dcprevbtn" data-do="dc-preview">1. Preview</button>
+          <button class="btn btn-p" type="button" id="dcmovebtn" data-do="dc-move" disabled>2. Move</button>
           <span class="hint" id="dcstate" role="status"></span></div>
         <pre class="log short" id="dclog" hidden></pre>
       </div></div>
@@ -317,6 +320,7 @@ __CSS__
       <div id="movebox" class="stack">
         <h2 id="hxhead">Move to another computer</h2>
         <p class="hint" id="hxlead"></p>
+        <p class="hint" id="hxfilelead" hidden></p>
         <div class="row-actions" id="hxexportrow"><button class="btn btn-s" type="button" id="hxexport" data-do="hx-export">Export history</button></div>
         <label class="field" for="hxfile">Import a history file</label>
         <input id="hxfile" type="file" accept=".ppz">
@@ -350,7 +354,9 @@ __CSS__
       <p class="row-actions small"><a href="https://paperpull.net/guide.html" target="_blank" rel="noopener">How to use it</a>
         <span class="sep-dot" aria-hidden="true">·</span><a href="https://github.com/rheeloaded/paperpull#readme" target="_blank" rel="noopener">README</a>
         <span class="sep-dot" aria-hidden="true">·</span><a href="https://github.com/rheeloaded/paperpull/issues" target="_blank" rel="noopener">Report a problem</a>
-        <span class="sep-dot" aria-hidden="true">·</span><a href="https://paperpull.net/terms.html" target="_blank" rel="noopener">Terms of Use</a></p></div>
+        <span class="sep-dot" aria-hidden="true">·</span><a href="https://paperpull.net/terms.html" target="_blank" rel="noopener">Terms of Use</a></p>
+      <div class="row-actions"><button class="btn btn-s" type="button" data-do="request" data-kind="feature" id="g-feature">Request a feature</button>
+        <button class="btn btn-s" type="button" data-do="request" data-kind="provider" id="g-provider">Request a provider</button></div></div>
     </section>
   </div>
 </section>
@@ -371,7 +377,7 @@ __CSS__
   <div class="dock-head">
     <div><h2 id="dock-title">Sign-in window</h2>
       <p id="dock-say">Sign in below the way you would on the provider's own site. Your password goes to the
-        provider, never to PaperPull. Leave it signed in when you are done.</p></div>
+        provider, never to PaperPull. Stay signed in, since runs use this window.</p></div>
     <a class="btn btn-s" href="/screen" target="_blank" rel="noopener">Full screen</a>
     <button class="btn btn-p" type="button" data-do="dock-close" title="Hides this panel. The window stays open on the server.">Done</button>
   </div>
@@ -385,7 +391,7 @@ __CSS__
     <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/></svg></div>
       <div><h2 id="rs-title">Restore deleted files</h2>
         <p>PaperPull remembers every document it saved, so it never downloads one twice, even after you delete
-          the PDF, say once it is in paperless-ngx. Restore fetches the missing ones again, for the dates you pick.</p></div></div>
+          the PDF, for example once it is in Paperless. Restore downloads the missing ones again, for the dates you pick.</p></div></div>
     <div class="dlg-body">
       <fieldset><legend>Which dates</legend>
         <div class="row-actions">
@@ -396,23 +402,60 @@ __CSS__
         <div class="dates" id="rs-range" hidden>
           <label class="field">From<input type="date" id="rs-start"></label>
           <label class="field">To<input type="date" id="rs-end"></label></div>
-        <p class="hint" style="margin-top:8px">A year, or both a From and a To date, is needed, so a whole history is
-          never fetched again by accident.</p>
+        <p class="hint" style="margin-top:8px">Choose a year, or both a From and a To date, so a whole history is
+          never downloaded again by accident.</p>
       </fieldset>
       <fieldset><legend>How many</legend><div class="stack" style="gap:8px">
         <label class="opt"><input type="radio" name="rshow" value="all" checked><span><b>Every missing file in those dates</b>
-          <span>Goes through every document in range, the ones already downloaded included, and fetches again each one whose file is gone</span></span></label>
+          <span>Downloads again every document in those dates whose file is gone</span></span></label>
         <label class="opt"><input type="radio" name="rshow" value="pilot"><span><b>Just the newest few, as a test</b>
           <span>The same, for the newest few documents in range only</span></span></label></div></fieldset>
       <ul class="facts">
-        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg><span>Nothing is overwritten. A file you still have stays as it is, and the app may save a second copy beside it, under a name of its own.</span></li>
-        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>The provider is asked again for each document fetched, so a long range takes as long as the first download did.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5L19 7"/></svg><span>Nothing is overwritten. A file you still have stays as it is, and PaperPull may save a second copy beside it, under a name of its own.</span></li>
+        <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>The provider is asked again for each document downloaded again, so a long range takes as long as the first download did.</span></li>
         <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7"/><path d="M4 4v5h5"/></svg><span>For this run only. Your next Get new documents works as usual, and Continue never restores.</span></li>
       </ul>
       <p class="err" id="rs-err" role="alert" hidden></p>
     </div>
     <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
       <button class="btn btn-p" type="button" id="rs-go" data-do="rs-go">Restore missing files</button></div>
+  </form>
+</dialog>
+
+<dialog id="dlg-request" aria-labelledby="rq-title-h">
+  <form id="rq-form">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+      <div><h2 id="rq-title-h" tabindex="-1">Make a request</h2>
+        <p>Tell us what you need. PaperPull starts a form on GitHub with your answers, for you to read and send.</p></div></div>
+    <div class="dlg-body" id="rq-body">
+      <div class="seg" role="radiogroup" aria-label="What are you requesting?">
+        <label><input type="radio" name="rq-kind" value="provider" checked>A provider</label>
+        <label><input type="radio" name="rq-kind" value="feature">A feature</label></div>
+      <div class="stack" id="rq-provider-fields">
+        <label class="field" for="rq-provider">Provider<input id="rq-provider" type="text" autocomplete="off" maxlength="80" placeholder="for example Acme Water"></label>
+        <p class="hint" id="rq-known" role="status" hidden></p>
+        <label class="field" for="rq-category">Kind of provider<select id="rq-category"><option value="">Choose one</option><option>Bank / credit union</option><option>Credit card</option><option>Brokerage / investing</option><option>Utility</option><option>Telecom / internet</option><option>Retail</option><option>Insurance</option><option>Other</option></select></label>
+        <label class="field" for="rq-documents">What documents do you want?<textarea id="rq-documents" rows="2" maxlength="300" placeholder="for example monthly bills and year-end tax forms"></textarea></label>
+        <label class="field" for="rq-url">Where you sign in (optional)<input id="rq-url" type="text" autocomplete="off" spellcheck="false" maxlength="200" placeholder="https://www.example.com"></label>
+      </div>
+      <div class="stack" id="rq-feature-fields" hidden>
+        <label class="field" for="rq-title">In a few words<input id="rq-title" type="text" autocomplete="off" maxlength="70" placeholder="for example Get new documents on a schedule"></label>
+        <div class="rq-pair">
+        <label class="field" for="rq-area">Part of PaperPull<select id="rq-area"><option value="">Choose one</option><option>Getting documents</option><option>Signing in</option><option>Accounts page</option><option>Spreadsheets</option><option>File names</option><option>Settings</option><option>Something else</option></select></label>
+        <label class="field" for="rq-importance">How much does it matter?<select id="rq-importance"><option value="">Choose one</option><option>Nice to have</option><option>I would use it often</option><option>I cannot get what I need without it</option></select></label>
+        </div>
+        <label class="field" for="rq-what">What should it do?<textarea id="rq-what" rows="2" maxlength="800"></textarea></label>
+        <label class="field" for="rq-why">What would it help you with?<textarea id="rq-why" rows="2" maxlength="800" placeholder="What you are trying to get done, and what you do today instead"></textarea></label>
+      </div>
+      <p class="hint">GitHub requests are public, so leave out account numbers, names and anything private. Sending needs a free GitHub account. PaperPull sends nothing itself.</p>
+      <p class="err" id="rq-err" role="alert" hidden></p>
+    </div>
+    <div class="dlg-body" id="rq-done" hidden>
+      <p><b>Your request is open in your browser.</b></p>
+      <p class="hint">Read it there and press Submit new issue to send it. Nothing is sent until you do.</p>
+    </div>
+    <div class="dlg-foot"><button class="btn btn-s" type="button" data-do="rq-close" id="rq-cancel">Cancel</button>
+      <a class="btn btn-p" id="rq-go" target="_blank" rel="noopener" href="https://github.com/rheeloaded/paperpull/issues/new/choose">Continue on GitHub</a></div>
   </form>
 </dialog>
 
@@ -423,9 +466,9 @@ __CSS__
         <p id="ps-lead">They get their own folder beside this one, their own sign-in window and their own download
           history, so nothing mixes with the first account.</p></div></div>
     <div class="dlg-body">
-      <label class="field" for="ps-label">A short label for the account<input id="ps-label" type="text" autocomplete="off" spellcheck="false" maxlength="32" placeholder="for example spouse or alex"></label>
+      <label class="field" for="ps-label">A short name for this person<input id="ps-label" type="text" autocomplete="off" spellcheck="false" maxlength="32" placeholder="for example spouse or alex"></label>
       <p class="hint" style="margin-top:-10px">Lowercase letters, digits, - or _. It names their folder.</p>
-      <label class="field" for="ps-owner">Their name, as it appears on the documents (optional)<input id="ps-owner" type="text" autocomplete="off" maxlength="80"></label>
+      <label class="field" for="ps-owner">Name on the account (optional)<input id="ps-owner" type="text" autocomplete="off" maxlength="80"></label>
       <p class="err" id="ps-err" role="alert" hidden></p>
     </div>
     <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
@@ -451,12 +494,12 @@ __CSS__
   <form method="dialog">
     <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16z"/></svg></div>
       <div><h2 id="rn-title">Rename existing files</h2>
-        <p><b>Rename preview</b> shows what this app would call the files you already have, and changes nothing.
-          <b>Apply renames</b> then renames them where they sit. Nothing is downloaded either way, nothing moves between
-          folders, and only files this app downloaded are touched.</p></div></div>
+        <p><b>Preview</b> lists the new name of each file you already have, and changes nothing.
+          <b>Rename</b> then renames them. Nothing is downloaded, and only files PaperPull saved are touched. A file
+          moves to another folder only if your file-name pattern has a /.</p></div></div>
     <div class="dlg-body">
-      <div class="row-actions"><button class="btn btn-s" type="button" data-do="rn-preview" id="rn-prev">1. Rename preview</button>
-        <button class="btn btn-p" type="button" data-do="rn-apply" id="rn-apply" disabled>2. Apply renames</button>
+      <div class="row-actions"><button class="btn btn-s" type="button" data-do="rn-preview" id="rn-prev">1. Preview</button>
+        <button class="btn btn-p" type="button" data-do="rn-apply" id="rn-apply" disabled>2. Rename</button>
         <span class="hint" id="rn-state" role="status"></span></div>
       <pre class="log" id="rn-log" hidden></pre>
     </div>
@@ -470,7 +513,7 @@ __CSS__
       <div><h2 id="rv-title">Review names</h2>
         <p>These receipts were saved under a name PaperPull was unsure of. Type a better summary for any of them, such
           as <b>Garden Hose</b>, and leave the rest blank to keep their names. Each file is renamed where it sits, and
-          its rows in the receipt index and order history follow it. Nothing is downloaded.</p>
+          its download history follows it. Nothing is downloaded.</p>
         <p id="rv-paperless" hidden>A receipt already copied to Paperless keeps the title it has there.</p></div></div>
     <div class="dlg-body">
       <p class="hint" id="rv-state" role="status"></p>
@@ -486,16 +529,18 @@ __CSS__
   <form method="dialog">
     <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></div>
       <div><h2 id="sp-title">Make a support report</h2>
-        <p id="sp-diagnose"><b>Diagnose</b> reads the provider's page and writes two files to its Diagnostics folder, downloading
-          nothing. The one whose name starts with <b>survey-</b> holds counts and states and no text from your account,
-          and that is the one to attach to an issue. The detailed file beside it keeps a word only when it is on
-          PaperPull's fixed list and writes any other as its shape, and a title, row or label only the words that say
-          what kind of document and when, so a card's name never stays. It can go with it. A screenshot, where Diagnose
-          takes one, shows the page as it is and stays on this machine.</p></div></div>
-    <div class="dlg-body"><p class="hint">Sign in to the provider first and leave its window on the page that has your
-      documents, so the report reads the right page.</p></div>
+        <p id="sp-diagnose">A support report reads the provider's page and saves two files to its Diagnostics folder,
+          downloading nothing. Attach the one whose name starts with <b>survey-</b> to a problem report, a GitHub issue.
+          It holds counts and page states, never text from your account. The detailed file beside it keeps only words on
+          PaperPull's fixed list, and of a title, row or label only the words that say what kind of document it is
+          and when, never a card's name, so it can go too. A screenshot,
+          when one is taken, shows your page and stays on this computer.</p></div></div>
+    <div class="dlg-body"><p class="hint" id="sp-signsay">Sign in to the provider first and leave its window on the page that has your
+      documents, so the report reads the right page.</p>
+      <div class="row-actions" id="sp-signrow"><button class="btn btn-s starts" type="button" data-do="sp-signin">Open sign-in window</button></div>
+      <pre class="log short" id="sp-log" hidden></pre></div>
     <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
-      <button class="btn btn-p" type="button" data-do="sp-go">Make the report</button></div>
+      <button class="btn btn-p starts" type="button" data-do="sp-go">Make the report</button></div>
   </form>
 </dialog>
 
@@ -503,9 +548,9 @@ __CSS__
   <form method="dialog">
     <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg></div>
       <div><h2 id="rc-title">Record steps for support</h2>
-        <p><b>Record</b> watches one signed-in page while you click your way to a document, and writes what you did to the
-          Diagnostics folder. It downloads nothing and captures no keystroke. It is the one-round version of a support
-          report, since a report guesses which control matters and a recording knows.</p></div></div>
+        <p><b>Record</b> watches one signed-in page while you click your way to a document, and saves what you clicked to
+          the Diagnostics folder. It downloads nothing and records no typing. Use it when a support report is not enough,
+          since a recording shows which button matters.</p></div></div>
     <div class="dlg-body"><p class="hint">Start it, click through the provider's site to one document in its window, then
       press Stop recording here.</p></div>
     <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>

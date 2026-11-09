@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (75, plus six built and waiting for a tester)
+## Supported (80, plus five built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -18,6 +18,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`adp`](apps/adp) | ADP Workforce Now | Pay statements and W-2s, everything the statement services list, nothing clicked | Payroll |
 | [`aafmaa`](apps/aafmaa) | AAFMAA (Armed Forces Mutual) | Annual statements, policy & insurance documents | Insurance / member association |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Bank / card |
+| [`cetera`](apps/cetera) | Cetera (AdviceWorks) | Brokerage account statements and quarterly performance reports, every account and quarter the client portal keeps, from the page's own statement and report lists asked from inside the signed-in page, nothing clicked. Built and run on a contributor's own account, 56 statements and 5 reports | Brokerage |
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | Bank |
 | [`alpaca`](apps/alpaca) | Alpaca (Live brokerage account) | Brokerage and crypto statements and trade confirmations for the Live account, each row's own Download pressed once and the presigned file taken through the browser. The JSON twins of trade confirmations and the account application are skipped, and a Paper account is never read. Built and run on a contributor's own Live account, 22 documents | Brokerage / crypto |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. Confirmed by @watling777 on two accounts, wireless and internet, with a full run on each (#26) | Telecom |
@@ -35,7 +36,9 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements, the roughly two years the site lists online; statements API, nothing clicked | Card |
 | [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements back to the account's first month, Coinbase One Card statements (run live on 2026-10-15, all 13 saved), and tax documents, the 1099-DA and other tax forms and the pregenerated gain and loss PDF reports. Contributed by @JasperDale420. A statement row's own PDF button is pressed and the download taken only from Coinbase's statements bucket, and tax PDFs come from the list calls the Taxes page makes, nothing pressed. A full run on a retail account saved 66 statements and 2 tax documents | Crypto exchange |
 | [`costco`](apps/costco) | Costco Wholesale | Receipts, in-warehouse, gas, pharmacy and costco.com orders. Written from a member's recording and run against their account. One membership so far, a second Pilot is welcome, see issue #47 | Retail |
+| [`discoverbank`](apps/discoverbank) | Discover Bank (deposits) | Checking and savings statements, every statement the statements page's own list call names for each account its account menu holds, read from inside the page with nothing clicked but the inactivity dialog's keep-alive. An account whose list holds no statements, or exactly 100, which looks like the most one answer holds, stops the run with the list not whole. Contributed by @appchamp, whose full run saved 100 checking and 100 savings statements (#151). Money market and CD accounts are untested. Discover credit cards are the `discovercard` app | Bank |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements. A card that has moved to Capital One is read there by the Capital One app (#13) | Card |
+| [`dkb`](apps/dkb) | DKB (Deutsche Kreditbank) | Kontoauszüge, Kreditkartenabrechnungen, Wertpapierdokumente, Steuerbescheinigungen, Vertragsinformationen and Mitteilungen, from the Postfach and its archive, read through the Postfach's own API with nothing clicked. Contributed by @tabacha. Built and run on a contributor's own account, 611 documents saved. DKB answers 500 for most archived securities documents, which its own page cannot open either | Bank / brokerage |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`ebay`](apps/ebay) | eBay | Order receipts, the order-details page rendered to PDF, ten years of purchase history, nothing clicked. Confirmed by @jpfieber on issue #44, every order back to 2017 | Retail |
 | [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms. Confirmed by @watling777, whose Pilot and full run saved every statement (#36). No tax form seen yet, his account has none | Brokerage |
@@ -91,10 +94,11 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`vanguard`](apps/vanguard) | Vanguard | Account statements, monthly and quarterly, for every account the statements page lists, an employer 401(k) among them. Contributed by @tylerverry. A full run on five accounts saved 135 statements back to 2020, every one a valid PDF | Brokerage |
 | [`venmo`](apps/venmo) | Venmo (account.venmo.com) | Monthly account statements, back to your start date. With none set it saves two years, and when the oldest of those months has transactions the run then ends as one that stopped rather than call the list whole. Venmo has no PDF statement on the web, so each finished month's statement page is opened by its own address and printed to PDF, with only the month's own "Show more" pressed until every transaction is drawn. Months with no transactions are skipped and the CSV is not taken. Built and run on one account, 24 statements with two busy months expanded in full. A business profile is not listed | Payments |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Telecom |
-| [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #31 | Telecom |
+| [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills, the 24 months My Verizon keeps, from Bill & payment history's own bill list, each PDF asked from inside the signed-in page, nothing clicked. Confirmed on a contributor's own account, 24 bills (#31) | Telecom |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Retail |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents. Credit card statements confirmed on a real account by @appchamp (#27). Checking, savings, mortgage and tax documents are untested | Bank / card / mortgage |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | Brokerage |
+| [`ziply`](apps/ziply) | Ziply Fiber | Monthly internet bills, the whole history My Account lists, from the page's own billStatements query asked from inside the signed-in page, nothing clicked. One account at a time. Built and run on a contributor's own account, 17 bills | Telecom |
 
 ## Requested / in progress
 
