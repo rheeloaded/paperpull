@@ -1648,20 +1648,25 @@ async function wCreate() {
 // A history file brings what was downloaded, never the PDFs, and marks
 // every one of them downloaded, so Get new never fetches them. Each place
 // the move is offered says so, and on the desktop leads with copying the
-// folders, which brings the PDFs too: config.json names its folders
-// relative to its own (output_dir ".", profile_dir "./browser-profile").
+// folders, which brings the PDFs too. A copied PaperPull folder works
+// wherever it lands, since config.json names its folders relative to its
+// own (output_dir ".", profile_dir "./browser-profile"). A documents folder
+// does not. Each account's config names it by its full path (documents_dir),
+// and so do the records of each document moved there, so it has to land at
+// the same path, and so does a folder of one account's own.
 const PDFS_STAY = () => 'The PDFs stay on the other computer' +
-  (SERVER ? '.' : ': copy them over, or use Restore deleted files under More to download them again.');
+  (SERVER ? '.' : '. Copy them over, or use Restore deleted files under More to download them again.');
 const HX_LEAD_WELCOME = () =>
   'Choose the history file you saved with Export history in Settings on your other computer. ' +
   'Each provider and person in it is set up here, and what they already downloaded is marked, so none ' +
   'of it downloads again. No sign-in comes with the file, so you sign in to each provider here. ' + PDFS_STAY();
 const HX_LEAD_COPY = () =>
-  'To move everything, your PDFs included, copy your PaperPull folder, ' + META.apps_root +
-  (META.documents_root ? ', and your Documents folder, ' + META.documents_root + ',' : '') +
-  ' to the new computer. There, type where the PaperPull folder is in the welcome\'s first step, ' +
-  'and PaperPull finds its providers' + (META.documents_root ? ', then choose the Documents folder again here' : '') +
-  '. Sign in to each provider once there, since a sign-in rarely survives a copy.';
+  'To move everything, your PDFs included, copy your PaperPull folder, ' + META.apps_root + ', to the new computer. ' +
+  'There, type where it is in the welcome\'s first step, and PaperPull finds its providers. ' +
+  (META.documents_root ? 'Copy your Documents folder, ' + META.documents_root + ', to the same place on the new ' +
+    'computer, since PaperPull keeps its full path, then choose the Documents folder again here. ' : '') +
+  'Any folder you chose for one account\'s documents goes to the same place too. ' +
+  'Sign in to each provider once there, since a sign-in rarely survives a copy.';
 const HX_LEAD_FILE =
   'No way to copy the folders? Export history saves a file that lists each provider and person here, their ' +
   'settings, and every document each one has already downloaded, so none of it downloads again where you ' +

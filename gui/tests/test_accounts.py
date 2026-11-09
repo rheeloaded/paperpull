@@ -1006,8 +1006,13 @@ def test_moving_says_the_pdfs_stay_unless_the_folders_are_copied(panel):
     copy, file_ = said["card"]
     assert copy.startswith("To move everything, your PDFs included, copy your PaperPull folder, /Users/me/PaperPull")
     assert "your Documents folder, /Users/me/Drive/Docs" in copy and "choose the Documents folder again" in copy
+    # Each config names the documents folder by its full path, and so do the
+    # records of what was moved there, so a copy elsewhere would point at
+    # the old computer's folder.
+    assert "/Users/me/Drive/Docs, to the same place on the new computer, since PaperPull keeps its full path" in copy
+    assert "Any folder you chose for one account's documents goes to the same place too" in copy
     assert file_.startswith("No way to copy the folders?") and "no PDF" in file_
-    assert "The PDFs stay on the other computer: copy them over, or use Restore deleted files" in said["welcome"]
+    assert "The PDFs stay on the other computer. Copy them over, or use Restore deleted files" in said["welcome"]
     assert said["aside"].startswith("Copy your PaperPull folder from the old computer, then type where it is above")
 
 

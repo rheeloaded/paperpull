@@ -237,8 +237,12 @@ language stays editable under **Edit as text**, see
 Copying the PaperPull folder, and the Documents folder if one is set,
 moves everything, the PDFs included. Typed into the welcome's first step
 on the new computer, the copied folder's providers are found and Open
-Accounts uses them. Settings' Move card says this first, naming both
-folders.
+Accounts uses them. The PaperPull folder may land anywhere, since each
+config.json names its folders relative to its own. The Documents folder has
+to land at the same path, since each config names it by its full path and
+so do the records of what was moved there, and so does a folder one account
+was given for its own documents. Settings' Move card says this first,
+naming both folders.
 
 When the folders cannot be copied, in **Settings**, **Export history** hands the browser a file listing each
 provider and person here, their settings, and every document each one has

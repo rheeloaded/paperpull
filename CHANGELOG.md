@@ -41,10 +41,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **Moving to another computer says what comes with you.** The Move card
   offered only a history file, which brings no PDF and marks every document
   it lists as downloaded, so Get new never fetched them, and nothing said
-  so: somebody who moved had an empty archive PaperPull believed complete.
+  so. Somebody who moved had an empty archive PaperPull believed complete.
   The card now leads with copying the PaperPull folder, and the Documents
-  folder, naming both, which brings everything and works where it lands,
-  since each config.json names its folders relative to its own. The history
+  folder, naming both, which brings everything. The PaperPull folder works
+  wherever it lands, since each config.json names its folders relative to
+  its own. The Documents folder is named by its full path, in each config
+  and in the records of what was moved there, so the card says to copy it
+  to the same place and choose it again. The history
   file follows as the way when the folders cannot be copied, and its
   import, on the welcome and in Settings, says the PDFs stay on the other
   computer and to copy them over or use Restore deleted files.
