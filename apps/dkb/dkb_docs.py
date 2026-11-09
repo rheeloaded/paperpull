@@ -31,7 +31,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -127,8 +128,11 @@ class Document:
 
 
 # Which of several documents sharing these is which is told by their ids
-# (keys.told_apart). The account is always one of them too.
-ALIKE = ("title", "date")
+# (keys.told_apart). Every field the key is made of but the number, so two
+# documents alike but for their account or their kind are never one group
+# whose numbers one of them takes from the other (#122). App._numbered
+# writes the same out where it numbers.
+ALIKE = ("title", "date", "account", "category")
 
 
 def tidy(text) -> str:
@@ -137,11 +141,8 @@ def tidy(text) -> str:
 
 def row_category(d: dict, title: str) -> str:
     """The category a listed row is recorded under, as _record_statement_doc
-    reads it before the rules choose its words."""
-    category = d.get("category") or ""
-    if category == doc_types.OTHER and re.search(r"statement|kontoauszug", title, re.I):
-        category = doc_types.STATEMENT
-    return category
+    reads it before the rules choose its words (site.filed_category)."""
+    return site.filed_category(dict(d, title=title))
 
 
 def listed_key(d: dict) -> str:
@@ -222,9 +223,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -317,7 +316,7 @@ class App:
             prefer_real=True,   # DKB's bot management turns a bare Chromium away
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
@@ -369,8 +368,8 @@ class App:
 
 
     def _numbered(self, rows: List[dict]) -> list:
-        """Each row's number among the documents sharing its title, date and
-        account, and whether that surely names it, as (number, sure).
+        """Each row's number among the documents sharing its kind, title,
+        date and account, and whether that surely names it, as (number, sure).
         Discover and each download's look at a recent listing are both
         numbered here, so the two agree on which row is which document.
 
@@ -378,10 +377,16 @@ class App:
         saved under first (paperpull_core.keys.told_apart), so a list in
         another order or a new row ahead of one saved moves nothing. A
         document this run saved is not counted as saved here, since an id
-        may last no longer than one list."""
+        may last no longer than one list.
+
+        Numbered by every field the key holds but the number (ALIKE), each
+        row by the kind its record holds (site.filed_category), so a row
+        and its record are alike."""
+        alike = ("title", "date", "account", "category")
         saved = {key: rec for key, rec in self.progress.data.items()
                  if saved_copy.holding(self, key)}
-        return _told_apart(rows, self.discovery.data, fields=ALIKE, id_field="item_id",
+        filed = [dict(r, category=site.filed_category(r)) for r in rows]
+        return _told_apart(filed, self.discovery.data, fields=alike, id_field="item_id",
                            saved=saved, key_of=listed_key)
 
     def _record_statement_doc(self, d: dict, occurrence: int = 0, sure: bool = True) -> int:
@@ -468,9 +473,17 @@ class App:
             self.write_failure("read the documents list", "the list stopped partway")
             raise SystemExit(1)
         log.info("DKB: %d document(s) in the Postfach", len(raw))
+        # A document with no date the app can read has no key, so it is
+        # left out of the list and said here rather than vanish.
+        left_out = site.undated()
+        if left_out:
+            self.stats["undated"] = left_out
+            print(f"\n!! {left_out} document(s) in the DKB list carry no date this app can read,")
+            print("   so they are left out and nothing is saved for them. Open them in the")
+            print("   Postfach yourself. Everything else is listed.")
         n_new = 0
-        # Which of several documents sharing a title, a date and an account
-        # this is. The number used to follow the order the provider answered
+        # Which of several documents sharing a kind, a title, a date and an
+        # account this is. The number used to follow the order the provider answered
         # in, so if that order ever changed, the document already downloaded
         # took the other one's number and was skipped as done while the
         # other was fetched again beside it. A number now stays with the id
@@ -652,6 +665,7 @@ class App:
                                            client_hint=doc.client_id,
                                            occurrence=doc.occurrence,
                                            account=doc.account,
+                                           category=doc.category,
                                            number_rows=self._numbered, twins=alike,
                                            config=self.config)
         except site.SessionExpired:
@@ -1018,9 +1032,10 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='DKB',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='DKB',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

@@ -52,19 +52,29 @@ were saved.
                     subject, fileName, creationDate ("YYYY-MM-DDTHH:MMZ"),
                     additionalInformation (an IBAN on Kontoauszuege)}}.
                     Walked like the list, until a page comes back short.
+                    No account recorded so far named a subfolder, so the
+                    shape of one is unseen. Each is read as the folder list
+                    names a folder, its id read by the same call, to
+                    MAX_FOLDER_DEPTH. One that does not answer stops the
+                    list.
     * a file     GET /api/documentstorage/legacy-documents/{id}
                  -> data.attributes {content (the PDF, base64),
                     contentType, fileName}.
-  A folder named for a filter files its documents there. "Archiv" files
-  each by its subject. A file also in the Postfach, the same day, the same
-  subject and the same account where both name one, is taken from the
-  Postfach only.
+  A folder named for a filter files its documents there, and so does a
+  subfolder of it. "Archiv" files each by its subject. A file also in the
+  Postfach, the same subject and the same account where both name one, is
+  taken from the Postfach only. Its day there is its creationDate, as in
+  the archive, or its statementDate.
 
   WHOLE OR NOT AT ALL. The list is the Postfach, its messages, the folder
-  list and every folder. Any of them that does not answer as a readable
-  list raises ListStopped, so the listing is never called whole without
-  it, and a run that reads it again while it downloads stops once with its
-  list unread.
+  list and every folder with its subfolders. Any of them that does not
+  answer as a readable list raises ListStopped, so the listing is never
+  called whole without it, and a run that reads it again while it
+  downloads stops once with its list unread. So does a Postfach document
+  its messages leave out, a Postfach answering empty while its messages
+  name documents, and a folder list with no folder in it. A document with
+  no date this app can read is left out and said, and a list where no
+  document has one stops.
 
   NEVER sent: the PATCH on /messages/{id} that marks a message read, any
   call that archives or deletes one, and anything outside documentstorage.
@@ -128,6 +138,7 @@ API = {
 }
 PAGE_LIMIT = 200         # what the Postfach itself asks for
 MAX_PAGES = 50           # 10,000 documents, far beyond the ten years DKB keeps
+MAX_FOLDER_DEPTH = 5     # subfolders below the folder list, deeper stops the list
 # The page's own app identity. Not a credential, the same for every customer.
 APP_HEADERS = {"application-name": "web-banking"}
 
@@ -212,11 +223,18 @@ class NoFile(RuntimeError):
 class ListStopped(Exception):
     """A part of the list did not answer in a way this app can read whole.
     The parts are the Postfach, its messages, the archive's folder list and
-    each archive folder. A part read as empty or cut short would leave its
-    documents out of a list called whole, and a missing messages answer
-    would file every document by its words and so change its key. So any
-    of them stops the listing, and a run that reads the list again while it
-    downloads stops once with the list unread (listing.read_again_stopped)."""
+    each archive folder with its subfolders. A part read as empty or cut
+    short would leave its documents out of a list called whole, and a
+    missing message would file its document by its words and so change its
+    key. So any of them stops the listing, and a run that reads the list
+    again while it downloads stops once with the list unread
+    (listing.read_again_stopped).
+
+    Read as empty by error, as told by what the other parts say. A Postfach
+    with no documents is empty when its messages name none either. A folder
+    list with no folder is never whole, since the account this was mapped
+    against has one folder per filter and "Archiv". A folder with no files
+    is empty."""
 
 
 class NotToldApart(Exception):
@@ -636,9 +654,26 @@ def account_label(meta: dict) -> str:
     return num[-4:] if re.search(r"\d{4}$", num) else ""
 
 
+def filed_category(row: dict) -> str:
+    """The category a listed row's document is recorded under. The row's
+    own, except that one of no known kind whose subject says it is a
+    statement is recorded as one (dkb_docs._record_statement_doc). Discover
+    numbers the rows by it and a download finds its row by it, so the two
+    read a row as the record holds it."""
+    category = row.get("category") or ""
+    title = re.sub(r"\s+", " ", str(row.get("title") or "")).strip() or "Statement"
+    if category == OTHER and re.search(r"statement|kontoauszug", title, re.I):
+        return ACCOUNT
+    return category
+
+
 def _row(d: dict, messages: dict) -> Optional[dict]:
+    """One Postfach document as a row, None when it is not a PDF. A row
+    whose date cannot be read carries "" for it, and _all_rows counts it."""
     a = d.get("attributes") or {}
-    meta = a.get("metadata") or {}
+    meta = (a.get("metadata") or {}) if isinstance(a, dict) else None
+    if not isinstance(meta, dict):
+        raise ListStopped("a Postfach document could not be read")
     msg = messages.get(str(d.get("id"))) or {}
     ct = str(a.get("contentType") or "application/pdf")
     if "pdf" not in ct.lower():
@@ -646,8 +681,6 @@ def _row(d: dict, messages: dict) -> Optional[dict]:
     raw_date = str(_first(meta, "statementDate", "date", "documentDate")
                    or _first(a, "creationDate", "date") or _first(msg, "documentDate", "creationDate"))
     date = local_date(raw_date)
-    if not date:
-        return None
     doc_type = str(_first(a, "documentType") or _first(msg, "documentType"))
     title = str(_first(meta, "subject") or _first(msg, "subject") or a.get("fileName") or doc_type
                 or "Dokument")
@@ -657,26 +690,70 @@ def _row(d: dict, messages: dict) -> Optional[dict]:
         "category": classify(doc_type, title, str(a.get("fileName") or "")),
         "item_id": str(d.get("id") or ""), "client_id": ct,
         "period_start": "", "href": API["document"],
+        # The day it was made, which the archive dates its copy by.
+        "created": local_date(str(_first(a, "creationDate") or _first(msg, "creationDate"))),
     }
+
+
+def _postfach(page) -> List[dict]:
+    """The Postfach's rows, each document's kind from its message.
+
+    The messages are one per document. A document they leave out would be
+    filed by its words, which can be another kind and so another key, so it
+    stops the listing (ListStopped), unless the document names its own
+    kind. A Postfach answering empty while its messages name documents is
+    not empty, and stops it too. One whose messages name no document is."""
+    messages = list_messages(page)
+    documents = list_documents(page)
+    if not documents and any(isinstance(m, dict) and m.get("documentId") for m in messages.values()):
+        raise ListStopped("the Postfach list answered empty while its messages name documents")
+    rows, untold = [], 0
+    for d in documents:
+        r = _row(d, messages)
+        if r is None:
+            continue
+        if not _first(d.get("attributes") or {}, "documentType") and str(d.get("id")) not in messages:
+            untold += 1
+        rows.append(r)
+    if untold:
+        raise ListStopped("the Postfach messages leave out %d document(s) the list holds" % untold)
+    return rows
+
+
+def _folder_entry(f, what: str) -> tuple:
+    """(id, name) of a folder as a list names it, or ListStopped. A folder
+    whose id cannot be read would go unread."""
+    if isinstance(f, str):
+        fid, name = f, ""
+    elif isinstance(f, dict):
+        attrs = f.get("attributes")
+        fid = str(f.get("id") or "")
+        name = attrs.get("name") if isinstance(attrs, dict) else f.get("name")
+    else:
+        raise ListStopped("%s names a folder this app cannot read" % what)
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", fid):
+        raise ListStopped("%s names a folder by an id this app cannot read" % what)
+    return fid, str(name or "")
 
 
 def list_folders(page) -> List[tuple]:
     """(id, name) of every archive folder. A folder whose id cannot be read
-    would go unread, so it stops the listing instead (ListStopped)."""
-    j = _list_answer(page, API["folders"], "the archive's folder list")
-    out = []
-    for f in _data_list(j, "the archive's folder list"):
-        fid = str(f.get("id") or "")
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", fid):
-            raise ListStopped("an archive folder carries an id this app cannot read")
-        attrs = f.get("attributes")
-        out.append((fid, str((attrs.get("name") if isinstance(attrs, dict) else "") or "")))
+    would go unread, and a list with no folder in it is not the list this
+    app was mapped against, so either stops the listing (ListStopped)."""
+    what = "the archive's folder list"
+    out = [_folder_entry(f, what) for f in _data_list(_list_answer(page, API["folders"], what), what)]
+    if not out:
+        raise ListStopped("%s answered with no folder in it" % what)
     return out
 
 
-def list_folder(page, folder_id: str) -> List[dict]:
-    """Every file in one archive folder, a page of PAGE_LIMIT at a time."""
-    out: List[dict] = []
+def read_folder(page, folder_id: str) -> tuple:
+    """(name, files, subfolders) of one archive folder, its files a page of
+    PAGE_LIMIT at a time, its subfolders as (id, name). A subfolders entry
+    this app cannot read stops the listing (ListStopped)."""
+    name = ""
+    files_out: List[dict] = []
+    subs: List[tuple] = []
     seen: set = set()
     what = "the archive folder %s" % folder_id
     for n in range(MAX_PAGES):
@@ -687,9 +764,16 @@ def list_folder(page, folder_id: str) -> List[dict]:
         files = attrs.get("files") if isinstance(attrs, dict) else None
         if not isinstance(files, list) or not all(isinstance(f, dict) for f in files):
             raise ListStopped("%s holds no list of files this app can read" % what)
-        out.extend(_new_of(files, seen, what))
+        sub = attrs.get("subfolders")
+        if sub is not None and not isinstance(sub, list):
+            raise ListStopped("%s names its subfolders in a way this app cannot read" % what)
+        for entry in (_folder_entry(s, what) for s in sub or []):
+            if entry[0] not in [s[0] for s in subs]:
+                subs.append(entry)
+        name = name or str(attrs.get("name") or "")
+        files_out.extend(_new_of(files, seen, what))
         if len(files) < PAGE_LIMIT:
-            return out
+            return name, files_out, subs
     raise ListStopped("%s ran past %d pages" % (what, MAX_PAGES))
 
 
@@ -710,13 +794,13 @@ def _archive_account(f: dict) -> str:
 
 
 def _archive_row(f: dict, folder_name: str) -> Optional[dict]:
+    """One archive file as a row, None when it is not a PDF. A row whose
+    date cannot be read carries "" for it, and _all_rows counts it."""
     fid = str(f.get("id") or "")
     name = str(f.get("fileName") or "")
     if not fid or (name and not name.lower().endswith(".pdf")):
         return None
     date = local_date(str(f.get("creationDate") or ""))
-    if not date:
-        return None
     title = re.sub(r"\s+", " ", str(f.get("subject") or "") or re.sub(r"\.pdf$", "", name, flags=re.I)).strip()
     category = ARCHIVE_FOLDERS.get(folder_name.strip().lower()) or classify(title, name)
     return {
@@ -727,12 +811,39 @@ def _archive_row(f: dict, folder_name: str) -> Optional[dict]:
 
 
 def collect_archive(page) -> List[dict]:
+    """Every file of the archive, each folder's subfolders read too, to
+    MAX_FOLDER_DEPTH below the folder list. Deeper stops the listing
+    (ListStopped). A folder reached twice is read once, and a file two
+    folders list is one file, kept where it was found first.
+
+    A subfolder files its documents by its own name when that is a filter's,
+    else as the folder above it does."""
     rows: List[dict] = []
-    for fid, name in list_folders(page):
-        files = list_folder(page, fid)
-        log.info("Archiv %s: %d", name or fid, len(files))
-        rows.extend(r for r in (_archive_row(f, name) for f in files) if r)
-    return rows
+    reached: set = set()
+    files_seen: set = set()
+    level = [(fid, name, "") for fid, name in list_folders(page)]
+    for _depth in range(MAX_FOLDER_DEPTH + 1):
+        below = []
+        for fid, listed, above in level:
+            if fid in reached:
+                continue
+            reached.add(fid)
+            own, files, subs = read_folder(page, fid)
+            name = listed or own
+            filed = name if not above or name.strip().lower() in ARCHIVE_FOLDERS else above
+            log.info("Archiv %s: %d", name or fid, len(files))
+            for f in files:
+                ident = str(f.get("id") or "")
+                if ident in files_seen:
+                    continue
+                if ident:
+                    files_seen.add(ident)
+                rows.append(_archive_row(f, filed))
+            below.extend((sid, sname, filed) for sid, sname in subs)
+        level = [entry for entry in below if entry[0] not in reached]
+        if not level:
+            return [r for r in rows if r]
+    raise ListStopped("the archive's folders run deeper than %d levels" % MAX_FOLDER_DEPTH)
 
 
 # One listing serves a run's downloads for a while, rather than the whole
@@ -743,35 +854,61 @@ _listing: dict = {}
 
 def _in_the_postfach(postfach: List[dict]):
     """Whether an archive row is a file the Postfach lists too: the same
-    day, the same subject, and the same account where both name one. Two
-    accounts' documents of one day and subject are two documents."""
-    accounts: dict = {}
-    for r in postfach:
-        accounts.setdefault((r["date"], r["title"]), set()).add(r["account"])
+    subject, the same account where both name one, and the same day. The
+    archive dates a file by when it was made, and the Postfach a statement
+    by its statementDate, so either of the Postfach's days is its day.
+
+    Each Postfach row is one file, so it answers for one archive row at
+    most. An archive row naming no account, of a day and subject the
+    Postfach holds for more than one account, cannot be told to be either,
+    and is kept. Saved twice is found, left out is not."""
+    by_day: dict = {}
+    for i, r in enumerate(postfach):
+        for day in {r["date"], r.get("created") or ""} - {""}:
+            by_day.setdefault((day, r["title"]), []).append(i)
+    used: set = set()
 
     def held(r: dict) -> bool:
-        there = accounts.get((r["date"], r["title"]))
-        if not there:
+        same = [i for i in by_day.get((r["date"], r["title"]), ())
+                if i not in used and (not r["account"] or not postfach[i]["account"]
+                                      or postfach[i]["account"] == r["account"])]
+        if not same or (not r["account"] and len({postfach[i]["account"] for i in same}) > 1):
             return False
-        return not r["account"] or "" in there or r["account"] in there
+        # Its own account's row first, where the Postfach has one.
+        used.add(min(same, key=lambda i: postfach[i]["account"] != r["account"]))
+        return True
     return held
 
 
 def _all_rows(page, fresh: bool = False) -> List[dict]:
     """The Postfach and the archive, read whole or not at all. A part that
     cannot be read raises ListStopped (or SessionExpired), so no listing
-    missing a part is ever kept or called whole."""
+    missing a part is ever kept or called whole.
+
+    A row with no date this app can read cannot be keyed, so it is left out
+    and counted (undated), for Discover to say. A list where no row has
+    one is not read, and stops."""
     now = _time.monotonic()
     if not fresh and _listing.get("rows") is not None and now - _listing.get("at", 0) < LISTING_SECONDS:
         return _listing["rows"]
-    messages = list_messages(page)
-    rows = [r for r in (_row(d, messages) for d in list_documents(page)) if r]
+    postfach = _postfach(page)
     archive = collect_archive(page)
     # A file in both places is taken from the Postfach.
-    held = _in_the_postfach(rows)
-    rows += [r for r in archive if not held(r)]
-    _listing.update(rows=rows, at=now)
-    return rows
+    held = _in_the_postfach([r for r in postfach if r["date"]])
+    rows = postfach + [r for r in archive if not (r["date"] and held(r))]
+    dated = [r for r in rows if r["date"]]
+    if rows and not dated:
+        raise ListStopped("no document in the list carries a date this app can read")
+    if len(dated) < len(rows):
+        log.warning("%d document(s) carry no date this app can read", len(rows) - len(dated))
+    _listing.update(rows=dated, at=now, undated=len(rows) - len(dated))
+    return dated
+
+
+def undated() -> int:
+    """How many documents the last listing left out for carrying no date
+    this app can read."""
+    return int(_listing.get("undated") or 0)
 
 
 def _wanted(config: Optional[dict]) -> set:
@@ -798,22 +935,25 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
 
 
 def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0,
-                 item_id: str = "", *, number_rows, twins: int = 1,
+                 item_id: str = "", *, category: str, number_rows, twins: int = 1,
                  config: Optional[dict] = None) -> Optional[dict]:
     """The document's own row of a recent listing, or None when the listing
     no longer shows it.
 
     `number_rows` numbers the listing as Discover numbered it, the stored
     ids first, so a row answers to `occurrence` and no two documents can
-    come to one row. A place among the rows alike says nothing once the
-    list comes back in another order. A row found by its number and not by
-    `item_id` is taken only when the listing shows as many documents alike
-    as the app knows (`twins`). Anything less raises NotToldApart rather
-    than guess."""
+    come to one row. Rows are numbered within their kind, so two documents
+    alike in all but `category` can both be 0, and a row is its document's
+    only when its kind (filed_category) is the document's too. A place
+    among the rows alike says nothing once the list comes back in another
+    order. A row found by its number and not by `item_id` is taken only
+    when the listing shows as many documents alike as the app knows
+    (`twins`). Anything less raises NotToldApart rather than guess."""
     rows = listed_rows(page, config)
     numbers = number_rows(rows)
     alike = [i for i, r in enumerate(rows)
-             if r["title"] == title and r["date"] == date and r["account"] == account]
+             if r["title"] == title and r["date"] == date and r["account"] == account
+             and filed_category(r) == category]
     mine = [i for i in alike if numbers[i][0] == occurrence]
     if not mine:
         # The stored id is left as the way to it, unless another document
@@ -855,14 +995,16 @@ def fetch_pdf(page, item_id: str, content_type: str = "application/pdf") -> byte
 
 def download_document(page, title: str, date: str, out_path: Path, occurrence: int = 0,
                       item_hint: str = "", client_hint: str = "", account: str = "", *,
-                      number_rows, twins: int = 1, config: Optional[dict] = None) -> str:
+                      category: str, number_rows, twins: int = 1,
+                      config: Optional[dict] = None) -> str:
     """Save one document, and answer the id its bytes came from, or "" when
-    nothing was saved. Looks it up again by title, account and date first,
-    and falls back to the stored id only when the listing no longer shows
-    it. Which row is its own is resolve_item's to say, and it raises
+    nothing was saved. Looks it up again by kind, title, account and date
+    first, and falls back to the stored id only when the listing no longer
+    shows it. Which row is its own is resolve_item's to say, and it raises
     NotToldApart when that cannot be told."""
     found = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
-                         number_rows=number_rows, twins=twins, config=config)
+                         category=category, number_rows=number_rows, twins=twins,
+                         config=config)
     item_id = (found or {}).get("item_id") or item_hint
     ct = (found or {}).get("client_id") or client_hint or "application/pdf"
     if not item_id:

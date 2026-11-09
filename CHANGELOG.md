@@ -28,7 +28,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   download once with the list unread. Two documents of one day, subject
   and account are now told apart by their ids, so neither is saved with
   the other's bytes, and Login says signed in only once DKB answers with
-  the list.
+  the list. An archive folder's subfolders are read too. A Postfach
+  document its messages leave out, a Postfach that answers empty while its
+  messages name documents, and a folder list with no folder in it stop the
+  list, a document with no date is left out and said rather than dropped
+  unseen, and a statement held in both the Postfach and the archive is
+  saved once. Like every other app, it says Sign in first when nobody is
+  signed in, and says when no sign-in window opened or nothing was
+  recorded.
 - **Discover Bank, the 83rd app, checking and savings statements (#151).**
   `discoverbank` reads Discover Bank deposit accounts on bank.discover.com.
   It reads every account on the Statements page's account menu from the
