@@ -69,6 +69,10 @@ def test_windows_answers_for_a_folder_of_ones_own_and_for_system32(box):
     assert app_module._root_problem(str(box / "Documents" / "PaperPull")) == \
         (box / "Documents" / "PaperPull", "")
     assert sorted(p.name for p in box.rglob("*")) == ["Documents"], "nothing was made"
+    # A person may make a folder at the top of the system drive and not a
+    # file, so asked for the right to add a file it would be refused.
+    drive = Path(os.environ.get("SystemDrive", "C:") + "\\")
+    assert app_module._windows_may_add_a_folder(drive), "a folder at the top of %s is fine" % drive
     if not ctypes.windll.shell32.IsUserAnAdmin():
         system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
         assert app_module._windows_may_add_a_folder(system32) is False
