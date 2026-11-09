@@ -14,9 +14,9 @@ echo   2. Open your statements or messages area if you know where it is.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
 echo   4. Then run:  paperpull dkb diagnose   (a safe look, downloads nothing)
 echo.
-echo READ-ONLY: this tool only downloads statements and tax forms. It NEVER
-echo moves money between funds, changes contributions, withdraws, takes a
-echo loan, changes beneficiaries, or changes any setting.
+echo READ-ONLY: this tool only downloads the PDFs in your DKB Postfach. It
+echo NEVER transfers money, sets up a standing order, buys or sells
+echo securities, locks a card, marks a message read, or changes any setting.
 echo.
 rem This app's own Python when setup.bat made one. Otherwise, in a
 rem checkout, the one setup-all.bat made for every app in gui\.venv, once

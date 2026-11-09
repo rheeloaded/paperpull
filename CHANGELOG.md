@@ -7,6 +7,29 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **DKB, the 82nd app, the Postfach and its archive (#164).** It saves
+  every PDF in a DKB (Deutsche Kreditbank) Postfach and in its older
+  archive, account and card statements, securities documents, tax
+  certificates, contract information and messages, each kind in a folder
+  of its own named as the Postfach names it. Nothing is clicked. The list, the messages that
+  say each document's kind, the archive's folders and each PDF come from
+  the same GET calls the Postfach page makes, from inside the signed-in
+  page, and the call that marks a message read is never sent. DKB signs a
+  tab out about six minutes after the last thing the person did in it, and
+  a run's calls do not count, so a long run stops as signed out and Resume
+  carries on after a new sign-in. Contributed by @tabacha and run on the
+  contributor's own account, 611 documents saved. Before merging, a part
+  of the list that does not answer as a list, the archive or the messages
+  among them, was made to stop the run rather than be passed over with the
+  list called whole, and to stop a run that reads it again while documents
+  download once with the list unread. Two documents of one day, subject
+  and account are now told apart by their ids, so neither is saved with
+  the other's bytes, and Login says signed in only once DKB answers with
+  the list.
+
 ## [0.61.1] - 2026-11-08
 
 SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo

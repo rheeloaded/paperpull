@@ -6,10 +6,11 @@ your records: Kontoauszüge, Kreditkartenabrechnungen, Wertpapierdokumente
 Vertragsinformationen and Mitteilungen. Read-only, delete-safe, and part of
 [PaperPull](../../README.md).
 
-**Status: built, not yet run against a real account.** Scaffolded on
-2026-11-08. The API it reads is written from what the Postfach is known to
-ask for and is marked UNVERIFIED in `dkb_site.py` until a signed-in survey
-or recording confirms it.
+**Status: built and run on the contributor's own account.** Mapped on
+2026-11-08 from recordings of a signed-in Postfach. Discover listed 1001
+documents, 265 in the Postfach and 736 in the archive, and 611 were saved.
+DKB answers 500 for most archived securities documents, which its own page
+cannot open either, and Resume asks for them again.
 
 ## How it reads the site
 
@@ -28,13 +29,20 @@ Postfach filters by six kinds, and the app files into one folder for each:
 The app never clicks anything in the Postfach. It makes the same GET calls
 the page makes, from inside the signed-in page, so the session cookies never
 leave the browser. One call lists the documents, one lists the messages for
-their subjects, and one returns a document's PDF. It never sends the call
-that marks a message read, archives it or deletes it.
+their kinds and subjects, and one returns a document's PDF. The archive is
+read the same way, its folder list, each folder, and each file. It never
+sends the call that marks a message read, archives it or deletes it.
+
+A run calls the list read only when every part of it answered as a list,
+the Postfach, its messages, the folder list and each folder. When any of
+them does not, the run says which and stops, and nothing it read is taken
+as the whole list.
 
 Each document is identified by its title, its account and its date, never
-by the Postfach's own id, which is stored as a hint and looked up fresh at
-download time. File names carry the last four digits of the IBAN, depot or
-card, never the whole number.
+by the Postfach's own id, which is stored as a hint. Two documents alike in
+all three are told apart by their ids, and a download takes a row of the
+list only when that surely names the document. File names carry the last
+four digits of the IBAN, depot or card, never the whole number.
 
 **Which kinds a run downloads** is `document_types` in `config.json`. All
 six by default. Drop the ones you do not want, for example keep only
