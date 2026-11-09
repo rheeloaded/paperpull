@@ -33,8 +33,9 @@ a tab of its own. A tab of another site is never used.
   run and are never written.
 - **Whole or stopped.** A list that holds fewer rows than it says, a row
   the app cannot read, a statement of an account the page did not ask
-  about, a report whose advisory flag is not true or false, or a history
-  with no statements at all stops the list rather than be called whole.
+  about, a statement or report id that comes back twice, a report whose
+  advisory flag is not true or false, or a history with no statements at
+  all stops the list rather than be called whole.
   The failure file says the list stopped partway.
 - **Identity.** A statement is known by its account's last four digits
   and its date, and its file name carries the account as the portal masks
@@ -42,15 +43,22 @@ a tab of its own. A tab of another site is never used.
   report is known by its report id. Two statements of one account and date
   are both listed, Discover names the date, and neither is fetched, since
   nothing tells them apart. Every other document is read.
+- **Names.** A statement keeps the name the list gives it, so a
+  confirmation or a tax form the list may hold is left out by the skip
+  patterns in `document_rules.json`, a tax form by its form number.
+  Neither is ever filed as an account statement.
 - **The PDF.** Each PDF is fetched the way the page's own download fetches
   it, no redirect followed, and kept only when it is a PDF. Any other
   answer fails that document alone, and the next run tries it again.
 - **Once a run.** Both lists are read once and kept in memory. They are
   read again only when a document is not in them, or when a PDF is
-  refused with the headers kept from that reading, since the page's token
-  does not last.
+  refused, since the page's token does not last.
 - **Signing out.** A 401, a 403 or a redirect on a list just read stops the
-  run and keeps what it saved. Sign in again and run Resume.
+  run and keeps what it saved. Sign in again and run Resume. A PDF refused
+  with a 401 or a 403 right after the lists were read has them read once
+  more. If they refuse too, the run stops the same way. If they answer,
+  the portal is refusing that one document, which fails alone, and the
+  next run tries it again.
 
 ## Validation status
 
@@ -67,7 +75,8 @@ quarterly performance reports. These have not been seen yet.
   corrected statement beside the first. Neither statement of that date is
   fetched.
 - Confirmations, tax documents, shareholder communications and client
-  letters, which this app does not read.
+  letters, which this app does not read. Only statements have been seen
+  in the statements list.
 
 Never touched are trading, transfers, deposits, linked banks, eDelivery,
 alerts, messages to your financial professional, and every setting. Your
