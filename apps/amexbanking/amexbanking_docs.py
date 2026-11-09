@@ -34,20 +34,22 @@ from typing import List, Optional
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import pressing
 from paperpull_core import renaming
+from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import report_run_result
+from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import amexbanking_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.keys import migrate_account_keys as _migrate_account_keys
-from paperpull_core.words import words_for, write_shaped
+from paperpull_core.words import shape_label, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
-                     build_pdf_filename, load_config,
+                     atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
@@ -405,10 +407,13 @@ class App:
         found = self._file_on_disk_for(doc)
         if found is None:
             return False
+        # Adopting a file already saved is no download attempt, so it is
+        # written straight to the record rather than through _record.
         doc.pdf_path = str(found)
         doc.pdf_filename = found.name
         doc.downloaded_ok = True
-        self._record(doc, State.PDF_VERIFIED)
+        doc.state = State.PDF_VERIFIED.value
+        self.progress.update(doc.key, doc.to_dict())
         return True
 
     def _file_on_disk_for(self, doc: Document) -> Optional[Path]:
@@ -515,6 +520,9 @@ class App:
             self._record(doc, State.PDF_VERIFIED)
             self._write_row(doc, "Success", "Verified")
             self.stats["new_files"].append(str(out_path))
+            bucket = {"Statement": "statements", "Tax Document": "tax_documents"}
+            self.stats[bucket.get(doc.category, "other")] += 1
+            self.stats["dates"].append(doc.date)
             print(f"  Saved: {out_path.name} ({valid.size_bytes:,} bytes, {valid.page_count} pages)")
         else:
             self.stats["validation_failures"] += 1
@@ -529,7 +537,12 @@ class App:
         if state == State.PDF_VERIFIED:
             doc.downloaded_ok = True
         rec = doc.to_dict()
+        # A document saved before keeps its record while a Download again
+        # saves no copy of its own (paperpull_core.saved_copy).
+        if saved_copy.holds(self, doc.key, rec):
+            return
         self.progress.update(doc.key, rec)
+        self.discovery.update(doc.key, {"state": state.value})
 
     def _write_row(self, doc: Document, status: str, processing: str):
         row = {
@@ -560,8 +573,37 @@ class App:
         if not docs:
             print("No documents in scope to pilot.")
             return
-        self.process(docs)
-        self.write_run_summary()
+        self.process(docs, dry_run=self.args.dry_run)
+        self._pilot_report(docs)
+
+    def _pilot_report(self, docs: List[Document]):
+        print("\n" + "=" * 70)
+        print("PILOT RESULTS - inspect these before approving a full run")
+        print("=" * 70)
+        problems = []
+        for d in docs:
+            rec = self.progress.get(d.key) or {}
+            state = rec.get("state", "?")
+            print(f"\n  {rec.get('date', d.date)}  {rec.get('category', d.category)}")
+            print(f"    Title:  {rec.get('title', d.title)[:70]}")
+            print(f"    State:  {state}")
+            print(f"    PDF:    {rec.get('pdf_filename') or '(none)'}"
+                  f"  ({rec.get('pdf_size') or '?'} bytes, {rec.get('pdf_pages') or '?'} pages)")
+            # A Download again that saved nothing kept the saved copy's
+            # record as it was, so it is said here (paperpull_core.saved_copy).
+            if saved_copy.tried(self, d.key):
+                problems.append(f"{d.key}: {saved_copy.tried(self, d.key)}")
+            if state not in (State.COMPLETED.value, State.PDF_VERIFIED.value):
+                problems.append(f"{d.key}: {state} - {rec.get('notes', '')}")
+        print("\n" + "-" * 70)
+        if problems:
+            print("Needs attention:")
+            for p in problems:
+                print(f"  ! {p}")
+        else:
+            print("No problems detected in the pilot.")
+        print(f"\nFiles are in:\n  {self.paths.root}")
+        print("Nothing further runs until you explicitly start a full command.")
 
     def cmd_run(self, mode_name: str):
         self.stats["mode"] = mode_name
@@ -576,7 +618,6 @@ class App:
             print("No documents in scope to download.")
             return
         self.process(docs, dry_run=self.args.dry_run)
-        self.write_run_summary()
 
     def cmd_resume(self):
         self.cmd_run("resume")
@@ -634,23 +675,24 @@ class App:
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
-        docs = [Document.from_dict(v) for v in self.progress.data.values()
-                if v.get("state") in (State.PDF_SAVED.value, State.PDF_VERIFIED.value)]
-        print(f"\nVerifying {len(docs)} previously saved PDFs...")
-        ok, failed = 0, 0
-        for d in docs:
-            p = Path(d.pdf_path)
-            if not p.exists():
-                print(f"  Missing: {d.pdf_filename}")
-                failed += 1
+        rows = self.index_csv.read_all()
+        if not rows:
+            print("Document index is empty - nothing to verify.")
+            return
+        bad = 0
+        for row in rows:
+            p = row.get("PDF Full Path", "")
+            if not p:
                 continue
-            res = receipt_pdf.validate_pdf(p, self.config["min_pdf_bytes"])
-            if res.ok:
-                ok += 1
+            r = receipt_pdf.validate_pdf(Path(_absolute(p, self.paths.root)),
+                                         self.config["min_pdf_bytes"])
+            if not r.ok:
+                bad += 1
+                print(f"  BAD {row.get('PDF Filename', '')}: {r.reason}")
             else:
-                print(f"  Invalid: {d.pdf_filename} - {res.reason}")
-                failed += 1
-        print(f"Verification complete: {ok} valid, {failed} missing/invalid.")
+                row["Verified At"] = now_iso()
+        self.index_csv.rewrite(rows)
+        print(f"\nVerified {len(rows)} index rows; {bad} problem(s).")
 
     @property
     def requests(self):
@@ -671,10 +713,23 @@ class App:
                               text=text, details=details,
                               owner=self.config.get("owner", ""))
 
+    def write_survey(self) -> None:
+        """The survey Diagnose is safe to send, written beside the detailed
+        file on the same list of what may leave that the failure file uses."""
+        failure.write_survey(
+            self.paths.diagnostics,
+            page=getattr(self, "_work_page", None),
+            selectors=None,
+            journal=self._journal,
+            requests=self._requests,
+            provider='American Express Banking')
+
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
+        words = words_for('American Express Banking', site)
         page = self.page()
         info = {"timestamp": now_iso()}
+        stopped = None
         try:
             info["statements_ready"] = site.ensure_statements(page)
             info["url"] = page.url
@@ -682,7 +737,6 @@ class App:
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
 
-            # Dump visible controls, tabs, buttons, links
             controls = []
             for role in ("tab", "button", "link"):
                 loc = page.get_by_role(role)
@@ -701,23 +755,74 @@ class App:
                 {"title": d.title, "date": d.date_text, "category": d.category, "tag": d.tag}
                 for d in docs[:8]
             ]
+        except pressing.Stop as stop:
+            info["stopped"] = {"step": stop.step, "reason": stop.reason, "facts": stop.facts}
+            stopped = stop
         except Exception as e:
             info["error"] = str(e)
 
-        out = self.paths.diagnostics / f"survey-diagnose-{datetime.now():%Y%m%d-%H%M%S}.json"
-        write_shaped(out, info, words_for("American Express Banking", site), full_list=True)
-        print(f"\nDiagnose report written to {out}")
+        out = self.paths.diagnostics / "diagnose-documents.json"
+        write_shaped(out, info, words)
+        if stopped is not None:
+            pressing.say(stopped)
+        print(f"Wrote {out}")
+        print("  That is the detailed file, for repairing this provider. Any word")
+        print("  in it that is not on PaperPull's fixed list is written as its")
+        print("  shape, a for a letter and 9 for a digit, so it can be attached")
+        print("  too. Read it through first.")
+        print(f"Documents collected: {shape_tree(info.get('collected', '?'), words)}")
+        for s in info.get("samples", [])[:5]:
+            print(shape_label(f"  [{s['category']}] {s['date']}  {s['title'][:50]}",
+                              words, collapse=False))
 
     def cmd_record(self):
+        """Record the path a person takes to a document, so this app can be
+        written or repaired to take the same one. Downloads nothing, and
+        captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
-        from paperpull_core.recorder import run_recording
-        page = self.page()
-        run_recording(page, site, "American Express Banking", self.paths.diagnostics,
-                      owner=self.config.get("owner", ""))
+        from paperpull_core.recorder import record_session
+        record_session(self.page(), site, self.paths.diagnostics,
+                       provider='American Express Banking',
+                       owner=self.config.get("owner", ""))
 
     def write_run_summary(self):
-        self.stats["ended"] = now_iso()
-        report_run_result(self.stats)
+        s = self.stats
+        s["ended"] = now_iso()
+        dates = sorted(d for d in s["dates"] if d)
+        new_files = s.get("new_files", [])
+        atomic_write_text(self.paths.run_summary, "\n".join([
+            "American Express Banking - run summary",
+            "=" * 40,
+            f"Run start:                 {s['started']}",
+            f"Run end:                   {s['ended']}",
+            f"Mode:                      {s['mode'] or '(none)'}",
+            f"Documents known:           {s['discovered']}",
+            f"NEW files this run:        {len(new_files)}",
+            f"Statements downloaded:     {s['statements']}",
+            f"Tax documents downloaded:  {s['tax_documents']}",
+            f"Other documents:           {s['other']}",
+            f"Skipped (already done):    {s['skipped_completed']}",
+            f"Skipped (out of scope):    {s['skipped_out_of_scope']}",
+            f"Needs manual review:       {s['manual_review']}",
+            f"Failed:                    {s['failed']}",
+            f"Duplicate filenames (#'d): {s['duplicate_filenames']}",
+            f"PDF validation failures:   {s['validation_failures']}",
+            f"Earliest date processed:   {dates[0] if dates else '-'}",
+            f"Latest date processed:     {dates[-1] if dates else '-'}",
+            "",
+        ]))
+        # The files saved THIS run. Not for Verify or a dry run, which save
+        # nothing and leave the list as the last download run wrote it.
+        if lists_what_it_saved(s, self.args):
+            atomic_write_text(
+                self.paths.root / "new-this-run.txt",
+                f"# {len(new_files)} file(s) downloaded on this run "
+                f"({s['ended']}):\n" + NEW_LIST_NOTE
+                + "\n".join(sorted(new_files)) + "\n")
+            if new_files:
+                print(f"\n{len(new_files)} NEW file(s) downloaded this run "
+                      f"(listed in new-this-run.txt).")
+        report_run_result(s)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -748,8 +853,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None):
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    args = build_parser().parse_args(argv)
+    for d in (args.start_date, args.end_date):
+        if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+            print(f"Bad date '{d}': use YYYY-MM-DD")
+            return 2
     app = App(args)
     try:
         if args.open_browser:
@@ -757,6 +865,7 @@ def main(argv=None):
         elif args.login:
             app.cmd_login()
         elif args.discover:
+            app.stats["mode"] = "discover"
             app.cmd_discover()
         elif args.pilot:
             app.cmd_pilot()
@@ -768,15 +877,38 @@ def main(argv=None):
             app.cmd_verify()
         elif args.rename:
             app.cmd_rename()
-        elif args.diagnose:
-            app.cmd_diagnose()
         elif args.record:
             app.cmd_record()
+        elif args.diagnose:
+            app.cmd_diagnose()
+            app.write_survey()
+        elif args.dry_run:
+            app.cmd_run("dry-run")
         else:
-            parser.print_help()
+            build_parser().print_help()
+            return 0
+    except pressing.Stop as stop:
+        # A press it would not make, or one that brought nothing, stops the
+        # run here, with the reason said and the failure file written.
+        pressing.stop_run(app, stop)
+    except KeyboardInterrupt:
+        print("\nStopped by user. Progress saved.")
+        return 130
     finally:
+        app.progress.save(leaving=True)
+        app.discovery.save(leaving=True)
+        if app.stats["mode"] in ("discover", "rename"):
+            # Discover and Rename download nothing, so the run summary and
+            # new-this-run.txt stay as the last download run wrote them, and
+            # only the panel is told how it ended (#103).
+            report_run_result(app.stats)
+        # A run that only looked at the page writes no summary, which would
+        # replace new-this-run.txt with an empty list.
+        elif app.stats["mode"] not in ("", "diagnose", "record"):
+            app.write_run_summary()
         app.close()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
