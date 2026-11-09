@@ -166,10 +166,14 @@ def test_a_row_without_a_subject_takes_the_message_or_the_file_name():
     assert r["category"] == site.SECURITIES and r["account"] == "9999"
 
 
-def test_a_row_that_is_not_a_pdf_or_has_no_date_is_left_out():
+def test_a_row_that_is_not_a_pdf_is_left_out_and_one_with_no_date_says_so():
+    """A row with no date used to be left out like one that is not a PDF,
+    with nothing said. It comes back without a date, for the listing to
+    count and Discover to say."""
     not_pdf = {"id": "x", "attributes": {"contentType": "text/csv", "creationDate": "2026-01-01"}}
     no_date = {"id": "y", "attributes": {"contentType": "application/pdf", "metadata": {}}}
-    assert site._row(not_pdf, {}) is None and site._row(no_date, {}) is None
+    assert site._row(not_pdf, {}) is None
+    assert site._row(no_date, {})["date"] == ""
 
 
 def test_collect_keeps_wanted_kinds_and_years_in_scope_newest_first(monkeypatch):
@@ -328,11 +332,12 @@ def test_download_resolves_the_id_fresh_and_refuses_a_non_pdf(monkeypatch, tmp_p
     monkeypatch.setattr(site, "fetch_pdf", lambda page, item_id, ct: (seen.update(id=item_id), b"%PDF-1.4 ok")[1])
     out = tmp_path / "x.pdf"
     assert site.download_document(None, "Kontoauszug 1/2026", "2026-01-31", out,
-                                  item_hint="stale", account="1234", number_rows=_by_place) == "fresh"
+                                  item_hint="stale", account="1234", category=site.ACCOUNT,
+                                  number_rows=_by_place) == "fresh"
     assert seen == {"id": "fresh"} and out.read_bytes().startswith(b"%PDF")
     monkeypatch.setattr(site, "fetch_pdf", lambda *a: b"<html>Anmelden</html>")
     assert not site.download_document(None, "Kontoauszug", "2026-01-31", tmp_path / "y.pdf", account="1234",
-                                      number_rows=_by_place)
+                                      category=site.ACCOUNT, number_rows=_by_place)
     assert not (tmp_path / "y.pdf").exists()
 
 
@@ -428,7 +433,8 @@ def test_an_archive_folder_is_walked_until_a_short_page(monkeypatch):
         size = site.PAGE_LIMIT if len(asked) < 4 else 3
         return {"json": _folder("Archiv", [{"id": "f%d-%d" % (len(asked), i)} for i in range(size)])}
     monkeypatch.setattr(site, "_get", fake_get)
-    assert len(site.list_folder(None, "9")) == 3 * site.PAGE_LIMIT + 3
+    name, files, subs = site.read_folder(None, "9")
+    assert (name, len(files), subs) == ("Archiv", 3 * site.PAGE_LIMIT + 3, [])
     assert asked[-1].endswith("/9?page%5Blimit%5D=200&page%5Boffset%5D=600")
 
 
@@ -464,7 +470,8 @@ def test_one_listing_serves_the_downloads_that_follow(monkeypatch):
     site.collect_documents(None)
     for _ in range(3):
         assert site.resolve_item(None, "Kontoauszug 1/2026", "2026-01-31", "1234",
-                                 item_id=DOC["id"], number_rows=_by_place)["item_id"] == DOC["id"]
+                                 item_id=DOC["id"], category=site.ACCOUNT,
+                                 number_rows=_by_place)["item_id"] == DOC["id"]
     assert len(calls) == 1
 
 

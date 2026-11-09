@@ -34,14 +34,20 @@ read the same way, its folder list, each folder, and each file. It never
 sends the call that marks a message read, archives it or deletes it.
 
 A run calls the list read only when every part of it answered as a list,
-the Postfach, its messages, the folder list and each folder. When any of
-them does not, the run says which and stops, and nothing it read is taken
-as the whole list.
+the Postfach, its messages, the folder list and each folder with its
+subfolders. When any of them does not, the run says which and stops, and
+nothing it read is taken as the whole list. It stops the same way when the
+messages leave out a document the Postfach lists, since a document's kind
+comes from its message, when the Postfach answers empty while its messages
+name documents, and when the folder list has no folder in it. A document
+with no date the app can read is left out, and the run says how many. A
+file held in both the Postfach and the archive is saved once, from the
+Postfach.
 
-Each document is identified by its title, its account and its date, never
-by the Postfach's own id, which is stored as a hint. Two documents alike in
-all three are told apart by their ids, and a download takes a row of the
-list only when that surely names the document. File names carry the last
+Each document is identified by its kind, its title, its account and its
+date, never by the Postfach's own id, which is stored as a hint. Two
+documents alike in all four are told apart by their ids, and a download
+takes a row of the list only when that surely names the document. File names carry the last
 four digits of the IBAN, depot or card, never the whole number.
 
 **Which kinds a run downloads** is `document_types` in `config.json`. All
