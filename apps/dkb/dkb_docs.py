@@ -310,7 +310,7 @@ class App:
         saved session - so nothing is duplicated in the launcher scripts. You
         sign in; the tool attaches afterwards.
         """
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9303")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9305")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         name = browser_launcher.open_signin_browser(profile, port, url,
