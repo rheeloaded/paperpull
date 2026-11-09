@@ -23,7 +23,26 @@ SEEN SIGNED IN, 2026-10-30 (shapes only, no values kept):
     the two headers off the page's own billingDetails request, asks
     billStatements (the page's own query, more bills) from inside the page,
     and fetches each statement's PDF the same way. Nothing is clicked. The
-    header values stay in memory and are never written.
+    header values stay in memory and are never written. The list is read
+    once a run and kept in memory, and read again only for a bill not in
+    it.
+
+KNOWN CEILINGS (left as they are until a run shows otherwise)
+  * One account. Every account the page asks billingDetails about on load
+    is heard, and more than one stops the list. A bill is known by its
+    account's last four digits and its invoice id, so a bill listed under
+    another account than the one the page asks about stops the run once,
+    naming the account to choose. How My Account switches between accounts
+    has not been seen.
+  * The empty list has not been seen. A list with no bills stops, until a
+    real empty history has been seen.
+  * 100 bills are asked for and 17 were seen. A list as long as was asked
+    for stops, since there may be more. A server that gives fewer than
+    were asked for and no more would be read as whole.
+  * The answer's APIStatus has been seen as 200 with no message. Any other
+    status, an error, or a message that does not say success stops the
+    list, and a 401 or 403 there, or words that say the session ended,
+    stop the run as signed out.
 
 Sign-in, with any verification code, is the account holder's own, in the
 browser.
@@ -51,6 +70,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 from paperpull_core import intake
+from paperpull_core.characters import whole_json
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -77,7 +97,7 @@ DOCUMENTS_URL = BASE + DOCUMENTS_PATH
 # What discovery records as every bill's href; the invoice id is the
 # record's document_id and the PDF address is built from it, checked.
 DOWNLOAD_PATH = "/api/myacc/billinginvoice"
-STATEMENTS_URL = DOCUMENTS_URL
+# Where discovery records a bill's list as, its source_url.
 BILLING_URL = DOCUMENTS_URL
 URLS = {
     "home": f"{BASE}/myaccount",
@@ -89,8 +109,8 @@ URLS = {
 LOGIN_URL_MARKERS = ["/login", "/signin", "/sign-in", "/logout", "/auth/"]
 
 # ---------------------------------------------------------------------------
-# HARD SAFETY GUARD. Tuned for a utility portal. Every stem anchored so
-# "Bill" is not "billing plan" and "Download" is not "load".
+# HARD SAFETY GUARD. Tuned for an internet provider's account pages. Every
+# stem anchored so "Bill" is not "billing plan" and "Download" is not "load".
 # ---------------------------------------------------------------------------
 FORBIDDEN_CONTROL_RE = re.compile(
     r"(\bpay\b|\bpaying\b|\bpayments?\b|\bpay\s*now\b|\bautopay\b|\bauto\s*-?\s*pay\b|\btext\s+to\s+pay\b|"
@@ -107,15 +127,12 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"\bturn\s+off\b|\bupgrade\b|\breturn\s+equipment\b|\bvoice\b|\btrouble\s+ticket\b|"
     r"\brebalance\b|\bliquidate\b|\bdetails\b)", re.I)
 
-# The document actions this app would ever accept, anchored whole: the
-# portal's own "View Your Detailed Bill PDF", "Download Your Solar Bill" and
-# "View Bill", and the "View Utility Bill" its rules name. Nothing looser,
-# so a label carrying anything more is refused.
-# The links that lead to a bill. This app presses none of them; they are
-# named here for the survey's verdicts.
+# The links that lead to a bill, anchored whole, Billing's own "View PDF"
+# and a "View Bill" or "Download Bill" with nothing more. This app presses
+# none of them. They are named here for the survey's verdicts.
 SAFE_DOC_CONTROL_RES = (
     re.compile(r"^view\s+pdf$", re.I),
-    re.compile(r"^(view|download)\s+(your\s+)?(detailed\s+)?(utility\s+)?bill(\s+\(?pdf\)?)?$", re.I),
+    re.compile(r"^(view|download)\s+(your\s+)?(detailed\s+)?bill(\s+\(?pdf\)?)?$", re.I),
 )
 
 BILL_CONTROL_RE = re.compile(r"^\s*view\s+pdf\s*$", re.I)
@@ -134,8 +151,6 @@ RATE_LIMIT_MARKERS = [
     "temporarily unavailable", "http error 429", "unusual traffic",
 ]
 
-# A bill's row on Billing History, and the table plugin's own cell for a
-# table with no rows.
 # For Diagnose's counts only: the View PDF links the page draws.
 BILL_ROW = "a[href*='/api/myacc/billinginvoice']"
 
@@ -208,36 +223,16 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
     return None, ""
 
 
-# A bill row's statement date, exactly as the table writes it: "Sep 12, 2026".
-_STATEMENT_DATE_RE = re.compile(
-    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+([0-9]{1,2}),\s+([0-9]{4})")
-# The words that head the column that date is read from. A header holding
-# both, as "Statement Date" or "Statement Date *" does, and "Due Date" does
-# not, since the live header has only been named, never seen whole.
-STATEMENT_HEAD_WORDS = frozenset({"statement", "date"})
-
-
-def statement_date(text) -> Optional[str]:
-    """A bill row's statement date as YYYY-MM-DD, or None. The whole cell
-    must be the date and the day must exist; nothing is found inside other
-    text."""
-    m = _STATEMENT_DATE_RE.fullmatch(re.sub(r"\s+", " ", str(text or "")).strip())
-    if not m:
-        return None
-    try:
-        return _date(int(m.group(3)), _MONTHS[m.group(1).lower()], int(m.group(2))).isoformat()
-    except ValueError:
-        return None
-
-
 # ---------------------------------------------------------------------------
 # Session / safety
 # ---------------------------------------------------------------------------
 
 class SessionExpired(Exception):
-    """ziplyfiber.com answered as a signed-out session: its sign-in page,
-    a redirect where a bill was asked for, a 401, or an HTML or JSON body
-    where a PDF was expected. The run stops for the account holder."""
+    """ziplyfiber.com answered as a signed-out session, with its sign-in
+    page, a redirect where a bill or the list was asked for, a 401 or 403,
+    an answer from the account API that says the session ended, or a page
+    where a bill's PDF was expected. The run stops for the account
+    holder."""
 
 
 def looks_signed_out(page) -> bool:
@@ -297,18 +292,24 @@ def is_safe_control(name: str) -> bool:
 
 # ---------------------------------------------------------------------------
 # Hosts. Exact, parsed, no subdomain wildcard, and a bill only from the one
-# PDF address.
-# ---------------------------------------------------------------------------
-# The site and the account API its signed-in pages fetch from (seen
-# 2026-10-29). Exact hosts only; analytics and cookie hosts are not allowed.
-# ---------------------------------------------------------------------------
-# Hosts. Exact, parsed, no subdomain wildcard.
+# PDF address. The site and the account API its signed-in pages fetch from
+# are one host (seen 2026-10-29). Analytics and cookie hosts are not allowed.
 # ---------------------------------------------------------------------------
 ALLOWED_HOSTS = {"ziplyfiber.com"}
 BILLS_ASKED = 100
 INVOICE_ID_RE = re.compile(r"[0-9]{4,12}")
+# A bill's document_id, its account's last four digits and its invoice id.
+BILL_ID_RE = re.compile(r"bill-([0-9]{4})-([0-9]{4,12})")
 _ISO_DAY_RE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
 _ACCOUNT_RE = re.compile(r"[0-9]{6,20}")
+# How long Billing is given, once it has asked about one account, to ask
+# about another, so a page showing two is heard as one that does.
+ACCOUNTS_WAIT_MS = 2000
+# What an answer of the account API says when the session has ended.
+_SIGNED_OUT_WORDS = ("unauthori", "unauthenticat", "not authenticated", "expired", "forbidden",
+                     "invalid token", "jwt")
+# A message beside a list that answered, which says it did.
+_SUCCESS_RE = re.compile(r"(?:success(?:ful)?|ok)", re.I)
 MAX_LIST_BYTES = 5 * 1024 * 1024
 MAX_PDF_BYTES = 25 * 1024 * 1024
 # The only request headers taken from the page's own call. The values live
@@ -371,6 +372,24 @@ class ListStopped(Exception):
         self.docs = list(docs or [])
 
 
+class SeveralAccounts(ListStopped):
+    """Billing asked about more than one account, and this app reads one."""
+
+    def __init__(self, count: int):
+        super().__init__(f"Billing asked about {count} accounts, and this app reads one")
+        self.count = count
+
+
+class OtherAccountShown(Exception):
+    """Billing asks about another account than the one a bill was listed
+    under. Every bill of that account would meet the same, so the run stops
+    once, naming the last four digits of the account it wants."""
+
+    def __init__(self, wanted: str, shown: str):
+        super().__init__(f"Billing shows the account ending {shown}, and the bill is of the one ending {wanted}")
+        self.wanted, self.shown = wanted, shown
+
+
 @dataclass
 class _Session:
     account: str
@@ -383,7 +402,7 @@ def _account_request(method: str, url: str, post_data: Optional[str]) -> str:
     if (method or "").upper() != "POST" or url != API_URL:
         return ""
     try:
-        body = json.loads(post_data or "")
+        body = whole_json(json.loads(post_data or ""))
     except (TypeError, ValueError):
         return ""
     if not isinstance(body, dict) or body.get("operationName") != "billingDetails":
@@ -402,14 +421,15 @@ def _settled_here(page) -> bool:
 
 def _open(page, timeout_ms: int = 45000) -> _Session:
     """Open Billing by its address and take the account number and the
-    authorization the page's own billingDetails query carries. Raises
-    SessionExpired when the site shows its sign-in page and ListStopped
-    when the page never asks. Nothing is pressed."""
+    authorization the page's own billingDetails query carries. Every
+    account the page asks about is heard, and more than one raises
+    SeveralAccounts. Raises SessionExpired when the site shows its sign-in
+    page and ListStopped when the page never asks. Nothing is pressed."""
     got = []
 
     def seen(req):
         try:
-            if not got and _account_request(req.method, req.url, req.post_data):
+            if len(got) < 20 and _account_request(req.method, req.url, req.post_data):
                 got.append(req)
         except Exception:
             pass
@@ -424,6 +444,12 @@ def _open(page, timeout_ms: int = 45000) -> _Session:
         while not got and waited < timeout_ms:
             page.wait_for_timeout(250)
             waited += 250
+        # A page that shows a second account asks about it soon after the
+        # first, so it is given a moment more to be heard.
+        waited = 0
+        while got and waited < ACCOUNTS_WAIT_MS:
+            page.wait_for_timeout(250)
+            waited += 250
     finally:
         try:
             page.remove_listener("request", seen)
@@ -435,6 +461,10 @@ def _open(page, timeout_ms: int = 45000) -> _Session:
         raise ListStopped("Billing did not ask for its account")
     if not _settled_here(page):
         raise ListStopped("Billing settled off its own address")
+    accounts = sorted({_account_request(r.method, r.url, r.post_data) for r in got})
+    _keep_private(accounts)
+    if len(accounts) != 1:
+        raise SeveralAccounts(len(accounts))
     req = got[0]
     try:
         headers = {k: v for k, v in req.all_headers().items() if k.lower() in _CARRIED_HEADERS and v}
@@ -442,9 +472,7 @@ def _open(page, timeout_ms: int = 45000) -> _Session:
         raise ListStopped(f"the page's own request could not be read ({type(e).__name__})")
     if not headers.get("authorization"):
         raise ListStopped("the page's own account request carried no authorization")
-    account = _account_request(req.method, req.url, req.post_data)
-    _keep_private([account])
-    return _Session(account=account, headers=headers)
+    return _Session(account=accounts[0], headers=headers)
 
 
 def _keep_private(words) -> None:
@@ -475,6 +503,11 @@ def _ask_statements(page, session: _Session) -> dict:
         got = intake.evaluate(page, _ASK_JS, [API_URL, session.headers, body], limit=MAX_LIST_BYTES) or {}
     except intake.TooLarge:
         raise ListStopped("the bill list is larger than any history")
+    except Exception as e:
+        # The page went away under the script, a sign-out among the ways.
+        if looks_signed_out(page):
+            raise SessionExpired("ziplyfiber.com showed its sign-in page")
+        raise ListStopped(f"the bill list could not be asked ({type(e).__name__})")
     if got.get("redirected") or got.get("status") in (401, 403):
         raise SessionExpired("the account API refused the session")
     if got.get("status") != 200 or not isinstance(got.get("data"), dict):
@@ -492,25 +525,49 @@ def bill_day(text) -> Optional[str]:
         return None
 
 
-def bills_of(answer) -> List[RawDoc]:
-    """RawDocs from a billStatements answer, one per statement, known by its
-    invoice id and dated by its date. An answer with errors, a statement
-    whose id is not one, whose URL is not that id's PDF, whose date is not a
-    calendar date, one id twice, or a list as long as was asked for (there
-    may be more) stops the list, carrying what was read before it."""
+def _says_signed_out(value) -> bool:
+    text = (value if isinstance(value, str) else json.dumps(value, default=str)).lower()
+    return any(w in text for w in _SIGNED_OUT_WORDS)
+
+
+def bills_of(answer, account: str) -> List[RawDoc]:
+    """RawDocs from a billStatements answer for `account`, one per
+    statement, known by the account's last four digits and its invoice id
+    and dated by its date. An answer with errors, an error or a status
+    other than 200 or a message that does not say success in its block, a
+    list with no bills, a statement whose id is not one, whose URL is not
+    that id's PDF, whose date is not a calendar date, one id twice, or a
+    list as long as was asked for (there may be more) stops the list,
+    carrying what was read before it. A 401 or 403 in the block, or words
+    that say the session ended, raise SessionExpired."""
+    if not _ACCOUNT_RE.fullmatch(account or ""):
+        raise ListStopped("the bill list names no account number")
+    last4 = account[-4:]
     if not isinstance(answer, dict):
         raise ListStopped("the bill list answer is not an object")
     if answer.get("errors"):
-        text = json.dumps(answer.get("errors")).lower()
-        if any(w in text for w in ("unauthori", "unauthenticat", "expired", "forbidden")):
+        if _says_signed_out(answer.get("errors")):
             raise SessionExpired("the account API said the session has ended")
         raise ListStopped("the account API answered the bill list with errors")
-    block = ((answer.get("data") or {}).get("billStatements"))
-    if not isinstance(block, dict) or block.get("error"):
+    data = answer.get("data")
+    block = data.get("billStatements") if isinstance(data, dict) else None
+    if not isinstance(block, dict):
+        raise ListStopped("the account API answered with no bill list")
+    status, said = block.get("APIStatus"), block.get("message")
+    if str(status) in ("401", "403") or (block.get("error") and _says_signed_out(said)):
+        raise SessionExpired("the account API said the session has ended")
+    if block.get("error"):
         raise ListStopped("the account API answered the bill list with an error")
+    if str(status) != "200":
+        shown = status if isinstance(status, int) and not isinstance(status, bool) else "that is not one"
+        raise ListStopped(f"the account API answered the bill list with status {shown}")
+    if said not in (None, "") and not (isinstance(said, str) and _SUCCESS_RE.fullmatch(said.strip())):
+        raise ListStopped("the account API answered the bill list with a message")
     rows = block.get("billStatements")
     if not isinstance(rows, list):
         raise ListStopped("the bill list holds no statements")
+    if not rows:
+        raise ListStopped("the bill list holds no bills, and a history with none has not been seen")
     docs: List[RawDoc] = []
     ids = set()
     for r in rows:
@@ -528,8 +585,9 @@ def bills_of(answer) -> List[RawDoc]:
             raise ListStopped("two statements carry one id", docs)
         ids.add(inv)
         title = f"Ziply Fiber Bill {iso}"
-        docs.append(RawDoc(title=title, date_text=iso, href=DOWNLOAD_PATH, text=title,
-                           row_index=len(docs), kind="statement", document_id=inv))
+        docs.append(RawDoc(title=title, account=f"XXXX-{last4}", date_text=iso, href=DOWNLOAD_PATH,
+                           text=title, row_index=len(docs), kind="statement",
+                           document_id=f"bill-{last4}-{inv}"))
     if len(rows) >= BILLS_ASKED:
         raise ListStopped(f"the bill list holds all {BILLS_ASKED} asked for, so there may be more", docs)
     return docs
@@ -571,16 +629,25 @@ def expand_all(page) -> None:
     return None
 
 
-def table_header(page) -> dict:
-    """For Diagnose. There is no bill table to read a header from."""
-    return {"cells": [], "statement_date_column": None}
+# The list as this run last read it, with the session it was read with, so
+# each bill is not a fresh reading of the whole list. In memory for the run
+# only.
+_RUN: dict = {}
+
+
+def _read(page) -> List[RawDoc]:
+    _RUN.clear()
+    session = _open(page)
+    bills = bills_of(_ask_statements(page, session), session.account)
+    _RUN.update(session=session, bills=bills)
+    return bills
 
 
 def collect_download_docs(page) -> List[RawDoc]:
-    """Every bill Ziply lists. Nothing is pressed. A list that cannot be
-    read whole raises ListStopped holding what was read, and a signed-out
-    session raises SessionExpired."""
-    return bills_of(_ask_statements(page, _open(page)))
+    """Every bill Ziply lists, kept for this run's downloads. Nothing is
+    pressed. A list that cannot be read whole raises ListStopped holding
+    what was read, and a signed-out session raises SessionExpired."""
+    return _read(page)
 
 
 _PDF_JS = r"""async ([url, limit]) => {
@@ -627,8 +694,13 @@ def _fetch(page, invoice_id: str, out_path: Path, trace: Optional[list]) -> bool
     except Exception:
         return False
     if data[:5] != b"%PDF-":
-        if data.lstrip()[:1] in (b"<", b"{", b"["):
+        # The PDF is asked with the session's cookies alone, so a page in
+        # its place is the sign-in page. A JSON answer is about this one
+        # bill, which fails alone and is tried again on the next run.
+        if data.lstrip()[:1] == b"<":
             raise SessionExpired("ziplyfiber.com answered a bill with a sign-in page")
+        if trace is not None:
+            trace.append({"note": "the answer is not a PDF"})
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(data)
@@ -638,28 +710,38 @@ def _fetch(page, invoice_id: str, out_path: Path, trace: Optional[list]) -> bool
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None, href: str = "",
                   document_id: str = "") -> bool:
-    """Save the bill discovery recorded with invoice id `document_id`, dated
-    `iso_date`. The bill list is asked again and the bill is fetched only
-    when exactly one statement there carries that id and date. `dl_dir` is
-    unused. Nothing is pressed. SessionExpired propagates to the run."""
+    """Save the bill discovery recorded as `document_id`, its account's last
+    four digits and its invoice id, dated `iso_date`. The list this run read
+    is used when there is one, and it is read again when there is none or
+    the bill is not in it. The bill is fetched only when exactly one
+    statement there carries that id and date. A list for another account
+    than the one the bill was recorded under raises OtherAccountShown, with
+    no reread, since the account shown is the person's choice on the site.
+    `dl_dir` is unused. Nothing is pressed. SessionExpired propagates to the
+    run, and so does ListStopped when the list cannot be read again, since
+    every bill after this one would read the same list."""
     out_path = Path(out_path)
-    inv = (document_id or "").strip()
-    if href != DOWNLOAD_PATH or not INVOICE_ID_RE.fullmatch(inv):
+    m = BILL_ID_RE.fullmatch((document_id or "").strip())
+    if href != DOWNLOAD_PATH or not m:
         log.info("no bill was recorded for this document")
         if trace is not None:
             trace.append({"note": "no recorded bill"})
         return False
-    try:
-        found = [d for d in collect_download_docs(page) if d.document_id == inv and d.date_text == (iso_date or "")]
-    except ListStopped as stop:
-        log.info("the bill list stopped while looking for the bill dated %s: %s", iso_date, stop)
-        return False
-    if len(found) != 1:
-        log.info("%d statements match the recorded id and date %s, none taken", len(found), iso_date)
-        if trace is not None:
-            trace.append({"note": "no single statement matches the record", "matches": len(found)})
-        return False
-    return _fetch(page, inv, out_path, trace)
+    last4, inv = m.group(1), m.group(2)
+    found: List[RawDoc] = []
+    for fresh in ((False, True) if _RUN else (True,)):
+        if fresh:
+            _read(page)
+        session, bills = _RUN["session"], _RUN["bills"]
+        if session.account[-4:] != last4:
+            raise OtherAccountShown(last4, session.account[-4:])
+        found = [d for d in bills if d.document_id == m.group(0) and d.date_text == (iso_date or "")]
+        if len(found) == 1:
+            return _fetch(page, inv, out_path, trace)
+    log.info("%d statements match the recorded id and date %s, none taken", len(found), iso_date)
+    if trace is not None:
+        trace.append({"note": "no single statement matches the record", "matches": len(found)})
+    return False
 
 
 # ---------------------------------------------------------------------------

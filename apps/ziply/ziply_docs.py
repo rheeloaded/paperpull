@@ -1,8 +1,8 @@
 """Ziply Fiber bill downloader (local, supervised).
 
-Ziply Fiber keeps its customers' bills on ziplyfiber.com,
-ziplyfiber.com. This downloads the bill PDFs Billing History lists,
-about two years of them. The orchestrator below is the same one every
+Ziply Fiber keeps its customers' bills in My Account on ziplyfiber.com.
+This downloads the bill PDFs My Account's Billing page lists, every one
+of them. The orchestrator below is the same one every
 other statement app runs on. Everything about the site itself is in
 ziply_site.py.
 
@@ -20,7 +20,7 @@ Usage:
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N  --type Statement
 
-READ-ONLY: this tool only reads Billing History and saves the bill PDFs
+READ-ONLY: this tool only reads Billing's bill list and saves the bill PDFs
 Ziply Fiber already generated. It never pays a bill, sets up autopay or a payment
 arrangement, enrolls in anything, starts, stops or transfers service, or
 changes any account setting. Everything stays on this machine, and nothing
@@ -124,14 +124,16 @@ class Document:
                  href="", row_index=-1, confidence="", account="",
                  date_text="", document_id="", **kw):
         self.title = title
-        # Always empty: the account a bill belongs to is never written down.
+        # The bill's account as XXXX- and its last four digits, which its
+        # file name carries too. The whole number is never written down.
         self.account = account
         self.category = category
         self.summary = summary
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        # The bill's invoice id, what it is fetched by and known by.
+        # "bill-1234-70000001", the account's last four digits and the
+        # bill's invoice id, what it is fetched by and known by.
         self.document_id = document_id
         self.source_url = kw.get("source_url", "")  # page where the doc's download link lives
         # Sticky "was successfully downloaded at least once" marker. Once set,
@@ -151,8 +153,8 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. A bill's invoice id, which no other bill
-        carries. A record without one falls back to category, date and
+        """Stable identity. A bill's account and invoice id, which no other
+        bill carries. A record without one falls back to category, date and
         title."""
         if self.document_id:
             return f"id:{self.account}:{self.document_id}" if self.account \
@@ -180,13 +182,15 @@ def migrate_legacy_keys(records: dict) -> int:
 
 def told_apart_by(record: dict) -> str:
     """What a bill's file adds to its name when another file already has
-    that name, the same on every run: the end of its invoice id, never
-    " (2)" (core/tests/test_every_app_renames_each_file_for_its_own_record).
-    Two bills of one statement date stop the list (ziply_site.bills_of), so
-    this is reached only when a file of that name is already in the folder.
-    The download and Rename both ask this, so they agree."""
+    that name, the same on every run. It is the bill's invoice id, never
+    " (2)" (core/tests/test_every_app_renames_each_file_for_its_own_record). A
+    file's name carries its date and account, so this is reached when one
+    account has two bills of a date, or a file of that name is already in
+    the folder. The download and Rename both ask this, so they agree. A
+    record of another id gives the end of it."""
     doc_id = str((record or {}).get("document_id") or "").strip()
-    return doc_id[-6:] if doc_id else ""
+    m = site.BILL_ID_RE.fullmatch(doc_id)
+    return m.group(2) if m else doc_id[-6:]
 
 
 class App:
@@ -216,10 +220,10 @@ class App:
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
-        # The owner's name first. The site adds what names the account, its
-        # number and address, once Billing History shows them.
+        # The owner's name first. The site adds the account number once
+        # Billing asks about it.
         site.set_private_words([self.config.get("owner", "")])
 
         self._pw = None
@@ -381,7 +385,7 @@ class App:
     def cmd_login(self):
         print("Checking the connection to your signed-in ziplyfiber.com browser...\n")
         page = self.page()
-        # What only a signed-in page shows, Billing History's own list.
+        # What only a signed-in page shows, Billing's own list.
         listed = site.bill_list_opens(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
@@ -390,13 +394,13 @@ class App:
             print("Connected, but ziplyfiber.com shows its sign-in page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif listed:
-            print("Success. Connected, and Billing History lists your bills.")
+            print("Success. Connected, and Billing lists your bills.")
             print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
-            print("Connected, but Billing History did not finish loading, so this cannot")
+            print("Connected, but Billing did not finish loading, so this cannot")
             print("say whether you are signed in. Look at the browser window and answer")
             print("anything ziplyfiber.com asks there yourself. If it shows your account, open")
-            print("Billing, then Billing History in it, then run --diagnose.")
+            print("My Account, then Billing in it, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -416,7 +420,7 @@ class App:
         return True
 
     def _record_rawdoc(self, r, source_url: str) -> int:
-        """Record one bill (a RawDoc) read from Billing History.
+        """Record one bill (a RawDoc) read from Billing's bill list.
         Returns 1 if new."""
         title = re.sub(r"\s+", " ", (r.title or "")).strip()
         if not title:
@@ -438,10 +442,15 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        account = (getattr(r, "account", "") or "").strip()
+        if account:
+            # Two accounts' bills of one month are told apart by the
+            # account's masked number, in the file name as in the record.
+            summary = f"{summary} {account}"
         doc = Document(title=title, category=category, summary=summary,
                        date=date, confidence=confidence, source_url=persistable(source_url),
                        href=persistable(getattr(r, "href", "") or ""),
-                       account="",
+                       account=account,
                        document_id=(getattr(r, "document_id", "") or "").strip())
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
@@ -459,12 +468,12 @@ class App:
         listing.started(self)
         n_new = 0
         # The tab is taken the way each bill takes it. With no tab of the
-        # person's on ziplyfiber.com, Billing History is opened in a tab
-        # of this run's own before anything asks about the session, since
-        # that tab starts blank, off the site, and the session check stops
-        # on a tab off the site. A tab of another site is never used.
+        # person's on ziplyfiber.com, Billing is opened in a tab of this
+        # run's own before anything asks about the session, since that tab
+        # starts blank, off the site, and the session check stops on a tab
+        # off the site. A tab of another site is never used.
         page = self._on_its_site()
-        # Billing History is then opened and read in one go by the site
+        # Billing is then opened and its list read in one go by the site
         # layer, so a sign-out anywhere on the way reaches the boundary
         # below and stops the run, rather than a prompt to sign in again.
         self.check_session(page)
@@ -478,15 +487,20 @@ class App:
             for r in stop.docs:
                 self._record_rawdoc(r, site.BILLING_URL)
             self.discovery.save()
-            print(f"\n!! The Ziply Fiber billing history stopped partway, since {stop}.")
-            print(f"   The {len(stop.docs)} bill(s) listed before it stopped are kept,")
-            print("   and this run stops rather than call the list read. Run it again.")
+            if isinstance(stop, site.SeveralAccounts):
+                print(f"\n!! Ziply Fiber's Billing page asked about {stop.count} accounts, and this app")
+                print("   reads one, so nothing was listed. Please say so on the Ziply Fiber issue")
+                print("   on GitHub, and how My Account switches between them.")
+            else:
+                print(f"\n!! The Ziply Fiber bill list stopped partway, since {stop}.")
+                print(f"   The {len(stop.docs)} bill(s) listed before it stopped are kept,")
+                print("   and this run stops rather than call the list read. Run it again.")
             self.write_failure("read the documents list", "the list stopped partway")
             raise SystemExit(1)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
-        log.info("billing history: %d bills, %d new", len(docs), n_new)
+        log.info("bill list: %d bills, %d new", len(docs), n_new)
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -549,17 +563,16 @@ class App:
     # -- processing --------------------------------------------------------
 
     def _on_its_site(self):
-        """The tab Discover and the next bill are taken in, on My Energy
-        Center and never a tab of another site. ziplyfiber.com keeps its
-        session in a cookie a new tab shares, so with no tab of the person's
-        on the site Billing History is opened in a tab of this run's own
+        """The tab Discover and the next bill are taken in, on
+        ziplyfiber.com and never a tab of another site. ziplyfiber.com keeps
+        its session in a cookie a new tab shares, so with no tab of the
+        person's on the site Billing is opened in a tab of this run's own
         (tabs.on_its_site)."""
         return tabs.on_its_site(self, site.is_safe_url, "ziplyfiber.com",
                                 self._open_documents)
 
     def _open_documents(self, page):
-        """Billing History, opened by its address the way discovery opens
-        it."""
+        """Billing, opened by its address the way discovery opens it."""
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
@@ -594,6 +607,16 @@ class App:
                 # bill after it would get the same answer, so the run stops
                 # here, with nothing recorded against this one.
                 self.session_ended()
+            except site.OtherAccountShown as e:
+                # Billing asks about another account. Every bill of the one
+                # this bill was listed under would meet the same, so the
+                # run stops once, with nothing recorded against this one.
+                self.account_not_shown(e)
+            except site.ListStopped as stop:
+                # The bill list could not be read again for this bill.
+                # Every bill after it reads the same list, so the run stops
+                # here rather than fail each one in turn.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -610,21 +633,44 @@ class App:
             "window, then run Resume to carry on from where this stopped.",
         ])
 
+    def account_not_shown(self, shown: "site.OtherAccountShown") -> None:
+        """Stop the run because Billing asks about another account than the
+        one the next bill was listed under. Progress is saved and nothing
+        is recorded for review (tabs.stop)."""
+        tabs.stop(self, [
+            f"ziplyfiber.com shows the account ending {shown.shown}, and the next bill",
+            f"was listed under the account ending {shown.wanted}, so this run stops here.",
+            "Everything saved so far is kept. Choose the account ending "
+            f"{shown.wanted} on ziplyfiber.com,",
+            "then run Resume to carry on from where this stopped.",
+        ])
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        bill was sought. Nothing is recorded against the bill, and the run
+        leaves as one whose list did not end whole, which only a run that
+        lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        listing.read_again_stopped(self, (
+            "The Ziply Fiber bill list could not be read again, so this "
+            "run stops here."))
+
     def download_one(self, page, doc: Document, filename: str):
-        """Save one bill. The site layer opens Billing History again and
-        fetches the bill by its invoice id, only when exactly one row there
-        carries the recorded id and statement date. Nothing is pressed."""
+        """Save one bill. The site layer finds the bill by its account and
+        invoice id in the list this run read, or reads it, and fetches it
+        only when exactly one bill there carries them. Nothing is
+        pressed."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        # Only a name already taken in the folder gets the end of the
-        # invoice id (told_apart_by).
+        # Only a name already taken in the folder gets the invoice id
+        # (told_apart_by).
         out_path = unique_path(folder, filename, self.config["max_path_length"],
                                distinguisher=told_apart_by(doc.to_dict()))
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # The site layer opens Billing History itself, finds this bill and
-        # fetches it.
+        # The site layer finds this bill and fetches it.
         trace: list = []
         saved = site.download_bill(page, None, doc.date, out_path,
                                    title=doc.title, trace=trace, href=doc.href,
@@ -641,12 +687,12 @@ class App:
                 "landed_on": site.redact(page.url or ""),
                 "responses": trace[:80]}, words_for('Ziply Fiber', site))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
@@ -936,7 +982,7 @@ class App:
         words = words_for('Ziply Fiber', site)
         page = self.page()
         info = {"timestamp": now_iso(),
-                "note": Fixed("A survey of the Ziply Fiber Billing History page. It is what a "
+                "note": Fixed("A survey of the Ziply Fiber Billing page. It is what a "
                               "repair of the site layer is checked against.")}
         stopped = None
         try:
@@ -958,20 +1004,16 @@ class App:
             if found:
                 site.expand_all(page)
                 site.scroll_full_page(page)
-                # Where a bill's date is read from, so a list that stops
-                # for want of its Statement Date column can be repaired.
-                info["bill_table_header"] = site.table_header(page)
             info["row_counts"] = {}
             for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
                               ("table rows", "table tbody tr"),
-                              ("bill rows", site.BILL_ROW),
-                              ("account options", "select#accountList option")]:
+                              ("bill links", site.BILL_ROW)]:
                 try:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
             found_docs = site.collect_download_docs(page) if found else []
-            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_invoice_id": bool(b.document_id)}
+            info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "has_id": bool(b.document_id)}
                                             for b in found_docs[:40]]
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)
@@ -1075,7 +1117,7 @@ def build_parser() -> argparse.ArgumentParser:
             ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
             ("rename", "rename downloaded files to this app's current naming"),
-            ("diagnose", "dump the Billing History page structure (no downloads)"),
+            ("diagnose", "dump the Billing page structure (no downloads)"),
             ("record", "record your own path to a document, so this app can be repaired (downloads nothing)"),
             ]:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)

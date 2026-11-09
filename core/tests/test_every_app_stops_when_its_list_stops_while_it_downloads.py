@@ -246,6 +246,9 @@ NOT_A_LIST = {
     ("nwnatural", "Challenged"):
         "the portal's bot protection answering in place of the list or a bill, which "
         "the person answers in the browser before Continue",
+    ("ziply", "OtherAccountShown"):
+        "another account asked about on Billing than the one a bill was listed under, "
+        "which the person chooses again before Continue",
 }
 
 

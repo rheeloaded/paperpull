@@ -15,9 +15,11 @@ from paperpull_core import storage as _core
 from paperpull_core.spec import (AppSpec, CsvSpec, DOCUMENT, Folder,
                                  INFRASTRUCTURE_FOLDERS)
 
-# One row per downloaded Ziply Fiber bill. Deliberately records NO account
+# One row per downloaded Ziply Fiber bill. Deliberately records NO full account
 # numbers, service addresses, amounts, or other sensitive values from inside
-# the documents, only what is needed to find and verify a file locally.
+# the documents, only what is needed to find and verify a file locally. A
+# bill's summary and file name carry its account as "XXXX-" and the last
+# four digits.
 DOCUMENT_INDEX_COLUMNS = [
     "Account Holder",
     "Document Date", "Category", "Document Summary", "Document Title",

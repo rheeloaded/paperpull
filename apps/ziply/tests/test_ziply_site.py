@@ -15,8 +15,10 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 import ziply_site as site  # noqa: E402
 import ziply_docs as docs  # noqa: E402
+from paperpull_core.run_reporting import ListNotRead  # noqa: E402
 
 FAKE_ACCOUNT = "98765432100001234"
+OTHER_ACCOUNT = "98765432100005678"
 FAKE_TOKEN = "Bearer fake-token-not-real-0000"
 PDF = b"%PDF-1.4 " + b"x" * 3000
 
@@ -29,16 +31,16 @@ def stmt(day, inv, status="CLOSED"):
 ROWS = [stmt("2026-10-13", "50000003", "OPEN"), stmt("2026-09-13", "50000002"), stmt("2026-08-13", "50000001")]
 
 
-def answer(rows, error=False):
-    return {"data": {"billStatements": {"error": error, "APIStatus": 200, "message": None,
+def answer(rows, error=False, status=200, message=None):
+    return {"data": {"billStatements": {"error": error, "APIStatus": status, "message": message,
                                         "billStatements": rows, "__typename": "BillStatementsResponse"}}}
 
 
 class Req:
-    def __init__(self, op="billingDetails", headers=None):
+    def __init__(self, op="billingDetails", headers=None, account=FAKE_ACCOUNT):
         self.method = "POST"
         self.url = site.API_URL
-        self.post_data = json.dumps({"operationName": op, "variables": {"accountNumber": FAKE_ACCOUNT}, "query": "query x { y }"})
+        self.post_data = json.dumps({"operationName": op, "variables": {"accountNumber": account}, "query": "query x { y }"})
         self._headers = {"authorization": FAKE_TOKEN, "requestid": "r-0", "cookie": "never-taken",
                          "content-type": "application/json"} if headers is None else headers
 
@@ -55,12 +57,15 @@ class Locator:
 
 
 class Page:
-    def __init__(self, rows=ROWS, settled=None, asks=True, headers=None, listing=None, pdf=PDF, pdf_status=200):
+    def __init__(self, rows=ROWS, settled=None, asks=True, headers=None, listing=None, pdf=PDF, pdf_status=200,
+                 accounts=(FAKE_ACCOUNT,)):
         self.rows, self.asks, self.headers, self.listing = rows, asks, headers, listing
         self.settled = settled or site.DOCUMENTS_URL
         self.url = "about:blank"
         self.pdf, self.pdf_status = pdf, pdf_status
+        self.accounts = accounts
         self.handlers, self.asked = [], []
+        self.loads = 0
 
     def on(self, event, h):
         self.handlers.append(h)
@@ -72,10 +77,12 @@ class Page:
         pass
 
     def goto(self, url, **k):
+        self.loads += 1
         self.url = self.settled
         if self.asks:
             for h in list(self.handlers):
-                h(Req(headers=self.headers))
+                for account in self.accounts:
+                    h(Req(headers=self.headers, account=account))
 
     def locator(self, sel):
         return Locator(1 if "password" in sel and "login" in self.settled.lower() else 0)
@@ -87,6 +94,9 @@ class Page:
         if self.pdf_status != 200:
             return {"status": self.pdf_status, "type": "text/html"}
         return {"status": 200, "type": "application/pdf", "b64": base64.b64encode(self.pdf).decode()}
+
+    def lists_asked(self):
+        return sum(1 for a in self.asked if a[0] == site.API_URL)
 
 
 class Hosts(unittest.TestCase):
@@ -111,7 +121,7 @@ class Controls(unittest.TestCase):
 
     def test_everything_else_is_refused(self):
         for name in ("MAKE A PAYMENT", "MANAGE AUTOPAY", "TURN OFF", "Upgrade", "Return equipment",
-                     "Edit profile", "Update payment method", "Log out", "", "   "):
+                     "Edit profile", "Update payment method", "Log out", "View Utility Bill", "", "   "):
             self.assertFalse(site.is_safe_control(name), name)
 
     def test_credit_is_not_edit(self):
@@ -120,16 +130,18 @@ class Controls(unittest.TestCase):
 
 
 class Rows(unittest.TestCase):
-    def test_statements_are_known_by_invoice_and_dated(self):
-        got = site.bills_of(answer(ROWS))
+    def test_statements_are_known_by_account_and_invoice_and_dated(self):
+        got = site.bills_of(answer(ROWS), FAKE_ACCOUNT)
         self.assertEqual([d.date_text for d in got], ["2026-10-13", "2026-09-13", "2026-08-13"])
-        self.assertEqual([d.document_id for d in got], ["50000003", "50000002", "50000001"])
+        self.assertEqual([d.document_id for d in got],
+                         ["bill-1234-50000003", "bill-1234-50000002", "bill-1234-50000001"])
+        self.assertEqual({d.account for d in got}, {"XXXX-1234"})
 
     def test_unreadable_statements_stop_the_list_with_what_was_read(self):
         for broken in (stmt("2026-07-13", "x1"), dict(stmt("2026-07-13", "50000009"), url="https://evil.test/x.pdf"),
                        stmt("2026-02-30", "50000009"), stmt("2026-07-13", "50000003")):
             with self.assertRaises(site.ListStopped) as stop:
-                site.bills_of(answer(ROWS + [broken]))
+                site.bills_of(answer(ROWS + [broken]), FAKE_ACCOUNT)
             self.assertEqual(len(stop.exception.docs), 3, broken)
 
     def test_a_list_as_long_as_asked_for_or_an_error_stops(self):
@@ -137,15 +149,36 @@ class Rows(unittest.TestCase):
         many = [dict(r, date=f"{2000 + i // 12:04d}-{i % 12 + 1:02d}-13") for i, r in enumerate(many)]
         for a in (answer(many), answer(ROWS, error=True), {"data": {}}, []):
             with self.assertRaises(site.ListStopped):
-                site.bills_of(a)
+                site.bills_of(a, FAKE_ACCOUNT)
         with self.assertRaises(site.SessionExpired):
-            site.bills_of({"errors": [{"message": "Unauthorized"}]})
+            site.bills_of({"errors": [{"message": "Unauthorized"}]}, FAKE_ACCOUNT)
+
+    def test_an_empty_or_failed_list_is_never_whole(self):
+        """A list with no bills, or one the API marks as failed in its own
+        block, was read as a whole history with nothing in it."""
+        for a in (answer([]), answer([], status=500), answer(ROWS, status=500), answer(ROWS, status="ERR"),
+                  answer(ROWS, message="Account is being migrated"), answer([], error=True, status=200)):
+            with self.assertRaises(site.ListStopped, msg=a):
+                site.bills_of(a, FAKE_ACCOUNT)
+        for said in (None, "", "Success", "OK"):
+            self.assertEqual(len(site.bills_of(answer(ROWS, message=said), FAKE_ACCOUNT)), 3, said)
+
+    def test_a_block_that_says_the_session_ended_is_signed_out(self):
+        for a in (answer([], error=True, status=401, message="Token expired"),
+                  answer([], status=403),
+                  answer([], error=True, status=500, message="Invalid token"),
+                  {"errors": [{"message": "Invalid token"}]}):
+            with self.assertRaises(site.SessionExpired, msg=a):
+                site.bills_of(a, FAKE_ACCOUNT)
 
     def test_rules_classify(self):
         self.assertIsInstance(json.loads((HERE / "document_rules.json").read_text()), dict)
 
 
 class ListWhole(unittest.TestCase):
+    def setUp(self):
+        site._RUN.clear()
+
     def test_the_pages_own_query_is_asked_with_more_bills_and_its_headers(self):
         page = Page()
         self.assertEqual(len(site.collect_download_docs(page)), 3)
@@ -163,58 +196,166 @@ class ListWhole(unittest.TestCase):
             with self.assertRaises(site.ListStopped):
                 site.collect_download_docs(page)
 
+    def test_a_page_that_asks_about_two_accounts_stops_and_lists_nothing(self):
+        """Only the first account the page asked about was read, and the
+        list was called whole."""
+        page = Page(accounts=(FAKE_ACCOUNT, OTHER_ACCOUNT))
+        with self.assertRaises(site.SeveralAccounts) as stop:
+            site.collect_download_docs(page)
+        self.assertEqual((stop.exception.count, stop.exception.docs), (2, []))
+        self.assertEqual(page.lists_asked(), 0)
+        self.assertIn(OTHER_ACCOUNT, site.private_words())
+        # The same account asked about twice is one account.
+        self.assertEqual(len(site.collect_download_docs(Page(accounts=(FAKE_ACCOUNT, FAKE_ACCOUNT)))), 3)
+
     def test_a_signed_out_site_or_a_refused_list_is_session_expired(self):
         for page in (Page(asks=False, settled="https://ziplyfiber.com/login"), Page(listing={"status": 401})):
             with self.assertRaises(site.SessionExpired):
                 site.collect_download_docs(page)
 
+    def test_a_list_the_page_could_not_ask_stops_rather_than_raise_its_own_error(self):
+        class Gone(Page):
+            def evaluate(self, js, arg=None):
+                raise RuntimeError("Execution context was destroyed")
+        with self.assertRaises(site.ListStopped):
+            site.collect_download_docs(Gone())
+        with self.assertRaises(site.SessionExpired):
+            site.collect_download_docs(Gone(settled="https://ziplyfiber.com/login", asks=False))
+
 
 class Download(unittest.TestCase):
     def setUp(self):
+        site._RUN.clear()
         self.out = Path(tempfile.mkdtemp()) / "Statements" / "bill.pdf"
 
     def test_the_bill_with_that_id_and_date_is_fetched(self):
         page = Page()
         self.assertTrue(site.download_bill(page, None, "2026-09-13", self.out,
-                                           href=site.DOWNLOAD_PATH, document_id="50000002"))
+                                           href=site.DOWNLOAD_PATH, document_id="bill-1234-50000002"))
         self.assertEqual(self.out.read_bytes(), PDF)
         self.assertEqual(page.asked[-1][0], site.invoice_url("50000002"))
 
+    def test_the_list_this_run_read_is_used_for_each_bill(self):
+        """Each bill opened Billing and asked the whole list again."""
+        page = Page()
+        site.collect_download_docs(page)
+        for inv, day in (("50000003", "2026-10-13"), ("50000002", "2026-09-13")):
+            self.assertTrue(site.download_bill(page, None, day, self.out, href=site.DOWNLOAD_PATH,
+                                               document_id=f"bill-1234-{inv}"))
+        self.assertEqual((page.loads, page.lists_asked()), (1, 1))
+        # A bill the kept list does not hold reads it once more.
+        self.assertFalse(site.download_bill(page, None, "2026-07-13", self.out, href=site.DOWNLOAD_PATH,
+                                            document_id="bill-1234-50000000"))
+        self.assertEqual((page.loads, page.lists_asked()), (2, 2))
+
     def test_a_record_that_does_not_match_is_not_fetched(self):
-        for inv, day, href in (("50000002", "2026-08-13", site.DOWNLOAD_PATH), ("50000099", "2026-09-13", site.DOWNLOAD_PATH),
-                               ("50000002", "2026-09-13", "/other")):
+        for doc_id, day, href in (("bill-1234-50000002", "2026-08-13", site.DOWNLOAD_PATH),
+                                  ("bill-1234-50000099", "2026-09-13", site.DOWNLOAD_PATH),
+                                  ("bill-1234-50000002", "2026-09-13", "/other"),
+                                  ("50000002", "2026-09-13", site.DOWNLOAD_PATH)):
             page = Page()
-            self.assertFalse(site.download_bill(page, None, day, self.out, href=href, document_id=inv))
+            site._RUN.clear()
+            self.assertFalse(site.download_bill(page, None, day, self.out, href=href, document_id=doc_id))
             self.assertFalse(any("billinginvoice" in str(a[0]) for a in page.asked))
+            self.assertFalse(self.out.exists())
+
+    def test_a_bill_of_another_account_stops_the_run_once(self):
+        """With the page on another account every recorded bill went to
+        Manual Review, one after another."""
+        page = Page(accounts=(OTHER_ACCOUNT,))
+        with self.assertRaises(site.OtherAccountShown) as shown:
+            site.download_bill(page, None, "2026-09-13", self.out, href=site.DOWNLOAD_PATH,
+                               document_id="bill-1234-50000002")
+        self.assertEqual((shown.exception.wanted, shown.exception.shown), ("1234", "5678"))
+        self.assertFalse(any("billinginvoice" in str(a[0]) for a in page.asked))
+
+    def test_a_list_that_stops_while_bills_download_reaches_the_run(self):
+        for page in (Page(rows=[]), Page(listing={"status": 200, "data": answer(ROWS, status=500)}),
+                     Page(accounts=(FAKE_ACCOUNT, OTHER_ACCOUNT))):
+            site._RUN.clear()
+            with self.assertRaises(site.ListStopped):
+                site.download_bill(page, None, "2026-09-13", self.out, href=site.DOWNLOAD_PATH,
+                                   document_id="bill-1234-50000002")
             self.assertFalse(self.out.exists())
 
     def test_refused_and_sign_in_answers_raise_and_save_nothing(self):
         for page in (Page(pdf_status=401), Page(pdf=b"<html>sign in</html>")):
+            site._RUN.clear()
             with self.assertRaises(site.SessionExpired):
-                site.download_bill(page, None, "2026-09-13", self.out, href=site.DOWNLOAD_PATH, document_id="50000002")
+                site.download_bill(page, None, "2026-09-13", self.out, href=site.DOWNLOAD_PATH,
+                                   document_id="bill-1234-50000002")
+            self.assertFalse(self.out.exists())
+
+    def test_a_json_answer_fails_that_bill_alone(self):
+        """A JSON error for one bill was read as a sign-out, which stopped
+        every run at that bill."""
+        for body in (b'{"error": true, "message": "Invoice not available"}', b"[]"):
+            site._RUN.clear()
+            self.assertFalse(site.download_bill(Page(pdf=body), None, "2026-09-13", self.out,
+                                                href=site.DOWNLOAD_PATH, document_id="bill-1234-50000002"))
             self.assertFalse(self.out.exists())
 
 
 def make_app(tmp, *args):
     config = json.loads((HERE / "config.example.json").read_text())
-    config.update({"owner": "Tester Example", "output_dir": str(Path(tmp) / "out")})
+    config.update({"owner": "Tester Example", "output_dir": str(Path(tmp) / "out"),
+                   "delay_min_seconds": 0, "delay_max_seconds": 0})
     cfg = Path(tmp) / "config.json"
     cfg.write_text(json.dumps(config))
     return docs.App(docs.build_parser().parse_args([*args, "--config", str(cfg)]))
 
 
 class Orchestrator(unittest.TestCase):
-    def test_persisted_record_is_keyed_by_the_invoice(self):
+    def setUp(self):
+        site._RUN.clear()
+
+    def test_persisted_record_is_keyed_by_the_account_and_invoice_and_named_for_the_account(self):
         app = make_app(tempfile.mkdtemp(), "--discover")
-        for r in site.bills_of(answer(ROWS)):
+        for r in site.bills_of(answer(ROWS), FAKE_ACCOUNT):
             app._record_rawdoc(r, site.BILLING_URL)
         app.discovery.save()
-        rec = app.discovery.get("id:50000003")
-        self.assertEqual((rec["href"], rec["document_id"]), (site.DOWNLOAD_PATH, "50000003"))
+        rec = app.discovery.get("id:XXXX-1234:bill-1234-50000003")
+        self.assertEqual((rec["href"], rec["document_id"], rec["summary"], rec["account"]),
+                         (site.DOWNLOAD_PATH, "bill-1234-50000003", "Internet Bill XXXX-1234", "XXXX-1234"))
+        self.assertEqual(docs.told_apart_by(rec), "50000003")
+
+    def _listed_then(self, page):
+        tmp = tempfile.mkdtemp()
+        app = make_app(tmp, "--resume")
+        for r in site.bills_of(answer(ROWS), FAKE_ACCOUNT):
+            app._record_rawdoc(r, site.BILLING_URL)
+        app.discovery.save()
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        return app
+
+    def test_a_list_that_stops_while_bills_download_stops_the_run_once_unread(self):
+        page = Page(rows=[])
+        app = self._listed_then(page)
+        out = io.StringIO()
+        with redirect_stdout(out), self.assertRaises(ListNotRead):
+            app.process(app._select())
+        self.assertEqual(page.loads, 1)
+        self.assertNotIn("Nothing was saved", out.getvalue())
+        self.assertEqual(app.progress.data, {})
+
+    def test_a_page_on_another_account_stops_the_run_once_and_names_it(self):
+        page = Page(accounts=(OTHER_ACCOUNT,))
+        app = self._listed_then(page)
+        out = io.StringIO()
+        with redirect_stdout(out), self.assertRaises(SystemExit) as ended:
+            app.process(app._select())
+        self.assertNotIsInstance(ended.exception, ListNotRead)
+        said = " ".join(out.getvalue().split())
+        self.assertIn("the account ending 5678", said)
+        self.assertIn("Choose the account ending 1234", said)
+        self.assertEqual(page.loads, 1)
+        self.assertEqual(app.progress.data, {})
 
 
 class Privacy(unittest.TestCase):
     def test_the_account_and_authorization_stay_out_of_logs_stdout_and_files(self):
+        site._RUN.clear()
         tmp = tempfile.mkdtemp()
         app = make_app(tmp, "--all")
         seen = io.StringIO()
