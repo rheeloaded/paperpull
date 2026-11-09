@@ -732,7 +732,8 @@ function postRun(body, url) {
 }
 // opts: scope to use instead of the page's dates, redownload for Restore,
 // stay to keep the person where they are, sink, an element its output also
-// goes to, onDone, told the exit code, and queue, for a run of a round.
+// goes to, onDone, told the exit code, queue, for a run of a round, and
+// then, for a sign-in, the run its page offers next.
 function startRun(r, action, opts) {
   opts = opts || {};
   if (RUN.state === 'running') {
@@ -747,7 +748,7 @@ function startRun(r, action, opts) {
   if (again && (SERVER || !againScoped(s) || !(META.redownload_actions || []).includes(action))) return false;
   Object.assign(RUN, {state: 'running', app, account, provider: r.provider, kind: r.kind, who: whoOf(r), action,
     scope: s, again, lines: [], result: null, saved: null, code: null, refused: '', found: null, step: 0, total: 0,
-    connected: false, now: '', failure: false, startedAt: new Date(), endedAt: null, outcome: null, savedIn: '',
+    connected: false, now: '', failure: false, startedAt: new Date(), endedAt: null, outcome: null, savedIn: '', then: opts.then || null,
     queue: Boolean(opts.queue), onDone: opts.onDone || null, sink: opts.sink ? $(opts.sink) : null, stopped: false});
   if (RUN.sink) { if (!opts.append) RUN.sink.textContent = ''; RUN.sink.hidden = false; }
   const q = new URLSearchParams({ app, account, action });
@@ -891,14 +892,24 @@ const NOTHING_OPENED = '5', NOTHING_RECORDED = '6', NOT_SIGNED_IN = '7';
 const RERUN = {all: ['Get new documents', 'Saves every document you do not have yet'],
   pilot: ['Try the newest few first', 'Saves the newest few, to see it work'],
   discover: ["Check what's there", 'Lists what is there. Nothing is downloaded'],
-  resume: ['Continue', 'Picks up what is left, without asking again for what is already saved']};
+  resume: ['Continue', 'Picks up what is left, without asking again for what is already saved'],
+  // Each of these is started from a dialog of its own, which the step opens.
+  diagnose: ['Make a support report', 'Reads the page and saves a file with no account details', 'support'],
+  record: ['Record steps for support', 'Watches while you click your way to a document', 'record'],
+  restore: ['Restore deleted files', 'Downloads again the PDFs you deleted, for the dates you choose', 'restore']};
 function rerunStep(run, key, num, after) {
-  const action = RERUN[run.action] ? run.action : 'all', s = run.action === 'login' ? {} : run.scope || {};
+  // A sign-in pressed on the page of a run that found nobody signed in is
+  // followed by that run (run.then), and any other sign-in by Get new. A
+  // run with no step of its own here gets none, rather than another run.
+  const src = run.action === 'login' ? run.then || {action: 'all', scope: {}} : run;
+  const action = src.again ? 'restore' : src.action, s = src.scope || {};
+  if (!RERUN[action]) return '';
   const dates = (s.year ? ' data-year="' + esc(s.year) + '"' : '') + (s.start ? ' data-start="' + esc(s.start) + '"' : '') +
     (s.end ? ' data-end="' + esc(s.end) + '"' : '');
+  const how = RERUN[action][2] ? 'data-do="' + RERUN[action][2] + '"' : 'data-do="run" data-action="' + action + '"' + dates;
   return '<li><div class="stepnum' + (after ? '' : ' on') + '">' + num + '</div><div class="body"><b>' + esc(RERUN[action][0]) + '</b><span>' +
-    esc(RERUN[action][1]) + '</span></div><button type="button" class="btn ' + (after ? 'btn-s' : 'btn-p') + ' starts" data-do="run" data-action="' + action +
-    '" data-key="' + key + '"' + dates + '>' + PLAY + esc(RERUN[action][0]) + '</button></li>';
+    esc(RERUN[action][1]) + '</span></div><button type="button" class="btn ' + (after ? 'btn-s' : 'btn-p') + ' starts" ' + how +
+    ' data-key="' + key + '">' + (RERUN[action][2] ? '' : PLAY) + esc(RERUN[action][0]) + '</button></li>';
 }
 function runOutcome() {
   const res = RUN.result, code = RUN.code, n = noun(RUN), saved = RUN.saved || [];
@@ -1119,7 +1130,7 @@ function renderRun() {
     }
     if (r && RUN.savedIn) {
       html += '<div class="keepopen"><p>Saved to <span class="mono">' + esc(RUN.savedIn) + '</span></p>' +
-        '<button type="button" class="btn btn-s" data-do="reveal" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>';
+        '<button type="button" class="btn btn-s" data-do="reveal" data-what="saved" data-key="' + key + '">' + sv(P.folder) + 'Open folder</button></div>';
     }
     if (r && (o.resume || o.recheck || o.signin || o.relist || o.rerun)) {
       // Signing in again comes first, unless the outcome knows the stop had
@@ -1130,7 +1141,8 @@ function renderRun() {
         // the weight, and the run after it does not.
         (signFirst ? '<li><div class="stepnum' + (o.first ? ' on' : '') + '">1</div><div class="body"><b>Sign in to ' + esc(RUN.provider) + (o.first ? '' : ' again') +
           '</b><span>' + (o.first ? 'In the window that opens. Leave it open while documents download' : 'In its window, or open a new one') + '</span></div>' +
-        '<button type="button" class="btn ' + (o.first ? 'btn-p' : 'btn-s') + ' starts" data-do="run" data-action="login" data-key="' + key + '">Open sign-in window</button></li>' : '') +
+        '<button type="button" class="btn ' + (o.first ? 'btn-p' : 'btn-s') + ' starts" data-do="run" data-action="login" data-key="' + key + '"' +
+          (o.first ? ' data-then="1"' : '') + '>Open sign-in window</button></li>' : '') +
         (o.resume ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Continue where it stopped</b><span>Picks up what is left, without asking again for what is already saved</span></div>' +
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' + key + '">' + PLAY + 'Continue</button></li>' : '') +
         (o.relist ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Get new documents</b><span>Reads ' + esc(whose(RUN.provider)) +
@@ -2458,7 +2470,11 @@ const DO = {
     if (!r) return;
     const scope = el.dataset.start || el.dataset.year
       ? {year: el.dataset.year || '', start: el.dataset.start || '', end: el.dataset.end || ''} : null;
-    startRun(r, el.dataset.action, scope ? {scope} : {});
+    // The sign-in on the page of a run that found nobody signed in keeps
+    // that run, for the sign-in's own page to offer next (rerunStep).
+    const then = el.dataset.then && RUN.state === 'done' && RUN.app === r.app && RUN.account === r.account
+      ? {action: RUN.action, scope: RUN.scope, again: RUN.again} : null;
+    startRun(r, el.dataset.action, Object.assign(scope ? {scope} : {}, then ? {then} : {}));
   },
   'restore': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRestore(r); },
   'rename': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRename(r); },
