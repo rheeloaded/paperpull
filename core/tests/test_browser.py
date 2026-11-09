@@ -7,6 +7,7 @@ Windows, macOS and Linux.
 import json
 import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -79,6 +80,14 @@ def test_the_browsers_folder_is_the_one_playwright_uses(platform, settings, expe
     assert browser._playwright_root() == Path(expected.format(tmp=tmp_path, home=nothing_set))
 
 
+def _finish(exe: Path) -> None:
+    """Playwright's mark in the folder of the build `exe` is in, the file it
+    writes last, and without which a build is not counted."""
+    folder = next(p for p in exe.parents
+                  if p.name.startswith(("chromium-", "chromium_headless_shell-")))
+    (folder / "INSTALLATION_COMPLETE").write_text("")
+
+
 def test_linux_finds_the_chromium_kept_under_xdg_cache_home(nothing_set, tmp_path, monkeypatch):
     """XDG_CACHE_HOME moves the whole cache, and what Playwright downloads
     moves with it. The build is laid out as Playwright 1.62 lays out its
@@ -88,6 +97,7 @@ def test_linux_finds_the_chromium_kept_under_xdg_cache_home(nothing_set, tmp_pat
     exe = tmp_path / "cache" / "ms-playwright" / "chromium-1234" / "chrome-linux" / "chrome"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
+    _finish(exe)
     assert browser._bundled_chromium() == [str(exe)]
 
 
@@ -113,6 +123,7 @@ def test_0_is_the_folder_inside_playwrights_own_package(nothing_set, tmp_path, m
     exe = own / "chromium-1243" / "chrome-win64" / "chrome.exe"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
+    _finish(exe)
     assert browser._playwright_root() == own
     assert browser._bundled_chromium() == [str(exe)]
 
@@ -142,6 +153,7 @@ def test_mac_chromium_is_found_inside_the_app_bundle(monkeypatch, tmp_path):
     exe = tmp_path / "chromium-1234/chrome-mac/Chromium.app/Contents/MacOS/Chromium"
     exe.parent.mkdir(parents=True)
     exe.write_text("#!/bin/sh\n")
+    _finish(exe)
     assert browser._bundled_chromium() == [str(exe)]
     name, path = browser.find_browser()
     assert (name, path) == (browser.CHROMIUM, str(exe))
@@ -153,6 +165,7 @@ def test_mac_arm_build_is_found_too(monkeypatch, tmp_path):
     exe = tmp_path / "chromium-1234/chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"
     exe.parent.mkdir(parents=True)
     exe.write_text("#!/bin/sh\n")
+    _finish(exe)
     assert browser._bundled_chromium() == [str(exe)]
 
 
@@ -163,6 +176,7 @@ def test_prefer_real_picks_edge_over_bundled_chromium(monkeypatch, tmp_path):
     chromium = tmp_path / "chromium-1/chrome-mac/Chromium.app/Contents/MacOS/Chromium"
     chromium.parent.mkdir(parents=True)
     chromium.write_text("x")
+    _finish(chromium)
     edge = tmp_path / "Edge"
     edge.write_text("x")
     monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.EDGE, str(edge))])
@@ -240,6 +254,7 @@ def test_newest_chromium_build_wins(monkeypatch, tmp_path):
         exe = tmp_path / build / "chrome-mac/Chromium.app/Contents/MacOS/Chromium"
         exe.parent.mkdir(parents=True)
         exe.write_text("x")
+        _finish(exe)
     found = browser._bundled_chromium()
     assert "chromium-1228" in found[0], found
     # a plain text sort would have put chromium-1000 ahead of chromium-999
@@ -267,6 +282,7 @@ def test_mac_chromium_is_found_under_the_new_bundle_name(monkeypatch, tmp_path):
     exe = tmp_path / f"chromium-1234/{_NEW_MAC_BUNDLE}"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
+    _finish(exe)
     assert browser._bundled_chromium() == [str(exe)]
 
 
@@ -277,6 +293,7 @@ def test_new_bundle_name_also_found_on_intel_macs(monkeypatch, tmp_path):
                       "/Contents/MacOS/Google Chrome for Testing")
     exe.parent.mkdir(parents=True)
     exe.write_text("")
+    _finish(exe)
     assert browser._bundled_chromium() == [str(exe)]
 
 
@@ -288,6 +305,7 @@ def test_bundled_chromium_wins_when_prefer_real_is_off(monkeypatch, tmp_path):
     exe = tmp_path / f"chromium-1234/{_NEW_MAC_BUNDLE}"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
+    _finish(exe)
     edge = tmp_path / "Microsoft Edge"
     edge.write_text("")
     monkeypatch.setattr(browser, "_real_browsers",
@@ -417,6 +435,7 @@ def test_auto_keeps_the_order_each_machine_had(monkeypatch, tmp_path, platform, 
         exe = tmp_path / ("chromium-" + build) / inner
         exe.parent.mkdir(parents=True)
         exe.write_text("")
+        _finish(exe)
     newest_build, newest_inner = max(builds, key=lambda b: int(b[0]))
     bundled = (browser.CHROMIUM, str(tmp_path / ("chromium-" + newest_build) / newest_inner))
     real = (browser.CHROME, "/x/chrome")
@@ -515,6 +534,7 @@ def test_the_installed_playwright_puts_chromium_where_it_is_looked_for(monkeypat
         exe = root / "chromium-1243" / inner
         exe.parent.mkdir(parents=True)
         exe.write_text("")
+        _finish(exe)
         monkeypatch.setattr(browser.sys, "platform", platform)
         monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(root))
         if browser._bundled_chromium() != [str(exe)]:
@@ -542,6 +562,7 @@ def test_the_installed_playwright_puts_the_headless_shell_where_it_is_looked_for
         exe = root / "chromium_headless_shell-1243" / inner
         exe.parent.mkdir(parents=True)
         exe.write_text("")
+        _finish(exe)
         monkeypatch.setattr(browser.sys, "platform", platform)
         if browser._headless_shells(root) != [str(exe)]:
             missed.append("%s %s" % (key, inner))
@@ -628,6 +649,7 @@ def _lay_out(root, paths):
         exe = root / path
         exe.parent.mkdir(parents=True, exist_ok=True)
         exe.write_text("")
+        _finish(exe)
 
 
 _WIN = "chrome-win64/chrome.exe"
@@ -711,6 +733,115 @@ def test_a_copied_build_folder_keeps_the_sign_ins_order(monkeypatch, tmp_path, c
     c = _Chromium(tmp_path / "chromium-1250" / _WIN)
     browser.sandboxed_persistent_context(c, "/x/profile", headless=False)
     assert c.asked[0]["executable_path"] == browser._bundled_chromium()[0]
+
+
+# -- a build that stopped partway ---------------------------------------------------
+#
+# Playwright unpacks a build into its folder and writes INSTALLATION_COMPLETE
+# last, so an install stopped by a closed window or a power cut leaves a folder
+# holding the executable and most of the build. Measured on 2026-11-04, a real
+# install killed while it unpacked left chromium-1248 with chrome.exe and 57
+# other files and no mark. Nothing looked for the mark, so that folder was the
+# newest build, the finished one beside it was never tried, nothing was due and
+# a browser counted as there. So no repair was offered either (#132).
+
+def _stopped_partway(root, folder, inner):
+    """What an install killed while it unpacked leaves, the executable and the
+    files beside it and no mark."""
+    exe = root / folder / inner
+    exe.parent.mkdir(parents=True, exist_ok=True)
+    for name in (exe.name, *_BESIDE.get(exe.name, ())):
+        (exe.parent / name).write_text("")
+    return exe
+
+
+def _what_a_sign_in_reads():
+    """Every answer that decides which browser a sign-in starts."""
+    return {"builds": browser._bundled_chromium(),
+            "present": browser.bundled_chromium_present(),
+            "first": browser.bundled_chromium_first(),
+            "bundled": browser.browser_candidates(mode=browser.BUNDLED),
+            "auto": browser.browser_candidates(),
+            "real": browser.browser_candidates(prefer_real=True),
+            "found": browser.find_browser(),
+            "found real": browser.find_browser(prefer_real=True)}
+
+
+@pytest.mark.parametrize("folder", ["chromium-1248", "chromium-1248 - Copy", "chromium-1248.bak"])
+@pytest.mark.parametrize("platform,releases,build,chromium,shell", PLAYWRIGHT_LAYOUTS,
+                         ids=[_layout_id(layout) for layout in PLAYWRIGHT_LAYOUTS])
+def test_a_build_that_stopped_partway_is_the_same_as_no_build_at_all(
+        monkeypatch, tmp_path, platform, releases, build, chromium, shell, folder):
+    """Every answer on a machine with the unfinished folder is the answer
+    with the folder taken away, on every layout Playwright has used, under
+    Playwright's own name and a copy's, and the finished build beside it is
+    what starts."""
+    monkeypatch.setattr(browser.sys, "platform", platform)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [(browser.CHROME, "/x/chrome")])
+    finished = _install(tmp_path, build, chromium, shell)
+    _stopped_partway(tmp_path, folder, chromium)
+    with_it = _what_a_sign_in_reads()
+    assert with_it["builds"] == [str(finished)]
+    shutil.rmtree(tmp_path / folder)
+    assert with_it == _what_a_sign_in_reads()
+
+
+@pytest.mark.parametrize("platform,releases,build,chromium,shell", PLAYWRIGHT_LAYOUTS,
+                         ids=[_layout_id(layout) for layout in PLAYWRIGHT_LAYOUTS])
+def test_with_only_a_build_that_stopped_partway_there_is_no_build(
+        monkeypatch, tmp_path, platform, releases, build, chromium, shell):
+    """So the download is offered again, which a folder of files nobody can
+    start was keeping from happening."""
+    monkeypatch.setattr(browser.sys, "platform", platform)
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path))
+    monkeypatch.setattr(browser, "_real_browsers", lambda: [])
+    _stopped_partway(tmp_path, "chromium-" + build, chromium)
+    _stopped_partway(tmp_path, "chromium_headless_shell-" + build, shell)
+    assert browser._bundled_chromium() == []
+    assert browser._headless_shells(tmp_path) == []
+    assert not browser.bundled_chromium_present()
+    assert browser.browser_candidates() == []
+    assert browser.find_browser() == (None, None)
+
+
+def test_a_shell_that_stopped_partway_is_not_a_finished_one_of_its_folder(monkeypatch, tmp_path):
+    """The mark of a build is its own, so a finished Chromium does not stand
+    for an unfinished headless shell of the same number."""
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    _install(tmp_path, "1243", _WIN, _WIN_SHELL)
+    (tmp_path / "chromium-1248" / "chrome-win64").mkdir(parents=True)
+    (tmp_path / "chromium-1248" / _WIN).write_text("")
+    (tmp_path / "chromium-1248" / "INSTALLATION_COMPLETE").write_text("")
+    _stopped_partway(tmp_path, "chromium_headless_shell-1248", _WIN_SHELL)
+    assert browser._headless_shells(tmp_path) == [str(_shell_of(tmp_path, "1243", _WIN_SHELL))]
+
+
+def test_playwrights_own_build_stopped_partway_is_not_started(monkeypatch, tmp_path, capsys):
+    """Playwright starts its own build whenever the executable is there and
+    never reads the mark, so a launch that left it to Playwright started the
+    folder that stopped partway. Every launch takes the finished build."""
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    finished = _install(tmp_path, "1228", _WIN, _WIN_SHELL)
+    own = _stopped_partway(tmp_path, "chromium-1248", _WIN)
+    _stopped_partway(tmp_path, "chromium_headless_shell-1248", _WIN_SHELL)
+    c = _Chromium(own)
+    shell = str(_shell_of(tmp_path, "1228", _WIN_SHELL))
+    assert _launch_each_way(c) == [str(finished), str(finished), shell, shell]
+    assert "build 1228, the newest one here, is started instead" in capsys.readouterr().out
+
+
+def test_a_finished_own_build_is_still_left_to_playwright_with_one_stopped_partway_beside_it(
+        monkeypatch, tmp_path):
+    """A newer folder that stopped partway moves nobody off the build
+    Playwright starts."""
+    monkeypatch.setattr(browser.sys, "platform", "win32")
+    monkeypatch.setattr(browser, "_SAID_ON_DISK", set(), raising=False)
+    own = _install(tmp_path, "1248", _WIN, _WIN_SHELL)
+    _stopped_partway(tmp_path, "chromium-1250", _WIN)
+    _stopped_partway(tmp_path, "chromium_headless_shell-1250", _WIN_SHELL)
+    assert _launch_each_way(_Chromium(own)) == [None] * 4
 
 
 def test_the_headless_shell_is_named_for_chromiums_own_build():

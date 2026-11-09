@@ -1,0 +1,3 @@
+Ziply Fiber internet bills from ziplyfiber.com
+
+See README.md for setup and supervised pilot instructions.

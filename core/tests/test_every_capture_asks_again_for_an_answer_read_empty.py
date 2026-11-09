@@ -502,7 +502,7 @@ def test_every_scaffold_capture_is_found():
     """Not vacuous. These are the twelve this was measured in, but for ADP,
     whose copy no run called and which has gone since."""
     assert {d.name for d in SCAFFOLD} >= {"amfam", "applecard", "att", "etrade", "golden1",
-                                          "newrez", "sba", "smud", "statefarm", "verizonmobile",
+                                          "newrez", "sba", "smud", "statefarm",
                                           "wellsfargo"}
 
 

@@ -50,6 +50,7 @@ import run_result
 from anyio import to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import MutableHeaders
 
 # PaperPull targets Python 3.11+ (README, and core/pyproject.toml's
@@ -196,7 +197,7 @@ def _open_sample() -> Path:
         return dest
     builder = _sample_builder()
     if builder is None:
-        raise HTTPException(500, "this copy of PaperPull did not ship the sample archive")
+        raise HTTPException(500, "This copy of PaperPull has no sample archive. Download PaperPull again to repair it.")
     if dest.exists():
         shutil.rmtree(dest, ignore_errors=True)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -208,7 +209,7 @@ def _open_sample() -> Path:
         mod.build(dest)
     except Exception as e:
         shutil.rmtree(dest, ignore_errors=True)
-        raise HTTPException(500, "could not build the sample archive: %s" % e)
+        raise HTTPException(500, "Could not build the sample archive (%s)." % e)
     return dest
 
 
@@ -298,12 +299,12 @@ def _scope_flags(year: str = "", start: str = "", end: str = "") -> list:
     passed on to a subprocess command line."""
     year, start, end = (year or "").strip(), (start or "").strip(), (end or "").strip()
     if year and not _YEAR_RE.match(year):
-        raise HTTPException(400, "year must be four digits")
-    for label, value in (("start", start), ("end", end)):
+        raise HTTPException(400, "Choose a year with four digits.")
+    for label, value in (("From", start), ("To", end)):
         if value and not _DATE_RE.match(value):
-            raise HTTPException(400, f"{label} date must be YYYY-MM-DD")
+            raise HTTPException(400, f"The {label} date is not a date. Pick one from the calendar.")
     if start and end and start > end:
-        raise HTTPException(400, "start date is after end date")
+        raise HTTPException(400, "The From date is after the To date.")
     flags = []
     if year:
         flags += ["--year", year]
@@ -343,20 +344,20 @@ def _redownload_ok(action: str, scope_flags, redownload, confirmed) -> bool:
         # a new document, and the Paperless one copies each into Paperless.
         # Downloading again there would send Paperless every document in the
         # range a second time, so the server does not offer it.
-        raise HTTPException(404, "Download again is not offered on PaperPull Server. "
-                                 "Each copy would go to Paperless a second time.")
+        raise HTTPException(404, "Restore deleted files is not offered on PaperPull "
+                                 "Server, since each copy would go to Paperless a "
+                                 "second time.")
     if action not in REDOWNLOAD_ACTIONS:
-        raise HTTPException(400, "Download again works with Pilot and Run All only.")
+        raise HTTPException(400, "Restore works only with Get new documents or Try the newest few.")
     # One date alone is open at its other end, and From 1990 or To today is
     # a whole history, so it takes a year or both ends.
     chosen = {flag for flag in scope_flags if flag.startswith("--")}
     if "--year" not in chosen and not {"--start-date", "--end-date"} <= chosen:
-        raise HTTPException(400, "Download again needs a year, or both a From and a To "
-                                 "date, chosen in Scope, so a whole history is never "
-                                 "asked for again by accident.")
+        raise HTTPException(400, "Choose a year, or both a From and a To date, so a "
+                                 "whole history is never downloaded again by "
+                                 "accident.")
     if confirmed is not True:
-        raise HTTPException(400, "Download again needs the question on the page answered "
-                                 "first.")
+        raise HTTPException(400, "Confirm the restore in its dialog first.")
     return True
 
 
@@ -569,10 +570,10 @@ class NotInAFrame:
         await self.app(scope, receive, framed)
 
 
-# The answers the same for everyone, which a browser may keep, the icon and
-# the typefaces for a day, noVNC's files while they are still the image's.
+# The answers the same for everyone, which a browser may keep, the icon for
+# a day, noVNC's files while they are still the image's.
 _ANYONES = "/favicon.ico"
-_ANYONES_UNDER = ("/fonts/", "/screen/novnc/")
+_ANYONES_UNDER = ("/screen/novnc/",)
 
 
 class KeptPrivate:
@@ -629,7 +630,7 @@ def _not_in_sample() -> None:
     looking at the sample. Reading it and building spreadsheets from it are
     the point, so those are not guarded."""
     if _SAMPLE is not None:
-        raise HTTPException(409, "the panel is looking at the sample archive. "
+        raise HTTPException(409, "This is the sample archive. "
                                  "Leave the sample first.")
 
 
@@ -873,7 +874,7 @@ def _reviews_names(script) -> bool:
 def api_apps():
     refreshed = refresh_installs()
     apps = discover_apps()
-    return {"apps_root": str(apps_root()), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
+    return {"apps_root": str(apps_root()), "documents_root": _documents_root(), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
             "apps": apps, "refreshed": refreshed,
             # What the server's header says about where new documents go, and
@@ -974,21 +975,21 @@ async def api_export(request: Request):
     provider = str(body.get("provider") or "").strip() or None
     mod = _export_module()
     if mod is None:
-        return {"ok": False, "reason": "export_purchases.py was not found next to this control panel."}
+        return {"ok": False, "reason": "This copy of PaperPull is missing export_purchases.py. Download PaperPull again to repair it."}
     if provider:
         # Only a provider the exporter itself found may be named, so the page
         # cannot steer the filename or the folder walk.
         known = {p["provider"].lower(): p["provider"] for p in mod.providers(apps_root())}
         if provider.lower() not in known:
-            return {"ok": False, "reason": f"no order history for {provider!r} under {apps_root()}"}
+            return {"ok": False, "reason": f"No receipts saved for {provider} yet. Get new documents first."}
         provider = known[provider.lower()]
     try:
         result = mod.export(apps_root(), None, provider, as_csv)
     except Exception as e:
-        return {"ok": False, "reason": "the export failed, %s" % str(e).splitlines()[0][:120]}
+        return {"ok": False, "reason": "The file was not made (%s). Try again." % str(e).splitlines()[0][:120]}
     if not result["sources"]:
-        return {"ok": False, "reason": "no '<Provider> Order History.csv' under %s. Receipt apps "
-                "(Amazon, Target, Walmart, Gap) write one after a run." % apps_root()}
+        return {"ok": False, "reason": "No receipts saved yet. Get new documents from a shop such as "
+                "Amazon or Target first."}
     _LAST_EXPORT = Path(result["path"])
     return {"ok": True, **result}
 
@@ -1023,7 +1024,7 @@ def api_export_transactions_providers():
     workbook can be built from."""
     tool = _transactions_tool()
     if tool is None:
-        return {"available": False, "providers": [], "reason": "export_transactions.py was not found next to this control panel."}
+        return {"available": False, "providers": [], "reason": "This copy of PaperPull is missing export_transactions.py. Download PaperPull again to repair it."}
     import importlib.util
     try:
         spec = importlib.util.spec_from_file_location("paperpull_export_tx", tool)
@@ -1054,13 +1055,13 @@ def api_export_transactions(provider: str = "", csv: str = ""):
     way a run streams. Only a provider the tool itself lists may be named."""
     tool = _transactions_tool()
     if tool is None:
-        raise HTTPException(404, "export_transactions.py was not found next to this control panel.")
+        raise HTTPException(404, "This copy of PaperPull is missing export_transactions.py. Download PaperPull again to repair it.")
     provider = (provider or "").strip()
     if provider:
         known = {p["provider"].lower(): p["provider"]
                  for p in api_export_transactions_providers().get("providers", [])}
         if provider.lower() not in known:
-            raise HTTPException(400, f"no statement archive for {provider!r}")
+            raise HTTPException(400, f"No statements saved for {provider} yet. Get new documents first.")
         provider = known[provider.lower()]
     cmd = [sys.executable, str(tool), "--root", str(apps_root())]
     if provider:
@@ -1125,7 +1126,7 @@ def api_export_reveal():
     path from the page on purpose, only the one the server itself wrote."""
     p = _LAST_EXPORT
     if not p or not p.is_file():
-        raise HTTPException(404, "nothing exported yet")
+        raise HTTPException(404, "Create the file first.")
     try:
         if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,", str(p)])
@@ -1134,7 +1135,7 @@ def api_export_reveal():
         else:
             subprocess.Popen(["xdg-open", str(p.parent)])
     except Exception as e:
-        raise HTTPException(500, "could not open the folder, %s" % e)
+        raise HTTPException(500, "Could not open the folder (%s)." % e)
     return {"ok": True}
 
 
@@ -1154,11 +1155,11 @@ def api_export_download():
         raise HTTPException(404)
     p = _LAST_EXPORT
     if not p or not os.path.lexists(p):
-        raise HTTPException(404, "nothing exported yet")
+        raise HTTPException(404, "Create the file first.")
     fd = _exported(p)
     if fd is None:
-        raise HTTPException(404, "That spreadsheet is no longer the one this panel wrote. "
-                                 "Export it again.")
+        raise HTTPException(404, "That spreadsheet has changed since PaperPull made it. "
+                                 "Create it again.")
     fh = os.fdopen(fd, "rb")
     size = os.fstat(fd).st_size
 
@@ -1220,13 +1221,13 @@ def api_status():
     mod = _status_module()
     if mod is None:
         return {"available": False, "rows": [], "gaps": [],
-                "reason": "status.py was not found next to this control panel.",
+                "reason": "This copy of PaperPull is missing tools/status.py. Download PaperPull again to repair it.",
                 "root": str(apps_root())}
     try:
         rows = mod.scan_all(apps_root())
     except Exception as e:
         return {"available": False, "rows": [], "gaps": [],
-                "reason": "the scan failed, %s" % str(e).splitlines()[0][:120],
+                "reason": "PaperPull could not read how current each account is (%s)." % str(e).splitlines()[0][:120],
                 "root": str(apps_root())}
 
     out, gaps = [], []
@@ -1380,6 +1381,11 @@ def _provider_of(meta: dict) -> tuple:
     return (p.group(1) if p else name), (k.group(1) if k else "")
 
 
+# The exit of a run that found no signed-in browser, core
+# run_reporting.NOT_SIGNED_IN, which static/app.js keeps too.
+NOT_SIGNED_IN = 7
+
+
 def _last_outcome(entry) -> str:
     """How a logged run ended, in one word the page turns into a sentence.
     "" for a run that finished cleanly or no run at all."""
@@ -1391,6 +1397,10 @@ def _last_outcome(entry) -> str:
     result = entry.get("result") if isinstance(entry.get("result"), dict) else None
     if code == 130:
         return "interrupted"
+    # Found no signed-in browser, so nothing started and there is nothing
+    # to continue (core run_reporting.NOT_SIGNED_IN).
+    if code == NOT_SIGNED_IN:
+        return "signin"
     if code not in (0, None):
         return "failed"
     if result and result.get("stopped"):
@@ -1404,7 +1414,7 @@ def _last_outcome(entry) -> str:
 
 
 # The order the home page lists accounts in, most in need first.
-STATE_ORDER = ("stopped", "attention", "unreadable", "overdue", "due", "gap",
+STATE_ORDER = ("stopped", "signin", "attention", "unreadable", "overdue", "due", "gap",
                "never", "not_started", "nostatus", "unknown", "current", "ongoing")
 
 
@@ -1416,6 +1426,8 @@ def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
     archive whose status could not be read is never called not started."""
     if outcome in ("closed", "interrupted", "failed", "stopped", "unlisted"):
         return "stopped"
+    if outcome == "signin":
+        return "signin"
     if outcome == "attention":
         return "attention"
     if row is None:
@@ -1426,6 +1438,183 @@ def _account_state(row, outcome: str, gaps: list, known: bool = True) -> str:
     if gaps:
         return "gap"
     return status if status in STATE_ORDER else "unknown"
+
+
+# What in a run's result says it may not have read the provider's whole list
+# or taken everything on it, so the gaps it left say nothing about whether a
+# run could fill them.
+_UNSETTLING = ("stopped", "list_not_read", "failed", "validation_failures",
+               "manual_review", "wrong_document")
+
+# What a record says of a document with nothing left to take, beside
+# downloaded_ok. Of the states the document apps write, Completed is a
+# document taken, and No Longer Listed is one the provider's list, read
+# whole, has stopped showing. Every other state they write is left. No Receipt
+# Available is a download control not found, or Dominion's placeholder for a
+# bill it keeps no PDF of, and a record set aside for review is not counted
+# as saved by status.py, though a run does not ask for either again, so
+# either may be what the gap is missing. gui/tests/test_accounts.py holds
+# this to the states the apps write.
+_NOTHING_TO_TAKE = ("Completed", "No Longer Listed")
+
+# The apps whose list says in its log, in words of its own, that it saw a
+# document and did not list it. What they leave out is in no record, so their
+# records cannot say a run took everything, and a run of theirs settles no
+# gap (_took_everything). Wells Fargo, AmFam and SBA pass over a control that
+# would not answer and say the next run takes it, and one read two ways, for a
+# person. American Express leaves out a year-end row that stays at a card
+# switch, since whose it is cannot be told. Discover Bank passes over an
+# account its menu holds with no usable id, and that run stops at its end, so
+# it would settle nothing anyway. The others pass over a row they cannot date
+# or open.
+# gui/tests/test_accounts.py finds these by a log line written out as one
+# string. An app can also pass over a document and say so some other way, or
+# leave no trace at all, as Citi does with a requested statement not ready yet
+# and PayPal with a report still being made, which is why _settled waits for
+# a second run on another day.
+_LISTS_LEAVE_OUT = frozenset({"aafmaa", "affirm", "ally", "amex", "amfam", "applecard",
+                              "discoverbank", "dkb", "golden1", "ibkr", "sba", "statefarm",
+                              "tsp", "wellsfargo"})
+
+
+def _gap_keys(gaps) -> list:
+    """Each gap status.py found, as one string per series and dates, sorted.
+    What a whole run leaves is noted in these terms and compared in them. A
+    JSON list, so no account or summary holding a separator can make one
+    series' gap read as another's."""
+    keys = set()
+    for g in gaps or []:
+        if isinstance(g, dict):
+            keys.add(json.dumps([str(_jsonable(g.get(k)) or "")
+                                 for k in ("account", "summary", "after", "before")]))
+    return sorted(keys)
+
+
+def _whole_clean_run(entry) -> bool:
+    """A Run All with no dates set that finished on its own, with nothing
+    stopped, failed or set aside. Only such a run can settle a gap, and only
+    when it left nothing to take (_took_everything). A Pilot takes the newest
+    few, a scoped run part of the history, and Download again is a restore."""
+    if not isinstance(entry, dict) or entry.get("action") != "all":
+        return False
+    if entry.get("exit_code") != 0 or entry.get("closed") or entry.get("redownload"):
+        return False
+    if entry.get("scope"):
+        return False
+    result = entry.get("result")
+    if not isinstance(result, dict):
+        return False
+    return not any(result.get(k) for k in _UNSETTLING)
+
+
+def _day(entry) -> str:
+    """The calendar day a run ended, or "" when its log entry does not say."""
+    ended = str(entry.get("ended") or "")
+    try:
+        return date.fromisoformat(ended[:10]).isoformat()
+    except ValueError:
+        return ""
+
+
+def _noted(entry) -> set:
+    """The gaps a whole run's log entry noted as left, none when it noted none."""
+    left = entry.get("gaps_left")
+    return {str(k) for k in left} if isinstance(left, list) else set()
+
+
+def _settled(state: str, gaps, log: list) -> bool:
+    """Whether a gap row is one a run cannot fill (#149). It is when the
+    newest whole, clean Run All noted every gap the row shows now as left
+    after it had read the provider's list and left nothing to take, and an
+    earlier one, ended on another day, noted each of them too. A run can
+    leave a document its records do not show, a statement not ready yet, a
+    year that did not answer, and the next run usually takes it, so one run
+    alone settles nothing. Neither says anything of what the person's own
+    settings kept a run from looking at. A newest whole run that noted no
+    gaps, as one that left something notes none, settles nothing. A gap that
+    appears afterwards, from a history put back, say, still counts, and a
+    row that is due, stopped or anything but a gap is never settled, since a
+    new document may be waiting there."""
+    if state != "gap":
+        return False
+    now = _gap_keys(gaps)
+    if not now:
+        return False
+    whole = [e for e in log if _whole_clean_run(e)]
+    if not whole:
+        return False
+    day = _day(whole[0])
+    if not day or not set(now) <= _noted(whole[0]):
+        return False
+    earlier = [_noted(e) for e in whole[1:] if _day(e) not in ("", day)]
+    return all(any(key in noted for noted in earlier) for key in now)
+
+
+def _settings_leave_out(row: dict, config: dict) -> bool:
+    """Whether the person's own settings keep a listed document out of a run,
+    by the two rules of every app's _in_scope that a Run All with no dates
+    set is held to. A gap they leave out is their choice, and may settle.
+    Only what the account's config file itself says counts here."""
+    floor = config.get("default_start_date")
+    if isinstance(floor, str) and str(row.get("date") or "") < floor:
+        return True
+    types = config.get("document_types")
+    return isinstance(types, list) and bool(types) and row.get("category") not in types
+
+
+def _nothing_left(root: Path, config: dict) -> bool:
+    """Whether an account's own records say its last run left nothing to take.
+
+    A run does not report what it leaves in one way. First Horizon, Bilt,
+    Simmons and Alpaca leave a document whose Download is turned off with no
+    record at all and finish clean, and the next run takes it. So the records
+    are read. The list has to be noted as read to its end, and every document
+    in discovery.json has to have a record in progress.json saying it is
+    taken or gone, unless the person's own settings leave it out. Every app
+    keeps these under one key (gui/tests/test_accounts.py), and a key that
+    does not match reads as left. Records that cannot be read, or that say
+    nothing was listed, answer False. A document the list passed over and
+    never wrote to discovery.json cannot be seen here at all."""
+    note = _read_json(root / "last-listing.json")
+    if not isinstance(note, dict) or note.get("complete") is not True:
+        return False
+    listed = _read_json(root / "discovery.json")
+    kept = _read_json(root / "progress.json")
+    if not isinstance(listed, dict) or not listed or not isinstance(kept, dict):
+        return False
+    for key, row in listed.items():
+        if not isinstance(row, dict):
+            return False
+        if _settings_leave_out(row, config):
+            continue
+        rec = kept.get(key)
+        if not isinstance(rec, dict):
+            return False
+        if not (rec.get("downloaded_ok") or rec.get("state") in _NOTHING_TO_TAKE):
+            return False
+    return True
+
+
+def _took_everything(meta: dict, account: str, root: Path, result) -> bool:
+    """Whether a whole, clean run left nothing to take, as far as anything
+    can tell. Documents a run counts as left unsaved, an app whose list can
+    leave a document out, or records that do not show it all, answer False,
+    and the run then settles no gap."""
+    slug = str(meta.get("script_name") or "").rsplit("_", 1)[0]
+    if slug in _LISTS_LEAVE_OUT or result.get("alike"):
+        return False
+    config = _read_json(Path(meta["dir"]) / ("config.json" if account == "primary"
+                                             else "config.%s.json" % account))
+    return _nothing_left(root, config if isinstance(config, dict) else {})
+
+
+def _gaps_left(root: Path) -> list:
+    """The gaps an account's archive shows now, for a whole run's log entry."""
+    mod = _status_module()
+    if mod is None:
+        return None
+    row = mod.scan_install(root)
+    return _gap_keys((row or {}).get("gaps"))
 
 
 def _owner_of(meta: dict, account: str) -> str:
@@ -1459,17 +1648,29 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
     outcome = _last_outcome(last)
     running = _RUNS.get((name, account))
+    state = _account_state(row, outcome, gaps, known)
     return {
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
+        # The name its issues use, chase or amex, which a problem report
+        # is filed under (static/app.js reportLink).
+        "slug": _issue_slug(slug, cards),
         "gets": cards.get(slug, {}).get("documents", ""),
+        "group": cards.get(slug, {}).get("group", ""),
         "kind": (row or {}).get("kind") or kind,
-        "state": _account_state(row, outcome, gaps, known),
+        "state": state,
+        # A gap a whole, clean run could not fill, left out of "may have
+        # something new" on the home page (#149).
+        "settled": _settled(state, (row or {}).get("gaps"), log),
         "documents": (row or {}).get("documents") or 0,
         "newest": _jsonable((row or {}).get("newest")),
-        # When the app last finished a run at all, from its own run
-        # summary, so a run from a terminal counts as a check too.
-        "checked": _jsonable((row or {}).get("last_run")),
+        # When the app last read the provider's whole list, from the note
+        # it keeps, so a run from a terminal counts as a check too, and a
+        # Resume, a Verify or a Rename, which read no list, does not (#148).
+        "checked": _jsonable((row or {}).get("last_listed")),
+        # When the app last finished a run at all, from its own run summary,
+        # for a run from a terminal, which the panel's log never sees.
+        "ran": _jsonable((row or {}).get("last_run")),
         "age_days": (row or {}).get("age_days"),
         "cadence_days": (row or {}).get("cadence_days"),
         "cadence": mod._fmt_cadence((row or {}).get("cadence_days")) if mod else "-",
@@ -1557,16 +1758,26 @@ def _port_note(shared: dict, meta: dict, account: str):
     return {
         "port": found.port,
         "with": names,
-        "say": ("%s %s debugging port %d too. A sign-in joins the browser already on its "
-                "port, so these accounts sign in to one browser, and a run of any of them "
-                "reads whichever account that browser is signed in to. To keep them apart, "
-                "%s, %s no other account here names and no provider PaperPull ships comes "
-                "with. Nothing is stopped for this."
-                % (named[:1].upper() + named[1:], "names" if len(names) == 1 else "name",
+        "say": ("%s %s the same browser as this account, on port %d, so a run of any of "
+                "them reads whichever account that browser is signed in to. To keep them "
+                "apart, %s, %s no other account here names and no provider uses by "
+                "default. Nothing is stopped for this."
+                % (named[:1].upper() + named[1:], "signs in with" if len(names) == 1 else "sign in with",
                    found.port, what, "a port" if len(found.moves) == 1 else "ports")),
-        "short": ("Shares debugging port %d with %s. Open it to see the setting to change."
-                  % (found.port, named if len(names) == 1 else "%d other accounts" % len(names))),
+        "short": ("Signs in with the same browser as %s, on port %d. Open it to see how to "
+                  "keep them apart."
+                  % (named if len(names) == 1 else "%d other accounts" % len(names), found.port)),
     }
+
+
+def _issue_slug(slug: str, cards: dict) -> str:
+    """The name a problem report about this provider is filed under, which
+    the page puts in a link to GitHub (static/app.js reportLink), or "".
+    Only a provider PaperPull ships, one providers.json names, has one. The
+    slug is read from the entry script's name in the person's own folder,
+    and a script named by hand could carry any words, so a name that is not
+    on that list never goes into a link."""
+    return slug if isinstance(cards, dict) and slug in cards else ""
 
 
 def account_rows() -> list:
@@ -1589,8 +1800,11 @@ def account_rows() -> list:
                 running = _RUNS.get((name, account))
                 row = {
                     "app": name, "account": account, "provider": provider, "owner": "",
-                    "gets": cards.get(slug, {}).get("documents", ""), "kind": kind,
-                    "state": "nostatus", "documents": 0, "newest": None, "checked": None,
+                    "slug": _issue_slug(slug, cards),
+                    "gets": cards.get(slug, {}).get("documents", ""),
+                    "group": cards.get(slug, {}).get("group", ""), "kind": kind,
+                    "state": "nostatus", "settled": False, "documents": 0, "newest": None,
+                    "checked": None, "ran": None,
                     "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
                     "last_run": None, "last_outcome": "", "runs": [], "latest": [],
                     "running": dict(running) if running else None,
@@ -1616,26 +1830,244 @@ def api_accounts():
             "accounts": account_rows()}
 
 
+# The folders of an account's own that hold its records and never a
+# document of the kind a person opens (core spec.INFRASTRUCTURE_FOLDERS).
+# Manual Review holds a document, but one that failed its check, and is
+# no place to be sent to find what was saved.
+NOT_DOCUMENTS = frozenset({"Manual Review", "Logs", "Diagnostics", "Backups"})
+
+
+def _documents_in_use(meta: dict, account: str, root: Path) -> str:
+    """The documents folder an account's runs move its documents to, or ""
+    when they stay in its own folder. Core takes documents_dir only when it
+    is a full path that is no browser profile, holds no profile, does not
+    hold the account's own folder and is not in its records
+    (storage.set_documents_dir), and keeps documents in the account's own
+    folder otherwise, so a value it would not use names no folder here
+    either. A path that is not full would otherwise be read from wherever
+    the panel was started."""
+    raw = _documents_of(meta, account).strip()
+    if not raw or not run_result.on_one_line(raw) or not Path(raw).is_absolute():
+        return ""
+    docs = Path(os.path.normpath(raw))
+    profile = _config_of(meta, account).get("profile_dir")
+    if isinstance(profile, str) and profile.strip():
+        held = Path(profile.strip())
+        held = held if held.is_absolute() else Path(meta["dir"]) / held
+        if _within(docs, held) or _within(held, docs):
+            return ""
+    if _within(root, docs) and not _within(docs, root):
+        return ""
+    if _within(docs, root):
+        try:
+            first = docs.resolve().relative_to(root.resolve()).parts[:1]
+        except (ValueError, OSError, RuntimeError):
+            first = ()
+        if first and (first[0].lower() in {f.lower() for f in KEPT_FOLDERS} or first[0].startswith(".")):
+            return ""
+    return str(docs)
+
+
+def _not_for_documents(meta: dict, account: str) -> list:
+    """The folders inside an install or a person's folder that are never
+    where their documents are, each account's browser profile, signed in,
+    and each other account's own folder, which a config can put inside
+    this one's."""
+    out = []
+    install = Path(meta["dir"])
+    for other in meta.get("accounts", ()):
+        profile = _config_of(meta, other).get("profile_dir")
+        if isinstance(profile, str) and profile.strip():
+            path = Path(profile.strip())
+            out.append(path if path.is_absolute() else install / path)
+        if other != account:
+            try:
+                out.append(_account_root(meta, other))
+            except (ValueError, OSError):
+                continue
+    return out
+
+
+def _document_folders(base: Path, kept_out: list) -> list:
+    """The folders directly in base that can hold its documents, in name
+    order, never a link, a record folder, a hidden one or one that is or
+    holds a folder in kept_out."""
+    try:
+        children = sorted(base.iterdir())
+    except OSError:
+        return []
+    return [c for c in children if c.is_dir() and not c.is_symlink()
+            and c.name not in NOT_DOCUMENTS and not c.name.startswith((".", "_"))
+            and not any(_within(other, c) for other in kept_out)]
+
+
+def _where_documents_are(meta: dict, account: str) -> Path:
+    """The folder to show for an account's documents. Its own folder holds
+    its program and records beside them, and once a documents folder is
+    set only what is saved from then on goes there, so it is the folder
+    holding the newest PDF: the documents folder itself when that is where
+    it is, or the folder of its own that holds it, Statements, say. With
+    no PDF yet, the documents folder when set, or its own folder. Never a
+    browser profile or another person's folder (_not_for_documents)."""
+    root = _account_root(meta, account)
+    docs = _documents_in_use(meta, account, root)
+    bases = ([Path(docs)] if docs and Path(docs).is_dir() else []) + [root]
+    kept_out = _not_for_documents(meta, account)
+    newest = None
+    for base in bases:
+        children = _document_folders(base, kept_out)
+        for child in children:
+            try:
+                # In name order, so of two saved the same second the
+                # same one is shown on every computer.
+                for f in sorted(child.rglob("*")):
+                    if f.suffix.lower() == ".pdf" and f.is_file():
+                        when = f.stat().st_mtime
+                        if newest is None or when > newest[0]:
+                            newest = (when, base, child)
+            except OSError:
+                continue
+    if newest is None:
+        return bases[0]
+    _, base, child = newest
+    return base if base is not root else child
+
+
+def _saved_folder(meta: dict, account: str) -> str:
+    """Where the documents an account's last download run saved are now,
+    for its page to say "Saved to" it, or "" when that is more than one
+    place or cannot be told. Read from the new-this-run.txt the run wrote,
+    each file where it saved it, in a folder of its kind in the account's
+    own folder, or at the same place in the documents folder once the panel
+    moved it there (_move_new_documents). It is that folder of its kind
+    when they are all in one, the account's own folder when they are in
+    several of its own, and the documents folder when they were moved. The
+    newest PDF would name the folder of an older document of another kind,
+    and one folder of two a run saved in. Only the files the run's own log
+    entry names are taken, and only in a folder of documents of this
+    account, so a list left from an earlier run, or a line naming any other
+    place, is not."""
+    root = _account_root(meta, account)
+    last = next(iter(_read_run_log(root)), None)
+    if not last or last.get("action") not in DOWNLOAD_ACTIONS:
+        return ""
+    names = {n for n in (last.get("saved") or ()) if isinstance(n, str)}
+    if not names:
+        return ""
+    try:
+        lines = (root / "new-this-run.txt").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    docs = _documents_in_use(meta, account, root)
+    kinds = {c.name: c for c in _document_folders(root, _not_for_documents(meta, account))}
+    try:
+        home = root.resolve()
+    except (OSError, RuntimeError):
+        return ""
+    places = set()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or re.split(r"[\\/]", line)[-1] not in names:
+            continue
+        saved = Path(line)
+        saved = saved if saved.is_absolute() else Path(meta["dir"]) / saved
+        try:
+            parts = saved.resolve().relative_to(home).parts
+        except (ValueError, OSError, RuntimeError):
+            continue
+        if len(parts) < 2 or parts[0] not in kinds:
+            continue
+        if saved.is_file():
+            places.add(kinds[parts[0]])
+        elif docs and Path(docs).joinpath(*parts).is_file():
+            places.add(Path(docs))
+    if len(places) == 1:
+        return str(places.pop())
+    if places and places <= set(kinds.values()):
+        return str(root)
+    return ""
+
+
+# What Open folder can be asked to show, each a folder the panel works out
+# itself: the documents, where a run's documents are, a run's support file
+# or recording, what a run set aside, or the account's own folder with its
+# records.
+REVEAL_FOLDERS = {"diagnostics": "Diagnostics", "aside": "Manual Review"}
+# What the page says when that folder is not there, or is a link to
+# somewhere else, and nothing opens.
+REVEAL_MISSING = {
+    "diagnostics": "This account has no Diagnostics folder of its own, so there is no support file to show. "
+                   "Make a support report, and its file goes there.",
+    "aside": "This account has no Manual Review folder of its own now, so there is nothing set aside to show. "
+             "It may have been moved or emptied since the run.",
+}
+
+
+def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") -> Path:
+    try:
+        if what == "documents":
+            folder = _where_documents_are(meta, account)
+        elif what == "saved":
+            saved = _saved_folder(meta, account)
+            if not saved:
+                raise HTTPException(404, "Where the last run's documents are cannot be told now. "
+                                         "Open folder on the account's page shows its documents.")
+            folder = Path(saved)
+        else:
+            folder = _account_root(meta, account)
+            # A button named for Manual Review or Diagnostics opens that
+            # folder or nothing, never the account's own folder in its place.
+            if what in REVEAL_FOLDERS:
+                inner = folder / REVEAL_FOLDERS[what]
+                if inner.is_symlink() or not inner.is_dir():
+                    raise HTTPException(404, REVEAL_MISSING[what])
+                folder = inner
+    except ValueError:
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
+    if not folder.is_dir():
+        raise HTTPException(404, "That folder does not exist yet.")
+    return folder
+
+
+@app.get("/api/saved-in", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+def api_saved_in(app: str = "", account: str = "primary"):
+    """Where an account's last download run saved its documents
+    (_saved_folder), for the page to say "Saved to" it beside an Open folder
+    that shows the same folder, or "" when that cannot be told and the page
+    says nothing. Takes the app's name and the account, both checked
+    against what the panel itself found, and never a path. A plain def, so
+    the reading runs in a worker thread."""
+    apps = discover_apps()
+    if app not in apps or account not in apps[app]["accounts"]:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    try:
+        folder = _saved_folder(apps[app], account)
+    except ValueError:
+        folder = ""
+    return {"folder": folder if folder and Path(folder).is_dir() else ""}
+
+
 @app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
 async def api_reveal(request: Request):
-    """Show one account's folder in the file manager. Takes the app's name
-    and the account, both checked against what the panel itself found, and
-    never a path."""
+    """Show where one account's documents are in the file manager
+    (_where_documents_are). Takes the app's name and the account, both
+    checked against what the panel itself found, and never a path."""
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(400, "expected a JSON body")
     name = str((body or {}).get("app") or "")
     account = str((body or {}).get("account") or "primary")
+    what = str((body or {}).get("what") or "documents")
+    if what not in ("documents", "saved", "records", *REVEAL_FOLDERS):
+        raise HTTPException(400, "unknown folder to show")
     apps = discover_apps()
     if name not in apps or account not in apps[name]["accounts"]:
-        raise HTTPException(404, "unknown app or account")
-    try:
-        folder = _account_root(apps[name], account)
-    except ValueError:
-        raise HTTPException(404, "that account's config names no folder PaperPull can read")
-    if not folder.is_dir():
-        raise HTTPException(404, "that account has no folder yet")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    # The walk for the newest PDF reads the disk, so it runs in a worker
+    # thread and a download streaming meanwhile is not held up.
+    folder = await run_in_threadpool(_documents_folder_or_404, apps[name], account, what)
     try:
         if sys.platform == "win32":
             subprocess.Popen(["explorer", str(folder)])
@@ -1644,7 +2076,7 @@ async def api_reveal(request: Request):
         else:
             subprocess.Popen(["xdg-open", str(folder)])
     except Exception as e:
-        raise HTTPException(500, "could not open the folder, %s" % e)
+        raise HTTPException(500, "Could not open the folder (%s)." % e)
     return {"ok": True}
 
 
@@ -1670,6 +2102,130 @@ async def api_sample(request: Request):
             "apps": _looks_like_installs(apps_root())}
 
 
+def _root_problem(raw: str):
+    """The folder a person typed for their PaperPull folder, and "", or None
+    and what is wrong with it, in words to show under the field. A folder
+    that does not exist yet is fine, since setting up makes it, as long as
+    the nearest one above it that does can be written to."""
+    raw = str(raw or "").strip().strip('"')
+    if not raw:
+        return None, "Paste the folder path first."
+    root = Path(raw).expanduser()
+    if not root.is_absolute():
+        return None, "Give the full path, starting from the drive (C:\\) or from /."
+    if root.exists() and not root.is_dir():
+        return None, "That is a file, not a folder. Choose a folder."
+    above = root
+    while not above.exists() and above.parent != above:
+        above = above.parent
+    if not above.is_dir() or not _can_make_a_folder_in(above):
+        return None, "PaperPull cannot write there. Choose a folder you can write to, such as one in Documents."
+    return root, ""
+
+
+# Whether os.access says yes to every folder asked whether it can be written,
+# as it does on Windows (_can_make_a_folder_in).
+_ACCESS_SAYS_YES_TO_FOLDERS = sys.platform == "win32"
+
+
+def _can_make_a_folder_in(folder: Path) -> bool:
+    """Whether a folder can be made inside `folder`, which is what setting
+    up does there. os.access answers that on macOS and Linux. On Windows it
+    reads only the read-only flag, which says nothing of a folder's own
+    rights, so it says yes to every folder, Program Files too, and there
+    Windows itself is asked (_windows_may_add_a_folder). Nothing is written
+    either way, since the welcome's check changes nothing."""
+    if not os.access(folder, os.W_OK):
+        return False
+    if not _ACCESS_SAYS_YES_TO_FOLDERS:
+        return True
+    return _windows_may_add_a_folder(folder)
+
+
+def _windows_may_add_a_folder(folder: Path) -> bool:
+    """Whether Windows lets this person add a folder inside `folder`. The
+    folder is opened asking for that one right, FILE_ADD_SUBDIRECTORY, so
+    Windows checks it against the folder's own rights and nothing on disk
+    changes. It is that right and not the right to add a file, since a
+    person may make a folder at the top of C:\\ and not a file. Anything
+    that cannot be asked says yes, and Set up then says what went wrong."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create = kernel32.CreateFileW
+        create.restype = wintypes.HANDLE
+        create.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                           wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE)
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    except (ImportError, AttributeError, OSError):
+        return True
+    add_subdirectory, share_all, open_existing, backup_semantics = 0x0004, 0x0007, 3, 0x02000000
+    handle = create(str(folder), add_subdirectory, share_all, None, open_existing,
+                    backup_semantics, None)
+    if handle is None or handle == ctypes.c_void_p(-1).value:
+        return False
+    kernel32.CloseHandle(handle)
+    return True
+
+
+# The folders a sync service keeps in step with its cloud, by the name of
+# a folder on the way. A PaperPull folder holds each provider's signed-in
+# browser profile, which the terms say anyone holding it can act as you
+# with, so one inside these is warned of, never refused. A name that starts
+# a service's own folder name, "OneDrive - Contoso" or "Dropbox (Personal)",
+# is matched by its start. "My Drive" and "Mobile Documents" are ordinary
+# words too, so only a folder of exactly that name counts, and "My Drivers"
+# is not warned of.
+_SYNCED = (("icloud", "iCloud Drive"), ("onedrive", "OneDrive"), ("dropbox", "Dropbox"),
+           ("googledrive", "Google Drive"), ("google drive", "Google Drive"))
+_SYNCED_EXACTLY = {"mobile documents": "iCloud Drive", "my drive": "Google Drive"}
+
+
+def _synced_by(root: Path) -> str:
+    """The sync service a folder sits inside, by name, or ""."""
+    for part in root.parts:
+        low = part.lower()
+        if low in _SYNCED_EXACTLY:
+            return _SYNCED_EXACTLY[low]
+        for start, name in _SYNCED:
+            if low.startswith(start):
+                return name
+    return ""
+
+
+@app.post("/api/root/check", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+async def api_root_check(request: Request):
+    """What the welcome says of the folder typed in its first step, before
+    the person goes on. That is what is wrong with it, the providers already
+    set up in it, so they can open those instead of choosing again, and the
+    sync service it sits inside. Changes nothing."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    # A folder on a network share that is offline answers only when the
+    # share gives up, so the check runs in a worker thread, and every other
+    # tab's requests are answered meanwhile.
+    return await run_in_threadpool(_root_check, (body or {}).get("root"))
+
+
+def _root_check(raw) -> dict:
+    """What /api/root/check answers of a typed folder, read from the disk."""
+    root, problem = _root_problem(raw)
+    if problem:
+        return {"ok": False, "problem": problem}
+    found = []
+    if root.is_dir():
+        try:
+            found = [d.name for d in sorted(root.iterdir()) if d.is_dir() and run_result.on_one_line(d.name)
+                     and _entry_script(d)]
+        except OSError:
+            found = []
+    return {"ok": True, "root": str(root), "found": found[:6], "found_count": len(found),
+            "synced_by": _synced_by(root)}
+
+
 @app.get("/api/root", dependencies=[Depends(_same_origin_only)])
 def api_root_get():
     root = apps_root()
@@ -1690,27 +2246,28 @@ async def api_root_set(request: Request):
     moving the installs into it is a reasonable order of operations.
     """
     if os.environ.get("APPS_ROOT"):
-        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
-                                 "overrides any saved choice. Unset it first.")
+        raise HTTPException(409, "PaperPull was started with APPS_ROOT set, so "
+                                 "the folder cannot be changed here. Start it "
+                                 "without APPS_ROOT to change it.")
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(400, "expected a JSON body")
     raw = str((body or {}).get("root") or "").strip().strip('"')
     if not raw:
-        raise HTTPException(400, "no folder given")
+        raise HTTPException(400, "Paste the folder path first.")
     root = Path(raw).expanduser()
     if not root.is_absolute():
-        raise HTTPException(400, "give the full path, starting from the drive "
-                                 "or from /")
+        raise HTTPException(400, "Give the full path, starting from the drive "
+                                 "(C:\\) or from /.")
     if not root.is_dir():
-        raise HTTPException(400, "that folder does not exist")
+        raise HTTPException(400, "That folder does not exist. Check the path, or create the folder first.")
     data = _read_settings()
     data["apps_root"] = str(root.resolve())
     try:
         _write_settings(data)
     except OSError as e:
-        raise HTTPException(500, "could not save the choice: %s" % e)
+        raise HTTPException(500, "Could not save the folder (%s). Try again." % e)
     global _STATUS_MOD, _EXPORT_MOD
     _STATUS_MOD = None      # the status report is looked for relative to root
     _EXPORT_MOD = None      # and so is the exporter
@@ -1863,10 +2420,10 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
     Never overwrites, because an existing folder may hold years of history."""
     tmpl_root = _templates_root()
     if tmpl_root is None:
-        raise HTTPException(500, "no templates are available to create from")
+        raise HTTPException(500, "This copy of PaperPull has no providers to set up. Download it again from paperpull.net.")
     src = tmpl_root / slug
     if not src.is_dir() or not _entry_script(src):
-        raise HTTPException(400, "unknown provider %r" % slug)
+        raise HTTPException(400, "PaperPull has no provider called %r. Reload the page." % slug)
     info = next(p for p in list_providers() if p["slug"] == slug)
     dst = root / info["folder"]
     if dst.exists():
@@ -2385,8 +2942,9 @@ async def api_create(request: Request):
     nothing is remembered, since the image sets that folder every start."""
     server = server_mode.enabled()
     if os.environ.get("APPS_ROOT") and not server:
-        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
-                                 "overrides any saved choice. Unset it first.")
+        raise HTTPException(409, "PaperPull was started with APPS_ROOT set, so "
+                                 "the folder cannot be changed here. Start it "
+                                 "without APPS_ROOT to change it.")
     try:
         body = await request.json()
     except Exception:
@@ -2396,18 +2954,17 @@ async def api_create(request: Request):
         raw = str(server_mode.data_root())
     owner = str((body or {}).get("owner") or "").strip()[:80]
     slugs = (body or {}).get("providers") or []
-    if not raw:
-        raise HTTPException(400, "no folder given")
     if not isinstance(slugs, list) or not slugs:
-        raise HTTPException(400, "choose at least one provider")
-    root = Path(raw).expanduser()
-    if not root.is_absolute():
-        raise HTTPException(400, "give the full path, starting from the drive "
-                                 "or from /")
+        raise HTTPException(400, "Choose at least one provider.")
+    # The same check the welcome makes on Continue (_root_problem), so the
+    # two never disagree.
+    root, problem = _root_problem(raw)
+    if problem:
+        raise HTTPException(400, problem)
     try:
         root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        raise HTTPException(400, "could not create that folder: %s" % e)
+        raise HTTPException(400, "Could not create that folder (%s). Choose a folder you can write to." % e)
 
     created, existed = [], []
     for slug in slugs:
@@ -2422,7 +2979,7 @@ async def api_create(request: Request):
         try:
             _write_settings(data)
         except OSError as e:
-            raise HTTPException(500, "could not save the choice: %s" % e)
+            raise HTTPException(500, "Could not save the folder (%s). Try again." % e)
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"root": str(root.resolve()), "created": created, "existed": existed,
@@ -2479,12 +3036,12 @@ async def api_account(request: Request):
     owner = str(body.get("owner") or "").strip()[:80]
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     if not _LABEL_RE.match(label):
-        raise HTTPException(400, "the label is used in a filename, so letters, digits, - and _ only, "
-                                 "starting with a letter or digit")
+        raise HTTPException(400, "Use lowercase letters, digits, - or _, starting with "
+                                 "a letter or digit.")
     if label in ("primary", "example") or label in apps[name]["accounts"]:
-        raise HTTPException(409, "there is already an account called %r in %s" % (label, name))
+        raise HTTPException(409, "%s already has a person called %s. Choose another name." % (name, label))
     app_dir = Path(apps[name]["dir"])
     dest = _make_account(app_dir, label, owner)
     cfg = json.loads(dest.read_text(encoding="utf-8"))
@@ -2495,16 +3052,22 @@ async def api_account(request: Request):
             "owner": cfg.get("owner", "")}
 
 
+# Said of a provider's folder with no config.json, which a sign-in never
+# writes. Setting a provider up copies its config.example.json to it, so
+# only a folder made some other way has none, and the copy is what mends it.
+NO_CONFIG_YET = ("%s has no config.json yet. In its folder, copy config.example.json to "
+                 "config.json, then try again.")
+
+
 def _make_account(app_dir: Path, label: str, owner: str) -> Path:
     """config.<label>.json for a second person on an install, with its
     profile on the profiles volume on PaperPull Server. The label is
     checked by the caller. Returns the new config's path."""
     mod = _account_module()
     if mod is None:
-        raise HTTPException(500, "add_account.py was not found next to this control panel")
+        raise HTTPException(500, "This copy of PaperPull is missing add_account.py. Download PaperPull again to repair it.")
     if not (app_dir / "config.json").is_file():
-        raise HTTPException(409, "%s has no config.json yet. Run Login once for the first account, "
-                                 "then add the second." % app_dir.name)
+        raise HTTPException(409, NO_CONFIG_YET % app_dir.name)
     if server_mode.enabled():
         # make_config copies the first person's config into the new one and
         # makes the new person's folder, so a config left as a link in the
@@ -2523,9 +3086,9 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
     try:
         dest = mod.make_config(app_dir, label, owner=owner)
     except Exception as e:
-        raise HTTPException(500, "could not make the account: %s" % str(e).splitlines()[0][:160])
+        raise HTTPException(500, "Could not add this person (%s). Try again." % str(e).splitlines()[0][:160])
     if dest is None:
-        raise HTTPException(409, "%s has no config.json yet." % app_dir.name)
+        raise HTTPException(409, NO_CONFIG_YET % app_dir.name)
     if server_mode.enabled():
         # make_config puts the profile in the account's own folder, which on
         # the server is the shared folder, so it moves to the profiles volume.
@@ -2590,7 +3153,7 @@ def _history_outside(where: Path) -> bool:
 def _migrate_or_fail():
     mod = _migrate_module()
     if mod is None:
-        raise HTTPException(500, "migrate.py was not found next to this control panel")
+        raise HTTPException(500, "This copy of PaperPull is missing migrate.py. Download PaperPull again to repair it.")
     return mod
 
 
@@ -2601,7 +3164,7 @@ def api_history_export():
     mod = _migrate_or_fail()
     data, _ = mod.build(apps_root(), keep=_history_keep())
     if data is None:
-        raise HTTPException(404, "there is no download history here to export yet")
+        raise HTTPException(404, "Nothing is downloaded yet, so there is no history to export. Get new documents first.")
     name = "PaperPull history %s.ppz" % date.today().isoformat()
     return Response(content=data, media_type="application/zip",
                     headers={"Content-Disposition": 'attachment; filename="%s"' % name,
@@ -2615,12 +3178,12 @@ async def _history_upload(request: Request):
     the folder chosen there."""
     import base64
     if int(request.headers.get("content-length") or 0) > HISTORY_MAX_BYTES:
-        raise HTTPException(413, "that file is far larger than any download history")
+        raise HTTPException(413, "That file is too large to be a history file. Choose the .ppz file that Export history saved.")
     body = bytearray()
     async for chunk in request.stream():
         body += chunk
         if len(body) > HISTORY_MAX_BYTES:
-            raise HTTPException(413, "that file is far larger than any download history")
+            raise HTTPException(413, "That file is too large to be a history file. Choose the .ppz file that Export history saved.")
     try:
         data = json.loads(bytes(body).decode("utf-8"))
         raw = base64.b64decode(str(data.get("file") or ""), validate=True)
@@ -2645,12 +3208,13 @@ def _history_root(raw: str):
         return apps_root(), False
     root = Path(raw).expanduser()
     if not root.is_absolute():
-        raise HTTPException(400, "give the full path, starting from the drive or from /")
+        raise HTTPException(400, "Give the full path, starting from the drive (C:\\) or from /.")
     if os.path.normcase(str(root)) == os.path.normcase(str(apps_root())):
         return apps_root(), False
     if os.environ.get("APPS_ROOT"):
-        raise HTTPException(409, "APPS_ROOT is set in the environment, which "
-                                 "overrides any saved choice. Unset it first.")
+        raise HTTPException(409, "PaperPull was started with APPS_ROOT set, so "
+                                 "the folder cannot be changed here. Start it "
+                                 "without APPS_ROOT to change it.")
     return root, True
 
 
@@ -2829,10 +3393,10 @@ async def api_history_import(request: Request):
     # (_start_run), so the two never overlap. A run reads progress.json when
     # it starts and writes it as it goes, over what an import wrote.
     if not _IMPORTING.acquire(blocking=False):
-        raise HTTPException(409, "an import is already under way")
+        raise HTTPException(409, "An import is already going. Wait for it to finish.")
     if _RUNNING:
         _IMPORTING.release()
-        raise HTTPException(409, "a provider is running right now. Import once it has finished.")
+        raise HTTPException(409, "A run is going. Import once it has finished.")
     try:
         rows = await to_thread.run_sync(_history_walk, mod, manifest, root, True)
     finally:
@@ -2846,8 +3410,8 @@ async def api_history_import(request: Request):
         try:
             _write_settings(data)
         except OSError as e:
-            raise HTTPException(500, "the import is done, and the folder could not be "
-                                     "remembered: %s" % e)
+            raise HTTPException(500, "The import is done, but the folder could not be "
+                                     "remembered (%s)." % e)
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"root": str(root), "rows": rows}
@@ -2869,7 +3433,7 @@ def _account_named(meta: dict, account) -> str:
     that app, so a name from the page can never point at another folder."""
     account = str(account or "primary")
     if account not in (meta.get("accounts") or ["primary"]):
-        raise HTTPException(404, "unknown account")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     return account
 
 
@@ -2924,7 +3488,7 @@ def api_failure_latest(app: str = "", account: str = "primary"):
     """Whether the run that just stopped left a file worth attaching."""
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     found = _latest_failure(apps[app], _account_named(apps[app], account))
     if found is None:
         return {"found": False}
@@ -2933,16 +3497,24 @@ def api_failure_latest(app: str = "", account: str = "primary"):
 
 @app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
 async def api_failure_reveal(request: Request):
-    """Show that file in the file manager. Takes no path from the page,
-    only the app name, and finds the file here the same way."""
+    """Show that file in the file manager, selected. Takes no path from the
+    page, only the app name and which kind of file, the failure file, or a
+    support report's survey or a recording (REPORT_FILES) by the action
+    that wrote it, and finds the file here the same way, so a person sent
+    to attach one lands on it rather than among the files beside it."""
     body = await request.json()
     name = str((body or {}).get("app") or "")
+    kind = str((body or {}).get("kind") or "failure")
+    if kind != "failure" and kind not in REPORT_FILES:
+        raise HTTPException(400, "unknown kind of file")
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "unknown app")
-    found = _latest_failure(apps[name], _account_named(apps[name], (body or {}).get("account")))
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    pattern = REPORT_FILES.get(kind, "failure-*.json")
+    found = _latest_failure(apps[name], _account_named(apps[name], (body or {}).get("account")), pattern)
     if found is None:
-        raise HTTPException(404, "no recent failure file")
+        raise HTTPException(404, "There is no recent file about what went wrong." if kind == "failure"
+                            else "There is no recent file to attach. Make the report again.")
     try:
         if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,", str(found)])
@@ -2951,7 +3523,7 @@ async def api_failure_reveal(request: Request):
         else:
             subprocess.Popen(["xdg-open", str(found.parent)])
     except Exception as e:
-        raise HTTPException(500, "could not open the folder, %s" % e)
+        raise HTTPException(500, "Could not open the folder (%s)." % e)
     return {"ok": True}
 
 
@@ -2964,11 +3536,11 @@ def api_failure_download(app: str = "", account: str = "primary"):
         raise HTTPException(404)
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     account = _account_named(apps[app], account)
     found = _latest_failure(apps[app], account)
     if found is None:
-        raise HTTPException(404, "no recent failure file")
+        raise HTTPException(404, "There is no recent file about what went wrong.")
     return _handed(apps[app], account, "Diagnostics", found)
 
 
@@ -3047,14 +3619,14 @@ def _handed(meta: dict, account: str, name: str, path: Path) -> Response:
     try:
         inside = _inside(meta, account, name)
     except ValueError:
-        raise HTTPException(404, "that account's folder cannot be read here")
+        raise HTTPException(404, "That account's folder cannot be read here.")
     fd = _open_plain(path, inside)
     if fd is None:
-        raise HTTPException(404, "that file cannot be handed over")
+        raise HTTPException(404, "That file cannot be downloaded.")
     with os.fdopen(fd, "rb") as fh:
         data = fh.read(HANDED_MOST + 1)
     if len(data) > HANDED_MOST:
-        raise HTTPException(413, "that file is too large to be a report")
+        raise HTTPException(413, "That file is too large to be a report.")
     kind = "application/json" if path.suffix.lower() == ".json" else "application/octet-stream"
     return Response(content=data, media_type=kind, headers=_attachment(path.name))
 
@@ -3078,7 +3650,7 @@ def api_diagnostics_download(app: str = "", account: str = "primary", action: st
         raise HTTPException(400, "diagnose or record")
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     account = _account_named(apps[app], account)
     found = _latest_failure(apps[app], account, REPORT_FILES[action])
     if found is None:
@@ -3095,7 +3667,7 @@ def _set_aside(meta: dict, account: str):
     try:
         inside = _inside(meta, account, "Manual Review")
     except ValueError:
-        raise HTTPException(404, "that account's folder cannot be read here")
+        raise HTTPException(404, "That account's folder cannot be read here.")
     out = []
     if os.path.islink(inside):
         return out, inside
@@ -3139,7 +3711,7 @@ def api_aside_download(app: str = "", account: str = "primary"):
         raise HTTPException(404)
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     files, inside = _set_aside(apps[app], _account_named(apps[app], account))
     named = "%s set aside.zip" % (app if account == "primary" else "%s %s" % (app, account))
     # A file of no name, which the system removes when it is closed or the
@@ -3196,16 +3768,17 @@ async def api_record_stop(request: Request):
     name = str((body or {}).get("app") or "")
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     try:
         target = _diagnostics_of(apps[name], _account_named(apps[name], (body or {}).get("account")))
     except ValueError:
-        raise HTTPException(404, "that account's config names no folder PaperPull can read")
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
     try:
         _make_folder(target)
         _write_text(target / ".stop-recording", "stop\n")
     except OSError as e:
-        raise HTTPException(500, "could not signal the recording: %s" % e)
+        raise HTTPException(500, "Could not stop the recording (%s). Press Stop recording again." % e)
     return {"app": name, "stopping": True}
 
 
@@ -3248,14 +3821,14 @@ async def api_remove(request: Request):
     name = str((body or {}).get("app") or "")
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     if name in _RUNNING:
-        raise HTTPException(409, "that provider is running right now. Wait for it "
-                                 "to finish, or close the tab it is running in.")
+        raise HTTPException(409, "That provider is running. Wait for it to finish, "
+                                 "or close the tab it is running in.")
     src = Path(apps[name]["dir"])
     root = apps_root()
     if src.parent.resolve() != root.resolve():
-        raise HTTPException(400, "that folder is not directly under the apps root")
+        raise HTTPException(400, "That folder is not directly inside the PaperPull folder.")
 
     summary = _removal_summary(src)
     dest_dir = root / REMOVED_DIR
@@ -3270,8 +3843,8 @@ async def api_remove(request: Request):
         _make_folder(dest_dir)
         shutil.move(str(src), str(dest))
     except OSError as e:
-        raise HTTPException(500, "could not move the folder: %s. Is a file in it "
-                                 "open, or a browser still signed in there?" % e)
+        raise HTTPException(500, "Could not move the folder (%s). Close any file open "
+                                 "from it and its sign-in window, then try again." % e)
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"app": name, "moved_to": str(dest), **summary}
@@ -3281,7 +3854,7 @@ def _build_cmd(app_meta: dict, account: str, action: str, scope_flags=(), redown
     if action not in ACTIONS:
         raise HTTPException(400, "unknown action")
     if account not in app_meta["accounts"]:
-        raise HTTPException(400, "unknown account")
+        raise HTTPException(400, "That account is no longer here. Reload the page.")
     flags = []
     for f in ACTIONS[action]["flags"]:
         flags.append(app_meta["login_flag"] if f == "__LOGIN__" else f)
@@ -3319,10 +3892,10 @@ def _review_cmd(app_meta: dict, account: str) -> list:
     through /api/review-names, which hands it what it would otherwise ask
     in a console (renaming.REVIEW_LIST_ENV, REVIEW_ANSWERS_ENV)."""
     if not app_meta.get("reviews_names"):
-        raise HTTPException(400, "%s has no Review Names. Only receipt providers do."
+        raise HTTPException(400, "%s has no Review names. Only receipt providers do."
                             % app_meta.get("name", "This provider"))
     if account not in app_meta["accounts"]:
-        raise HTTPException(400, "unknown account")
+        raise HTTPException(400, "That account is no longer here. Reload the page.")
     return _command(app_meta, account, ["--review-names"])
 
 
@@ -3462,21 +4035,21 @@ def _review_list(app: str, account: str) -> dict:
     said while finding them (rows it leaves out, and why)."""
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     meta = apps[app]
     if server_mode.enabled() and not meta.get("runnable", True):
-        raise HTTPException(409, "This install does not match a provider PaperPull ships, "
-                                 "so it will not be run.")
+        raise HTTPException(409, "PaperPull does not recognize this provider's folder, "
+                                 "so it cannot run it.")
     blocked = setup_needed(meta)
     if blocked:
-        raise HTTPException(409, blocked.splitlines()[0] if blocked.strip() else "setup needed")
+        raise HTTPException(409, blocked.splitlines()[0] if blocked.strip() else "This provider is not set up yet.")
     cmd = _review_cmd(meta, account)
     folder = None
     try:
         try:
             folder = Path(tempfile.mkdtemp(prefix="paperpull-review-"))
         except OSError as e:
-            raise HTTPException(500, "Review Names had nowhere to list into, %s" % e)
+            raise HTTPException(500, "Review names had nowhere to list the receipts (%s)." % e)
         mark = run_result.new_mark()
         env = dict(_run_env(meta), **{REVIEW_LIST_ENV: str(folder / HANDED),
                                       run_result.MARK_ENV: mark})
@@ -3487,10 +4060,10 @@ def _review_list(app: str, account: str) -> dict:
                                   stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                   errors="replace", env=env, timeout=REVIEW_LIST_SECONDS)
         except subprocess.TimeoutExpired:
-            raise HTTPException(504, "Review Names did not finish listing in %d seconds."
-                                % REVIEW_LIST_SECONDS)
+            raise HTTPException(504, "Review names took too long to list the receipts. "
+                                "Try again.")
         except OSError as e:
-            raise HTTPException(500, "Review Names could not start, %s" % e)
+            raise HTTPException(500, "Review names could not start (%s)." % e)
         said = [line.rstrip() for line in (done.stdout or "").splitlines()
                 if line.strip() and run_result.parse(line, mark) is None]
         try:
@@ -3500,8 +4073,7 @@ def _review_list(app: str, account: str) -> dict:
                 raise ValueError("not a list")
         except (OSError, ValueError, KeyError, TypeError):
             raise HTTPException(500, " ".join(said[-3:]) or
-                                "Review Names ended with code %s and listed nothing."
-                                % done.returncode)
+                                "Review names listed nothing. Try again.")
         return {"receipts": receipts, "said": said}
     finally:
         _drop(folder)
@@ -3568,21 +4140,24 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
     run's own that is gone once the run ends (_hand_over)."""
     apps = discover_apps()
     if app not in apps:
-        raise HTTPException(404, "unknown app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     meta = apps[app]
 
     if server_mode.enabled() and not meta.get("runnable", True):
         # Fail closed. The install does not map to exactly one provider the
         # image ships, so there is no trusted code to run for it, and the
         # server never falls back to code in the /data folder.
-        detail = ("This install does not match a provider PaperPull ships, so "
-                  "it will not be run. Its folder must hold exactly one "
-                  "provider script whose name is one PaperPull ships. Remove "
-                  "any extra script, or add the provider again from the panel.")
+        detail = ("PaperPull does not recognize this provider's folder, so it "
+                  "cannot run it. Its folder should hold exactly one provider "
+                  "script, named as PaperPull's own are. Remove any extra "
+                  "script, or add the provider again with Add a provider.")
 
         async def refuse_unmapped():
             for line in detail.splitlines():
                 yield _event(line)
+            # A run that did not start, said so (static/app.js finishRun),
+            # never one that began and failed with a Continue offered.
+            yield _event(" ".join(detail.split()), "refused")
             yield _event(1, "done")
         return StreamingResponse(refuse_unmapped(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
@@ -3609,8 +4184,8 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         except Exception as e:
             # Never the reason a run does not start. Its documents go where
             # its config already says.
-            documents_said = ["Documents stay where they were, since the folder for every "
-                              "provider could not be applied (%s)." % type(e).__name__]
+            documents_said = ["Documents stay where they were, since the Documents folder "
+                              "could not be applied (%s)." % type(e).__name__]
 
     if blocked:
         # Said here rather than let the app start under an interpreter
@@ -3625,6 +4200,8 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         async def refuse():
             for line in blocked.splitlines():
                 yield _event(line)
+            if code:
+                yield _event(" ".join(blocked.split()), "refused")
             yield _event(code, "done")
         return StreamingResponse(refuse(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
@@ -3656,8 +4233,14 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         started = time.time()
         # Asked with nothing awaited before the run counts itself, so an
         # import cannot start in between (api_history_import).
+        # A run that will not start says why as a refused event too, which
+        # the page puts under "This run did not start" rather than read the
+        # done code as a run that began and failed. The code stays 1, so a
+        # queue still counts it as not done.
         if _IMPORTING.locked():
-            yield _event("A history file is being imported. Run this once it has finished.")
+            why = "A history file is being imported. Run this once it has finished."
+            yield _event(why)
+            yield _event(why, "refused")
             yield _event(1, "done")
             return
         # One run per account. A second, from another tab, would put two
@@ -3665,8 +4248,10 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         # Checked and claimed with nothing awaited between, so two requests
         # cannot both get through.
         if (app, account) in _RUNS:
-            yield _event("%s is already running for this account, in another tab "
-                         "or window. Wait for it to finish there." % app)
+            why = ("%s is already running for this account, in another tab "
+                   "or window. Wait for it to finish there." % app)
+            yield _event(why)
+            yield _event(why, "refused")
             yield _event(1, "done")
             return
         # Where the run's log goes, worked out before the run is claimed, so
@@ -3687,13 +4272,24 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             if root is None:
                 return
             try:
-                _note_run(root, {
+                entry = {
                     "action": action, "account": account,
                     "started": _RUNS.get((app, account), {}).get("started", ""),
                     "ended": datetime.now().isoformat(timespec="seconds"),
                     "exit_code": code, "closed": closed, "result": result,
                     "scope": list(scope_flags), "redownload": bool(redownload),
-                    "saved": _saved_this_run(root, started) if saved is None else saved})
+                    "saved": _saved_this_run(root, started) if saved is None else saved}
+                if _whole_clean_run(entry):
+                    # The gaps a whole run that left nothing to take could
+                    # not fill, which settles them on the home page
+                    # (_settled). A run that left something, or a scan that
+                    # fails, notes none, and the gaps keep counting.
+                    try:
+                        if _took_everything(meta, account, root, result):
+                            entry["gaps_left"] = _gaps_left(root)
+                    except Exception:
+                        pass
+                _note_run(root, entry)
             except Exception:
                 pass
         try:
@@ -3978,7 +4574,7 @@ def _newest_saved(records, n=3):
 def _naming_app(name: str) -> Path:
     apps = discover_apps()
     if name not in apps:
-        raise HTTPException(404, "no such app")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     return Path(apps[name]["dir"])
 
 
@@ -4083,7 +4679,7 @@ async def api_naming_preview(request: Request):
     naming = _naming()
     d = _naming_app(str(body.get("app") or ""))
     if naming is None:
-        raise HTTPException(503, "file naming is not available in this install")
+        raise HTTPException(503, "File naming is not available in this copy of PaperPull. Update PaperPull to get it.")
     pattern = str(body.get("pattern") or "").strip()
     if pattern == naming.DEFAULT_RECEIPTS:
         # Under the default a name is what the app built at the time,
@@ -4128,7 +4724,7 @@ async def api_naming_save(request: Request):
     naming = _naming()
     d = _naming_app(str(body.get("app") or ""))
     if naming is None:
-        raise HTTPException(503, "file naming is not available in this install")
+        raise HTTPException(503, "File naming is not available in this copy of PaperPull. Update PaperPull to get it.")
     scope = body.get("scope")
     if scope not in ("shared", "own"):
         raise HTTPException(400, "scope is shared or own")
@@ -4268,7 +4864,7 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
                     "of their own.")
     for name, meta in apps.items():
         if _within(meta["dir"], target):
-            return ("That folder holds %s's own folder, with its settings and records. "
+            return ("That folder holds %s's own folder, with its settings and download history. "
                     "Choose a folder of their own." % name)
         for other in meta["accounts"]:
             try:
@@ -4279,10 +4875,10 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
             # Around any account's own folder, this one's included, its
             # records and Manual Review would sit in the watched folder.
             if _within(root, target):
-                return ("That folder holds the folder %s keeps its records and Manual Review "
-                        "in. Choose a folder of their own." % who)
+                return ("That folder holds the folder %s keeps its download history and "
+                        "Manual Review in. Choose a folder of their own." % who)
             if (name, other) != (app_name, account) and _within(target, root):
-                return ("That folder is inside the folder %s keeps its records in. "
+                return ("That folder is inside the folder %s keeps its download history in. "
                         "Choose a folder of its own." % who)
             if (name, other) == (app_name, account) and _within(target, root):
                 # Inside its own folder it may be, but not where a document
@@ -4293,7 +4889,7 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
                     first = ()
                 if first and (first[0] in KEPT_FOLDERS or first[0].startswith(".")):
                     return ("That folder is inside %s, where documents that failed their "
-                            "check or a run's own records are kept. Choose a folder of their "
+                            "check or a run's own logs and backups are kept. Choose a folder of their "
                             "own." % first[0])
     return None
 
@@ -4438,7 +5034,7 @@ def _root_held_problem(apps: dict, root: str, skip=None):
     into a folder in it, or None (_root_held_by)."""
     held = _root_held_by(apps, root, root, skip=skip)
     if held:
-        return ("%s has a folder of their own, %s, that holds the folder for every provider. "
+        return ("%s has a folder of their own, %s, that holds the Documents folder. "
                 "Choose another folder for them first." % held)
     return None
 
@@ -4451,16 +5047,16 @@ def _own_in_root_problem(apps: dict, app_name: str, account: str, folder: str, r
     if not root:
         return None
     if _within(folder, root) and _within(root, folder):
-        return ("That is the folder for every provider itself. Use the folder for every "
-                "provider gives this one its folder inside it, or choose another folder.")
+        return ("That is the Documents folder itself. Use the Documents folder gives "
+                "this one its folder inside it, or choose another folder.")
     if _within(root, folder):
-        return ("That folder holds the folder for every provider, so every provider's folder "
+        return ("That folder holds the Documents folder, so every account's folder "
                 "would be inside it. Choose another folder.")
     for other_name, other in apps.items():
         for other_account in other.get("accounts", ()):
             if (other_name, other_account) != (app_name, account) and \
                     _within(folder, _documents_for(other, other_account, root)):
-                return ("That folder is %s's folder inside the folder for every provider, or "
+                return ("That folder is %s's folder inside the Documents folder, or "
                         "inside it. Choose a folder of their own."
                         % _who(other_name, other_account))
     return None
@@ -4532,15 +5128,15 @@ def _documents_before_run(apps: dict, app_name: str, account: str) -> list:
     want = _documents_for(meta, account, root)
     problem = _in_root_problem(apps, app_name, account, root) or _root_held_problem(apps, root)
     if problem:
-        return ["Documents stay where they were. %s would get %s inside the folder for every "
-                "provider. %s" % (_who(app_name, account), want, problem)]
+        return ["Documents stay where they were. %s would get %s inside the Documents "
+                "folder. %s" % (_who(app_name, account), want, problem)]
     missed = []
     if _sync_documents(apps, root, only=(app_name, account), missed=missed):
-        return ["Documents go to %s from this run on, inside the folder for every provider "
+        return ["Documents go to %s from this run on, inside the Documents folder "
                 "set in Settings." % want]
     if missed:
-        return ["Documents stay where they were. %s would get %s inside the folder for every "
-                "provider, and its config could not be written." % (missed[0], want)]
+        return ["Documents stay where they were. %s would get %s inside the Documents "
+                "folder, and its config could not be written." % (missed[0], want)]
     return []
 
 
@@ -4581,6 +5177,10 @@ def _indexed_files(root: Path):
     return found
 
 
+# What the Move takes, the core's renaming.VALID_DOC_EXTS.
+DOCUMENT_ENDINGS = (".pdf", ".xls", ".xlsx", ".csv")
+
+
 def _documents_left(meta: dict, account: str) -> int:
     """How many documents an account's records name that are saved and
     checked, and are in a folder of their kind in its own folder or in a
@@ -4613,7 +5213,7 @@ def _documents_left(meta: dict, account: str) -> int:
         files = [main] + [e.get("file") for e in (invoices if isinstance(invoices, list) else ())
                           if isinstance(e, dict) and e.get("kept", True)]
         for raw in files:
-            if not isinstance(raw, str) or not raw.strip().lower().endswith(".pdf"):
+            if not isinstance(raw, str) or not raw.strip().lower().endswith(DOCUMENT_ENDINGS):
                 continue
             path = Path(raw.strip())
             path = path if path.is_absolute() else root / path
@@ -4671,11 +5271,12 @@ def _documents_account(app_name: str, account: str):
     apps = discover_apps()
     meta = apps.get(app_name)
     if meta is None or account not in meta["accounts"]:
-        raise HTTPException(404, "unknown app or account")
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
     try:
         root = _account_root(meta, account)
     except ValueError:
-        raise HTTPException(404, "that account's config names no folder PaperPull can read")
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
     return apps, meta, root
 
 
@@ -4750,7 +5351,7 @@ def _save_account_documents(body: dict) -> dict:
         problem = _in_root_problem(apps, app_name, account, docs_root) or \
             _root_held_problem(apps, docs_root, skip=(app_name, account))
         if problem:
-            raise HTTPException(400, "%s would get %s inside the folder for every provider. %s"
+            raise HTTPException(400, "%s would get %s inside the Documents folder. %s"
                                 % (_who(app_name, account), folder, problem))
     elif folder:
         problem = (_documents_problem(apps, app_name, account, folder)
@@ -4761,7 +5362,7 @@ def _save_account_documents(body: dict) -> dict:
         folder = os.path.normpath(folder)
     cfg_path = _account_config(meta, account)
     if not cfg_path.is_file():
-        raise HTTPException(404, "that account has no settings yet")
+        raise HTTPException(404, NO_CONFIG_YET % _who(app_name, account))
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     # Its own folder is written as "" while a documents folder is set, so
     # the account stays out of it, and is no setting at all when none is.
@@ -4793,8 +5394,8 @@ def _save_documents_root(folder: str, apply_all: bool) -> dict:
         raise HTTPException(409, "A history file is being imported. Save this once it has "
                                  "finished.")
     if apply_all and (not folder or os.path.normpath(folder) != _documents_root()):
-        raise HTTPException(409, "Save that folder first. Use it for every provider gives every "
-                                 "provider and person a folder inside the folder saved.")
+        raise HTTPException(409, "Save the Documents folder first. Apply to every account "
+                                 "then gives each account a folder inside it.")
     apps = discover_apps()
     if folder:
         problem = _documents_root_problem(apps, folder, force=apply_all)
@@ -4810,7 +5411,7 @@ def _save_documents_root(folder: str, apply_all: bool) -> dict:
     try:
         _write_settings(data)
     except OSError as e:
-        raise HTTPException(500, "could not save the folder: %s" % e)
+        raise HTTPException(500, "Could not save the folder (%s). Try again." % e)
     missed = []
     written = _sync_documents(apps, old, force=apply_all, missed=missed)
     following, own = _documents_counts(apps, folder)
@@ -4843,13 +5444,13 @@ async def api_terms(request: Request):
     except Exception:
         raise HTTPException(400, "expected a JSON body")
     if not isinstance(body, dict) or body.get("accepted") != TERMS_VERSION:
-        raise HTTPException(409, "those are not the current terms, reload the page")
+        raise HTTPException(409, "The terms have changed. Reload the page to read them.")
     data = _read_settings()
     data["terms_accepted"] = TERMS_VERSION
     try:
         _write_settings(data)
     except OSError as e:
-        raise HTTPException(500, "could not save the answer: %s" % e)
+        raise HTTPException(500, "Could not save the answer (%s)." % e)
     return {"accepted": TERMS_VERSION}
 
 
@@ -4931,25 +5532,6 @@ def favicon():
 
 
 STATIC = HERE / "static"
-# The panel's two typefaces, gui/static/fonts, licensed under the SIL Open
-# Font License (NOTICE.md). Served by name from this list and nothing else,
-# so no request can name another file.
-FONTS = ("AtkinsonHyperlegibleNext.ttf", "AtkinsonHyperlegibleMono.ttf")
-
-
-@app.get("/fonts/{name}", include_in_schema=False)
-def font(name: str):
-    """One of the panel's typefaces. Like the icon they are the same for
-    everyone and say nothing about the person. On the server they come only
-    after the password, as every page does. Kept for a day in the browser."""
-    if name not in FONTS:
-        raise HTTPException(404, "no such font")
-    try:
-        data = (STATIC / "fonts" / name).read_bytes()
-    except OSError:
-        raise HTTPException(404, "no such font")
-    return Response(content=data, media_type="font/ttf",
-                    headers={"Cache-Control": "max-age=86400"})
 
 
 def _page() -> str:

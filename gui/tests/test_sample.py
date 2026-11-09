@@ -220,3 +220,17 @@ def test_it_is_built_the_same_way_every_time(panel, tmp_path):
     names = lambda d: sorted(str(p.relative_to(d)) for p in d.rglob("*"))
     assert names(a) == names(b)
     assert (a / "Chase Statements" / "progress.json").read_bytes() ==            (b / "Chase Statements" / "progress.json").read_bytes()
+
+
+def test_each_account_says_which_kind_of_provider_it_is(panel):
+    """The panel draws each row's symbol from its provider's group in
+    providers.json, a bank's building or a shop's bag, so every row carries
+    that group by name, and it is one the page knows."""
+    import json
+    groups = set(json.loads(app_module.PROVIDER_CARDS.read_text(encoding="utf-8"))["groups"])
+    _sample(True)
+    rows = app_module.api_accounts()["accounts"]
+    assert rows
+    for r in rows:
+        assert r["group"] in groups | {""}, r["app"]
+    assert all(r["group"] for r in rows), "every sample provider has a card"

@@ -2,19 +2,19 @@
 
 The bundle's main executable used to be a dozen lines of C that ran
 `open -a Terminal` on Resources/paperpull-panel.sh. It is now
-packaging/macos/launcher.m, Objective-C that starts the panel as a child
-process and shows it in a WKWebView, and packaging/build_macos.py compiles
-it. The two are written to one contract, and this holds the build side and
+packaging/macos/launcher.m, Objective-C that starts gui/mac_host.py and
+shows the panel it runs in a WKWebView, and packaging/build_macos.py compiles
+it. test_mac_host.py runs the host for real. The two are written to one contract, and this holds the build side and
 the source's side of it to each other, because the launcher cannot be run
 on the machines that run these tests:
 
-    clang -fobjc-arc -O2 -arch <ARCH> -mmacosx-version-min=<MACOS_MIN>
+    clang -fobjc-arc -O2 -arch <ARCH> -mmacosx-version-min=<WINDOW_MACOS_MIN>
           -framework Cocoa -framework WebKit
           -o Contents/MacOS/PaperPull packaging/macos/launcher.m
 
 The plist carries NSAppTransportSecurity with NSAllowsLocalNetworking, or
-WKWebView refuses http://127.0.0.1. The source reads PAPERPULL_PORT (a port
-for tests) and PAPERPULL_LAUNCHER_SELFTEST ("ready" and "window"), which the
+WKWebView refuses http://127.0.0.1. The source reads
+PAPERPULL_LAUNCHER_SELFTEST ("ready" and "window"), which the
 release workflow's own-executable steps use: "ready" is the hard gate, and
 "window" is allowed to fail on a runner with no display. The window itself is
 looked at by hand and by that second step, not here.
@@ -23,18 +23,11 @@ import importlib.util
 import os
 import plistlib
 import re
-import signal
-import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
-
-# bm.subprocess is the real module, which _record_commands() replaces run() on
-# for the length of a test, so the script tests keep the real one.
-REAL_RUN = subprocess.run
 
 REPO = Path(__file__).resolve().parents[2]
 LAUNCHER = REPO / "packaging" / "macos" / "launcher.m"
@@ -95,7 +88,7 @@ def test_the_build_compiles_the_launcher_source_with_cocoa_webkit_and_arc(bm, mo
     cmd = clang[0]
     assert "-fobjc-arc" in cmd
     assert cmd[cmd.index("-arch") + 1] == "x86_64", "the architecture being built"
-    assert "-mmacosx-version-min=" + bm.MACOS_MIN in cmd
+    assert "-mmacosx-version-min=" + bm.WINDOW_MACOS_MIN in cmd
     frameworks = [cmd[i + 1] for i, c in enumerate(cmd) if c == "-framework"]
     assert sorted(frameworks) == ["Cocoa", "WebKit"]
     assert cmd[cmd.index("-o") + 1] == str(bm.MACOS / "PaperPull")
@@ -130,7 +123,7 @@ def test_the_plist_lets_the_web_view_reach_the_panel_on_this_computer(bm, monkey
     assert plist["NSPrincipalClass"] == "NSApplication"
     assert plist["LSApplicationCategoryType"] == "public.app-category.productivity"
     assert plist["CFBundleExecutable"] == "PaperPull"
-    assert plist["LSMinimumSystemVersion"] == bm.MACOS_MIN
+    assert plist["LSMinimumSystemVersion"] == bm.WINDOW_MACOS_MIN
     assert "NSAllowsArbitraryLoads" not in plist["NSAppTransportSecurity"], \
         "only local networking is opened, never the web"
 
@@ -138,136 +131,13 @@ def test_the_plist_lets_the_web_view_reach_the_panel_on_this_computer(bm, monkey
 def test_the_terminal_script_and_the_command_line_shim_still_ship(bm, monkeypatch):
     _write_bundle(bm, monkeypatch)
     panel = (bm.RES / "paperpull-panel.sh").read_text(encoding="utf-8")
-    assert '--host 127.0.0.1 --port "$PORT" --app-dir "$DIR/gui"' in panel
-    assert 'PORT="${PAPERPULL_PORT:-8765}"' in panel, "8765 unless a test says otherwise"
+    assert '--host 127.0.0.1 --port 8765 --app-dir "$DIR/gui"' in panel
     assert (bm.RES / "paperpull").is_file()
     if sys.platform != "win32":
         # Windows has no execute bit, so os.chmod(0o755) leaves both at 0o666
         # there. The bundle is only ever built and run on a Mac.
         assert (bm.RES / "paperpull-panel.sh").stat().st_mode & 0o111
         assert (bm.RES / "paperpull").stat().st_mode & 0o111
-
-
-# -- the terminal script, run for real against a stand-in Python ---------------
-
-def _free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
-@pytest.fixture()
-def panel_env(bm, monkeypatch, tmp_path):
-    """The script as write_bundle() writes it, in a bundle whose python/bin/python3
-    is a stand-in that listens on the port it is given (as uvicorn would) and
-    notes that it started, and an `open` on PATH that records what it was
-    asked to open."""
-    if sys.platform == "win32":
-        pytest.skip("a bash script")
-    _write_bundle(bm, monkeypatch)
-    res = tmp_path / "res"
-    (res / "python" / "bin").mkdir(parents=True)
-    (res / "gui").mkdir()
-    script = res / "paperpull-panel.sh"
-    script.write_text((bm.RES / "paperpull-panel.sh").read_text(encoding="utf-8"),
-                      encoding="utf-8")
-    script.chmod(0o755)
-    py = res / "python" / "bin" / "python3"
-    py.write_text(
-        "#!%s\n"
-        "import os, signal, socket, sys, time\n"
-        "port = int(sys.argv[sys.argv.index('--port') + 1])\n"
-        "open(os.environ['STARTED'], 'w').write(str(os.getpid()))\n"
-        "signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))\n"
-        "s = socket.socket()\n"
-        "s.bind(('127.0.0.1', port))\n"
-        "s.listen()\n"
-        "while True:\n"
-        "    time.sleep(0.05)\n" % sys.executable, encoding="utf-8")
-    py.chmod(0o755)
-    tools = tmp_path / "tools"
-    tools.mkdir()
-    opener = tools / "open"
-    opener.write_text('#!/bin/sh\necho "$@" >> "$OPENED"\n', encoding="utf-8")
-    opener.chmod(0o755)
-    env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
-               STARTED=str(tmp_path / "started"), OPENED=str(tmp_path / "opened"),
-               HOME=str(tmp_path), PAPERPULL_PORT=str(_free_port()))
-    return script, env, tmp_path
-
-
-def _start(script, env):
-    """The script as a person's terminal starts it. SIGINT is put back to its
-    default first: a test runner started from a script or a background job
-    has it ignored, and a shell cannot trap a signal it inherited ignored."""
-    return subprocess.Popen(
-        ["/bin/bash", str(script)], env=env, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True,
-        preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
-
-
-def _wait_for(path, seconds=15):
-    end = time.time() + seconds
-    while time.time() < end:
-        if path.exists() and path.read_text(encoding="utf-8").strip():
-            return True
-        time.sleep(0.05)
-    return False
-
-
-def test_the_terminal_script_opens_the_browser_once_the_panel_answers(panel_env):
-    script, env, tmp = panel_env
-    proc = _start(script, env)
-    try:
-        assert _wait_for(tmp / "opened"), "the browser was never opened"
-        assert (tmp / "opened").read_text(encoding="utf-8").split() == \
-            ["http://127.0.0.1:" + env["PAPERPULL_PORT"]]
-    finally:
-        proc.send_signal(signal.SIGTERM)
-        proc.communicate(timeout=20)
-
-
-@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM])
-def test_stopping_the_terminal_script_stops_the_panel_it_started(panel_env, sig):
-    script, env, tmp = panel_env
-    proc = _start(script, env)
-    assert _wait_for(tmp / "opened"), "the panel never came up"
-    pid = int((tmp / "started").read_text(encoding="utf-8"))
-    proc.send_signal(sig)
-    proc.communicate(timeout=20)
-    end = time.time() + 10
-    while time.time() < end:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return
-        time.sleep(0.05)
-    os.kill(pid, signal.SIGKILL)
-    pytest.fail("the panel outlived the script that started it")
-
-
-def test_a_taken_port_means_no_panel_no_browser_and_a_message_to_quit_the_app(panel_env):
-    script, env, tmp = panel_env
-    with socket.socket() as held:
-        held.bind(("127.0.0.1", int(env["PAPERPULL_PORT"])))
-        held.listen()
-        done = REAL_RUN(["/bin/bash", str(script)], env=env, capture_output=True,
-                              text=True, timeout=30)
-    assert done.returncode != 0
-    assert "PaperPull.app" in done.stderr and "quit" in done.stderr.lower()
-    assert not (tmp / "started").exists(), "a second panel was started on a taken port"
-    assert not (tmp / "opened").exists(), "the browser was sent to somebody else's panel"
-
-
-def test_a_panel_that_dies_before_it_answers_is_not_opened_in_the_browser(panel_env):
-    script, env, tmp = panel_env
-    (script.parent / "python" / "bin" / "python3").write_text(
-        "#!/bin/sh\necho failed to bind >&2\nexit 3\n", encoding="utf-8")
-    done = REAL_RUN(["/bin/bash", str(script)], env=env, capture_output=True,
-                          text=True, timeout=30)
-    assert done.returncode == 3
-    assert "PaperPull.app" in done.stderr
-    assert not (tmp / "opened").exists()
 
 
 def test_the_readme_first_describes_a_window_not_a_terminal(bm, monkeypatch):
@@ -381,9 +251,8 @@ def source():
     return LAUNCHER.read_text(encoding="utf-8")
 
 
-def test_the_launcher_source_reads_the_two_environment_variables(source):
+def test_the_launcher_source_reads_its_environment_variable(source):
     assert "PAPERPULL_LAUNCHER_SELFTEST" in source
-    assert "PAPERPULL_PORT" in source
     for mode in ('"ready"', '"window"'):
         assert mode in source, mode
 
@@ -399,11 +268,9 @@ def test_the_launcher_source_uses_the_frameworks_it_is_linked_with(source):
     assert "WKWebView" in source
 
 
-def test_the_launcher_source_runs_the_panel_the_way_the_terminal_script_does(source):
-    for needed in ("python/bin/python3", "uvicorn", "app:app", "--app-dir", "127.0.0.1",
-                   "PYTHONNOUSERSITE", "PYTHONPYCACHEPREFIX", "panel.log"):
+def test_the_launcher_starts_the_host_with_the_bundled_python(source):
+    for needed in ("python/bin/python3", "gui/mac_host.py", "READY %d", "panel.log"):
         assert needed in source, needed
-    assert "8765" in source
     assert "http://localhost" not in source and "http://[::1]" not in source, \
         "the panel's Host check allows them, but the web view must use 127.0.0.1"
 

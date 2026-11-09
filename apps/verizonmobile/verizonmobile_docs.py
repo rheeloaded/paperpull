@@ -1,11 +1,12 @@
-"""Verizon Mobile bill downloader (local, supervised). UNVERIFIED, see verizonmobile_site.py.
+"""Verizon Mobile bill downloader (local, supervised).
 
-This app was written without a Verizon Mobile account so that someone who holds one
-can test it without writing code. The orchestrator below is the same one
-every other bill app runs on. What has not been proven is the site layer,
-verizonmobile_site.py, which carries every guess about verizon.com and says which ones
-most need a survey. Run --diagnose first and attach the Diagnostics file
-to the GitHub issue. It takes no screenshot and masks digit runs.
+Confirmed on a real account (24 bills, issue #31). The site layer,
+verizonmobile_site.py, reads Bill & payment history's own bill list and asks
+each bill's PDF from inside the signed-in page, the way the page's own
+Review bill PDF does, and presses nothing. A bill is known by its account
+and its end date. A list that cannot be read whole, a sign-out, or another
+account shown stops the run once, with nothing recorded against the bill
+it stopped at. Diagnose takes no screenshot and masks digit runs.
 
 Usage:
     python verizonmobile_docs.py --login       verify connection to your browser
@@ -36,7 +37,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -87,7 +89,10 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id  # unused, the date is the identity
+        # The bill's id, "bill-4321-00001-2026-10-11", its account's last
+        # four digits with the suffix and its end date, what it is known and
+        # found again by.
+        self.document_id = document_id
         self.source_url = kw.get("source_url", "")  # page where the doc's download link lives
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
@@ -106,9 +111,9 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Stable identity. Category, date and title. Verizon Mobile's bill list is
-        read from the page, so there is no document id to store, and a
-        bill's date is what tells one from the next."""
+        """Stable identity. A bill's id, its account and its end date
+        (verizonmobile_site.bills_of). A record without one falls back to
+        category, date and title."""
         if self.document_id:
             return f"id:{self.document_id}"
         # Keep the last four. Cutting to forty characters made two cards
@@ -134,6 +139,20 @@ def migrate_legacy_keys(records: dict) -> int:
     short enough to fit has no such records and nothing happens.
     """
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
+
+
+def told_apart_by(record: dict) -> str:
+    """What a bill's file adds to its name when another file already has
+    that name, the same on every run, the last four digits of its account
+    with the suffix, never " (2)" (core/tests/test_every_app_renames_each_file_for_its_own_record).
+    Two bills of one account and end date stop the list
+    (verizonmobile_site.bills_of), so this is reached when a second account
+    has a bill of that date, or a file of that name is already in the
+    folder. The download and Rename both ask this, so they agree. A record
+    of another id gives the end of it."""
+    doc_id = str((record or {}).get("document_id") or "").strip()
+    m = site.BILL_ID_RE.fullmatch(doc_id)
+    return m.group(1) if m else doc_id[-6:]
 
 
 class App:
@@ -163,14 +182,20 @@ class App:
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
+        # The owner's name first. The site adds what names the account, its
+        # number and the name on it, once Bill & payment history shows them.
+        site.set_private_words([self.config.get("owner", "")])
 
         self._pw = None
         self._browser = None
         self._context = None
         self._work_page = None
         self._cdp_mode = False
+        # The account Bill & payment history showed when this run listed it,
+        # whose bills the run takes first (_shown_first).
+        self._shown_account = ""
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -208,9 +233,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -241,13 +264,10 @@ class App:
             self._work_page = dom[0] if dom else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
-        # A real Edge or Chrome attached over CDP saves a download itself,
-        # into its own Downloads folder, and Playwright never sees it. So
-        # the browser is pointed at a folder under the output and the site
-        # layer watches that folder after every click, alongside the
-        # download event, PDF response and new tab it already catches.
+        # Nothing goes through the browser's downloads: each bill is asked
+        # for from inside the page (verizonmobile_site._fetch). The folder
+        # a former build pointed the browser at is still cleared of copies.
         self._dl_dir = Path(self.config["output_dir"]) / ".verizonmobile-downloads"
-        site.set_download_dir(self._work_page, self._dl_dir)
         # A file here that is an exact copy of a document in the archive
         # is one the browser was left holding, and goes. Nothing else is
         # touched (capture.clear_archived_copies).
@@ -319,7 +339,7 @@ class App:
             prefer_real=True,
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
@@ -327,21 +347,23 @@ class App:
     def cmd_login(self):
         print("Checking the connection to your signed-in Verizon Mobile browser...\n")
         page = self.page()
-        ok = site.goto_documents(page)
+        # What only a signed-in page shows, Bill & payment history's own
+        # bill list, read whole.
+        listed = site.bill_list_opens(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
             print("Connected, but Verizon Mobile shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
-        elif ok:
-            print("Success: connected and the Documents page is visible.")
+        elif listed:
+            print("Success. Connected, and Bill & payment history lists your bills.")
             print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
-            print("Connected, but the Documents list did not load, so this cannot say")
-            print("whether you are signed in. Look at the browser window and answer")
+            print("Connected, but Bill & payment history did not list your bills, so this")
+            print("cannot say whether you are signed in. Look at the browser window and answer")
             print("anything Verizon Mobile asks there yourself. If it shows your account,")
-            print("open your Documents/Statements page in it, then run --diagnose.")
+            print("open Bill & payment history in it, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -416,8 +438,13 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
+        # The bill's id names its account and its end date, and is what
+        # the bill is known and found again by. The href is the PDF's path,
+        # never an address with the page's channel in it.
         doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+                       date=date, confidence=confidence, source_url=source_url,
+                       href=getattr(r, "href", "") or "", account="",
+                       document_id=(getattr(r, "document_id", "") or "").strip())
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -431,19 +458,37 @@ class App:
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, for Resume (paperpull_core.listing).
         listing.started(self)
-        page = self.page()
         n_new = 0
-        # Verizon Mobile lists past bills on a history page. Open it and read the bill
-        # date from every control that fetches a bill.
-        if not site.goto_documents(page):
-            self.check_session(page)
-            site.goto_documents(page)
+        # The tab is taken the way each bill takes it, the person's own tab
+        # on verizon.com or, with none open, one of this run's own, never a
+        # tab of another site.
+        page = self._on_its_site()
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        # Bill & payment history is then opened and read in one go by the
+        # site layer, so a sign-out on the way reaches the boundary below
+        # and stops the run, and a list read in part is never taken whole.
+        try:
+            docs = site.collect_download_docs(page)
+        except site.SessionExpired:
+            self.session_ended()
+        except site.ListStopped as stop:
+            # What was listed is kept, and the listing stays noted as one
+            # that stopped, so neither this run nor a Resume calls it whole.
+            for r in stop.docs:
+                self._record_rawdoc(r, site.BILLING_URL)
+            self.discovery.save()
+            print(f"\n!! The Verizon Mobile bill history stopped partway, since {stop}.")
+            print(f"   The {len(stop.docs)} bill(s) listed before it stopped are kept,")
+            print("   and this run stops rather than call the list read. Run it again.")
+            self.write_failure("read the documents list", "the list stopped partway")
+            raise SystemExit(1)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
-        log.info("billing history: %d statements, %d new", len(docs), n_new)
+        log.info("bill history: %d bills, %d new", len(docs), n_new)
+        # Every bill of one history is of the account it shows (bills_of).
+        shown = {site.account_in(r.document_id) for r in docs}
+        self._shown_account = shown.pop() if len(shown) == 1 else ""
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -506,22 +551,56 @@ class App:
     # -- processing --------------------------------------------------------
 
     def _on_its_site(self):
-        """The tab the next document is taken in, on Verizon Mobile's own site
-        and never a tab of another site. Verizon Mobile keeps its session in
-        a cookie a new tab shares, so with no tab of the person's on the
-        site the documents page is opened in a tab of this run's own
-        (tabs.on_its_site)."""
+        """The tab Discover and the next bill are taken in, on Verizon
+        Mobile's own site and never a tab of another site. Verizon Mobile
+        keeps its session in a cookie a new tab shares, so with no tab of
+        the person's on the site Bill & payment history is opened in a tab
+        of this run's own (tabs.on_its_site)."""
         return tabs.on_its_site(self, site.is_safe_url, "Verizon Mobile",
                                 self._open_documents)
 
     def _open_documents(self, page):
-        """Verizon Mobile's documents page, opened by its address the way
-        discovery opens it."""
+        """Bill & payment history, opened by its address the way discovery
+        opens it."""
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
 
+    def _shown_first(self, docs: List[Document]) -> List[Document]:
+        """The bills in the order a run takes them, those of the account My
+        Verizon shows first, newest first, then those of every other account.
+
+        A bill's PDF address names no account, so a bill is fetched only
+        while its own account is shown (verizonmobile_site.download_bill),
+        and the first bill of another account stops the run once, naming
+        the account to choose. Taken newest first across accounts, one bill
+        of another account that was refused or interrupted stopped every
+        run at it, and the older bills of the account shown were never
+        reached. Now such a bill waits for a run with its own account shown.
+
+        With the bills not yet done all of one account there is nothing to
+        order and the history is not read for it. A run that listed knows
+        the account from its list, and a Resume reads the history once."""
+        waiting = {site.account_in(d.document_id) for d in docs
+                   if not self._already_done(d)} - {""}
+        if len(waiting) < 2:
+            return docs
+        shown = self._shown_account
+        if not shown:
+            page = self._on_its_site()
+            self.check_session(page)
+            try:
+                shown = site.account_shown(page)
+            except site.SessionExpired:
+                self.session_ended()
+            except site.ListStopped as stop:
+                self.list_changed(stop)
+        # A stable sort, so each account's bills stay newest first.
+        return sorted(docs, key=lambda d: site.account_in(d.document_id) not in ("", shown))
+
     def process(self, docs: List[Document], dry_run: bool = False):
+        if not dry_run:
+            docs = self._shown_first(docs)
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
@@ -546,35 +625,81 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
+            except site.SessionExpired:
+                # Verizon answered as a signed-out session. Every bill after
+                # this one would get the same answer, so the run stops here,
+                # with nothing recorded against this one.
+                self.session_ended()
+            except site.OtherAccountShown as e:
+                # The history shows another account, and a bill's PDF
+                # address names none, so it would be that account's bill.
+                # Every bill of the one this bill was listed under would
+                # meet the same, so the run stops once, with nothing
+                # recorded against this one.
+                self.account_not_shown(e)
+            except site.ListStopped as stop:
+                # Bill & payment history could not be read again for this
+                # bill. Every bill after it reads the same list, so the run
+                # stops here rather than send each one to review.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
 
+    def session_ended(self) -> None:
+        """Stop the run because verizon.com has signed the session out.
+        Progress is saved, nothing is recorded for review, and the run ends
+        as one that stopped (tabs.stop)."""
+        tabs.stop(self, [
+            "Verizon Mobile answered as signed out, so this run stops here.",
+            "Everything saved so far is kept. Sign in again in the open browser",
+            "window, then run Resume to carry on from where this stopped.",
+        ])
+
+    def account_not_shown(self, shown: "site.OtherAccountShown") -> None:
+        """Stop the run because Bill & payment history shows another account
+        than the one the next bill was listed under. Progress is saved and
+        nothing is recorded for review (tabs.stop)."""
+        tabs.stop(self, [
+            f"Verizon Mobile shows the account ending {shown.shown}, and the next bill",
+            f"was listed under the account ending {shown.wanted}, so this run stops here.",
+            f"Everything saved so far is kept. Choose the account ending {shown.wanted}",
+            "in My Verizon, then run Resume to carry on from where this stopped.",
+        ])
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        bill was sought. Nothing is recorded against the bill, and the run
+        leaves as one whose list did not end whole, which only a run that
+        lists carries on from (listing.read_again_stopped)."""
+        log.info("the bill history could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list changed or stopped")
+        listing.read_again_stopped(self, (
+            f"The Verizon Mobile bill history could not be read again, since {stop}, "
+            "so this run stops here."))
+
     def download_one(self, page, doc: Document, filename: str):
-        """Save one bill. The site layer fetches the row's PDF link from
-        inside the page when there is one, and otherwise clicks the row's
-        own control and catches what arrives."""
+        """Save one bill. The site layer reads the bill history again, finds
+        the bill by its account and end date, and asks for its PDF from
+        inside the page only when the history shows that account. Nothing
+        is pressed."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        # The last of the document id, used only if the name is taken.
-        # Two documents on one day used to differ by " (2)", which says
-        # nothing about which is which and moves between them when a file
-        # is deleted (#49, and the same complaint on #43).
+        # Only a name already taken in the folder gets the account's last
+        # four digits and suffix (told_apart_by).
         out_path = unique_path(folder, filename, self.config["max_path_length"],
-                               distinguisher=(doc.document_id or "")[-6:])
+                               distinguisher=told_apart_by(doc.to_dict()))
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Open the bill-history page and click this bill's "Download detailed
-        # bill" button; Playwright captures the resulting download event.
-        if not site.goto_documents(page):
-            self.check_session(page)
-            site.goto_documents(page)
+        # The site layer opens Bill & payment history once for this bill,
+        # finds it there and fetches its PDF.
         trace: list = []
         saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                   title=doc.title, trace=trace)
+                                   title=doc.title, trace=trace,
+                                   document_id=doc.document_id)
         # A capture that failed must not leave a convincing empty file behind.
         # A ZIP the capture took stays, for the branch below that opens it.
         if out_path.exists() and not (saved and receipt_pdf.is_zip(out_path)) and (
@@ -588,12 +713,12 @@ class App:
                 "landed_on": site.redact(page.url or ""),
                 "responses": trace[:80]}, words_for('Verizon Mobile', site))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
@@ -761,7 +886,8 @@ class App:
         nothing is asked of the provider here (#43, #49). A preview
         unless --apply is given."""
         self.stats["mode"] = "rename"
-        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
+        renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)),
+                         told_apart=told_apart_by)
 
     def cmd_verify(self):
         self.stats["mode"] = "verify"
@@ -886,16 +1012,16 @@ class App:
             stopped=stopped or getattr(self, "_diagnose_stopped", None))
 
     def cmd_diagnose(self):
-        """Survey the billing area and write a file a tester can attach to
-        the GitHub issue. No screenshot, digit runs masked, JSON bodies as
-        shape only. Nothing is downloaded and nothing but a billing link is
-        followed."""
+        """Survey Bill & payment history and write a file a tester can attach
+        to the GitHub issue. No screenshot, digit runs masked, JSON bodies
+        as shape only. Nothing is downloaded, nothing is pressed and no link
+        is followed."""
         self.stats["mode"] = "diagnose"
         words = words_for('Verizon Mobile', site)
         page = self.page()
-        info = {"timestamp": now_iso(), "unverified": True,
-                "note": Fixed("Verizon Mobile app built without an account. This survey is what "
-                              "the maintainer repairs the site layer against.")}
+        info = {"timestamp": now_iso(),
+                "note": Fixed("A survey of the Verizon Mobile Bill & payment history page. It is "
+                              "what a repair of the site layer is checked against.")}
         stopped = None
         try:
             try:
@@ -912,8 +1038,10 @@ class App:
             info["landed_on"] = site.redact(page.url)
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            site.set_private_words([self.config.get("owner", "")])
-            info["survey"] = site.survey(page, max_follow=0 if stopped is not None else 6)
+            # The owner's name and the account's words are already private
+            # (App.__init__ and the history just read), and nothing is
+            # followed.
+            info["survey"] = site.survey(page)
             if found:
                 site.expand_all(page)
                 site.scroll_full_page(page)
@@ -926,8 +1054,18 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            bills = site.collect_download_docs(page) if found else []
-            info["bills_recognized"] = [{"date": b.date_text, "has_pdf_link": bool(b.href)}
+            bills = []
+            info["list_read_whole"] = False
+            if found:
+                try:
+                    bills = site.collect_download_docs(page)
+                    info["list_read_whole"] = True
+                except (site.SessionExpired, site.ListStopped) as cut:
+                    # Said in the file, and what was read before it stopped
+                    # is shown, so the rest of the survey is still written.
+                    bills = getattr(cut, "docs", [])
+                    info["list_stopped"] = str(cut)[:200]
+            info["bills_recognized"] = [{"date": b.date_text, "has_id": bool(b.document_id)}
                                         for b in bills[:40]]
             docs = site.collect_documents(page)
             info["rows_collected"] = len(docs)
@@ -972,9 +1110,10 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='Verizon Mobile',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='Verizon Mobile',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

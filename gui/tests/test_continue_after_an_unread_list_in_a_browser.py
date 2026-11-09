@@ -234,7 +234,7 @@ def test_a_round_that_meets_one_tries_it_again_as_get_new(panel, shop):
     tab.wait_for_function("() => QUEUE && QUEUE.held && RUN.state === 'done'", timeout=60000)
     first = shop if started(shop) else bank
     assert started(first) == [["--resume", "--yes"]]
-    assert "Try it again to read the list first" in tab.inner_text("#view-run")
+    assert "Try it again to read the list, or skip to the next." in tab.inner_text("#view-run")
     tab.click("[data-do=queue-retry]")
     tab.wait_for_function("() => QUEUE && QUEUE.i === 1 && QUEUE.held && RUN.state === 'done'",
                           timeout=60000)
@@ -262,7 +262,7 @@ def test_a_retry_that_stops_for_a_sign_in_says_so_at_the_pause(panel, shop):
     tab.wait_for_selector("#view-home [data-do=queue]")
     tab.click("#view-home [data-do=queue]")
     tab.wait_for_function("() => QUEUE && QUEUE.held && RUN.state === 'done'", timeout=60000)
-    assert "Try it again to read the list first" in tab.inner_text("#view-run")
+    assert "Try it again to read the list, or skip to the next." in tab.inner_text("#view-run")
     tab.click("[data-do=queue-retry]")
     tab.wait_for_function("() => QUEUE && QUEUE.held && RUN.state === 'done' && RUN.action === 'all'",
                           timeout=60000)

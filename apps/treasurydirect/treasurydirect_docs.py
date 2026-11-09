@@ -43,7 +43,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -219,7 +220,7 @@ class App:
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
         # The owner's name first. The site adds what names the account, its
         # number, taxpayer id and registration, from every page it reads.
@@ -267,9 +268,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -375,7 +374,7 @@ class App:
             prefer_real=True,
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
@@ -740,12 +739,12 @@ class App:
                 "landed_on": site.redact(self._url_of(page)),
                 "responses": trace[:80]}, words_for('TreasuryDirect', site))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not render the document page")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
@@ -1096,9 +1095,10 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='TreasuryDirect',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='TreasuryDirect',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

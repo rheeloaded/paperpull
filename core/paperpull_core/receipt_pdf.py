@@ -870,7 +870,8 @@ def render_url_headless(playwright, storage_state: dict, url: str,
     Nothing is printed when the tab was sent off the provider's hosts at any
     point, or is not on them at the moment of printing, and a PDF already
     written then is removed. Raises ValueError for those, SandboxRefused
-    when the browser's sandbox cannot start, RuntimeError(PROXY_REFUSED)
+    when the browser's sandbox cannot start, NoOwnChromium when Playwright's
+    own Chromium is not on this computer, RuntimeError(PROXY_REFUSED)
     behind a proxy, and Playwright's own error when the page could not be
     opened at all.
     """
@@ -882,7 +883,15 @@ def render_url_headless(playwright, storage_state: dict, url: str,
                          "provider's: %r" % (url or "")[:120])
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    browser = _launcher.sandboxed_launch(playwright.chromium, headless=True, args=[rules])
+    try:
+        browser = _launcher.sandboxed_launch(playwright.chromium, headless=True, args=[rules])
+    except Exception as e:
+        # Playwright's own Chromium is not on this computer, the usual case
+        # where sign-in uses the person's own browser. Its words tell the
+        # reader to run a command the packaged app does not have (#131).
+        if _launcher.is_missing_chromium(e):
+            raise _launcher.NoOwnChromium(_launcher.missing_chromium_words()) from None
+        raise
     try:
         policy = _RequestPolicy(browser, is_safe_url, is_asset_url)
         context = browser.new_context(storage_state=_state_for(storage_state, url, is_safe_url),

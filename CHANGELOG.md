@@ -10,8 +10,594 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
-- **Bank of America saves statements from the credit card page too, and is
-  confirmed on a real account (#121).** Statements & Documents at
+- **FedEx and Stripe read their list on a computer just started.** Each
+  keeps its list with the time it was read and reads it again once it is
+  four minutes old, and a list never read was judged by that age alone. On
+  Windows the clock it is measured by starts with the computer, so in the
+  first four minutes after a restart a download took the list it had never
+  read for a fresh one. FedEx then sent the invoice to Manual Review, and
+  Stripe fetched the address saved with the record, which can have expired.
+  A list never read is now always read first, and a census holds every
+  app's list to it. Both apps are still waiting for someone with an account
+  to test them.
+
+## [0.62.0] - 2026-11-09
+
+DKB, Discover Bank, Ziply Fiber and Cetera are the 82nd to 85th apps, and
+Verizon Mobile downloads wireless bills from a real account. The control
+panel looks and reads like a Mac app, puts what needs you first, and says
+why a run stopped and whose it is to fix. Get new pressed before signing in
+offers the sign-in and then the same run, a support report takes three
+steps, and a run started outside its app's folder keeps to that folder.
+
+### Added
+- **DKB, the 82nd app, the Postfach and its archive (#164).** It saves
+  every PDF in a DKB (Deutsche Kreditbank) Postfach and in its older
+  archive, account and card statements, securities documents, tax
+  certificates, contract information and messages, each kind in a folder
+  of its own named as the Postfach names it. Nothing is clicked. The list, the messages that
+  say each document's kind, the archive's folders and each PDF come from
+  the same GET calls the Postfach page makes, from inside the signed-in
+  page, and the call that marks a message read is never sent. DKB signs a
+  tab out about six minutes after the last thing the person did in it, and
+  a run's calls do not count, so a long run stops as signed out and Resume
+  carries on after a new sign-in. Contributed by @tabacha and run on the
+  contributor's own account, 611 documents saved. Before merging, a part
+  of the list that does not answer as a list, the archive or the messages
+  among them, was made to stop the run rather than be passed over with the
+  list called whole, and to stop a run that reads it again while documents
+  download once with the list unread. Two documents of one day, subject
+  and account are now told apart by their ids, so neither is saved with
+  the other's bytes, and Login says signed in only once DKB answers with
+  the list. An archive folder's subfolders are read too. A Postfach
+  document its messages leave out, a Postfach that answers empty while its
+  messages name documents, and a folder list with no folder in it stop the
+  list, a document with no date is left out and said rather than dropped
+  unseen, and a statement held in both the Postfach and the archive is
+  saved once. Like every other app, it says Sign in first when nobody is
+  signed in, and says when no sign-in window opened or nothing was
+  recorded.
+- **Discover Bank, the 83rd app, checking and savings statements (#151).**
+  `discoverbank` reads Discover Bank deposit accounts on bank.discover.com.
+  It reads every account on the Statements page's account menu from the
+  state the page keeps for it, asks each account's statement list the way
+  the page does, from inside the page, and saves each PDF under its own
+  account, named for it. Nothing on the page is pressed but the keep-alive
+  button of Discover's inactivity dialog, by its whole name, so a long run
+  is not signed out partway. Contributed by
+  @appchamp, whose full run saved 100 checking and 100 savings statements.
+  Money market and CD accounts are untested. Before merging, the Discover
+  card app was kept beside it, since Capital One moves Discover cards onto
+  its own site in waves into 2027, and the new app was given a port of its
+  own where it had taken the card app's. It no longer opens the account
+  menu and chooses each account when the menu's state cannot be read, nor
+  reads the page's text in place of the lists. An account whose list did
+  not answer, an account with no id or another's name, an option named for
+  an action, and a statement whose PDF is not its own account's, whose date
+  is no day, or whose kind its account's name and id disagree on, now leave
+  the list not whole, so the run keeps what it saved and stops at its end.
+  A list with nothing read is no longer noted whole. The list call takes no
+  paging anybody has seen, and both of the contributor's accounts answered
+  exactly 100 statements, one of them for 108 months, so a run says an
+  account whose list holds exactly 100 may have older statements out of
+  reach, and an account whose list answers with none leaves the list not
+  noted whole, without stopping the run. It no longer presses the site's own
+  Activity or Statements link when the Statements address lands elsewhere,
+  and a keep-alive button is pressed only by its whole name. Login says
+  signed in only once the account menu and a statement list answer, and a
+  run with nobody signed in, a sign-in window that did not open and an
+  empty recording end the way every other app's do.
+- **Ziply Fiber, the 84th app, monthly internet bills (#129).** It
+  downloads every bill My Account's Billing page lists from
+  ziplyfiber.com. Nothing is clicked. The app asks the page's own bill
+  list query from inside the signed-in page with the page's own headers,
+  which stay in memory for the run and are never written down, and
+  fetches each bill's PDF the same way. A list with no bills, an answer
+  the account API marks as failed, a list as long as was asked for, or a
+  page that asks about more than one account stops the list rather than
+  be read as whole. A bill is known by the account's last four digits and
+  its invoice id, its file name carries the account, and a bill listed
+  under another account than the one the page shows stops the run once
+  and names the account to choose. Contributed by crazyhorse90210 and run
+  on the contributor's own account. Before merging, an empty or failed
+  list was made to stop, a second account was made to stop the list, a
+  list that stops while bills download was made to stop the run once
+  with the list unread, a bill answered with JSON was made to fail alone,
+  the list was made to be read once a run, and the README was rewritten
+  for this app. Get new pressed before signing in now says Sign in first,
+  and a sign-in window that did not open or a recording with nothing in
+  it now says so, as every other app does.
+- **Cetera (AdviceWorks), the 85th app, brokerage statements and
+  quarterly performance reports (#130).** It downloads every statement of
+  every account the AdviceWorks client portal lists, and the quarterly
+  performance reports beside them. Nothing is clicked. The app asks the
+  page's own two lists from inside the signed-in page with the page's own
+  headers, which stay in memory for the run and are never written down,
+  and fetches each PDF the way the page's own download does. A list
+  shorter than its own count, a statement of an account the page did not
+  ask about, or a history with no statements stops the list rather than be
+  read as whole. A statement's file name carries its account as the portal
+  masks it. Contributed by crazyhorse90210 and run on the contributor's
+  own account. Before merging, one document answered with something other
+  than a PDF was made to fail alone, where it had stopped every run at that
+  document for good, two statements of one account and date were made to
+  leave only that date, a list that stops while documents download was
+  made to stop the run once with the list unread, and both lists were made
+  to be read once a run. A statement that comes back twice as the list is
+  read page by page now stops the list, where one row given twice could
+  hide a statement left out. A PDF refused while the lists still answer
+  now fails that document alone, where it stopped every run there as
+  signed out. A statement keeps the name the list gives it, so a
+  confirmation or a tax form is never filed as an account statement. Get
+  new pressed before signing in now says Sign in first, and a sign-in
+  window that did not open or a recording with nothing in it now says so,
+  as every other app does.
+- **Make a request, from the main page (#163).** A button on Accounts opens one
+  sheet for asking for a provider or a feature, with the questions a request
+  needs answered, and says so when PaperPull already reads the provider
+  asked for. The answers start the matching form on GitHub in the person's
+  own browser, for them to read and send, so PaperPull still sends nothing
+  itself. Of where you sign in, only the site goes, never the page's path
+  or what follows it, which can hold a username. Settings and the list of
+  providers open the same sheet. Contributed by @JasperDale420.
+
+### Changed
+- **The control panel looks and reads like a Mac app (#154).** It is set in the
+  computer's own font, San Francisco on a Mac and Segoe UI on Windows, so
+  the two bundled Atkinson Hyperlegible files are gone. Accounts,
+  Spreadsheets, File names and Settings sit in a sidebar, a bar along the
+  top on a narrow window. Colors are Apple's, with a blue of its own in dark
+  mode, and every text color is checked to 4.5:1 against what it sits on.
+  A status is a colored dot and its words, each provider has the symbol of
+  its kind, a bank's building or a shop's bag, instead of a letter, and
+  Settings is drawn in groups the way System Settings draws them. Contributed by @JasperDale420.
+- **Accounts puts what needs you first (#154).** The page has one blue button, the
+  one for the next step, and each row's own is gray. Once anything has run,
+  the providers never run fold under one Not started line, except one
+  whose first run is going, that needs setting up or that shares a
+  sign-in browser with another account, and a list longer than eight gets
+  a search box. Overdue reads in amber, as a new document that is likely
+  waiting, instead of a failure's red. Escape gives focus back to the More
+  button, and Settings names each provider and person as Accounts does,
+  instead of by folder. Contributed by @JasperDale420.
+
+### Fixed
+- **A run started outside its app's folder keeps to that folder (#165).** An
+  `output_dir` of `.`, a second person's `../<app> - <name>` and a relative
+  `profile_dir` were read from wherever the run was started, so a run started
+  from a shell in the folder that holds the installs made Logs, Backups, a
+  folder of each kind and a browser profile there. A run started outside both
+  its app's folder and its config's folder now reads them from the config's
+  folder, and `--config config.<name>.json` given there finds the app's own
+  file of that name. The control panel, `paperpull`, `login.bat` and
+  `login.command` start every run in the app's folder, and those runs read
+  their folders and record their paths exactly as before. Contributed by
+  @appchamp. Before merging, the folders were kept as written for a run
+  started in the app's folder or its config's, since every path such a run
+  records is relative to that folder, and the search for a config was kept to
+  a bare file name.
+- **Verizon Mobile downloads your wireless bills (#31).** The app had been
+  built without an account, and on a real one it found no bills. It now
+  opens Bill & payment history by its address, takes the page's own list of
+  every bill My Verizon keeps, about two years of them, and asks each bill's
+  PDF from inside the signed-in page the way the page's own Review bill PDF
+  does. Nothing is clicked, and Diagnose follows no link. A bill is known by
+  the last four digits of its account number with the suffix after the
+  hyphen and by the day its cycle ended, so two accounts on one sign-in
+  keep their bills apart, and a bill is asked for only while My Verizon
+  shows the account it was listed under. A run takes the bills of the
+  account shown first, so one account's bill left for later never holds
+  back another's, and stops once when only other accounts' bills are left,
+  naming the account to choose. A history that cannot be read
+  whole, one that lists no bills among them, stops the run and is never
+  taken for the whole list, and a sign-out partway through stops the run
+  once instead of sending every bill to Manual Review. Each bill reads the
+  history once, where it used to read it twice. Records the earlier build
+  wrote are not carried over, so a bill it saved downloads once more under
+  its new name. Contributed by @crazyhorse90210, who ran it on their own
+  account and saved all 24 bills. Before merging, the list stops, the sign-out,
+  the account and the history read once a bill were done on our side.
+- **A support report takes three steps, not fifteen (#162).** Its dialog said to
+  sign in first with no way to, so a person canceled, signed in and came
+  back through More. Open folder then opened a folder of two or three
+  files to pick the one to attach from, and where to send it was under
+  Settings, About. The dialog now opens the sign-in window itself and stays
+  open for the report, Show the file selects the survey or recording in
+  the file manager, and Report a problem opens a new problem report for
+  that provider, on the form for an app that stopped working with the
+  provider filled in. The note about a file a failed run wrote offers the
+  same link. It is a link the person follows, carrying the provider's short
+  name only, and only for a provider PaperPull ships. On PaperPull Server,
+  whose sign-in window is docked in the page itself, the dialog still says
+  to sign in first. When the sign-in the dialog started ends, the dialog
+  says whether its window opened, and when none did, the app's own words
+  for why are under it. Contributed by @JasperDale420.
+- **Moving to another computer says what comes with you (#161).** The Move card
+  offered only a history file, which brings no PDF and marks every document
+  it lists as downloaded, so Get new never fetched them, and nothing said
+  so. Somebody who moved had an empty archive PaperPull believed complete.
+  The card now leads with copying the PaperPull folder, and the Documents
+  folder, naming both, which brings everything. The PaperPull folder works
+  wherever it lands, since each config.json names its folders relative to
+  its own. The Documents folder is named by its full path, in each config
+  and in the records of what was moved there, so the card says to copy it
+  to the same place and choose it again. The history
+  file follows as the way when the folders cannot be copied, and its
+  import, on the welcome and in Settings, says the PDFs stay on the other
+  computer and to copy them over or use Restore deleted files. Contributed by @JasperDale420.
+- **The welcome's folder step says what it thinks of the folder (#160).** A
+  folder that could not be used was refused only at Set up, two steps on
+  and away from its field. One already holding PaperPull providers, the
+  obvious one to type for somebody who has them, was not noticed. They were
+  asked to choose providers again, and Set up said it set up 0. One inside
+  iCloud Drive, Google Drive, Dropbox or OneDrive was taken without a word,
+  though it holds each provider's signed-in browser. Continue now checks the
+  folder (the same check Set up makes) and says under the field what is
+  wrong, the providers already there with Open Accounts to use them, or the
+  sync service it is in before going on. Already have PaperPull folders, in
+  Settings, goes on to Accounts once it finds them. A folder slow to
+  answer, on a network share that is offline, say, holds up only its own
+  check and never the panel's other tabs. Contributed by @JasperDale420.
+- **The panel calls each thing by one name, and says what to do next (#159).**
+  The same thing went by several names from page to page, and some were
+  the command line's. The panel now says provider, account, PaperPull
+  folder, Documents folder, download history and Technical details, each
+  for one thing only, and never Pilot, Run All, Resume, Discover, Login,
+  Scope or Download again, or a folder slug where a provider's name
+  belongs. Messages from PaperPull itself start with a capital, end with a
+  period and say what to do next, such as "That folder does not exist.
+  Check the path, or create the folder first." Contributed by @JasperDale420.
+- **A run says where its documents went, and Open folder opens them (#158).** A
+  run's page listed the names it saved and never where, and Open folder
+  opened the account's own folder, among its script, config and records,
+  with the PDFs a folder down, or, once a documents folder was set in
+  Settings, a folder they had moved out of. A run that saved documents now
+  says "Saved to" the folder they are in, read from what that run saved,
+  with an Open folder button that opens that same folder. That is the
+  folder of their kind, Statements, say, or the account's own folder when
+  they went to more than one kind, or the documents folder once they were
+  moved there. Open folder elsewhere opens the folder holding the account's
+  newest document, never a browser profile, another person's folder, or a
+  documents folder no run would use. Open what was set aside opens Manual
+  Review, as the page says it is there, and when there is no Manual Review
+  folder it opens nothing and says so. Accounts names the documents
+  folder once one is set. Contributed by @JasperDale420.
+- **Sign in, then get new documents, in one go (#157).** Get new pressed before
+  signing in, the likeliest first-run slip, read as a crash ("It exited with
+  code 1", "Run login.bat first"), said "Sign in again" to somebody who never
+  had, and offered Continue for a run that never started. Each app now ends
+  that run through `run_reporting.not_signed_in`, which says it in the
+  panel's words under the panel and in login.bat's in a terminal, and exits
+  `NOT_SIGNED_IN` (7). The panel titles it "Sign in first" and offers the
+  sign-in, then the same run over the same dates, which the sign-in's own
+  page offers again once its window has opened, and the account is not
+  listed as stopped. A support report, a recording or a restore that found
+  nobody signed in offers its own dialog again, never Get new. A sign-in
+  pressed on the page of a run that stopped carries the step that page
+  offered after it, Check again, Continue, the restore or the recording,
+  and its own page offers that step and names it. Check again checks over
+  the dates of the check that stopped. Any other "Sign-in
+  window opened" now offers Get new documents on the same page. A
+  row not started yet offers Sign in, which opens the window, where it
+  offered Start, which only opened the account's page, and that page leads
+  with signing in while the account has not started or its last run found
+  nobody signed in. Contributed by @JasperDale420.
+- **A run that stops says why, and whose it is to fix (#156).** Every stop read
+  "may have signed you out partway … Sign in again, then continue",
+  whatever had stopped it. The run's result now carries why it stopped,
+  worked out in the core from what the run is leaving on. The provider
+  needed you, for a sign-in or a check nobody was there to answer, and the
+  panel says to sign in, then continue. Its page was not what PaperPull
+  expected, and the panel sends you to the technical details for what to
+  do, then Continue, and says a stop at the same place again is for
+  PaperPull to fix. It did not answer in time, or PaperPull hit an error it
+  did not expect, and the panel offers Continue. Where the run's page says
+  to make a support report, it has a Make a support report button for it,
+  since that page has no More menu. Only a stop a sign-in can
+  fix offers one, and a stop with no reason sends you to the technical
+  details instead of guessing a sign-out. Contributed by @JasperDale420.
+- **The panel never says something happened that did not (#155).** Open sign-in
+  window said "Sign-in window opened" in green when no browser could open
+  at all, and Record said "Recording saved", ready to attach, when the
+  recorder refused on a sign-in page or nothing was clicked. Each app now
+  ends those as the core's NOTHING_OPENED and NOTHING_RECORDED, and the
+  panel says "No sign-in window opened" or "Nothing was recorded", with the
+  app's own words for why under it. A run the panel would not start,
+  because another tab is running it, a history file is being imported, the
+  app needs setting up or PaperPull Server does not recognize its folder,
+  now reads "This run did not start" with the reason, instead of "It
+  exited with code 1" and a Continue for a run that never began. None of
+  these offers an earlier run's failure file as one it wrote. Recent runs
+  says "no sign-in window opened", "nothing was recorded" or, for a run
+  that found nobody signed in, "nobody was signed in", never "ended with a
+  problem". Contributed by @JasperDale420.
+
+## [0.61.1] - 2026-11-08
+
+SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo
+reads both tabs of its newer Statements page, and American Express goes on
+past year-end rows that stay at a card switch. A document that could not be
+downloaded no longer reads as one waiting in Manual Review, a gap no run can
+fill no longer keeps an account in "may have something new", and an account
+says it was checked only when its list was read.
+
+### Fixed
+- **"May have something new" no longer keeps a gap a whole run could not
+  fill (#149).** A gap in the middle of a history, years back say, counted
+  toward the home page's "may have something new", and Get new for all ran
+  its account every time, though no run filled it. Get new and Get new for
+  all now run a gap row's whole list with no dates, and the row's own Look
+  for them still looks in the gap's dates. A Run All with no dates that ends
+  clean, with its list noted as read to its end and the account's records
+  showing nothing on it left to take, notes the gaps still there. Once the
+  newest such run and an earlier one, ended on another day, have each noted
+  a gap, the home page leaves it out of the count. A gap the person's own
+  `default_start_date` or `document_types` leave out is noted with them. A
+  Pilot, a scoped run, Download again, or a run that stopped, failed, set
+  something aside or whose records show a document left notes none, and
+  neither does a run of eleven apps whose log says their list passed over a
+  document it saw. Some apps can pass over a document with no trace in their
+  records, a statement not ready yet, say, and the second run on another
+  day is there for that. A gap that shows up later still counts, and the
+  account's row still says Possible gap and offers Look for them. An account
+  that is due is unchanged, since its next document may come any day.
+  Contributed by @JasperDale420. Before merging, the summary's buttons were
+  made to run a gap row whole, and a gap was made to settle only after two
+  such runs on different days whose records show nothing left.
+- **An account's card says it was checked only when its list was read
+  (#148).** After a run that stopped partway with every listed document
+  already saved, a Continue found nothing to take and ended in a second,
+  reading no list and opening nothing, and the card then said "checked"
+  that day. The date came from the panel's last run that downloads, a
+  Continue among them, and for an account run only from a terminal from
+  whichever run ended last, a check of the saved files or a rename too. It
+  now comes from when a run last read the provider's whole list, which
+  every app already notes, so a run over part of the history does not move
+  it either, and the card says when the last run ended where it talks about
+  that run. Reported by JasperDale420.
+- **A capture that saved nothing no longer reads as a document waiting in
+  Manual Review (#152).** Ally's tax forms API lists a 2019 Form 1099-INT
+  while its Tax Forms year picker starts at 2020, so its page cannot open it.
+  The run counted it as needing manual review, the panel said a document sat
+  in the Manual Review folder, and the folder was empty. Every run then tried
+  it again, wrote a new failure file, and added the same row to the document
+  index. Ally now says once that the form is out of reach of its page, counts
+  it on the run summary's line "Not reachable on Ally's page", and leaves it
+  on later runs, with no failure file. A run with `--redownload` asks for it
+  again. Only a year older than the first of the one year picker shown, read
+  twice, counts as out of reach, so a year the picker has not reached yet is
+  still tried. In every
+  document app a capture that saved nothing is now a failure, which the next
+  run tries again, rather than a document for Manual Review, and Anthem's
+  documents fetched through its API do the same. Wealthfront recorded a row it
+  could not find as having nothing to fetch, so it was never asked for again,
+  and now tries it again too, the records it left so before included, and
+  those in a history moved to another computer. NW Natural and Portland
+  General Electric no longer say a date two bills share is left for Manual
+  Review, since neither bill is fetched and nothing goes there. Every
+  document index now holds a row once, so a document that fails the same way
+  on several runs has one row. Refusals that save nothing, such as a wrong
+  document or a page that asks you to sign in again, are still counted for
+  review as before.
+- **American Express goes on past year-end rows that stay at a card switch.** A
+  tester's Pilot with two cards stopped at the first switch with 202 of 204
+  Downloads gone and two still showing under the same name (#135). A year-end
+  summary's row is named by its year alone, the same on every card, so the page
+  can keep it when the card changes, and whose PDF its Download then brings
+  cannot be told. When only such rows stay, just as they were, or show again
+  once the switch is done, and a Download of another document shows, the run now
+  reads that card's statements and leaves those year-end summaries out for both
+  cards. It names them, counts them for review, never presses their Download for
+  the card on show, whatever the page renames them to before the press, and does
+  not note the list as whole, so Resume says to run Pilot or Run All. A switch
+  that keeps such rows while documents are taken notes the list the same way.
+  Rows of a document type the archive does not take leave nothing out. Anything
+  else that stays, or any other row of the old list that shows again once the
+  switch is done, still stops the run, and the failure file now counts what
+  stayed as year-end summaries and as monthly statements, as counts only. No
+  real account has run this yet.
+- **Venmo reads both tabs of its newer Statements page.** Some accounts get a
+  page where a month has a Wallet tab and, with a Balance account, a Balance
+  tab, with only the open tab on the page. The app stopped at the first month
+  of such an account, and simply letting it through would have called a month
+  empty while its Balance tab held transactions. It now reads both, saves each
+  tab that holds transactions as its own statement, the Balance tab as
+  `<month end> Venmo Balance Statement.pdf`, and calls a month empty only when
+  neither does. That page also says a month has no transactions when Venmo
+  could not load it, so on the Wallet tab those words count only when Venmo's
+  own answer says the same. A Balance tab that will not open stops the list,
+  unless Venmo's answer says there is no Balance account, and a Balance month
+  past the ten transactions that tab can show is not saved, rather than be
+  saved with some missing, and counts as failed. All of it comes from Venmo's
+  public page code, and no run has met this page yet.
+- **SDG&E reads its Billing History again.** Since November 6 each bill
+  row on My Energy Center starts with a cell the page hides, holding the
+  row's number, and the header has no cell above it. Read cell by cell,
+  every row was one column wider than the header, so Discover, Pilot and a
+  full run stopped on the first bill, saying it did not line up with the
+  header. That first cell is now passed over when it is a plain hidden cell
+  holding only a number, the row is exactly one column wider than the
+  header, and Statement Date is the header's first column. Any other hidden
+  cell still counts as a column, so a table that hides some of its columns
+  is read by where each cell sits, and stops the list when its cells do not
+  line up. The contributor's own account listed nine bills, the eight the
+  app had recorded keeping their ids and dates. Contributed by
+  @JasperDale420. Before merging, since the page no longer says how many
+  bills it holds, the read was made to wait for the rows to settle, and the
+  list to stop on anything near the table that looks like a pager or a
+  show-more control or says there are more bills than were read, and on
+  hidden numbers that do not count the rows read from 0 or 1 at either
+  end, none of which has met the live page yet.
+- **Fidelity lists its tax forms and calls a statement of several accounts
+  Combined (#144).** The hub nests a tax form's fields, which the app did not
+  read, so every form was dropped as undated. A run now lists them and asks
+  for each through the hub's v1 download with docType `TF`, as the
+  contributor reports. A Discover on a real account listed the forms, and
+  nobody has shown one downloading that way yet. A form can be dated in the
+  year after its tax year, so a year or a date range now also asks for the
+  tax year before it, and keeps a form when its own date or the last day of
+  its tax year is inside it. `--year 2025` keeps the forms of tax year 2025
+  and the forms of 2024 dated in 2025. A form dated two or more years after
+  its tax year is listed only by a run with no year or dates set. A statement
+  with no account number kept no account, and it now reads `Combined`, which a
+  `filename_pattern` with `{account}` can make a folder of. The default file
+  name leaves it out, so files are named as before. An archive from before
+  this keeps every key and downloads nothing again. Contributed by appchamp.
+  Before merging, each document was made to find its own row of a fresh list,
+  by its stored id or else by its number among the documents of its title and
+  date, which counts across accounts, and to fail when that cannot be told,
+  since two forms on a second account saved one twice and the
+  other never, a tax year that fails was made to stop the list, the year on a
+  form was made to come from the listing rather than its first four digits,
+  and clearing manual review was taken out, since a run tries such a document
+  again anyway.
+- **The panel's tests leave a Mac's own settings alone (#153).** On macOS the
+  panel finds its settings file from the home folder alone, and the panel's
+  tests moved only the folders Windows and Linux use. So running `gui/tests`
+  on a Mac in daily use wrote over the person's own settings.json, and their
+  panel showed no accounts until `apps_root` was set again. Every panel test
+  now gets a home folder and settings folders of its own, and a test that
+  writes anywhere outside the temp folders fails, naming what it wrote.
+
+## [0.61.0] - 2026-11-06
+
+NW Natural and City of Tualatin are the 80th and 81st apps, both contributed
+by crazyhorse90210. American Express reads every card on a sign-in and checks
+that each PDF names its card, Charles Schwab finds view-only accounts,
+Wealthfront keeps the files of a tax form together, Venmo reads past an empty
+month on its older page, and a sign-in offers to update PaperPull's own
+Chromium when it falls behind.
+
+### Added
+
+- **NW Natural, the 80th app, monthly gas bills (#126).** It downloads
+  each month's bill from NW Natural's Paymentus payment portal, about
+  seven years of them. Nothing is clicked. The app reads Bill History from
+  inside the tab the person signed in with, and each bill's address, which
+  carries the session's token, stays in memory for the run and is never
+  written down. A second account, a pager, a history with no bills or a
+  count that does not match stops the list rather than be read as whole,
+  and Login and a run say so when the portal's bot protection answers.
+  Contributed by crazyhorse90210 and run on the contributor's own account.
+  Before merging, a list that stops while bills download was made to stop
+  the run once with the list unread, as the other apps do.
+- **Sign-in offers to update PaperPull's own Chromium when it falls behind
+  (#132).** Nothing updated the private copy after its first download, so a
+  computer that took it months ago went on signing in with that build while
+  each release carried a newer one with its security fixes. When that copy
+  is the browser about to start and it is older than the build this
+  PaperPull was made for, a sign-in from a terminal now offers the update,
+  about 400 MB, and a no holds until PaperPull wants a newer build still.
+  Nobody who signs in with their own Edge or Chrome is asked, and neither is
+  PaperPull Server. The control panel cannot ask, so its log says so and gives
+  the line to run. The Store edition, which cannot run it, says so too. The
+  build you have stays until the new one has opened, so a download that
+  fails, is stopped or dies partway costs you nothing, and sign-in goes on
+  with what you had. If the newest private copy does not open, the next older
+  finished build on the computer is tried, ahead of any other browser, so a
+  build it cannot start does not leave you with no window. That window has a
+  profile of its own and starts with no sign-ins, since running an older build
+  on a profile a newer one used lost that profile's saved site data.
+  Contributed by @JasperDale420.
+- **City of Tualatin, the 81st app, monthly utility bills (#127).** It
+  saves the water, sewer, stormwater, parks and road fee bills of a
+  Tualatin Water account from CivicPay Online, about two years of them.
+  Nothing is clicked. The portal has no PDF of a bill, so each bill's
+  print page is drawn as one, loading nothing, and the PDF's own text is
+  read for the bill's words and Billing Date before it is kept. A pager, a
+  filtered view, a second transaction table or a row of a type it does not
+  know stops the list rather than be read as whole. Contributed by
+  crazyhorse90210 and run on the contributor's own account. Before
+  merging, a list that stops while bills download was made to stop the run
+  once with the list unread, as the other apps do.
+
+### Fixed
+
+- **Target says in plain words when its fallback has no Chromium to print
+  with (#131).** Target's fallback prints a receipt page in PaperPull's
+  own Chromium, which most installs never download, since sign-in uses the
+  Edge or Chrome already on the computer. A purchase's notes used to carry
+  Playwright's own error, which names a command the packaged app does not
+  have. They now say what is missing and that nothing is wrong with the
+  account or the receipt, and give the one line that downloads it. The
+  Store edition, where that line cannot run, and PaperPull Server each get
+  words that fit them. Contributed by JasperDale420.
+- **American Express reads every card on a sign-in (#134).** With two
+  cards, Discover found nothing, because a sign-in that lands on the
+  overview page never reached the statements, and a page it never reached
+  read as a whole list of nothing. The app now reaches the statements from
+  there, stops when it cannot, reads each card in the switcher in turn, and
+  files each statement under its card, with the card's name and last digits
+  in the file name.
+  It waits for every Download that shows of one card's list to go before
+  it reads the next, at any window width, since a year-end summary has the
+  same date on both cards. If any of them stays, even under another
+  statement's name, the run stops there, the failure file counts how many
+  stayed, and a Resume does not carry on from such a stop, so Pilot or Run
+  All read each card again through the same waits. A card whose own list
+  has not come is waited for and then left as it is, since that list could
+  draw after the switch and read as the next card's. Each PDF saved for a
+  card then has to name that card by its last digits, and one that does not
+  goes to Manual Review rather than be called done. A card the site has
+  turned off, a canceled card say, is named, counted for review and left,
+  and the other cards are saved. A card the switcher holds but does not
+  show stops the run. Login says Success only on a list it saw. With one card,
+  keys, file names and files stay as they were. A switcher that cannot be
+  read, because it does not show, is turned off, is covered or offers no
+  card, no longer matters to a run with one card, which goes on with the
+  card on show and says so, and the list is not noted as whole, since
+  there may be more cards behind it. Contributed by @appchamp, who ran a
+  Pilot across two cards and read the PDFs. Before merging, the wait was
+  made to hold every button that shows, the turned off card was made to leave
+  only itself, an empty card was made to wait on its own words, and Login
+  was made to ask for the list.
+- **A Chromium download that stopped partway no longer takes over the
+  sign-in (#132).** Playwright marks a build finished last of all, and
+  nothing looked for that mark, so a closed window or a power cut during the
+  unpacking left a folder that counted as the newest build. The sign-in
+  tried it with the finished build beside it never started, and no repair
+  was offered. A build without the mark now counts as not there, and the
+  finished build beside it is the one started. With no finished build on the
+  computer, a launch through Playwright still starts Playwright's own folder
+  as it always did.
+- **Wealthfront keeps the files of a tax form together (#142).** A 1099 can
+  come with a workbook or a corrected copy beside its PDF. Those went to the
+  top of Tax Documents while the PDF went to the folders a naming pattern
+  names, nothing recorded them, and a Rename or Move to Documents Folder left
+  them behind. They are now saved beside the PDF, the record lists them, and
+  a Rename or a Move takes them along, with a `.xls`, `.xlsx` or `.csv`
+  keeping its ending. A file of any other kind stays where it was saved. A
+  form with nothing to download no longer leaves empty folders. Files earlier
+  runs saved stay where they are, since no record names them. Contributed by
+  @appchamp. Before merging, the Rename and the Move were made to work on a
+  record's real key, and an order's invoices were kept off the new path.
+- **Venmo reads past a month with no transactions on its older page (#136).**
+  Venmo has two sentences for a month with nothing in it, and which one a
+  person sees goes by their own account. The app knew "No transactions yet
+  for this month", so a month saying "There are no transactions for these
+  dates" read as a month still drawing, and every Discover and Pilot stopped
+  there with "the month's transactions did not finish drawing" and saved
+  nothing. Both sentences are an empty month now, and each is matched whole.
+  A month that shows neither, as one does when Venmo could not load it, still
+  stops the list, and so does a month holding only pending transactions,
+  each with a reason of its own. The run says which month it stopped on, and
+  its failure file holds what that month's page drew, as counts.
+- **Charles Schwab finds view-only accounts, and stops on an answer it cannot
+  read (#137).** A sign-in whose accounts all sit in Schwab's view-only list
+  read as no accounts, and Discover ended clean with no documents. Both lists
+  are now read. An accounts or documents answer the app cannot read stops
+  Discover with nothing recorded, rather than read as an empty list. The app
+  also goes to Statements & Tax Forms at its newer address first. A Discover
+  has been run on a view-only account, and a download from one has not been
+  seen yet. Contributed by appchamp.
+
+## [0.60.2] - 2026-11-04
+
+Bank of America now saves statements, and is confirmed on a real account.
+
+### Fixed
+- **Bank of America now saves statements, and is confirmed on a real
+  account (#121).** Statements & Documents at
   /mycommunications/statements/statement.go, where a credit card's page
   opens, now counts as the statements page. The bank draws each row's
   Download PDF link behind the front of a card, inside a wrapper marked

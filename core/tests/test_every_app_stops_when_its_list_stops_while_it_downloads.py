@@ -116,6 +116,11 @@ ITS_OWN = {
         "two shapes of row, and a stop there would stop every later run at the same row. "
         "A refusal once something on the row was pressed stops the run (Run.presses), "
         "and a stop of the list on the way to the row (_reach_row) reaches the run",
+    ("schwab", "listed_alike", ("list_documents",)):
+        "one account's one day, asked only to find the id a record keeps has moved. The "
+        "id the record keeps is still tried, and a document that will not come goes to "
+        "review by itself, so a day refused for one account costs the others nothing. "
+        "The whole list is Discover's to read",
     ("shelbycounty", "goto_documents", ("settled_here",)):
         "the opener's answer, which every caller in the download path turns into "
         "ListStopped itself (_back_to_parcel)",
@@ -157,6 +162,19 @@ ITS_OWN = {
     ("portlandgeneral", "download_bill", ("_fetch",)):
         "a refusal of the authorization this run kept from an earlier read, which "
         "reads the list again once. A refusal of a list just read reaches the run",
+    ("nwnatural", "download_bill", ("_fetch",)):
+        "a refusal of a View address read earlier in this run, which reads the list "
+        "again once, or of one right after a list that answered, which is that bill's "
+        "alone. A refusal of the list itself reaches the run",
+    ("verizonmobile", "download_bill", ("_fetch", "pdf_url")):
+        "a refusal of one bill's PDF, after which the history is read again. A sign-out "
+        "or a list that stops shows there and reaches the run, and a history that still "
+        "reads leaves the refusal that bill's alone, so one bill Verizon will not give "
+        "never stops every later run at it",
+    ("cetera", "download_bill", ("_fetch",)):
+        "a refusal of the headers this run kept from an earlier reading, whose token "
+        "may have run out, which reads the lists again once. A refusal right after the "
+        "lists were read reaches the run",
 }
 
 # A handler in a download path that turns a list stop into a stop of the run
@@ -233,6 +251,15 @@ NOT_A_LIST = {
         "statement or its twin (#106). The whole list is Discover's",
     ("portlandgeneral", "OtherAccountShown"):
         "another account shown on the site than the one a bill was listed under, "
+        "which the person chooses again before Continue",
+    ("nwnatural", "Challenged"):
+        "the portal's bot protection answering in place of the list or a bill, which "
+        "the person answers in the browser before Continue",
+    ("verizonmobile", "OtherAccountShown"):
+        "another account shown in My Verizon than the one a bill was listed under, "
+        "which the person chooses again before Continue",
+    ("ziply", "OtherAccountShown"):
+        "another account asked about on Billing than the one a bill was listed under, "
         "which the person chooses again before Continue",
 }
 

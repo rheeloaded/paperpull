@@ -15,13 +15,16 @@ Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N
 
 Statements of checking, savings and credit card accounts, from Statements &
-Documents. Built from a tester's two recordings, and its first run listed
-the statements and saved none. Sign in, open Statements & Documents in that
-window, and leave it open.
+Documents. Built from a tester's two recordings, and confirmed on that
+tester's checking and credit card statements, not yet on savings. Sign in,
+open Statements & Documents in that window, and leave it open.
 
-READ-ONLY: the one press is the statements page's Statements heading, when
-the page leaves it shut and a statement is to be downloaded, to open its
-list the way a person would. Login and Discover press nothing. It
+READ-ONLY: the two presses are the statements page's Statements heading, when
+the page leaves it shut and a statement is to be downloaded or Diagnose
+looks at the page, and again after a long run reloads it, to open its list
+the way a person would, and one Download PDF link, when every link's
+address is a script, to learn how the page asks for a PDF. Login and
+Discover press nothing. It
 reloads the statements page to hear its list, at the start and every five
 minutes of a long run, and asks for lists and PDFs from inside the
 signed-in page the way the page itself does. It never pays,
@@ -40,7 +43,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -170,7 +174,7 @@ class App:
         self.progress.load()
         self.discovery.load()
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -214,9 +218,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -332,7 +334,7 @@ class App:
             lines = ["The statements page did not answer the way this app knows, "
                      "because %s. Nothing was guessed at and nothing was saved "
                      "for it. The failure file above says what the page did, as "
-                     "counts. Attach it to issue #121." % e]
+                     "counts. Attach it to a new issue on GitHub." % e]
         print()
         for text in lines:
             for line in textwrap.wrap(text, width=72):
@@ -352,7 +354,7 @@ class App:
         text = ("Bank of America's statements list did not answer the way this app "
                 "knows when it was read again for a statement, because %s. Nothing was "
                 "guessed at and nothing was saved for it. The failure file above says "
-                "what the page did, as counts. Attach it to issue #121." % e)
+                "what the page did, as counts. Attach it to a new issue on GitHub." % e)
         print()
         for i, line in enumerate(textwrap.wrap(text, width=69)):
             print(("!! " if i == 0 else "   ") + line)
@@ -377,7 +379,7 @@ class App:
             prefer_real=True,
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, open Statements & Documents, keep the window OPEN, then")
@@ -784,12 +786,12 @@ class App:
                                 "be checked in its text")
                 return
         if not saved:
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
@@ -1024,8 +1026,8 @@ class App:
             print("  What it noticed:")
             for line in said[:6]:
                 print("    - %s" % line)
-        print("  Read it through, then attach it to this provider's issue on")
-        print("  GitHub. It is the one thing that saves a round of guessing.")
+        print("  Read it through, then attach it to a new issue on GitHub.")
+        print("  It is the one thing that saves a round of guessing.")
 
     def write_survey(self, stopped=None) -> None:
         """The survey Diagnose is safe to send, on the same list of what may
@@ -1098,9 +1100,10 @@ class App:
         keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='Bank of America',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='Bank of America',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     # -- summary -----------------------------------------------------------
 

@@ -3,8 +3,9 @@
 STATUS, built 2026-10-25 from two recordings by the tester on #121, one trip
 to a checking statement and one to a credit card statement. Its first run
 on an account (2026-10-26) listed 388 statements of five accounts and saved
-none, for want of the Statements heading below, so NOT YET PROVEN on an
-account. Every part below that a recording could not show is found
+none, for want of the Statements heading below. The same tester's run with
+#133 saved all 388, so it is proven on checking and credit card statements,
+not yet on savings. Every part below that a recording could not show is found
 on the page at run time, and anything that does not fit what the
 recordings showed stops the run rather than being guessed at.
 
@@ -1874,7 +1875,7 @@ def survey(page, dwell_ms: int = 2000) -> dict:
     """What the page the person left open looks like, and on the statements
     page what its list call answers, downloading nothing. The page is
     reloaded once to hear the call, and its Statements heading opened when
-    it is shut, the one press a run makes too."""
+    it is shut, as a run opens it too."""
     report = {"pages": [], "responses": [], "mapped": True}
     try:
         page.wait_for_timeout(dwell_ms)

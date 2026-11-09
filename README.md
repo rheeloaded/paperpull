@@ -56,11 +56,10 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Seventy-three providers are supported today, all built on the same pattern.
-Six more, SBA, Verizon Mobile,
-Meijer, American Family, Stripe and FedEx, are built and waiting for someone with an account to
+Eighty providers are supported today, all built on the same pattern.
+Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
+waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
-[#31](https://github.com/rheeloaded/paperpull/issues/31),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
 [#53](https://github.com/rheeloaded/paperpull/issues/53),
@@ -84,12 +83,15 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`bilt`](apps/bilt) | Bilt Card (serviced by Cardless) | Card statements | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 8 statements saved on a full run.** Only the card's balance summary, View statements and a statement's own button are pressed, and the PDF is taken from the tab it opens |
 | [`bofa`](apps/bofa) | Bank of America | Checking, savings and credit card statements | **Confirmed by [@appchamp](https://github.com/appchamp)** on a real account's checking and credit card statements ([#121](https://github.com/rheeloaded/paperpull/issues/121)). Savings statements are untested. Statements & Documents' own list and PDF links, read from inside the page, with its Statements heading opened, and when the links have no address, one pressed to learn the page's own call for a PDF. |
 | [`capitalone`](apps/capitalone) | Capital One | Bank and card statements, tax forms, letters | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
+| [`cetera`](apps/cetera) | Cetera (AdviceWorks) | Brokerage account statements and quarterly performance reports, every account the client portal lists | **Built and run on a contributor's own account, 56 statements across four accounts and 5 reports listed.** The portal's own statement and report lists asked from inside the signed-in page, each PDF fetched the same way, nothing clicked |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
 | [`chasebusiness`](apps/chasebusiness) | Chase Business (business document center) | Business checking and business card statements, up to seven years | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 10 checking statements and the business card's first statement saved on full runs.** One profile so far, so a debit account's statements are untested. Seven kinds of control pressed through the guard, real Edge/Chrome |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements, Coinbase One Card statements, tax forms, gain and loss reports | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 66 statements and 2 tax documents saved on a full run.** Each month's own PDF button on the Statements page pressed once and the download taken only from Coinbase's statements bucket, and tax PDFs from the list calls the Taxes page makes, nothing pressed. One Card statements from the Credit Card tab, each row's own PDF button pressed once, 13 saved on a full run on one account |
 | [`costco`](apps/costco) | Costco Wholesale | Receipts, in-warehouse, gas, pharmacy and costco.com orders | **Written from a member's recording and run against their account, 34 purchases back to July 2024** ([#47](https://github.com/rheeloaded/paperpull/issues/47)). Each receipt names its part of Costco, Warehouse or Gas Station, for a file name pattern ([#60](https://github.com/rheeloaded/paperpull/issues/60)). One membership so far, so a second Pilot is welcome. Two tabs, quarters walked, the warehouse receipt is a dialog rendered with printToPDF, real Edge/Chrome |
+| [`discoverbank`](apps/discoverbank) | Discover Bank | Checking and savings statements | **Contributed by [@appchamp](https://github.com/appchamp), 100 checking and 100 savings statements saved on a full run** ([#151](https://github.com/rheeloaded/paperpull/pull/151)). The statements page's own list call for each account its account menu holds, read from inside the page, nothing clicked but the inactivity dialog's keep-alive. A list of exactly 100 statements, which looks like the most one answer holds, may have older statements this app cannot reach, and the run says so. Money market and CD accounts are untested |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Capital One is moving these accounts onto its own site. A card that has moved is read there by the [`capitalone`](apps/capitalone) app ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
+| [`dkb`](apps/dkb) | DKB (Deutsche Kreditbank) | Kontoauszüge, Kreditkartenabrechnungen, Wertpapierdokumente, Steuerbescheinigungen, Vertragsinformationen and Mitteilungen, from the Postfach and its archive | **Contributed by [@tabacha](https://github.com/tabacha), 611 documents saved on a full run of the contributor's own account.** The Postfach's own API from inside the page, nothing clicked. DKB answers 500 for most archived securities documents, which its own page cannot open either |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
 | [`ebay`](apps/ebay) | eBay | Order receipts, ten years of purchase history | **Confirmed by [@jpfieber](https://github.com/jpfieber), every order back to 2017.** Order-details page rendered to PDF, nothing clicked but the order list's Show more, real Edge/Chrome. Requested in [#44](https://github.com/rheeloaded/paperpull/issues/44) |
 | [`lowes`](apps/lowes) | Lowe's Home Improvement | Store and online receipts, and returns | **Built on the maintainer's own account.** The purchase history read by address, each purchase's details page saved as the receipt, nothing clicked, real Edge/Chrome |
@@ -117,6 +119,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`newrez`](apps/newrez) | Newrez | Mortgage statements, escrow analysis, 1098 | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every document, three years of statements through the statements page's year picker and the 1098s ([#38](https://github.com/rheeloaded/paperpull/issues/38)) |
 | [`optum`](apps/optum) | Optum Bank (HSA) | HSA statements, 5498-SA and 1099-SA tax forms | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 21 statements and the 5498-SA saved on a full run.** Every document a plain link on the member site, fetched by its own address, nothing clicked. One HSA so far, so more than one product is untested |
 | [`paypal`](apps/paypal) | PayPal | Monthly statements | **Built on the maintainer's own account, 25 statements.** The site's own statements list and download from inside the page, nothing clicked for a personal account, and three years are online |
+| [`nwnatural`](apps/nwnatural) | NW Natural (Oregon and Washington natural gas) | Monthly bills, the whole history the payment portal keeps | **Built and run on a contributor's own account, 84 bills listed and the newest saved by a Pilot.** Read from the Paymentus portal's Bill History and each bill's View address, from inside the tab you signed in with, nothing clicked. One account at a time |
 | [`paylocity`](apps/paylocity) | Paylocity | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |
 | [`portlandgeneral`](apps/portlandgeneral) | Portland General Electric (Oregon) | Monthly bills, the Detailed Bill PDF | **Built and run on a contributor's own account, 36 bills listed and the newest saved by a Pilot.** The list and each PDF are asked of PGE's own account API from inside the signed-in page, nothing clicked. One account at a time |
@@ -135,6 +138,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`tmobile`](apps/tmobile) | T-Mobile | Bill statements | Bill-history page; detailed-bill download |
 | [`treasurydirect`](apps/treasurydirect) | TreasuryDirect (savings bonds and Treasuries) | Current Holdings, Security and Payment History, saved from its pages, taxable years listed for you | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 3 documents saved on a full run, every PDF opened. 1099 pages unconfirmed. Have a taxable year? [Help test it](apps/treasurydirect/README.md#help-test-it-no-programming-needed)** Its own links pressed in your tab, pages rendered to PDF |
 | [`tsp`](apps/tsp) | Thrift Savings Plan | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
+| [`tualatin`](apps/tualatin) | City of Tualatin, Oregon (water, sewer, stormwater) | Monthly utility bills, the two years CivicPay Online lists | **Built and run on a contributor's own account, 24 bills listed and the newest saved by a Pilot.** Activity's Billing rows, each bill's print page drawn as a PDF with its scripts taken out, nothing clicked |
 | [`uber`](apps/uber) | Uber (rides and Uber Eats) | Ride receipts and Uber Eats order receipts | **Built and run on the maintainer's own account, 24 receipts.** The trip list and the Uber Eats order list from inside each signed-in page, Uber's own receipt PDF for each paid purchase, checked for its receipt ID, nothing clicked, real Edge/Chrome |
 | [`ukg`](apps/ukg) | UKG Pro / UltiPro | **Pay statements** | Per-employer tenant; JSON-API, nothing clicked |
 | [`ups`](apps/ups) | UPS Billing Center | Shipping invoices | **Built on the maintainer's own account.** The Billing Center's own invoice list and download from inside the page, nothing clicked |
@@ -143,10 +147,11 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`vanguard`](apps/vanguard) | Vanguard | Account statements | **Contributed by [@tylerverry](https://github.com/tylerverry), 135 statements across five accounts.** The statements page's own list, read while its year picker is walked, then each statement's own download control, pressed through the guard |
 | [`venmo`](apps/venmo) | Venmo | Monthly account statements, printed from the Statements page | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 24 months saved on a full run.** Reads two years unless you set a From date, and says so when older months may hold more. Show more is the only press, and a month is printed only once every transaction is drawn |
 | [`verizon`](apps/verizon) | Verizon (Fios) | Bill statements | Real Edge (bot block); dropdown + CDP download |
-| [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills | **Untested, built without an account. Have one? [Help test it](apps/verizonmobile/README.md#help-test-it-no-programming-needed)** |
+| [`verizonmobile`](apps/verizonmobile) | Verizon Mobile (wireless) | Monthly bills, about two years online | **Confirmed on a contributor's own account, 24 bills ([#31](https://github.com/rheeloaded/paperpull/issues/31)).** Bill & payment history's own bill list, each bill's PDF asked from inside the signed-in page, nothing clicked |
 | [`walmart`](apps/walmart) | Walmart | Receipts | Hardened against bot detection |
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | Account statements, tax documents | **Confirmed by [@appchamp](https://github.com/appchamp)** on a real account's credit card statements ([#27](https://github.com/rheeloaded/paperpull/issues/27)). Checking, savings, mortgage and tax documents are untested. Have one? [Help test it](apps/wellsfargo/README.md#help-test-it-no-programming-needed) |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | Statements, tax docs | |
+| [`ziply`](apps/ziply) | Ziply Fiber | Monthly internet bills, the whole history My Account lists | **Built and run on a contributor's own account, 17 bills listed and the newest saved by a Pilot.** The page's own bill-list query asked for every bill, each PDF fetched from inside the signed-in page, nothing clicked. One account at a time |
 
 > ⚠️ **Read this first:** these tools drive real, signed-in financial accounts.
 > See [SECURITY.md](SECURITY.md) before you run *or* publish anything. In short:
@@ -369,8 +374,8 @@ slug or provider, runs it on the right Python, and passes anything else
 straight through, so `paperpull chase all --year 2025 --account spouse` works.
 The commands are `setup`, `login`, `discover`, `pilot`, `all`, `resume`,
 `verify`, `diagnose` and `dry-run`. The panel names them for what they do.
-Sign in, Get new documents, Try the newest few first and Only check what's
-there sit on each provider's page, Continue appears after a run that
+Open sign-in window, Get new documents, Try the newest few first and Check
+what's there sit on each provider's page, Continue appears after a run that
 stopped, and the rest are under More, each with a line saying what it does.
 A receipt provider's More also has **Review names**, for the receipts it
 was unsure how to name.
@@ -543,19 +548,19 @@ in [docs/file-naming.md](docs/file-naming.md).
 Documents can go to a folder apart from the browser profiles, records and
 logs in your PaperPull folder, such as one Google Drive or another sync
 program keeps, one Paperless-ngx watches or a share on a NAS. In Settings,
-under **Documents folder**, give one folder for every provider, and each
+under **Documents folder**, give one folder for every account, and each
 provider and person gets a folder of their own inside it, named as their
 PaperPull folder is, such as `Chase Statements` and
-`Costco Receipts - spouse`. Below it, pick a provider and person to give
-them a folder of their own instead, or keep their documents in the
-provider's own folder. One set that way keeps it when the folder for every
-provider changes, and **Use the folder for every provider** sets it back.
+`Costco Receipts - spouse`. Below it, pick an account to give it a folder
+of its own instead, or **Keep documents in the provider's folder**. One set
+that way keeps it when the Documents folder changes, and **Use the
+Documents folder** sets it back.
 The first save gives a folder in it to everyone whose config names no
 documents folder, one set back to the provider's own folder in an earlier
 version included, since that left no setting, so set those again below
 after it.
-The page lists each one that keeps a folder of their own, and **Use it for
-every provider** gives all of them their folder inside it at once, a copy
+The page lists each one that keeps a folder of their own, and **Apply to
+every account** gives all of them their folder inside it at once, a copy
 of each config kept in the provider's Backups folder first.
 
 Each download is still saved and checked in the provider's own folder, and
@@ -571,14 +576,14 @@ lists what the run saved, each file where the run saved it, before the move.
 Saving the setting moves nothing that is already there. Documents saved
 before stay where they are, and PaperPull still finds them, so nothing is
 downloaded again. The page says how many are still in the provider's
-folder and offers **Preview move** and then **Move**, which moves each one
+folder and offers **1. Preview** and then **2. Move**, which moves each one
 under the name it has, with its records following it, and puts everything
 back if a record cannot be written. Change the folder or set it back, and
 the same Move brings the documents to where it now points. A browser
 profile, a folder inside or around one, a folder holding a provider's own
 folder and a folder inside or around a person's own folder are refused. A
-provider or person added later gets their folder inside the folder for
-every provider as their first download run from the panel starts, and the
+provider or person added later gets their folder inside the Documents
+folder as their first download run from the panel starts, and the
 run says so. One whose config already names a documents folder, their own folder
 included, is never changed by a run. The panel writes each one's folder
 into their config.json as `"documents_dir"`, a full path, so a run from a
@@ -589,9 +594,24 @@ folder has to be inside the data folder, see
 
 ## Moving to another computer
 
-The record of what each provider already downloaded is what keeps
-PaperPull from downloading a document twice, and it can move with you. On
-the old computer, press **Export history** in the panel's Settings. On
+The simplest move brings everything. Copy your PaperPull folder to the new
+computer. Each provider's config.json names its own folders relative to
+itself, so that copy works wherever it lands. On the new computer, type
+where the PaperPull folder is in the welcome's first step, and PaperPull
+finds its providers. A Documents folder is different. Each account's
+config.json names it by its full path, as `"documents_dir"`, and so do the
+records of every document moved there, so copy it to the same place on the
+new computer, and any folder of its own you gave one account the same way.
+Then choose the Documents folder again in Settings, since that setting
+belongs to each computer, and sign in to each provider once, since a
+sign-in rarely survives a copy.
+
+When copying the folders is not an option, the record of what each
+provider already downloaded, which is what keeps PaperPull from
+downloading a document twice, can move on its own. It brings no PDF, and
+marks every document it lists as downloaded, so Get new never fetches them
+again. Copy the PDFs over too, or use **Restore deleted files** to download
+them. On the old computer, press **Export history** in the panel's Settings. On
 the new one, or on [PaperPull Server](SERVER.md#coming-from-the-desktop-app),
 choose that file under **Moving from another computer?** on the welcome
 page, or under **Import a history file** in Settings. Every provider
@@ -866,8 +886,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **seventy-nine** apps pass their tests, the seventy-three that are
-  supported and the six still waiting for a tester, 32,425 of them
+- ✅ All **eighty-five** apps pass their tests, the eighty that are
+  supported and the five still waiting for a tester, 35,564 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).

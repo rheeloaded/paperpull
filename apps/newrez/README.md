@@ -133,15 +133,16 @@ paperpull newrez pilot            REM once the site layer is confirmed
   the same month. A tester confirmed that his statements print
   `Statement Date: mm/dd/yyyy` and that files were renamed and saved under
   the right date (#38). The app remembers each statement by its month, so
-  nothing already downloaded is fetched again, and **Rename preview** then
-  **Apply renames** bring files saved by an earlier build into line.
+  nothing already downloaded is fetched again, and **Rename existing
+  files**, its **1. Preview** then **2. Rename**, brings files saved by an
+  earlier build into line.
 - **The right statement.** A statement whose first date after "Statement
   Date" falls in the month of another statement on the list, with no date
   of its own month near that label, is not saved under this one's name
   unless that date is the one a "Due Date" label names on its own line. It
   goes to `Manual Review\` and the statement is asked for again on the next
   run. One whose dates are in some other month, or disagree, keeps its
-  month's name with a note, and **Rename preview** lists any file already
+  month's name with a note, and a rename's **1. Preview** lists any file already
   saved that looks that way, so it can be opened and checked. The label it
   reads is the one a tester's statements print (#38), and a statement
   refused this way has not been seen on a real run yet.

@@ -10,10 +10,13 @@ Everything is under tmp_path. Runs start a stand-in app with this Python,
 the way the packaged build runs every app, and the stand-in does what a
 file beside it says.
 """
+import ast
 import asyncio
+import functools
 import http.client
 import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -67,6 +70,7 @@ if saved:
         encoding="utf-8")
 counts = {"manual_review": 0, "failed": 0, "validation_failures": 0,
           "new_files": len(saved), "stopped": plan.get("stopped", 0)}
+counts.update(plan.get("counts", {}))
 print("PAPERPULL_RUN_RESULT " + (mark + " " if mark else "") + json.dumps(counts), flush=True)
 sys.exit(plan.get("code", 0))
 '''
@@ -186,6 +190,62 @@ def test_a_resume_only_a_listing_carries_on_from_is_its_own_outcome(root):
          {"action": "resume", "exit_code": 0, "result": {"stopped": 1, "list_not_read": 0}})
     row = _rows()[("Bank Statements", "second")]
     assert (row["state"], row["last_outcome"]) == ("stopped", "stopped")
+
+
+def _listing_note(folder, at, whole_at="", resume_ended=""):
+    """The listing note an app keeps, and a Resume after it that read none."""
+    note = {"complete": True, "at": at}
+    if whole_at != "":
+        note["whole_at"] = whole_at
+    (folder / "last-listing.json").write_text(json.dumps(note), encoding="utf-8")
+    if resume_ended:
+        (folder / "run-summary.txt").write_text(
+            "Mode: resume\nRun end: %s\n" % resume_ended, encoding="utf-8")
+        _log(folder, {"action": "resume", "exit_code": 0, "ended": resume_ended,
+                      "result": {"stopped": 0, "new_files": 0}})
+
+
+def test_a_continue_with_nothing_to_take_is_no_check(panel, root):
+    """A Continue after every listed document was saved reads no list, so
+    the card says when the list was last read, not when the Continue ran,
+    and the last run is still said as the run it was (#148)."""
+    bank = root / "Bank Statements - second"
+    weeks_ago = (date.today() - timedelta(days=21)).isoformat() + "T09:00:00"
+    today = date.today().isoformat() + "T10:00:00"
+    _listing_note(bank, weeks_ago, weeks_ago, resume_ended=today)
+    row = _rows()[("Bank Statements", "second")]
+    assert (row["state"], row["checked"], row["ran"]) == ("current", weeks_ago, today)
+    shown = panel.evaluate("(row) => present(row)", json.loads(json.dumps(row, default=str)))
+    said_then = panel.evaluate("(iso) => when(iso)", weeks_ago)
+    said_today = panel.evaluate("(iso) => when(iso)", today)
+    assert shown["say"].endswith("checked " + said_then), shown
+    assert said_today not in shown["say"]
+
+
+@pytest.mark.parametrize("complete, whole_at, checked", [
+    (True, "", "at"), (False, "", None), (True, None, None)],
+    ids=["older note, whole", "older note, stopped", "never read whole"])
+def test_a_card_says_checked_only_for_a_list_read_whole(panel, root, complete, whole_at, checked):
+    bank = root / "Bank Statements - second"
+    at = (date.today() - timedelta(days=9)).isoformat() + "T09:00:00"
+    _listing_note(bank, at, whole_at)
+    if not complete:
+        (bank / "last-listing.json").write_text(json.dumps({"complete": False, "at": at}),
+                                                encoding="utf-8")
+    row = _rows()[("Bank Statements", "second")]
+    assert row["checked"] == (at if checked else None)
+    shown = panel.evaluate("(row) => present(row)", json.loads(json.dumps(row, default=str)))
+    assert ("checked" in shown["say"]) is bool(checked), shown
+
+
+def test_a_stopped_run_from_a_terminal_still_says_when_it_ran(panel, root):
+    """With nothing in the panel's log, the last run is the run summary's."""
+    bank = root / "Bank Statements - second"
+    ended = (date.today() - timedelta(days=3)).isoformat() + "T10:00:00"
+    (bank / "run-summary.txt").write_text("Mode: all\nRun end: %s\n" % ended, encoding="utf-8")
+    row = dict(_rows()[("Bank Statements", "second")], state="stopped", last_outcome="unlisted")
+    shown = panel.evaluate("(row) => present(row)", json.loads(json.dumps(row, default=str)))
+    assert ("The last run on " + panel.evaluate("(iso) => when(iso)", ended)) in shown["say"]
 
 
 def test_a_clean_run_after_a_stop_clears_it(root):
@@ -315,22 +375,118 @@ def test_a_run_that_saved_documents_never_says_nothing_new(panel, action, saved)
     o = _outcome(panel, _counted(new_files=23), saved, action)
     assert (o["tone"], o["title"]) == ("ok", "23 new documents saved")
     entry = {"action": action, "exit_code": 0, "result": _counted(new_files=23), "saved": saved}
-    assert ", 23 new files</span>" in panel.evaluate("(e) => runLine(e)", entry)
+    assert ", 23 new documents</span>" in panel.evaluate("(e) => runLine(e)", entry)
     o = _outcome(panel, _counted(new_files=23, failed=1), saved, action)
     assert o["title"] == "23 new documents saved, some need a look"
+
+
+@pytest.mark.parametrize("stop, code, title, signin, resume", [
+    ("needs_you", "0", "Citi needed you partway", True, True),
+    ("page", "0", "Citi's page was not what PaperPull expected", False, True),
+    ("slow", "1", "Citi did not answer in time", False, True),
+    ("error", "1", "PaperPull ran into something it did not expect", False, True),
+    ("", "0", "Stopped before finishing", True, True),
+])
+def test_a_stop_says_why_and_whose_it_is_to_fix(panel, stop, code, title, signin, resume):
+    """A changed page used to read as a sign-out, so the person signed in
+    and pressed Continue, which stopped at the same place again. Only a
+    stop a sign-in can fix offers one, and no stop guesses a sign-out."""
+    o = panel.evaluate("""([result, code]) => {
+        Object.assign(RUN, {result, code, action: 'all', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", [dict(_counted(stopped=1), stop=stop), code])
+    assert o["title"] == title
+    assert "may have signed you out" not in o["say"] and "exited with code" not in o["say"]
+    assert (o.get("signin") is not False) is signin and bool(o.get("resume")) is resume
+    # Whose it is to fix is said only where it is known. A page that was
+    # not what the app expected is a chat window over a button as often as
+    # a changed site, and that stop's own words say to close it and press
+    # Resume. A wait that ran out is a changed page or a sign-out as often
+    # as a busy site, and an error can be a window the person closed.
+    assert "not you" not in o["say"] and "busy" not in o["title"]
+    assert "too slow" not in o["title"] and "how it gets fixed" not in o["say"]
+    if stop == "page":
+        assert "If it stops at the same place again" in o["say"]
+
+
+def test_a_page_stop_of_a_check_offers_to_check_again(panel):
+    """A stop at a page offers what the stop's own words say, Resume, and
+    a Discover that stopped there offers Check again in its place."""
+    o = panel.evaluate("""(result) => {
+        Object.assign(RUN, {result, code: '0', action: 'discover', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", dict(_counted(stopped=1), stop="page"))
+    assert o.get("recheck") and not o.get("resume") and o.get("signin") is False
+
+
+@pytest.mark.parametrize("code, refused, asked", [
+    ("5", "", False),
+    ("6", "", False),
+    ("7", "", False),
+    ("1", "Citi is already running for this account, in another tab or window.", False),
+    ("1", "", True),
+])
+def test_a_run_that_wrote_no_failure_file_is_never_offered_one(panel, code, refused, asked):
+    """A sign-in with no window, a recording with nothing in it, a run
+    that found nobody signed in and a run that did not start write no
+    failure file. The panel asked for the
+    newest one all the same, since their codes are not 0, and an older
+    run's from the last hour then read 'This run wrote a file about what
+    went wrong'."""
+    seen = panel.evaluate("""([code, refused]) => {
+        window.checkFailure = () => { window.askedForFailure = true; };
+        window.askedForFailure = false;
+        Object.assign(RUN, {state: 'running', result: null, action: code === '5' ? 'login' : 'all',
+                            again: false, saved: [], provider: 'Citi', kind: 'DOCUMENT', lines: [],
+                            app: 'Citi Documents', account: 'primary', onDone: null, queue: false});
+        finishRun(code, refused, true);
+        return window.askedForFailure;
+    }""", [code, refused])
+    assert seen is asked
+
+
+def test_a_list_left_unread_keeps_its_own_next_step_whatever_stopped_it(panel):
+    o = panel.evaluate("""(result) => {
+        Object.assign(RUN, {result, code: '0', action: 'resume', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", dict(_counted(stopped=1, list_not_read=1), stop="page"))
+    assert o.get("relist") and "was not read to its end" in o["say"]
+
+
+@pytest.mark.parametrize("action, code, refused, tone, title, signin", [
+    ("login", "5", "", "bad", "No sign-in window opened", False),
+    ("record", "6", "", "info", "Nothing was recorded", True),
+    ("all", "1", "Citi is already running for this account, in another tab or window.",
+     "bad", "This run did not start", False),
+])
+def test_what_did_not_happen_is_never_said_to_have(panel, action, code, refused, tone, title, signin):
+    """A sign-in with no window, an empty or refused recording and a run
+    the server would not start each say so, and never 'Sign-in window
+    opened', 'Recording saved' or an exit code."""
+    o = panel.evaluate("""([action, code, refused]) => {
+        Object.assign(RUN, {result: null, code, action, again: false, refused, saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", [action, code, refused])
+    assert (o["tone"], o["title"]) == (tone, title)
+    assert "exited with code" not in o["say"]
+    assert bool(o.get("signin")) is signin and not o.get("resume")
 
 
 def test_a_run_that_saved_nothing_still_says_so(panel):
     o = _outcome(panel, _counted(), [])
     assert (o["tone"], o["title"]) == ("ok", "Nothing new")
-    assert _outcome(panel, _counted(failed=1), [])["title"] == "Finished, needs attention"
+    assert _outcome(panel, _counted(failed=1), [])["title"] == "Finished, some need a look"
     # A log in the run's folder can hold anything, and an odd count in it
     # is no count.
     for odd in ("23", -1, 2.5, None, [3]):
         entry = {"action": "all", "exit_code": 0, "result": {"new_files": odd}, "saved": []}
         assert ", nothing new</span>" in panel.evaluate("(e) => runLine(e)", entry), odd
     entry = {"action": "all", "exit_code": 0, "result": {}, "saved": ["a.pdf", "b.pdf"]}
-    assert ", 2 new files</span>" in panel.evaluate("(e) => runLine(e)", entry)
+    assert ", 2 new documents</span>" in panel.evaluate("(e) => runLine(e)", entry)
 
 
 def test_a_broken_log_is_no_log(root):
@@ -507,6 +663,9 @@ def test_a_second_run_of_one_account_waits_for_the_first(base, root):
     assert running and running["action"] == "pilot"
     second = run(base, {"app": "Bank Statements", "action": "all"})
     assert "already running for this account" in second and events(second, "done") == ["1"]
+    # Said as a run that did not start, not as one that began and failed.
+    refused = events(second, "refused")
+    assert len(refused) == 1 and "already running for this account" in refused[0]
     # Another person on the same app is not held up.
     other = run(base, {"app": "Bank Statements", "account": "second", "action": "discover"})
     assert "already running" not in other
@@ -560,6 +719,241 @@ class _Req:
 
     async def json(self):
         return self._body
+
+
+def _pdf(path, age):
+    """A PDF written `age` seconds ago."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"%PDF-1.4\n")
+    when = time.time() - age
+    os.utime(path, (when, when))
+    return path
+
+
+def _opened(monkeypatch):
+    opened = []
+
+    class Popen:
+        def __init__(self, cmd, *a, **k):
+            opened.append(Path(cmd[-1]).resolve())
+
+    monkeypatch.setattr(app_module.subprocess, "Popen", Popen)
+    return opened
+
+
+def test_open_folder_shows_the_documents_not_the_programs_beside_them(root, monkeypatch):
+    """The account's own folder holds its script, config and records, and
+    the PDFs one folder down, so Open folder opens the one holding them."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "2024" / "march.pdf", 100)
+    # Newer, but none of these is where its documents are.
+    for records in ("Logs", "Diagnostics", "Backups", "Manual Review", ".cache"):
+        _pdf(own / records / "x.pdf", 1)
+    opened = _opened(monkeypatch)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements"})))
+    assert opened == [(own / "Statements").resolve()]
+    # No run has said what it saved, so a run's page says nowhere.
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": ""}
+
+
+def test_open_folder_follows_the_newest_document_into_a_documents_folder(root, tmp_path, monkeypatch):
+    """Once a documents folder is set, only what is saved from then on goes
+    there, so it is shown once it holds the newest document, and not before."""
+    own, docs = root / "Bank Statements", tmp_path / "Documents" / "Bank"
+    docs.mkdir(parents=True)
+    _pdf(own / "Statements" / "old.pdf", 500)
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    _pdf(docs / "Statements" / "new.pdf", 10)
+    assert app_module._where_documents_are(meta, "primary") == docs
+
+
+def test_with_no_document_yet_it_is_the_documents_folder_or_the_accounts_own(root, tmp_path, monkeypatch):
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == root / "Bank Statements"
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    assert app_module._where_documents_are(meta, "primary") == docs
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="links need privileges on Windows")
+def test_a_link_in_the_folder_is_never_followed_to_find_documents(root, tmp_path, monkeypatch):
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf(tmp_path / "elsewhere" / "newer.pdf", 1)
+    (own / "Linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+
+
+def test_open_folder_never_looks_in_a_browser_profile_or_another_persons_folder(root):
+    """The signed-in browser's profile sits in the account's own folder, and
+    a config can put another person's folder there too. Neither is where
+    this account's documents are, whatever PDF is newest in it."""
+    own = root / "Bank Statements"
+    (own / "config.json").write_text(json.dumps({"output_dir": ".", "profile_dir": "./browser-profile"}),
+                                     encoding="utf-8")
+    (own / "config.inside.json").write_text(json.dumps(
+        {"output_dir": "./inside", "profile_dir": "./inside/browser-profile"}), encoding="utf-8")
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf(own / "browser-profile" / "Default" / "viewed.pdf", 1)
+    _pdf(own / "inside" / "Statements" / "theirs.pdf", 50)
+    _pdf(own / "inside" / "browser-profile" / "Default" / "viewed.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+    assert app_module._where_documents_are(meta, "inside") == own / "inside" / "Statements"
+
+
+@pytest.mark.parametrize("docs", ["Elsewhere", "{own}/browser-profile", "{own}/Manual Review/docs", "{apps}"])
+def test_a_documents_folder_no_run_would_use_is_never_shown(root, tmp_path, monkeypatch, docs):
+    """Core keeps documents in the account's own folder when documents_dir
+    is not a full path, is the browser profile, is in its records or holds
+    the account's own folder (storage.set_documents_dir), so the panel
+    never shows such a folder either. One that is not a full path was read
+    from wherever the panel was started."""
+    own = root / "Bank Statements"
+    docs = docs.format(own=own, apps=root)
+    monkeypatch.chdir(tmp_path)
+    (own / "config.json").write_text(json.dumps(
+        {"output_dir": ".", "profile_dir": "./browser-profile", "documents_dir": docs}), encoding="utf-8")
+    _pdf(own / "Statements" / "mine.pdf", 100)
+    _pdf((tmp_path / docs) / "Statements" / "newer.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Statements"
+
+
+def _ran(own, saved, lines, action="all"):
+    """A download run's log entry naming what it saved, and the
+    new-this-run.txt it wrote, each line where it saved a file."""
+    app_module._note_run(own, {"action": action, "exit_code": 0, "result": {"new_files": len(saved)},
+                               "saved": saved})
+    (own / "new-this-run.txt").write_text("# %d file(s)\n" % len(lines) + "".join(
+        line + "\n" for line in lines), encoding="utf-8")
+
+
+def test_saved_to_names_where_that_runs_documents_are(root, monkeypatch):
+    """The folder a run's page names, and its Open folder shows, is the one
+    that run's files are in, never the one holding a newer document of
+    another kind, and the account's own when they are of two kinds."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "2024" / "march.pdf", 100)
+    _pdf(own / "Tax Documents" / "2023" / "1099.pdf", 1)
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert app_module._where_documents_are(meta, "primary") == own / "Tax Documents"
+    _ran(own, ["march.pdf"], ["Statements/2024/march.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(own / "Statements")}
+    opened = _opened(monkeypatch)
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "saved"})))
+    assert opened == [(own / "Statements").resolve()]
+    _ran(own, ["march.pdf", "1099.pdf"], ["Statements/2024/march.pdf", "Tax Documents/2023/1099.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(own)}
+
+
+def test_saved_to_follows_a_run_moved_into_the_documents_folder(root, tmp_path, monkeypatch):
+    own, docs = root / "Bank Statements", tmp_path / "Documents" / "Bank"
+    # Moved there by the panel once the run ended, keeping its folders.
+    _pdf(docs / "Statements" / "2024" / "march.pdf", 100)
+    _pdf(own / "Statements" / "2019" / "kept.pdf", 1)
+    monkeypatch.setattr(app_module, "_documents_of", lambda meta, account: str(docs))
+    _ran(own, ["march.pdf"], ["Statements/2024/march.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": str(docs)}
+    # Moved in part, so in two places with nothing in common, and none is said.
+    _pdf(own / "Statements" / "2024" / "april.pdf", 100)
+    _ran(own, ["march.pdf", "april.pdf"], ["Statements/2024/march.pdf", "Statements/2024/april.pdf"])
+    assert app_module.api_saved_in("Bank Statements", "primary") == {"folder": ""}
+
+
+def test_saved_to_takes_only_that_runs_own_files_in_its_own_folders(root, tmp_path, monkeypatch):
+    """A line naming a file outside the person's folder, a list its run's
+    log does not name and a run that downloads nothing name no folder, and
+    Open folder beside it then opens nothing."""
+    second = root / "Bank Statements - second"
+    _pdf(second / "Statements" / "a.pdf", 10)
+    outside = _pdf(tmp_path / "elsewhere" / "Statements" / "b.pdf", 10)
+    mine = "../Bank Statements - second/Statements/a.pdf"
+    _ran(second, ["a.pdf", "b.pdf"], [mine, str(outside)])
+    assert app_module.api_saved_in("Bank Statements", "second") == {"folder": str(second / "Statements")}
+    opened = _opened(monkeypatch)
+    for saved, lines, action in ((["b.pdf"], [str(outside)], "all"), (["c.pdf"], [mine], "all"),
+                                 (["a.pdf"], [mine], "discover")):
+        _ran(second, saved, lines, action)
+        assert app_module.api_saved_in("Bank Statements", "second") == {"folder": ""}
+        with pytest.raises(app_module.HTTPException) as e:
+            asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "account": "second",
+                                                     "what": "saved"})))
+        assert e.value.status_code == 404
+    assert opened == []
+
+
+def test_a_support_file_and_what_was_set_aside_open_their_own_folders(root, monkeypatch):
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "a.pdf", 100)
+    (own / "Diagnostics").mkdir()
+    opened = _opened(monkeypatch)
+    for what in ("diagnostics", "records"):
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+    assert opened == [(own / "Diagnostics").resolve(), own.resolve()]
+    (own / "Manual Review").mkdir()
+    asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "aside"})))
+    assert opened[-1] == (own / "Manual Review").resolve()
+
+
+@pytest.mark.parametrize("what, folder", [("aside", "Manual Review"), ("diagnostics", "Diagnostics")])
+def test_a_folder_named_on_a_button_that_is_not_there_opens_nothing(root, monkeypatch, what, folder):
+    """Open what was set aside opened the account's own folder, among its
+    script, config and records, when Manual Review was not there, and said
+    nothing, under a button that names Manual Review."""
+    own = root / "Bank Statements"
+    _pdf(own / "Statements" / "a.pdf", 100)
+    opened = _opened(monkeypatch)
+    with pytest.raises(app_module.HTTPException) as e:
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+    assert e.value.status_code == 404 and "no %s folder" % folder in e.value.detail
+    assert opened == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="links need privileges on Windows")
+def test_a_manual_review_that_is_a_link_opens_nothing(root, tmp_path, monkeypatch):
+    own = root / "Bank Statements"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (own / "Manual Review").symlink_to(elsewhere, target_is_directory=True)
+    opened = _opened(monkeypatch)
+    with pytest.raises(app_module.HTTPException) as e:
+        asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": "aside"})))
+    assert e.value.status_code == 404 and opened == []
+    for what in ("../..", "/etc", "Statements"):
+        with pytest.raises(app_module.HTTPException) as e:
+            asyncio.run(app_module.api_reveal(_Req({"app": "Bank Statements", "what": what})))
+        assert e.value.status_code == 400
+
+
+def test_a_run_that_saved_documents_says_where_and_offers_to_show_them(panel):
+    """Where the documents went was asked where it was answered least, on
+    the page that lists them."""
+    js = panel.evaluate("() => [whereSaved.toString(), finishRun.toString(), renderRun.toString()]")
+    assert "/api/saved-in?" in js[0]
+    assert "savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(" in js[1]
+    shown = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'current',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'all', scope: {year: '', start: '', end: ''}, again: false, lines: [], result: null,
+                            saved: ['a.pdf'], code: '0',
+                            refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: '/Users/me/Documents/Bank/Statements'});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const keep = document.querySelector('#view-run .keepopen');
+        return [keep.innerText, keep.querySelector('button').dataset.what || ''];
+    }""")
+    assert "Saved to /Users/me/Documents/Bank/Statements" in shown[0] and "Open folder" in shown[0]
+    assert shown[1] == "saved", "the folder named beside it, where that run's documents are"
 
 
 def test_open_folder_shows_only_the_accounts_own_folder(root, monkeypatch):
@@ -674,3 +1068,954 @@ def test_a_run_that_ended_by_itself_before_its_page_closed_keeps_its_code(base, 
     assert log[0]["exit_code"] == 0 and log[0]["closed"] is False
     assert log[0]["result"]["new_files"] == 1
     assert _rows()[("Bank Statements", "primary")]["last_outcome"] == ""
+
+
+@pytest.mark.parametrize("action", ["all", "pilot", "discover", "resume"])
+def test_a_run_with_nobody_signed_in_says_sign_in_first(panel, action):
+    """Get new before Open sign-in window read as a crash with an exit code,
+    said 'Sign in again' to somebody who never had, and offered Continue
+    for a run that never started."""
+    o = panel.evaluate("""(action) => {
+        Object.assign(RUN, {result: null, code: NOT_SIGNED_IN, action, again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", action)
+    assert (o["tone"], o["title"]) == ("info", "Sign in first")
+    assert "exited with code" not in o["say"] and "nothing was downloaded" in o["say"]
+    assert o["signin"] and o["first"] and o["rerun"] and not o.get("resume")
+
+
+def test_once_signed_in_the_same_run_is_the_next_step_over_the_same_dates(panel):
+    step = panel.evaluate("""() => rerunStep({action: 'pilot', scope: {year: '2024', start: '', end: ''}}, 'k', '2')""")
+    assert 'data-action="pilot"' in step and 'data-year="2024"' in step and ">2</div>" in step
+    # After a sign-in, Get new over all dates, as the row's own button runs.
+    step = panel.evaluate("""() => rerunStep({action: 'login', scope: {year: '2024'}}, 'k', '1')""")
+    assert 'data-action="all"' in step and "data-year" not in step and "Get new documents" in step
+    assert 'btn btn-p' in step and 'stepnum on' in step
+    # After a sign-in still to do, which then carries the weight itself.
+    step = panel.evaluate("""() => rerunStep({action: 'all', scope: {}}, 'k', '2', true)""")
+    assert 'btn btn-s' in step and 'stepnum on' not in step
+
+
+def test_a_sign_in_window_that_opened_goes_straight_on_to_get_new(panel):
+    o = panel.evaluate("""() => {
+        Object.assign(RUN, {result: null, code: '0', action: 'login', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""")
+    assert o["title"] == "Sign-in window opened" and o["rerun"] and o["signin"] is False
+
+
+@pytest.mark.parametrize("action, again, opens", [("diagnose", False, 'data-do="support"'),
+                                                  ("record", False, 'data-do="record"'),
+                                                  ("all", True, 'data-do="restore"')])
+def test_a_run_started_from_its_own_dialog_offers_that_dialog_again(panel, action, again, opens):
+    """A support report, a recording or a restore that found nobody signed
+    in offered Get new documents beside "run this again", a run nobody
+    asked for, and a restore's dates as a Get new over them."""
+    step = panel.evaluate("""([action, again]) => rerunStep({action, again, scope: {year: '2024', start: '', end: ''}},
+                                                            'k', '2', true)""", [action, again])
+    assert opens in step and "data-action" not in step and "Get new" not in step
+    # A run with no step of its own gets none rather than another run.
+    assert panel.evaluate("() => rerunStep({action: 'verify', scope: {}}, 'k', '2', true)") == ""
+
+
+def test_signing_in_from_sign_in_first_keeps_the_run_to_do_next(panel):
+    """Open sign-in window on a Sign in first page replaced that page, and
+    with it the same run over the same dates, by Get new over every date."""
+    got = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'signin',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'pilot', scope: {year: '2024', start: '', end: ''}, again: false, lines: [],
+                            result: null, saved: [], code: NOT_SIGNED_IN, refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date(), savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const btn = document.querySelector('#view-run .nextsteps button[data-action="login"]');
+        let asked = null;
+        const was = startRun;
+        startRun = (row, action, opts) => { asked = {action, opts}; return true; };
+        try { DO.run(btn); } finally { startRun = was; }
+        return [btn.dataset.then || '', asked];
+    }""")
+    assert got[0] == "1"
+    assert got[1]["action"] == "login"
+    assert got[1]["opts"]["then"] == {"action": "pilot", "scope": {"year": "2024", "start": "", "end": ""},
+                                      "again": False}
+    step = panel.evaluate("""() => rerunStep({action: 'login', scope: {}, then: {action: 'pilot',
+                                              scope: {year: '2024', start: '', end: ''}, again: false}}, 'k', '1')""")
+    assert 'data-action="pilot"' in step and 'data-year="2024"' in step and "btn btn-p" in step
+
+
+@pytest.mark.parametrize("action, again, code, stop, offers, said", [
+    ("discover", False, "0", "needs_you", ['data-action="discover"', 'data-year="2024"'], "then check what's there"),
+    ("pilot", False, "0", "needs_you", ['data-action="resume"', ">Continue<"], "then continue"),
+    ("all", False, "1", None, ['data-action="resume"', ">Continue<"], "then continue"),
+    ("all", True, "0", "needs_you", ['data-do="restore"'], "then restore deleted files"),
+    ("record", False, "6", None, ['data-do="record"'], "then record steps for support"),
+])
+def test_a_sign_in_on_a_stopped_runs_page_offers_that_run_next(panel, action, again, code, stop, offers, said):
+    """The sign-in on a stopped run's page kept a run only on Sign in
+    first, so a Discover that stopped needing the person ("Sign in in its
+    window, then check again") led to a sign-in whose page offered Get new
+    documents, which downloads. So did Continue after a stop, a restore
+    that stopped, and a recording with nothing in it ("then record
+    again")."""
+    result = dict(_counted(stopped=1), stop=stop) if stop else None
+    got = panel.evaluate("""([action, again, code, result]) => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'stopped',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action, scope: {year: '2024', start: '', end: ''}, again, lines: [], result,
+                            saved: [], code, refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: '', then: null});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const btn = document.querySelector('#view-run .nextsteps button[data-action="login"]');
+        if (!btn) return null;
+        let asked = null;
+        const was = startRun;
+        startRun = (row, action, opts) => { asked = {action, opts}; return true; };
+        try { DO.run(btn); } finally { startRun = was; }
+        // The sign-in's own page, once its window opened.
+        Object.assign(RUN, {action: 'login', scope: {year: '', start: '', end: ''}, again: false, result: null,
+                            code: '0', then: asked.opts.then || null});
+        RUN.outcome = runOutcome();
+        renderRun();
+        return [asked.action, document.querySelector('#view-run .nextsteps').innerHTML, RUN.outcome.say];
+    }""", [action, again, code, result])
+    assert got is not None, "the stopped run's page offers a sign-in"
+    login, step, say = got
+    assert login == "login"
+    assert "Get new" not in step and 'data-action="all"' not in step
+    for want in offers:
+        assert want in step
+    assert said in say and "get new documents" not in say
+
+
+def test_a_sign_in_on_its_own_still_goes_on_to_get_new(panel):
+    """A sign-in pressed anywhere else keeps no run, so its page offers Get
+    new documents and says so."""
+    got = panel.evaluate("""() => {
+        Object.assign(RUN, {result: null, code: '0', action: 'login', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: [], then: null});
+        return [runOutcome().say, rerunStep(RUN, 'k', '1')];
+    }""")
+    assert got[0].endswith("leave it open, then get new documents.")
+    assert 'data-action="all"' in got[1]
+
+
+def test_check_again_checks_over_the_same_dates(panel):
+    got = panel.evaluate("""() => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'current',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'discover', scope: {year: '', start: '2023-01-01', end: '2023-06-30'}, again: false,
+                            lines: [], result: null, saved: [], code: 'stopped', refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date(), savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const b = document.querySelector('#view-run .nextsteps button[data-action="discover"]');
+        return [b.dataset.start, b.dataset.end];
+    }""")
+    assert got == ["2023-01-01", "2023-06-30"]
+
+
+@pytest.mark.parametrize("code, said", [(5, "no sign-in window opened"), (6, "nothing was recorded"),
+                                        (7, "nobody was signed in"), (1, "ended with a problem")])
+def test_recent_runs_reads_what_did_not_happen_as_no_failure(panel, code, said):
+    """An account in Sign in first showed "Get new documents, ended with a
+    problem" beside it, and a sign-in with no window or a recording with
+    nothing in it read as failures too."""
+    action = {5: "login", 6: "record"}.get(code, "all")
+    line = panel.evaluate("(e) => runLine(e)", {"action": action, "exit_code": code, "result": None})
+    assert ", " + said + "</span>" in line
+
+
+@pytest.mark.parametrize("stop, code", [("page", "0"), ("error", "1"), (None, "1")])
+def test_a_stop_that_says_make_a_support_report_offers_one_on_its_page(panel, stop, code):
+    """The page of a run said "make a support report from More", and a
+    run's page has no More menu."""
+    result = dict(_counted(stopped=1), stop=stop) if stop else None
+    got = panel.evaluate("""([result, code]) => {
+        const r = {app: 'Bank Statements', account: 'primary', provider: 'Bank', kind: 'DOCUMENT', state: 'stopped',
+                   runnable: true, documents: 1, gaps: [], latest: [], runs: [], slug: 'bank'};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'all', scope: {year: '', start: '', end: ''}, again: false, lines: [], result,
+                            saved: [], code, refused: '', failure: false, startedAt: new Date(), endedAt: new Date(),
+                            savedIn: ''});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const page = $('view-run');
+        const b = page.querySelector('[data-do="support"]');
+        if (b) DO.support(b);
+        return [RUN.outcome.say, Boolean(page.querySelector('[data-do="menu"]')), b ? b.textContent : '',
+                $('dlg-support').open];
+    }""", [result, code])
+    say, has_more, button, opened = got
+    assert "make a support report with the button below" in say and "More" not in say
+    assert not has_more
+    assert button == "Make a support report" and opened
+
+
+def test_a_run_with_nobody_signed_in_is_not_a_stop_to_continue():
+    entry = {"action": "all", "exit_code": app_module.NOT_SIGNED_IN, "result": None}
+    assert app_module._last_outcome(entry) == "signin"
+    assert app_module._account_state(None, "signin", []) == "signin"
+    assert app_module.STATE_ORDER.index("signin") < app_module.STATE_ORDER.index("not_started")
+
+
+def test_an_account_not_started_offers_to_sign_in_not_to_open_its_page(panel):
+    acts = panel.evaluate("""() => ['not_started', 'signin'].map(state =>
+        present({state, provider: 'Citi', kind: 'DOCUMENT', runnable: true, documents: 0, gaps: [], latest: []}).act)""")
+    assert all(a == {"label": "Sign in", "run": "login", "primary": True} for a in acts), acts
+
+
+def test_the_welcome_says_what_its_folder_holds_before_providers_are_chosen(panel):
+    """The folder was checked only at Set up, two steps on. One already
+    holding providers was not noticed, and one in a sync service, which
+    would sync each sign-in, was not said."""
+    reply = {}
+    panel.route("**/api/root/check", lambda route: route.fulfill(
+        status=200, content_type="application/json", body=json.dumps(reply)))
+
+    def press(answer, typed="/Users/me/PaperPull"):
+        reply.clear()
+        reply.update(answer)
+        return panel.evaluate("""async (typed) => {
+            PROVIDERS = {providers: [], templates: true};
+            if ($('newroot').value !== typed) { $('newroot').value = typed; $('newroot').oninput && $('newroot').oninput(); }
+            W.step = 1; W.add = false; wShow();
+            await DO['w-next']();
+            return {step: W.step, said: $('rootcheck').hidden ? '' : $('rootcheck').textContent,
+                    use: !$('w-useroot').hidden, next: $('w-next1').textContent};
+        }""", typed)
+
+    panel.evaluate("() => openWelcome(false).catch(() => {})")
+    bad = press({"ok": False, "problem": "That is a file, not a folder. Choose a folder."})
+    assert bad["step"] == 1 and bad["said"].startswith("That is a file") and not bad["use"]
+
+    found = {"ok": True, "found": ["Chase Statements", "Amex Statements"], "found_count": 2, "synced_by": ""}
+    first = press(found, "/Users/me/Old")
+    assert first["step"] == 1 and first["use"]
+    assert "Found 2 providers already set up here (Chase Statements, Amex Statements)." in first["said"]
+    assert press(found, "/Users/me/Old")["step"] == 2, "a second Continue goes on, to add more"
+
+    synced = {"ok": True, "found": [], "found_count": 0, "synced_by": "iCloud Drive"}
+    warned = press(synced, "/Users/me/Library/Mobile Documents/PaperPull")
+    assert warned["step"] == 1 and "in iCloud Drive" in warned["said"] and warned["next"] == "Continue anyway"
+    assert press(synced, "/Users/me/Library/Mobile Documents/PaperPull")["step"] == 2
+
+    assert press({"ok": True, "found": [], "found_count": 0, "synced_by": ""}, "/Users/me/New")["step"] == 2
+
+
+def test_moving_says_the_pdfs_stay_unless_the_folders_are_copied(panel):
+    """A history file marks every document it lists as downloaded and brings
+    no PDF, so Get new never fetched them, and nothing said so. The Move card
+    now leads with copying the folders, which brings everything."""
+    said = panel.evaluate("""async () => {
+        const was = META;
+        META = null;
+        placeMove(false);                   // as at start, before META is read
+        const early = $('hxlead').textContent;
+        META = Object.assign({}, was || {}, {apps_root: '/Users/me/PaperPull', documents_root: '/Users/me/Drive/Docs'});
+        placeMove(false);
+        const card = [$('hxlead').textContent, $('hxfilelead').hidden ? '' : $('hxfilelead').textContent];
+        placeMove(true);
+        const welcome = $('hxlead').textContent;
+        await openWelcome(false).catch(() => {});
+        return {early, card, welcome, aside: $('movesay').textContent};
+    }""")
+    assert "Export history saves a file" in said["early"]
+    copy, file_ = said["card"]
+    assert copy.startswith("To move everything, your PDFs included, copy your PaperPull folder, /Users/me/PaperPull")
+    assert "your Documents folder, /Users/me/Drive/Docs" in copy and "choose the Documents folder again" in copy
+    # Each config names the documents folder by its full path, and so do the
+    # records of what was moved there, so a copy elsewhere would point at
+    # the old computer's folder.
+    assert "/Users/me/Drive/Docs, to the same place on the new computer, since PaperPull keeps its full path" in copy
+    assert "Any folder you chose for one account's documents goes to the same place too" in copy
+    assert file_.startswith("No way to copy the folders?") and "no PDF" in file_
+    assert "The PDFs stay on the other computer. Copy them over, or use Restore deleted files" in said["welcome"]
+    assert said["aside"].startswith("Copy your PaperPull folder from the old computer, then type where it is above")
+
+
+def test_a_report_lands_on_its_file_and_where_to_send_it(panel):
+    """About 15 steps from More to an attached file. The dialog said to sign
+    in with no way to, the folder held several files, and the place to send
+    it was under Settings, About."""
+    got = panel.evaluate("""() => {
+        const r = {app: 'Chase Statements', account: 'primary', provider: 'Chase', slug: 'chase', kind: 'DOCUMENT',
+                   state: 'current', runnable: true, documents: 1, gaps: [], latest: [], runs: []};
+        ROWS = [r];
+        Object.assign(RUN, {state: 'done', app: r.app, account: r.account, provider: r.provider, kind: r.kind,
+                            action: 'diagnose', scope: {year: '', start: '', end: ''}, again: false, lines: [],
+                            result: null, saved: [], code: '0', refused: '', failure: false,
+                            startedAt: new Date(), endedAt: new Date()});
+        RUN.outcome = runOutcome();
+        renderRun();
+        const keep = document.querySelector('#view-run .keepopen');
+        const show = keep.querySelector('[data-do="report-reveal"]');
+        const link = keep.querySelector('a');
+        // The dialog's own sign-in, which keeps the person, and the dialog, where they are.
+        let asked = null;
+        const real = startRun;
+        startRun = (row, action, opts) => { asked = [row.app, action, opts]; return true; };
+        DLG_ROW = r;
+        DO['sp-signin']();
+        startRun = real;
+        return {kind: show && show.dataset.kind, text: show && show.textContent, href: link.href, target: link.target,
+                rel: link.rel, asked, said: $('sp-signsay').textContent, plain: reportLink({}).match(/href="([^"]+)"/)[1]};
+    }""")
+    assert got["kind"] == "diagnose" and got["text"] == "Show the file"
+    url = got["href"]
+    assert url.startswith("https://github.com/rheeloaded/paperpull/issues/new?")
+    assert "template=app-broke.yml" in url and "app=chase" in url and "title=%5BBroken%5D+chase%2C+" in url
+    assert (got["target"], got["rel"]) == ("_blank", "noopener")
+    # Its words come to the dialog, and what it came to is said there when
+    # it ends (test_a_support_report_from_its_own_dialog.py).
+    assert got["asked"][:2] == ["Chase Statements", "login"]
+    assert got["asked"][2]["stay"] is True and got["asked"][2]["sink"] == "sp-log"
+    assert got["said"].startswith("Opening the sign-in window.")
+    assert got["plain"] == "https://github.com/rheeloaded/paperpull/issues", "no slug, the issue list"
+
+
+def test_every_row_carries_the_name_its_issues_use(root, monkeypatch):
+    """Only a provider PaperPull ships, one providers.json names, since the
+    name goes into a link to GitHub and a script named by hand could carry
+    any words."""
+    shipped = dict(app_module._provider_notes(), bank={"documents": "", "group": "banks"})
+    monkeypatch.setattr(app_module, "_provider_notes", lambda: shipped)
+    rows = _rows()
+    assert rows[("Bank Statements", "primary")]["slug"] == "bank"
+    assert rows[("Bank Statements", "second")]["slug"] == "bank"
+    assert rows[("Shop Receipts", "primary")]["slug"] == "", "shop_receipts.py is no provider PaperPull ships"
+
+
+def _github_form(name):
+    return (Path(app_module.__file__).resolve().parents[1] / ".github" / "ISSUE_TEMPLATE" / name).read_text(encoding="utf-8")
+
+
+def _rq(panel, kind, values):
+    return panel.evaluate("""async ([kind, values]) => {
+        document.addEventListener('click', e => { if (e.target.id === 'rq-go') e.preventDefault(); }, true);
+        await openRequest(kind);
+        for (const [id, v] of Object.entries(values)) $(id).value = v;
+        $('rq-go').click();
+        await new Promise(f => setTimeout(f, 30));
+        return {err: $('rq-err').hidden ? '' : $('rq-err').textContent, href: $('rq-go').href,
+                done: !$('rq-done').hidden, invalid: [...$('dlg-request').querySelectorAll('[aria-invalid=true]')].map(n => n.id)};
+    }""", [kind, values])
+
+
+def test_a_request_needs_its_answers_before_it_goes_to_github(panel):
+    """Blank forms are what the sheet is there to stop."""
+    r = _rq(panel, "feature", {})
+    assert r["err"].startswith("Add a few words") and r["invalid"] == ["rq-title"] and not r["done"]
+    r = _rq(panel, "provider", {"rq-provider": "Acme", "rq-category": "Utility", "rq-documents": "bills", "rq-url": "me@acme.com"})
+    assert "Never a username" in r["err"] and not r["done"]
+
+
+def test_a_request_starts_the_right_github_form_with_its_answers(panel):
+    r = _rq(panel, "provider", {"rq-provider": "Acme Water", "rq-category": "Utility", "rq-documents": "monthly bills"})
+    assert r["done"] and "template=provider-request.yml" in r["href"]
+    for part in ("provider=Acme+Water", "category=Utility", "documents=monthly+bills", "title=%5BProvider+request%5D+Acme+Water"):
+        assert part in r["href"], part
+    assert "url=" not in r["href"], "an answer left blank is left out"
+    r = _rq(panel, "feature", {"rq-title": "A schedule", "rq-area": "Settings", "rq-what": "Run monthly", "rq-why": "I forget",
+                               "rq-importance": "Nice to have"})
+    assert r["done"] and "template=feature-request.yml" in r["href"]
+    for part in ("area=Settings", "what=Run+monthly", "why=I+forget", "importance=Nice+to+have", "version=", "computer="):
+        assert part in r["href"], part
+
+
+def test_the_sheet_offers_exactly_what_each_github_form_accepts():
+    """GitHub fills a dropdown only from one of its own options."""
+    page = app_module.HTML
+    for field, form in (("rq-category", "provider-request.yml"), ("rq-area", "feature-request.yml"), ("rq-importance", "feature-request.yml")):
+        options = re.findall(r"<option>([^<]+)</option>", re.search(r'<select id="%s">(.*?)</select>' % field, page, re.S).group(1))
+        for option in options:
+            assert "- %s\n" % option in _github_form(form), option
+    for name, ids in (("provider-request.yml", ("provider", "category", "url", "documents")),
+                      ("feature-request.yml", ("area", "what", "why", "importance", "version", "computer"))):
+        for field in ids:
+            assert "id: %s\n" % field in _github_form(name), field
+
+
+def test_a_provider_already_read_is_said_before_it_is_requested(panel):
+    said = panel.evaluate("""() => {
+        PROVIDERS = {providers: [{provider: 'SDG&E', slug: 'sdge', installed: false}], templates: true};
+        $('dlg-request').showModal();
+        $('rq-provider').value = 'sdg e';
+        rqKnown();
+        return $('rq-known').textContent;
+    }""")
+    assert said.startswith("PaperPull already works with SDG&E")
+
+
+# -- a gap a whole run could not fill (#149) ---------------------------------------
+#
+# A gap in the middle of a history counts toward "may have something new" on
+# the home page, and Get new for all runs its account. When a whole, clean
+# Run All has read the provider's list, left nothing on it to take, and the
+# gap is still there, no number of such runs changes it. Such a run notes the
+# gaps it left, and only those exact gaps are settled. One that appears
+# afterwards, from a history put back, say, still counts.
+
+def _gapped(newest_days_ago=5, hole=4):
+    """Saved records one every 30 days with the one at `hole` missing, which
+    status.py reads as a gap of one document."""
+    recs = _records(newest_days_ago)
+    del recs["doc-%d" % hole]
+    return recs
+
+
+def _clean_all(**more):
+    entry = {"action": "all", "account": "primary", "started": "2026-11-06T16:00:00",
+             "ended": "2026-11-06T16:01:00", "exit_code": 0, "closed": False,
+             "result": {"manual_review": 0, "failed": 0, "validation_failures": 0,
+                        "new_files": 0, "stopped": 0},
+             "scope": [], "redownload": False, "saved": []}
+    entry.update(more)
+    return entry
+
+
+def _listed(bank, recs, **more):
+    """What a Run All leaves beside progress.json when it took all of its
+    list, that list in discovery.json under the same keys, with `more` added
+    to it, and the note that it was read to its end."""
+    rows = {k: {"date": r["date"], "category": "Statement", "state": r["state"]}
+            for k, r in recs.items()}
+    (bank / "discovery.json").write_text(json.dumps(dict(rows, **more)), encoding="utf-8")
+    (bank / "last-listing.json").write_text(
+        json.dumps({"complete": True, "at": "2031-01-15T09:00:00"}), encoding="utf-8")
+
+
+def _took_it_all(root, **more):
+    """A bank whose gap a run has left, with the list that run read."""
+    bank = root / "Bank Statements"
+    recs = _gapped()
+    (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    _listed(bank, recs, **more)
+    return bank
+
+
+def _the_hole():
+    return (date.today() - timedelta(days=5 + 30 * 4)).isoformat()
+
+
+def _run_all(port, bank, account="primary"):
+    out = run(port, {"app": "Bank Statements", "action": "all", "account": account})
+    assert events(out, "done") == ["0"]
+    return app_module._read_run_log(bank)[0]
+
+
+def _gap_keys_now(bank):
+    row = _rows()[("Bank Statements", "primary")]
+    return app_module._gap_keys(app_module._status_module().scan_install(bank)["gaps"]), row
+
+
+def _yesterday():
+    return (date.today() - timedelta(days=1)).isoformat() + "T09:00:00"
+
+
+def _noted_the_day_before(bank):
+    """A whole, clean run ended the day before that noted the gaps the bank
+    shows now, so the next such run that notes them is the second."""
+    keys = app_module._gap_keys(app_module._status_module().scan_install(bank)["gaps"])
+    assert keys
+    _log(bank, _clean_all(gaps_left=keys, ended=_yesterday()))
+
+
+def test_a_clean_run_all_notes_the_gaps_it_left_and_settles_them(base, root):
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    assert _rows()[("Bank Statements", "primary")]["state"] == "gap"
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+    _listed(bank, _gapped())
+    _plan(bank)
+    entry = _run_all(base, bank)
+    keys, row = _gap_keys_now(bank)
+    assert keys and entry["gaps_left"] == keys
+    # One run settles nothing, since the next may take what it could not.
+    assert row["state"] == "gap" and row["settled"] is False
+    # A day on, the next whole run that notes the same gaps settles them.
+    log = app_module._read_run_log(bank)
+    log[0]["ended"] = _yesterday()
+    _log(bank, *log)
+    assert _run_all(base, bank)["gaps_left"] == keys
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+
+
+def _listed_no_record(bank):
+    """First Horizon, Bilt, Simmons and Alpaca, whose run leaves a document
+    turned off on the page with no record and finishes clean."""
+    rows = json.loads((bank / "discovery.json").read_text(encoding="utf-8"))
+    rows["doc-4"] = {"date": _the_hole(), "category": "Statement", "state": "Discovered"}
+    (bank / "discovery.json").write_text(json.dumps(rows), encoding="utf-8")
+
+
+def _a_record_saying(state):
+    def leave(bank):
+        _listed_no_record(bank)
+        recs = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
+        recs["doc-4"] = {"date": _the_hole(), "state": state, "downloaded_ok": False}
+        (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    return leave
+
+
+def _note_says(text):
+    def leave(bank):
+        (bank / "last-listing.json").write_text(text, encoding="utf-8")
+    return leave
+
+
+def _list_says(text):
+    def leave(bank):
+        (bank / "discovery.json").write_text(text, encoding="utf-8")
+    return leave
+
+
+def _gone(name):
+    return lambda bank: (bank / name).unlink()
+
+
+@pytest.mark.parametrize("leave", [
+    _listed_no_record, _a_record_saying("Discovered"), _a_record_saying("Failed"),
+    _a_record_saying("PDF Saved"), _a_record_saying("Needs Manual Review"),
+    _a_record_saying("No Receipt Available"), _a_record_saying("Canceled"),
+    _a_record_saying("PDF Verified"),
+    _note_says('{"complete": false, "at": "2031-01-15T09:00:00"}'),
+    _note_says('{"complete": "true"}'), _note_says('{"at": "2031-01-15T09:00:00"}'),
+    _note_says("[true]"), _note_says("not json"), _gone("last-listing.json"),
+    _list_says("{}"), _list_says("[]"), _list_says('["doc-0"]'), _list_says("not json"),
+    _list_says('{"doc-0": "a row"}'), _gone("discovery.json")],
+    ids=["no-record", "discovered", "failed", "pdf-saved", "set-aside", "no-control-found",
+         "canceled", "pdf-verified", "list-stopped",
+         "note-says-text", "note-says-nothing", "note-a-list", "note-not-json", "no-note",
+         "nothing-listed", "list-empty-list", "list-a-list", "list-not-json", "row-not-a-record",
+         "no-list"])
+def test_a_clean_run_that_left_something_or_cannot_say_settles_nothing(base, root, leave):
+    """First Horizon's real Run All listed 10, saved 9, left one for the next
+    run, ended clean and settled. A run's result does not say so, so its
+    records are read, and records that do not show it all count as left. A
+    run the day before noted the gap, so only this one stands between."""
+    bank = _took_it_all(root)
+    _noted_the_day_before(bank)
+    leave(bank)
+    _plan(bank)
+    entry = _run_all(base, bank)
+    assert app_module._whole_clean_run(entry) and "gaps_left" not in entry
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] == "gap" and row["settled"] is False
+    # An answer, not an error the run's note swallowed.
+    assert app_module._nothing_left(bank, {}) is False
+
+
+def test_records_that_will_not_read_say_nothing_was_taken(root):
+    """A progress.json that is not records leaves no row to run from the
+    panel, so its check is asked itself."""
+    bank = _took_it_all(root)
+    assert app_module._nothing_left(bank, {}) is True
+    (bank / "progress.json").write_text("[]", encoding="utf-8")
+    assert app_module._nothing_left(bank, {}) is False
+
+
+def test_a_run_that_counts_documents_left_unsaved_settles_nothing(base, root):
+    """Alpaca counts documents that share a type and a date and lists none
+    of them, so its records show nothing, and its count is all there is."""
+    bank = _took_it_all(root)
+    _noted_the_day_before(bank)
+    _plan(bank, counts={"alike": 2})
+    entry = _run_all(base, bank)
+    assert entry["result"]["alike"] == 2
+    assert app_module._whole_clean_run(entry) and "gaps_left" not in entry
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+
+
+def test_a_later_run_that_left_something_undoes_an_earlier_one(base, root):
+    bank = _took_it_all(root)
+    _noted_the_day_before(bank)
+    _plan(bank)
+    assert _run_all(base, bank)["gaps_left"]
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+    _listed_no_record(bank)
+    assert "gaps_left" not in _run_all(base, bank)
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+
+
+@pytest.mark.parametrize("state", ["Completed", "No Longer Listed"])
+def test_a_listed_document_with_nothing_to_take_is_not_left(base, root, state):
+    """Each state, on a record no file was saved for. Dated as a saved
+    document is, so it moves no gap. Written out here, so a state taken off
+    the panel's list fails rather than takes its own case with it."""
+    bank = _took_it_all(root)
+    _noted_the_day_before(bank)
+    recs = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
+    recs["extra"] = {"date": recs["doc-0"]["date"], "state": state, "downloaded_ok": False}
+    (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    _listed(bank, recs)
+    _plan(bank)
+    assert _run_all(base, bank)["gaps_left"]
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+
+
+def test_a_document_saved_once_stays_taken_whatever_its_record_says_since(base, root):
+    """downloaded_ok is kept for good, and a later try that failed does not
+    put back what was saved."""
+    bank = _took_it_all(root)
+    recs = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
+    recs["doc-0"]["state"] = "Failed"
+    (bank / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    _plan(bank)
+    assert _run_all(base, bank)["gaps_left"]
+
+
+def _config(bank, **settings):
+    (bank / "config.json").write_text(json.dumps(dict({"output_dir": "."}, **settings)),
+                                      encoding="utf-8")
+
+
+@pytest.mark.parametrize("row,settings", [
+    ({"category": "Statement"}, {"default_start_date": "AFTER"}),
+    ({"category": "Statement", "date": ""}, {"default_start_date": "AFTER"}),
+    ({"category": "Other Document"}, {"document_types": ["Statement", "Tax Document"]})],
+    ids=["before-the-floor", "no-date-under-a-floor", "type-not-wanted"])
+def test_a_document_the_persons_own_settings_leave_out_is_not_left(base, root, row, settings):
+    """A gap the person chose to leave out may settle, as the run did not
+    look there. The list of an earlier run with other settings still names
+    such a document, since discovery.json never forgets."""
+    after = (date.fromisoformat(_the_hole()) + timedelta(days=1)).isoformat()
+    bank = _took_it_all(root, **{"doc-4": dict({"date": _the_hole(), "state": "Discovered"}, **row)})
+    _noted_the_day_before(bank)
+    _config(bank, **{k: after if v == "AFTER" else v for k, v in settings.items()})
+    _plan(bank)
+    assert _run_all(base, bank)["gaps_left"]
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+
+
+@pytest.mark.parametrize("settings", [
+    {}, {"default_start_date": ""}, {"default_start_date": 2031}, {"default_start_date": "2000-01-01"},
+    {"document_types": []}, {"document_types": "Statement"}, {"document_types": ["Tax Document", "Statement"]}])
+def test_settings_that_do_not_leave_a_document_out_leave_it_left(base, root, settings):
+    """A setting that does not plainly leave it out, or one the config file
+    does not hold, which the app's own defaults may answer otherwise."""
+    bank = _took_it_all(root, **{"doc-4": {"date": _the_hole(), "category": "Tax Document",
+                                           "state": "Discovered"}})
+    _config(bank, **settings)
+    _plan(bank)
+    assert "gaps_left" not in _run_all(base, bank)
+    # An answer, not an error the run's note swallowed.
+    assert app_module._nothing_left(bank, settings) is False
+
+
+def test_a_config_that_will_not_read_leaves_nothing_out(base, root):
+    bank = _took_it_all(root, **{"doc-4": {"date": _the_hole(), "category": "Statement",
+                                           "state": "Discovered"}})
+    meta = {"script_name": "bank_docs.py", "dir": str(bank)}
+    for text in ("not json", "[]"):
+        (bank / "config.json").write_text(text, encoding="utf-8")
+        assert app_module._took_everything(meta, "primary", bank, {}) is False
+
+
+def test_a_second_person_is_held_to_their_own_settings(base, root):
+    """The first person's floor says nothing of what the second person's
+    run left."""
+    bank = root / "Bank Statements"
+    second = root / "Bank Statements - second"
+    recs = _gapped()
+    (second / "progress.json").write_text(json.dumps(recs), encoding="utf-8")
+    _listed(second, recs, **{"doc-4": {"date": _the_hole(), "category": "Statement",
+                                       "state": "Discovered"}})
+    floor = (date.fromisoformat(_the_hole()) + timedelta(days=1)).isoformat()
+    _config(bank, default_start_date=floor)
+    _plan(bank)
+    assert "gaps_left" not in _run_all(base, second, account="second")
+    _config(bank)
+    (bank / "config.second.json").write_text(
+        json.dumps({"output_dir": "../Bank Statements - second", "default_start_date": floor}),
+        encoding="utf-8")
+    assert _run_all(base, second, account="second")["gaps_left"]
+
+
+def test_a_gap_that_appears_after_the_run_is_not_settled(root):
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    _log(bank, _clean_all(gaps_left=[]))
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] == "gap" and row["settled"] is False
+
+
+@pytest.mark.parametrize("change", [
+    {"action": "pilot"}, {"action": "resume"}, {"scope": ["--year", "2026"]},
+    {"redownload": True}, {"exit_code": 1}, {"closed": True},
+    {"result": {"stopped": 1}}, {"result": {"list_not_read": 1}},
+    {"result": {"failed": 2}}, {"gaps_left": None}])
+def test_only_a_whole_clean_run_all_settles_a_gap(root, change):
+    """A pilot takes only the newest few, a scoped run reads part of the
+    history, and a run that stopped, failed or was closed may not have read
+    the list at all, so none of them says a gap cannot be filled."""
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    keys, _row = _gap_keys_now(bank)
+    entry = _clean_all(**dict({"gaps_left": keys}, **change))
+    assert app_module._whole_clean_run(entry) is (change == {"gaps_left": None})
+    _log(bank, entry)
+    # A run that failed, stopped or was closed leaves the row stopped, which
+    # comes first, and every other leaves it a gap. Neither is settled.
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+
+
+def test_the_newest_whole_run_is_the_one_that_settles(root):
+    """Older whole runs that left the gap do not settle it once a newer
+    whole run has noted different gaps."""
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    keys, _row = _gap_keys_now(bank)
+    before = _clean_all(gaps_left=keys, ended="2026-11-05T09:00:00")
+    _log(bank, _clean_all(gaps_left=[]), _clean_all(gaps_left=keys), before)
+    assert _rows()[("Bank Statements", "primary")]["settled"] is False
+    _log(bank, _clean_all(gaps_left=keys), _clean_all(gaps_left=[]), before)
+    assert _rows()[("Bank Statements", "primary")]["settled"] is True
+
+
+def test_only_a_gap_row_is_ever_settled(root):
+    """An account that is due, or whose run stopped, keeps its place in the
+    queue whatever gaps a run left, since a new document may be waiting."""
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped(newest_days_ago=45)), encoding="utf-8")
+    keys, row = _gap_keys_now(bank)
+    _log(bank, _clean_all(gaps_left=keys), _clean_all(gaps_left=keys, ended="2026-11-05T09:00:00"))
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] in ("due", "overdue") and row["settled"] is False
+    (bank / "progress.json").write_text(json.dumps(_gapped()), encoding="utf-8")
+    _log(bank, {"action": "all", "exit_code": 1, "ended": "2026-11-06T17:00:00",
+                "result": {"stopped": 1}}, _clean_all(gaps_left=keys),
+         _clean_all(gaps_left=keys, ended="2026-11-05T09:00:00"))
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] == "stopped" and row["settled"] is False
+
+
+def test_two_series_never_share_a_gap_key():
+    """An account "A|B" with summary "C" and an account "A" with summary
+    "B|C", on the same dates, are two series and two keys."""
+    one = {"account": "A|B", "summary": "C", "after": date(2020, 1, 31), "before": date(2020, 3, 31)}
+    two = dict(one, account="A", summary="B|C")
+    assert len(app_module._gap_keys([one, two])) == 2
+    assert app_module._gap_keys([one]) != app_module._gap_keys([two])
+
+
+def test_the_home_queue_leaves_out_a_settled_row():
+    js = (Path(app_module.__file__).resolve().parent / "static" / "app.js").read_text(encoding="utf-8")
+    start = js.index("function queueTargets()")
+    body = js[start:js.index("\n}\n", start)]
+    assert "!r.settled" in body
+
+
+# -- what the panel reads of every app, held to the apps ------------------------------
+
+REPO = Path(app_module.__file__).resolve().parents[1]
+
+
+@functools.lru_cache(maxsize=None)
+def _document_apps():
+    """Each app that files documents, with its own modules parsed. Only
+    these have gaps (status.find_gaps)."""
+    apps = {}
+    for spec in sorted((REPO / "apps").glob("*/storage.py")):
+        if re.search(r"kind\s*=\s*RECEIPT", spec.read_text(encoding="utf-8")):
+            continue
+        trees = [ast.parse(py.read_text(encoding="utf-8")) for py in spec.parent.glob("*.py")
+                 if py.name != "storage.py"]
+        apps[spec.parent.name] = trees
+    assert len(apps) > 60
+    return apps
+
+
+def _unparsed(trees, name):
+    return "\n".join(ast.unparse(node) for tree in trees for node in ast.walk(tree)
+                     if isinstance(node, ast.FunctionDef) and node.name == name)
+
+
+def test_every_app_keeps_what_it_lists_and_what_it_took_under_one_key():
+    """The panel reads a document as left when discovery.json names it and
+    progress.json holds no record of it taken under that key. That is true
+    only while each app takes its run from discovery.json, asks progress.json
+    by the key and writes it there, and calls done at least what the panel
+    calls nothing left to take. An app this fails for reads as left on every
+    run or, the other way, as taken when it is not."""
+    for name, trees in _document_apps().items():
+        done = _unparsed(trees, "_already_done")
+        assert "self.progress.get(doc.key)" in done, name
+        for state in ("COMPLETED", "PDF_VERIFIED", "NO_RECEIPT_AVAILABLE", "CANCELED"):
+            assert "State.%s.value" % state in done, (name, state)
+        assert "self.progress.update(doc.key, rec)" in _unparsed(trees, "_record"), name
+        assert "self.discovery.data.values()" in _unparsed(trees, "_select"), name
+
+
+def test_every_app_leaves_out_by_the_settings_the_panel_reads():
+    """_settings_leave_out says what each app's _in_scope does with a Run All
+    with no dates. Were an app to take what the panel reads as left out by
+    the person's settings, a document it left would read as their choice."""
+    for name, trees in _document_apps().items():
+        scope = _unparsed(trees, "_in_scope")
+        assert "if not doc_types.wanted(doc.category, self.config):" in scope, name
+        dates = scope + _unparsed(trees, "_in_dates")
+        assert "self.config.get('default_start_date')" in dates, name
+        assert ("if floor and (not doc.date or doc.date < floor):" in dates
+                or "if floor and (not day or day < floor):" in dates), name
+
+
+# What an app's log says of a document it saw and did not list.
+_SAYS_LEFT_OUT = re.compile(
+    r"left out|left alone|left for a person|waits for the next run|no usable|skipped|skipping", re.I)
+# What the same words say of something else, a run's scope, a check, a tab,
+# a page's pager, what a bill's own file is drawn with, a render that is
+# counted as a failure, and First Horizon's panel, whose list then stops.
+_SOMETHING_ELSE = re.compile(r"outside the run's scope|identity check|a tab opened|stylesheet|"
+                             r"pagination control|an earlier bill|the PDF render|panel title")
+
+
+def _says_it_left_a_document_out(trees):
+    for tree in trees:
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and isinstance(node.func.value, ast.Name) and node.func.value.id == "log"
+                    and node.args and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)):
+                said = node.args[0].value
+                if _SAYS_LEFT_OUT.search(said) and not _SOMETHING_ELSE.search(said):
+                    return True
+    return False
+
+
+def test_every_app_whose_list_says_it_left_a_document_out_settles_no_gap():
+    """What such a list leaves out is in no record, so the panel cannot see
+    it, and a run of that app has to settle nothing. An app that starts to
+    say so in a log line written as one string joins _LISTS_LEAVE_OUT. One
+    that says it in other words, in an f-string or a print, or drops a row
+    and says nothing, cannot be found here or by the panel. The second run on
+    another day that _settled waits for is there for those."""
+    said = {name for name, trees in _document_apps().items() if _says_it_left_a_document_out(trees)}
+    assert said == set(app_module._LISTS_LEAVE_OUT)
+
+
+@pytest.mark.parametrize("slug", sorted(app_module._LISTS_LEAVE_OUT))
+def test_a_list_that_can_leave_a_document_out_settles_nothing(root, slug):
+    bank = _took_it_all(root)
+    assert app_module._took_everything(
+        {"script_name": "bank_docs.py", "dir": str(bank)}, "primary", bank, {}) is True
+    assert app_module._took_everything(
+        {"script_name": slug + "_docs.py", "dir": str(bank)}, "primary", bank, {}) is False
+
+
+def test_a_run_of_such_an_app_notes_no_gaps(base, root):
+    bank = _took_it_all(root)
+    (bank / "bank_docs.py").rename(bank / "wellsfargo_docs.py")
+    _plan(bank)
+    entry = _run_all(base, bank)
+    assert app_module._whole_clean_run(entry) and "gaps_left" not in entry
+
+
+# -- two whole runs on two days ------------------------------------------------------
+
+def _two_gaps():
+    gaps = [{"account": "", "summary": "Bank Statement", "after": date(2031, 1, 31),
+             "before": date(2031, 3, 31)},
+            {"account": "", "summary": "Bank Statement", "after": date(2031, 5, 31),
+             "before": date(2031, 7, 31)}]
+    one, two = app_module._gap_keys(gaps)
+    return gaps, one, two
+
+
+def _on(day, keys, at="09:00:00", **more):
+    return _clean_all(gaps_left=list(keys), ended="%sT%s" % (day, at), **more)
+
+
+def test_a_gap_settles_once_two_whole_runs_on_two_days_noted_it():
+    """A statement not ready yet, or a year that did not answer, leaves no
+    trace in some apps' records, and the next run usually takes it. So one
+    run settles nothing, nor do two on one day."""
+    gaps, one, two = _two_gaps()
+    both = [one, two]
+    settled = app_module._settled
+    assert settled("gap", gaps, [_on("2031-02-15", both)]) is False
+    assert settled("gap", gaps, [_on("2031-02-15", both, "17:00:00"), _on("2031-02-15", both)]) is False
+    assert settled("gap", gaps, [_on("2031-02-15", both), _on("2031-02-14", both)]) is True
+    # A run that is not whole between them changes nothing.
+    pilot = _on("2031-02-16", [], action="pilot")
+    assert settled("gap", gaps, [pilot, _on("2031-02-15", both), _on("2031-02-14", both)]) is True
+
+
+def test_every_gap_has_to_be_noted_by_both_runs():
+    """A run that noted one gap of two says nothing of the other."""
+    gaps, one, two = _two_gaps()
+    settled = app_module._settled
+    assert settled("gap", gaps, [_on("2031-02-15", [one]), _on("2031-02-14", [one, two])]) is False
+    assert settled("gap", gaps, [_on("2031-02-15", [one, two]), _on("2031-02-14", [one])]) is False
+    # Each gap noted on another day, by an earlier run of its own.
+    assert settled("gap", gaps, [_on("2031-02-15", [one, two]), _on("2031-02-14", [one]),
+                                 _on("2031-02-13", [two])]) is True
+
+
+def test_the_newest_whole_run_has_to_be_one_that_noted_the_gap():
+    """Two earlier runs that noted it do not settle it once a newer whole run
+    left something, and so noted nothing."""
+    gaps, one, two = _two_gaps()
+    both = [one, two]
+    log = [_on("2031-02-16", []), _on("2031-02-15", both), _on("2031-02-14", both)]
+    assert app_module._settled("gap", gaps, log) is False
+    del log[0]["gaps_left"]
+    assert app_module._settled("gap", gaps, log) is False
+
+
+@pytest.mark.parametrize("which", [0, 1])
+@pytest.mark.parametrize("ended", ["", "yesterday", None])
+def test_a_run_whose_day_is_not_known_counts_for_nothing(which, ended):
+    gaps, one, two = _two_gaps()
+    log = [_on("2031-02-15", [one, two]), _on("2031-02-14", [one, two])]
+    log[which]["ended"] = ended
+    assert app_module._settled("gap", gaps, log) is False
+
+
+# Every state a document app writes on a record, judged. Completed is a
+# document taken and No Longer Listed one its provider's whole list stopped
+# showing. The rest leave something to take.
+_TAKEN_OR_GONE = {"COMPLETED": "Completed", "NO_LONGER_LISTED": "No Longer Listed"}
+_LEFT_TO_TAKE = {"DISCOVERED", "PDF_SAVED", "FAILED", "NEEDS_MANUAL_REVIEW", "NO_RECEIPT_AVAILABLE"}
+
+
+def _states_written(trees):
+    """Each State an app writes, as a call's argument, a state= keyword, or
+    a "state" key of a dict."""
+    found = set()
+    for tree in trees:
+        for node in ast.walk(tree):
+            values = []
+            if isinstance(node, ast.Call):
+                values += list(node.args) + [k.value for k in node.keywords if k.arg == "state"]
+            elif isinstance(node, ast.Dict):
+                values += [v for k, v in zip(node.keys, node.values)
+                           if isinstance(k, ast.Constant) and k.value == "state"]
+            for v in values:
+                if isinstance(v, ast.Attribute) and v.attr == "value":
+                    v = v.value
+                if isinstance(v, ast.Attribute) and isinstance(v.value, ast.Name) and v.value.id == "State":
+                    found.add(v.attr)
+    return found
+
+
+def test_every_state_an_app_writes_is_judged_taken_or_left():
+    """No Receipt Available is Wealthfront's download control not found and
+    Dominion's placeholder for a bill with no PDF, so a run that did not fill
+    the gap may have been refused it. A state an app starts to write has to
+    be judged here before it can count as nothing left."""
+    written = set().union(*(_states_written(trees) for trees in _document_apps().values()))
+    assert written <= set(_TAKEN_OR_GONE) | _LEFT_TO_TAKE, written
+    assert set(_TAKEN_OR_GONE) <= written
+    assert set(app_module._NOTHING_TO_TAKE) == set(_TAKEN_OR_GONE.values())

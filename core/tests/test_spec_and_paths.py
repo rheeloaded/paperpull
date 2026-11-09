@@ -167,3 +167,230 @@ def test_config_saved_with_a_bom_still_loads(tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text('{"owner": "Sam"}', encoding="utf-8-sig")
     assert storage.load_config(cfg)["owner"] == "Sam"
+
+
+def test_relative_output_dir_resolves_to_app_folder_when_cwd_is_outside(tmp_path, monkeypatch):
+    """When a script is run from the parent/root folder, output_dir='.' must resolve
+    to the app's own directory, not the parent/cwd."""
+    app_dir = tmp_path / "Discover Statements"
+    app_dir.mkdir()
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.json").write_text('{"output_dir": "."}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == app_dir.resolve()
+    paths.ensure()
+    assert (app_dir / "Backups").is_dir()
+    assert (app_dir / "Statements").is_dir()
+    assert not (tmp_path / "Backups").exists()
+    assert not (tmp_path / "Statements").exists()
+
+
+def test_relative_output_dir_sibling_resolves_relative_to_app_folder(tmp_path, monkeypatch):
+    """Multi-account configs like config.biz.json often specify '../App - biz'."""
+    app_dir = tmp_path / "American Express Statements"
+    app_dir.mkdir()
+    biz_dir = tmp_path / "American Express Statements - biz"
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.biz.json").write_text(
+        '{"output_dir": "../American Express Statements - biz"}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.biz.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == biz_dir.resolve()
+
+
+def test_documents_dir_for_matches_relative_output_dir_when_run_from_outside(tmp_path, monkeypatch):
+    """documents_dir mapping works correctly even when output_dir='.' is loaded from outside."""
+    app_dir = tmp_path / "Discover Statements"
+    app_dir.mkdir()
+    docs = tmp_path / "0GDrive" / "Discover Statements"
+    spec = document_spec(app_dir)
+    storage.bind(spec)
+    (app_dir / "config.json").write_text(
+        f'{{"output_dir": ".", "documents_dir": "{docs.as_posix()}"}}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    cfg = storage.load_config(app_dir / "config.json")
+    paths = storage.Paths(Path(cfg["output_dir"]))
+
+    assert paths.root == app_dir.resolve()
+    assert paths.documents == docs.resolve()
+
+
+# --- where a relative folder is read from (#165) ----------------------------
+#
+# Every launcher starts a run in the app's own folder (the control panel,
+# paperpull, login.bat, login.command and the server's panel), and the paths
+# a run records are relative to it. Those runs keep each folder as written.
+
+def an_install(tmp_path, name="Example Statements"):
+    """An install as the control panel makes one, with a second person's
+    config beside its own, as tools/add_account.py writes it."""
+    install = tmp_path / name
+    install.mkdir(parents=True)
+    storage.bind(document_spec(install))
+    (install / "config.json").write_text(
+        '{"output_dir": ".", "profile_dir": "./browser-profile"}', encoding="utf-8")
+    (install / "config.biz.json").write_text(
+        '{"output_dir": "../%s - biz", "profile_dir": "../%s - biz/browser-profile"}'
+        % (name, name), encoding="utf-8")
+    return install
+
+
+def link_to(folder, link):
+    """Another name for a folder, a junction on Windows and a link elsewhere."""
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(folder), str(link))
+    else:
+        link.symlink_to(folder, target_is_directory=True)
+    return link
+
+
+@pytest.mark.parametrize("named,output,profile", [
+    (None, ".", "./browser-profile"),
+    ("config.biz.json", "../Example Statements - biz", "../Example Statements - biz/browser-profile"),
+])
+def test_a_run_started_in_its_own_folder_keeps_its_folders_as_written(
+        tmp_path, monkeypatch, named, output, profile):
+    """So every path it records reads as the ones runs before it recorded,
+    relative to the install, which lets the install be moved."""
+    install = an_install(tmp_path)
+    monkeypatch.chdir(install)
+    cfg = storage.load_config(named)
+    assert (cfg["output_dir"], cfg["profile_dir"]) == (output, profile)
+    paths = storage.Paths(Path(cfg["output_dir"]))
+    assert paths.root == Path(output)
+    assert not (paths.statements / "x.pdf").is_absolute()
+
+
+def test_a_run_started_through_a_junction_to_its_folder_keeps_its_folders_as_written(
+        tmp_path, monkeypatch):
+    """An app's own folder is its file's folder with every link followed, and
+    a launcher can start the run through a junction or a link to it."""
+    install = an_install(tmp_path)
+    storage.bind(document_spec(install.resolve()))
+    monkeypatch.chdir(link_to(install, tmp_path / "Linked"))
+    cfg = storage.load_config(None)
+    assert (cfg["output_dir"], cfg["profile_dir"]) == (".", "./browser-profile")
+
+
+def test_a_config_kept_in_another_folder_still_reads_its_folders_from_the_install(
+        tmp_path, monkeypatch):
+    """A config named by its full path from somewhere else, run in the app's
+    folder, has always had its relative folders read from there, and its
+    documents and records stay where they are."""
+    install = an_install(tmp_path / "data")
+    kept = tmp_path / "configs"
+    kept.mkdir()
+    (kept / "config.sam.json").write_text(
+        '{"output_dir": "../Example Statements - sam"}', encoding="utf-8")
+    monkeypatch.chdir(install)
+    cfg = storage.load_config(kept / "config.sam.json")
+    assert cfg["output_dir"] == "../Example Statements - sam"
+    assert storage.Paths(Path(cfg["output_dir"])).root.resolve() == \
+        (tmp_path / "data" / "Example Statements - sam").resolve()
+
+
+def test_a_run_started_in_its_configs_folder_still_reads_its_folders_from_there(
+        tmp_path, monkeypatch):
+    """A config kept outside the app, run in its own folder, has always had
+    "." read as that folder, and keeps it."""
+    an_install(tmp_path / "installs")
+    kept = tmp_path / "configs"
+    kept.mkdir()
+    (kept / "config.sam.json").write_text('{"output_dir": "."}', encoding="utf-8")
+    monkeypatch.chdir(kept)
+    cfg = storage.load_config(Path("config.sam.json"))
+    assert cfg["output_dir"] == "."
+
+
+def test_a_download_again_still_knows_the_copy_a_run_before_saved(tmp_path, monkeypatch):
+    """A record saved before names its file relative to the install. An
+    attempt that saves under that very name has its copy taken for the
+    record's own only when the two paths read alike (saved_copy), and a
+    copy that failed its check is then no longer vouched for as saved."""
+    from types import SimpleNamespace
+    from paperpull_core import saved_copy
+    install = an_install(tmp_path)
+    monkeypatch.chdir(install)
+    cfg = storage.load_config(None)
+    paths = storage.Paths(Path(cfg["output_dir"]))
+    paths.ensure()
+    progress = storage.JsonStore(paths.progress_json, paths.backups)
+    name = "2026-01-31 Example Statement.pdf"
+    progress.update("k", {"downloaded_ok": True, "state": "Completed",
+                          "pdf_path": str(Path("Statements") / name)})
+    attempt = {"state": "Needs Manual Review", "pdf_path": str(paths.statements / name)}
+    assert saved_copy.holds(SimpleNamespace(progress=progress), "k", attempt) is False
+    assert attempt["downloaded_ok"] is False
+
+
+def test_a_run_started_elsewhere_reads_its_folders_from_the_config_folder(
+        tmp_path, monkeypatch):
+    """Its browser profile too, and its documents folder is judged against
+    the output folder it uses, so one inside that folder's Logs is refused."""
+    install = an_install(tmp_path)
+    (install / "config.json").write_text(
+        '{"output_dir": ".", "profile_dir": "./browser-profile", "documents_dir": "%s"}'
+        % (install / "Logs" / "Documents").as_posix(), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    cfg = storage.load_config(None)
+    assert Path(cfg["output_dir"]) == install
+    assert Path(cfg["profile_dir"]) == install / "browser-profile"
+    assert cfg["documents_dir"] == ""
+    storage.Paths(Path(cfg["output_dir"])).ensure()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["Example Statements"]
+
+
+def test_a_bare_config_name_is_the_one_where_the_run_starts_before_the_apps(
+        tmp_path, monkeypatch):
+    install = an_install(tmp_path / "installs")
+    here = tmp_path / "here"
+    here.mkdir()
+    (here / "config.biz.json").write_text('{"output_dir": "."}', encoding="utf-8")
+    monkeypatch.chdir(here)
+    storage.load_config("config.biz.json")
+    assert storage.config_read() == here / "config.biz.json"
+    monkeypatch.chdir(tmp_path)
+    cfg = storage.load_config("config.biz.json")
+    assert storage.config_read() == install / "config.biz.json"
+    assert Path(cfg["output_dir"]) == tmp_path / "installs" / "Example Statements - biz"
+
+
+def test_a_config_named_with_a_folder_is_never_looked_for_in_the_apps_folder(
+        tmp_path, monkeypatch):
+    """Only the file named is read, so a name with a folder in it that is
+    not where the run starts stops the run as before, though the app's own
+    folder holds a file by that name."""
+    install = an_install(tmp_path)
+    (install / "people").mkdir()
+    (install / "people" / "config.biz.json").write_text('{"output_dir": "."}',
+                                                        encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit, match="No config file at"):
+        storage.load_config(Path("people") / "config.biz.json")
+
+
+def test_the_owner_asked_for_by_a_run_started_elsewhere_is_saved_in_the_config_it_read(
+        tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    install = an_install(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    cfg = storage.load_config(Path("config.biz.json"))
+    monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: True))
+    monkeypatch.setattr("builtins.input", lambda *_a: "Dana Example")
+    storage.ensure_owner(cfg, Path("config.biz.json"))
+    saved = json.loads((install / "config.biz.json").read_text(encoding="utf-8"))
+    assert saved["owner"] == "Dana Example"
+    assert not (tmp_path / "config.biz.json").exists()
+

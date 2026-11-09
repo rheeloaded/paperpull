@@ -297,3 +297,51 @@ def test_a_verb_stem_inside_another_word_is_not_a_refusal():
     for label in ["Edit nickname", "Change delivery option", "Update address",
                   "Editing preferences", "Changed mind"]:
         assert not site.is_safe_control(label), label
+
+
+def test_list_accounts_finds_brokerage_and_view_only_accounts(monkeypatch):
+    data = {
+        "accountSelectorData": {
+            "brokerageAccountList": {
+                "brokerageAccounts": [
+                    {"id": "11112222", "nickName": "Trading", "accountType": "B",
+                     "isCharitable": False, "isClosed": False}
+                ],
+                "viewOnlyAccounts": [
+                    {"id": "33334444", "nickName": "SchwabOne", "accountType": "S1",
+                     "isCharitable": False, "isClosed": False, "isViewOnly": True}
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(site, "_gateway_call", lambda _page, url, _hdr, **_kw: {
+        "status": 200, "body": data
+    })
+    accounts = site.list_accounts(None)
+    assert len(accounts) == 2
+    assert accounts[0]["account_id"] == "11112222"
+    assert accounts[0]["label"] == "Trading (...2222)"
+    assert accounts[1]["account_id"] == "33334444"
+    assert accounts[1]["label"] == "SchwabOne (...4444)"
+
+
+def test_list_accounts_takes_an_account_in_both_lists_once(monkeypatch):
+    dup_data = {
+        "accountSelectorData": {
+            "brokerageAccountList": {
+                "brokerageAccounts": [
+                    {"id": "55556666", "nickName": "Main", "accountType": "B"}
+                ],
+                "viewOnlyAccounts": [
+                    {"id": "55556666", "nickName": "Main View", "accountType": "B"}
+                ]
+            }
+        }
+    }
+    monkeypatch.setattr(site, "_gateway_call", lambda _page, url, _hdr, **_kw: {
+        "status": 200, "body": dup_data
+    })
+    accounts = site.list_accounts(None)
+    assert len(accounts) == 1
+    assert accounts[0]["account_id"] == "55556666"
+    assert accounts[0]["label"] == "Main (...6666)"

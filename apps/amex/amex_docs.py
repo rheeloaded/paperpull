@@ -29,7 +29,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -119,6 +120,25 @@ class Document:
         return cls(**d)
 
 
+def _and(items: List[str]) -> str:
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def _kept_words(named: set) -> str:
+    """The documents of rows that stayed through a switch, in words, "the
+    year-end summaries of 2029 and 2030" or "the statement dated 2030-11-11"."""
+    years = sorted(when for kind, when in named if kind == "ye")
+    dates = sorted(when for kind, when in named if kind == "stmt")
+    parts = []
+    if years:
+        parts.append("the %s year-end summary" % years[0] if len(years) == 1
+                     else "the year-end summaries of %s" % _and(years))
+    if dates:
+        parts.append("the statement dated %s" % dates[0] if len(dates) == 1
+                     else "the statements dated %s" % _and(dates))
+    return " and ".join(parts)
+
+
 def migrate_legacy_keys(records: dict) -> int:
     """Move records written while the account was cut to forty characters.
 
@@ -156,7 +176,7 @@ class App:
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -164,6 +184,8 @@ class App:
         self._context = None
         self._work_page = None
         self._cdp_mode = False
+        self._card_count = None
+        self._cards_left = []
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -201,9 +223,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -299,7 +319,7 @@ class App:
             prefer_real=False,
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
@@ -307,7 +327,7 @@ class App:
     def cmd_login(self):
         print("Checking the connection to your signed-in American Express browser...\n")
         page = self.page()
-        ok = site.goto_documents(page)
+        ok = site.open_the_list(page)
         challenge = site.detect_security_challenge(page)
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
@@ -366,8 +386,8 @@ class App:
         doc = Document(title=r.title, category=category, summary=full_summary,
                        date=date or "", period=period, href=r.href,
                        row_index=r.row_index, confidence=confidence,
+                       account=acct,
                        date_text=getattr(r, "date_text", ""))
-        doc.account = acct
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
@@ -378,7 +398,7 @@ class App:
         return 0
 
     def _record_rawdoc(self, r, source_url: str) -> int:
-        """Record one scraped document (a RawDoc) from a American Express page.
+        """Record one scraped document (a RawDoc) from an American Express page.
         Returns 1 if new."""
         title = re.sub(r"\s+", " ", (r.title or "")).strip()
         if not title:
@@ -398,15 +418,18 @@ class App:
         if floor and (not date or date < floor):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        doc = Document(title=title, category=category, summary=summary,
-                       date=date, confidence=confidence, source_url=source_url)
+        acct = (r.account or "").strip()
+        full_summary = f"{summary} {acct}".strip() if acct else summary
+        doc = Document(title=title, category=category, summary=full_summary,
+                       date=date, confidence=confidence, source_url=source_url,
+                       account=acct)
         if self.discovery.get(doc.key) is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
         # refresh which page the doc's download link lives on
-        self.discovery.update(doc.key, {"source_url": source_url}, save=False)
+        self.discovery.update(doc.key, {"source_url": source_url, "account": acct}, save=False)
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
@@ -421,22 +444,105 @@ class App:
         # live on that one page as download-button controls.
         if not site.goto_documents(page):
             self.check_session(page)
-            site.goto_documents(page)
+            if not site.goto_documents(page):
+                log.info("could not reach the statements page after two tries")
+                print("\n!! Could not reach the statements page. Discovery was not completed.")
+                raise SystemExit(0)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
-        for r in docs:
-            n_new += self._record_rawdoc(r, page.url)
+
+        self._cards_left = []
+        # A dialog left open by a run that stopped would cover the switcher.
+        site.close_file_type_dialog(page, quiet=True)
+        cards = site.list_cards(page)
+        # An archive already filed by card is not one card, and the one-card
+        # way would save that card's history again under no card's name.
+        filed = any(d.get("account") for d in self.discovery.data.values())
+        if not cards and filed:
+            raise pressing.no_answer("read the card switcher", "the card options did not show",
+                                     "The card switcher could not be read, and this archive "
+                                     "holds statements filed by card.")
+        if cards is None:
+            self._only_the_card_on_show(page)
+            cards = []
+        self._card_count = len(cards)
+        total_controls = 0
+        if len(cards) > 1 or (cards and filed):
+            # A run that stopped at a switch, scoped or not, can leave the
+            # switcher ahead of the list on show, and no note says so for
+            # certain. So no card is read on the switcher's word, and each is
+            # reached through a real switch and its waits, the one on show last.
+            cards = site.card_on_show_last(page, cards)
+            for card in cards:
+                switched = site.select_card(page, card)
+                if card.get("turned_off"):
+                    self._leave_card(card["label"])
+                    continue
+                if not switched:
+                    raise pressing.no_answer("switch card", "the card did not switch",
+                                             f"{card.get('label', 'A card')} could not be chosen in the card "
+                                             "switcher, so the list was not read whole.")
+                docs = site.collect_download_docs(page, account=card["label"])
+                kept = site.kept_on_show(page)
+                if kept is None:
+                    raise pressing.Stop("read the statements", "a row that stayed could not be read", [
+                        "A Download that stayed on the page from the card before could not be "
+                        "read, so which document it is could not be told, and "
+                        f"{card['label']}'s list was not read.",
+                        "Nothing more was pressed."], list_unread=True)
+                if kept:
+                    docs = [r for r in docs if site.name_of(
+                        "Year-End Summary" if r.kind == "year-end" else "Statement",
+                        r.date_text) not in kept]
+                    if self._listed_kind(kept):
+                        self._leave_kept_rows(card["label"], self._listed_kind(kept))
+                if not docs and not site.has_no_statements(page):
+                    log.info("card %s has no statements and page did not say so", card["label"])
+                    print(f"\n!! Could not find statements for {card['label']}. Discovery was not completed.")
+                    raise SystemExit(0)
+                total_controls += len(docs)
+                for r in docs:
+                    n_new += self._record_rawdoc(r, page.url)
+        else:
+            # When there is only one card (or no switcher), keep account empty ("")
+            # so a one-card archive keeps its keys, file names and summaries as they are.
+            docs = site.collect_download_docs(page, account="")
+            if not docs and not site.has_no_statements(page):
+                log.info("no statements found and page did not say so")
+                print("\n!! Could not find statements. Discovery was not completed.")
+                raise SystemExit(0)
+            total_controls += len(docs)
+            for r in docs:
+                n_new += self._record_rawdoc(r, page.url)
+
+        if total_controls == 0 and not site.has_no_statements(page):
+            log.info("no download buttons were ever seen")
+            print("\n!! No statement download controls were found. Discovery was not completed.")
+            raise SystemExit(0)
+
         self.discovery.save()
-        log.info("statements page: %d download controls, %d new", len(docs), n_new)
+        log.info("statements page: %d download controls, %d new", total_controls, n_new)
 
         # The whole list is in, and only now may a Resume that carries on
-        # from it call the run finished (paperpull_core.listing).
-        listing.read_whole(self)
+        # from it call the run finished (paperpull_core.listing). A card left
+        # out leaves it short, so it stays noted as a listing that stopped,
+        # and the run goes on with the cards it did read.
+        if not self._cards_left:
+            listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
-            print(f"\nDiscovery complete. Documents known: {len(docs)}")
+            finished = "Discovery did not finish every card" if self._cards_left \
+                else "Discovery complete"
+            print(f"\n{finished}. Documents known: {len(docs)}")
+            accounts = {}
+            for d in docs:
+                if d.account:
+                    accounts[d.account] = accounts.get(d.account, 0) + 1
+            if accounts:
+                print(f"  Accounts with statements ({len(accounts)}):")
+                for acct, count in sorted(accounts.items(), key=lambda x: -x[1]):
+                    print(f"    {count:7d}  {acct}")
             by_cat = {}
             for d in docs:
                 by_cat.setdefault(d.category, []).append(d)
@@ -452,14 +558,110 @@ class App:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
+            self._say_cards_left()
         return n_new
+
+    def _only_the_card_on_show(self, page) -> None:
+        """A card switcher that could not be read, one in the page that does
+        not show, that is turned off, that something covers or that offered
+        no card.
+
+        Nothing pressed the switcher before cards were told apart, so on one
+        card this is the path that has always worked, and the run goes on with
+        the card on show, its keys, names and files as they always were. Yet
+        several cards may be behind a broken switcher, so that card is never
+        taken for every card. What was not read is said, counted for review
+        and written to the failure file, and the listing is not noted as
+        whole, so no Resume calls the list finished. Noting it whole would say
+        what nobody saw, and on one card not noting it costs only a Resume
+        that says to run Run All."""
+        shown = site.current_card_label(page) or "the card on show"
+        print(f"\n!! The card switcher on the statements page could not be read, so only {shown} was read.")
+        print("   Any other card on this sign-in was not read, and this list is not noted as whole.")
+        print("   With one card, nothing is missing.")
+        self._cards_left.append(f"any card but {shown}, since the card switcher could not be read")
+        self.stats["manual_review"] += 1
+        self.write_failure("read the card switcher", "the card options did not show")
+
+    def _leave_card(self, label: str) -> None:
+        """Leave a card whose option the page has turned off, a canceled card
+        say, which would otherwise stop every run at the same place and cost a
+        person all their other cards. It is said by name, counted for review
+        and written to the failure file, which never holds its name, and the
+        listing is not noted as whole."""
+        print(f"\n!! {label} is turned off in the card switcher, so its statements were not read.")
+        print("   The other cards are read as usual, and this list is not noted as whole.")
+        self._cards_left.append(f"{label}, turned off in the card switcher")
+        self.stats["manual_review"] += 1
+        self.write_failure("switch card", "a card option is turned off")
+
+    def _listed_kind(self, named: set) -> set:
+        """Those of the documents in `named`, as site.kept_on_show names them,
+        that this archive lists at all, by its document types and its start
+        date as _record_rawdoc goes by them. A kept row of a kind it never
+        lists leaves nothing out."""
+        floor = self.args.start_date or self.config.get("default_start_date")
+        listed = set()
+        for kind, when in named:
+            category, date = (("Year-End Summary", f"{when}-12-31") if kind == "ye"
+                              else ("Statement", when))
+            if doc_types.wanted(category, self.config) and not (floor and date < floor):
+                listed.add((kind, when))
+        return listed
+
+    def _leave_kept_rows(self, label: str, named: set) -> None:
+        """Leave out the documents whose rows stayed on the page through the
+        switch to this card, as site.kept_on_show names them now. A year-end
+        summary's row is named by its year alone, the same on every card, so
+        the page can keep it from the card before, and whose PDF its Download
+        brings cannot be told (site._kept_years). Rather than stop every run
+        with more than one card there, the rest of the card is read, and these
+        are said by name, counted for review, and the listing is not noted as
+        whole. No failure file is written, since this comes again on every
+        run, and the run's one file is kept for something that went wrong."""
+        words = _kept_words(named)
+        one = len(named) == 1
+        print(f"\n!! The Download{'' if one else 's'} of {words} stayed on the page from the card "
+              f"before, so whose {'it is' if one else 'they are'} could not be told.")
+        print(f"   {'It was' if one else 'They were'} not read as {label}'s, the rest of its "
+              "statements are read as usual, and this list is not noted as whole.")
+        self._cards_left.append(f"{words} of {label}, whose Download{'' if one else 's'} stayed "
+                                "from the card before")
+        self.stats["manual_review"] += 1
+
+    def _say_cards_left(self) -> None:
+        """What this run's list left out, by name, again where a person reads
+        last, since a long run scrolls the first time away."""
+        for left in self._cards_left:
+            print(f"!! Not read: {left}.")
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         docs = [d for d in docs if self._in_scope(d)]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
-        return docs[:limit] if limit else docs
+        if limit and len(docs) > limit:
+            by_acct = {}
+            for d in docs:
+                by_acct.setdefault(d.account or "", []).append(d)
+            if len(by_acct) > 1 and limit >= len(by_acct):
+                # Take from each card so a Pilot tests card switching,
+                # then fill up to limit with the newest remaining documents.
+                per_card = max(1, limit // len(by_acct))
+                chosen = []
+                for acct_docs in by_acct.values():
+                    chosen.extend(acct_docs[:per_card])
+                remaining = [d for d in docs if d not in chosen]
+                chosen.extend(remaining[:max(0, limit - len(chosen))])
+                docs = chosen
+            else:
+                docs = docs[:limit]
+        if limit and len(docs) > limit:
+            docs = docs[:limit]
+        # Group by card account so all statements for a single card are
+        # downloaded consecutively before switching to the next card.
+        docs.sort(key=lambda d: d.account or "")
+        return docs
 
     def _already_done(self, doc: Document) -> bool:
         """Skip documents already handled. A document that was successfully
@@ -548,14 +750,57 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             site.goto_documents(page)
-        saved = site.download_document(page, doc.category, doc.date, out_path)
-        if not saved:
+        if not doc.account:
+            card_count = getattr(self, "_card_count", None)
+            if card_count is None:
+                accounts = {d.get("account") for d in self.discovery.data.values() if d.get("account")}
+                card_count = len(accounts) if accounts else 1
+                self._card_count = card_count
+            if card_count > 1:
+                log.info("record has no account but multiple cards are in switcher")
+                self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                             notes="Record has no account and multiple cards exist in switcher")
+                self._write_row(doc, "Needs Account", "Needs Manual Review")
+                self.stats["manual_review"] += 1
+                print("  Record has no card account on a multi-card account - marked for manual review.")
+                return
+        else:
+            if not site.ensure_card(page, doc.account):
+                log.info("could not switch to card %s for download; left for manual review", doc.account)
+                self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                             notes=f"Could not switch to card {doc.account}")
+                self._write_row(doc, "Card switch failed", "Needs Manual Review")
+                self.stats["manual_review"] += 1
+                print(f"  Could not switch to card {doc.account} - marked for manual review.")
+                return
+            # A switch here, outside a listing, that kept rows of documents the
+            # list holds leaves the list noted as one that stopped, as one that
+            # stopped here did. A Resume in a later run may make no switch to
+            # the card left on show, so it would know nothing of them.
+            kept = site.kept_on_show(page)
+            if kept != set() and (kept is None or self._listed_kind(kept)) \
+                    and listing.last(self) != listing.STOPPED:
+                listing.started(self)
+        # A row that stayed through the switch to this card may bring the card
+        # before's PDF, so it is never pressed for this one (site.KeptRow).
+        try:
+            saved = site.download_document(page, doc.category, doc.date, out_path)
+        except site.KeptRow:
+            log.info("a row that stayed from the card before was not pressed")
             self._record(doc, State.NEEDS_MANUAL_REVIEW,
-                         notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
-            self.write_failure('capture the document', 'the document would not render')
+                         notes="Its row stayed on the page from the card before")
+            self._write_row(doc, "Row from the card before", "Needs Manual Review")
             self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            print("  !! Its Download stayed on the page from the card before, so whose it is "
+                  "could not be told. Nothing was pressed, and it is left for review.")
+            return
+        if not saved:
+            self._record(doc, State.FAILED,
+                         notes="Could not capture the document PDF")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
+            self.write_failure('capture the document', 'the document would not render')
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
@@ -593,6 +838,29 @@ class App:
             self.write_failure('validate the saved pdf', 'the saved pdf did not validate')
             self.stats["manual_review"] += 1
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
+            return
+
+        # However a page redraws, what a switch waited for says only that a
+        # list came, so on a sign-in filed by card the PDF itself has to name
+        # its card. One that does not is kept for a person to look at, and
+        # nothing is called done. With one card no record names a card.
+        if doc.account and not site.names_card(receipt_pdf.pdf_text(out_path), doc.account):
+            quarantine = unique_path(self.paths.manual_review, out_path.name,
+                                     self.config["max_path_length"])
+            try:
+                out_path.replace(quarantine)
+            except OSError:
+                quarantine = out_path
+            doc.pdf_path, doc.pdf_filename = str(quarantine), quarantine.name
+            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+                         notes=f"The PDF does not name {doc.account}")
+            self._write_row(doc, "Card not named", "Needs Manual Review")
+            self.write_failure('validate the saved pdf', 'the saved pdf did not validate')
+            self.stats["manual_review"] += 1
+            print(f"  !! The PDF does not name {doc.account}, so it may be another card's. "
+                  "Moved to Manual Review.\n"
+                  "     Delete it there to have the next run try again.")
+            site.close_file_type_dialog(page, quiet=True)
             return
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
@@ -685,6 +953,7 @@ class App:
                 problems.append(f"{d.key}: {saved_copy.tried(self, d.key)}")
             if state != State.COMPLETED.value:
                 problems.append(f"{d.key}: {state} - {rec.get('notes', '')}")
+        problems.extend(f"Not read: {left}" for left in self._cards_left)
         print("\n" + "-" * 70)
         if problems:
             print("Needs attention:")
@@ -708,9 +977,19 @@ class App:
         docs = self._select()
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
+        self._say_cards_left()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        accounts = {d.get("account") for d in self.discovery.data.values() if d.get("account")}
+        self._card_count = len(accounts) if accounts else 1
+        # The switcher can be ahead of the list on show after a list that
+        # stopped, and only a run that lists goes through a switch's waits, so
+        # with statements filed by card this Resume takes nothing.
+        if accounts and listing.last(self) == listing.STOPPED:
+            print("\n!! The last run stopped before it read the whole list. With more than one card the")
+            print("   list on show may not be the card on show, so nothing was taken.")
+            raise listing.say_unread(self)
         # Resume reads no list of its own. With nothing listed, or after a
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished
@@ -865,6 +1144,10 @@ class App:
             info["challenge"] = site.detect_security_challenge(page)
             site.expand_all(page)
             site.scroll_full_page(page)
+            cards = site.list_cards(page)
+            info["cards"] = cards
+            cur_card = site.current_card_label(page)
+            info["current_card"] = cur_card
             info["row_counts"] = {}
             for name, sel in [("doc_row", site.FALLBACK["doc_row"]),
                               ("table rows", "table tbody tr"),
@@ -874,7 +1157,7 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            docs = site.collect_download_docs(page)
+            docs = site.collect_download_docs(page, account=cur_card)
             info["collected"] = len(docs)
             info["samples"] = []
             for d in docs[:8]:
@@ -931,9 +1214,10 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='American Express',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='American Express',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

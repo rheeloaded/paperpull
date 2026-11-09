@@ -1,8 +1,12 @@
 {
-  "_comment": "Editable rules mapping Venmo statement titles to filename summaries. Every statement this app lists is titled 'Venmo Statement <YYYY-MM>' by venmo_site.py, so it is filed as '<month end> Venmo Statement.pdf'. Each is the month's statement page printed to PDF; the CSV is never taken.",
+  "_comment": "Editable rules mapping Venmo statement titles to filename summaries. Every statement this app lists is titled 'Venmo Statement <YYYY-MM>' by venmo_site.py, so it is filed as '<month end> Venmo Statement.pdf', or 'Venmo Balance Statement <YYYY-MM>' for the Balance tab of a statement with tabs, filed as '<month end> Venmo Balance Statement.pdf'. Each is the month's statement page printed to PDF, and the CSV is never taken.",
   "tax_rules": [],
   "insurance_rules": [],
   "statement_rules": [
+    {
+      "pattern": "\\bbalance\\s+statement\\b",
+      "summary": "Balance Statement"
+    },
     {
       "pattern": "\\bstatement\\b",
       "summary": "Statement"

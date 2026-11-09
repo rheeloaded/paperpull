@@ -22,11 +22,13 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -51,6 +53,14 @@ from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("wealthfront_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
+
+# What a run notes when it finds no safe download control for a row. Up to
+# 0.61.0 it was written with No Receipt Available, which is final, so the
+# document was never asked for again (#152). A record an older version left
+# so is asked for again, by paperpull_core.not_shown.asked_again, which
+# holds these words, so a history moved to another computer carries the
+# note too (tools/migrate.py).
+NO_CONTROL = "No safe download control found for this row"
 
 
 def ask(prompt: str) -> str:
@@ -83,6 +93,7 @@ class Document:
         self.pdf_pages = kw.get("pdf_pages", "")
         self.notes = kw.get("notes", "")
         self.discovered_at = kw.get("discovered_at", now_iso())
+        self.invoices = kw.get("invoices", None)
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -131,7 +142,7 @@ class App:
         self.progress.load()
         self.discovery.load()
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -175,9 +186,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -261,7 +270,7 @@ class App:
             prefer_real=False,
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
@@ -488,6 +497,8 @@ class App:
             return False
         if rec.get("downloaded_ok"):
             return True
+        if not_shown.asked_again(rec):
+            return False
         state = rec.get("state")
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
@@ -545,9 +556,20 @@ class App:
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
-        out_path = unique_path(folder, filename, self.config["max_path_length"])
+        # Planned with no folder made, since a form with nothing to download
+        # left the folders a naming pattern names empty.
+        out_path = unique_path(folder, filename, self.config["max_path_length"], make=False)
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
+
+        def saving_to() -> Path:
+            """The path for a download that has arrived, with its folders made
+            now through unique_path, as every app's are, or the folder of its
+            kind when they cannot be."""
+            nonlocal out_path
+            out_path = unique_path(folder, filename, self.config["max_path_length"],
+                                   ignoring=out_path)
+            return out_path
 
         # Tax rows carry no href: their "Download" button opens a dialog that
         # lists the actual PDF link(s). Resolve those now.
@@ -592,7 +614,7 @@ class App:
                     except Exception as nav_err:
                         if "download is starting" not in str(nav_err).lower():
                             log.info("navigation note: %s", nav_err)
-                receipt_pdf.save_download(dl.value, out_path)
+                receipt_pdf.save_download(dl.value, saving_to())
                 saved = True
             except Exception as e:
                 log.info("Direct URL download did not fire (%s); trying the row button", e)
@@ -615,17 +637,21 @@ class App:
                 site.scroll_full_page(page)
             control = site.find_row_download(page, doc.account, doc.title)
             if control is None:
-                self._record(doc, State.NO_RECEIPT_AVAILABLE,
-                             notes="No safe download control found for this row")
-                self._write_row(doc, "No download control", "Review Needed")
-                self.stats["manual_review"] += 1
-                print("  No download control found - marked for manual review.")
+                # A row not found, or not found yet, is no proof there is
+                # nothing to fetch. Recorded as No Receipt Available, which
+                # is final, it was never asked for again, and it was counted
+                # for a Manual Review folder that held nothing (#152). It is
+                # a failure the next run tries again.
+                self._record(doc, State.FAILED, notes=NO_CONTROL)
+                self._write_row(doc, "No download control", State.FAILED.value)
+                self.stats["failed"] += 1
+                print("  No download control found. Nothing was saved, and the next run tries it again.")
                 return
             try:
                 with page.expect_download(timeout=45000) as dl:
                     control.click()
                 download = dl.value
-                receipt_pdf.save_download(download, out_path)
+                receipt_pdf.save_download(download, saving_to())
                 saved = True
             except Exception as e:
                 log.warning("Row-button download failed: %s", e)
@@ -683,6 +709,7 @@ class App:
 
         # A form set can include corrected versions (idx=1, ...). Save those
         # alongside the primary file so nothing is silently dropped.
+        extra_paths: List[Path] = []
         for n, href in enumerate(extra_hrefs, start=2):
             try:
                 url = href if href.startswith("http") else site.BASE + href
@@ -702,17 +729,25 @@ class App:
                 suggested = getattr(download, "suggested_filename", "") or ""
                 ext = Path(suggested).suffix.lower() or ".pdf"
                 stem = f"{out_path.stem} ({n} of {len(extra_hrefs) + 1})"
-                extra_path = unique_path(folder, stem + ext,
+                extra_path = unique_path(out_path.parent, stem + ext,
                                          self.config["max_path_length"])
                 receipt_pdf.save_download(download, extra_path)
                 if receipt_pdf.is_zip(extra_path) and ext not in (".zip", ".xlsx"):
                     opened = receipt_pdf.open_zip(extra_path)
                     extra_path = opened.pdf or opened.kept or extra_path
                 print(f"  + additional file: {extra_path.name}")
-                doc.notes = (doc.notes + "; " if doc.notes else "") + \
-                    f"form set has {len(extra_hrefs) + 1} files"
+                extra_paths.append(extra_path)
+                self.stats["new_files"].append(str(extra_path))
             except Exception as e:
                 log.warning("Extra tax file %s failed: %s", href, e)
+
+        # The list is what a Rename or a move reads and keeps up to date, so
+        # the files of a form stay together (renaming._invoices_alone).
+        if extra_paths:
+            doc.notes = (doc.notes + "; " if doc.notes else "") + \
+                f"form set has {len(extra_hrefs) + 1} files"
+            doc.invoices = [{"file": str(out_path), "kept": True}] + [
+                {"file": str(p), "kept": True} for p in extra_paths]
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
@@ -1031,9 +1066,10 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='Wealthfront',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='Wealthfront',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

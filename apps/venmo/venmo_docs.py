@@ -3,7 +3,8 @@
 Venmo shows an account statement for each month on its web account pages,
 account.venmo.com, under Statements, as a web page with a CSV download and
 no PDF. This saves each finished month's statement page as a PDF, printed
-from the page itself, back to the run's start date. With no start date it
+from the page itself, back to the run's start date, and on a statement with
+Wallet and Balance tabs each tab as a PDF of its own. With no start date it
 reads two years, and when the oldest of them has transactions the list
 stops rather than be called whole. The orchestrator below is the same one
 every other statement app runs on.
@@ -43,7 +44,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -140,7 +142,9 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        # The statement's month, YYYY-MM, how it is reached and known by.
+        # The statement's month, YYYY-MM, how it is reached and known by,
+        # with -balance after it for the Balance tab of a statement with tabs
+        # (venmo_site.month_and_tab).
         self.document_id = document_id
         # How many transaction rows the printed statement drew.
         self.rows_printed = kw.get("rows_printed", "")
@@ -194,10 +198,10 @@ def told_apart_by(record: dict) -> str:
     """What a statement's file adds to its name when another file already
     has that name, the same on every run: its month, never " (2)"
     (core/tests/test_every_app_renames_each_file_for_its_own_record). The
-    walk names each month once (venmo_site.months_to_walk), and a month is
-    keyed by its profile and month, so this is reached only when a file of
-    that name is already in the folder. The download and Rename both ask
-    this, so they agree."""
+    walk names each month once (venmo_site.months_to_walk), and a statement
+    is keyed by its profile, its month and its tab, so this is reached only
+    when a file of that name is already in the folder. The download and
+    Rename both ask this, so they agree."""
     return str((record or {}).get("document_id") or "").strip()
 
 
@@ -231,7 +235,7 @@ class App:
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
         # The owner's name first. The site adds what names the account
         # holder, the username, display name, email and phone, once the
@@ -280,9 +284,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -407,7 +409,7 @@ class App:
             prefer_real=True,
             mode=self.config.get("browser", "auto"))
         if not name:
-            return
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, keep the window OPEN, then run the pilot.")
@@ -537,9 +539,12 @@ class App:
                 self._record_rawdoc(r, site.BILLING_URL)
             self.discovery.save()
             print(f"\n!! The Venmo statement list stopped partway, since {stop}.")
+            if stop.month:
+                print(f"   It stopped on {stop.month}.")
             print(f"   The {len(stop.docs)} statement(s) listed before it stopped are kept,")
             print("   and this run stops rather than call the list read. Run it again.")
-            self.write_failure("read the documents list", "the list stopped partway")
+            self.write_failure("read the documents list", "the list stopped partway",
+                               extra={"month_page": stop.seen} if stop.seen else None)
             raise SystemExit(1)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
@@ -746,12 +751,12 @@ class App:
                 "landed_on": site.redact(page.url or ""),
                 "responses": trace[:80]}, words_for('Venmo', site))
             print(f"  What the site answered is in {attempt}, attach it to the issue.")
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
@@ -1123,9 +1128,10 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='Venmo',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='Venmo',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

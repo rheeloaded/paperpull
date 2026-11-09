@@ -23,7 +23,7 @@ from typing import Dict, Iterable, List, Optional
 from . import shared_folder
 from .characters import json_escaped, whole_characters, whole_json
 from .run_reporting import on_one_line, one_line
-from .sheets import read_stored_row, store_value
+from .sheets import read_stored, read_stored_row, store_value
 from .spec import INFRASTRUCTURE_FOLDERS, RECEIPT
 
 # ---------------------------------------------------------------------------
@@ -84,10 +84,77 @@ def spec():
     return _SPEC
 
 
+def config_file(path=None) -> Path:
+    """The file a run reads for the config it was given (#165).
+
+    With none it is config.json in the app's own folder. A config named by
+    a path is that file, read from where the run starts, as it always was.
+    Only a bare file name, config.spouse.json say, that is not in the
+    folder the run starts in is the file of that name in the app's own
+    folder, where every launcher keeps it, so a run started in another
+    folder finds it. No other file is looked for, so a name with a folder
+    in it, or one that is in the folder the run starts in, never reads a
+    file other than the one named."""
+    sp = spec()
+    if not path:
+        return sp.project_dir / "config.json"
+    given = Path(path)
+    if given.is_absolute() or given.exists() or len(given.parts) != 1:
+        return given
+    beside = sp.project_dir / given
+    return beside if beside.is_file() else given
+
+
+# The settings that name a folder and may be written relative to the folder
+# a run starts in. documents_dir has to be a full path (set_documents_dir).
+_RELATIVE_FOLDERS = ("output_dir", "profile_dir")
+
+
+def _started_in(folder) -> bool:
+    """Whether this process's working folder is `folder`, however either is
+    reached, a link or a junction on the way included."""
+    try:
+        here = os.getcwd()
+    except OSError:
+        return False
+    try:
+        return os.path.samefile(here, str(folder))
+    except OSError:
+        return os.path.normcase(os.path.realpath(here)) == \
+            os.path.normcase(os.path.realpath(str(folder)))
+
+
+def read_relative_folders(cfg: dict, path) -> None:
+    """Read a relative output_dir or profile_dir from the config's own
+    folder when the run started neither there nor in the app's folder
+    (#165).
+
+    Every launcher starts a run in the app's own folder. The control panel
+    does, paperpull and paperpull.bat do, login.bat and login.command do,
+    and so does the panel on PaperPull Server. A relative folder has always
+    been read from there, and the paths a run records in progress.json and
+    its index are relative to it, which is what lets an install be moved
+    and lets a record saved before be told apart from the copy a Download
+    again saves (saved_copy). So such a run keeps each setting exactly as
+    it is written, and every path it records and compares reads as it
+    always has. A run started in any other folder, a shell in the folder
+    that holds the installs say, read "." as that folder, and made Logs,
+    Backups and a folder of each kind there, with a browser profile nobody
+    had signed in to. Such a run now reads them from the folder the config
+    is in. The config in memory is given each folder as it is used."""
+    base = Path(os.path.abspath(str(path))).parent
+    if not isinstance(cfg, dict) or _started_in(spec().project_dir) or _started_in(base):
+        return
+    for key in _RELATIVE_FOLDERS:
+        value = cfg.get(key)
+        if isinstance(value, str) and value.strip() and not Path(value).is_absolute():
+            cfg[key] = os.path.normpath(os.path.join(str(base), value))
+
+
 def load_config(path: Optional[Path] = None) -> dict:
     """Read config.json and fill in this provider's defaults."""
     sp = spec()
-    path = Path(path) if path else (sp.project_dir / "config.json")
+    path = config_file(path)
     if not path.exists():
         copy_cmd = ("copy config.example.json config.json"
                     if sys.platform == "win32"
@@ -114,6 +181,8 @@ def load_config(path: Optional[Path] = None) -> dict:
             "and names, and the control panel reads what it prints line by line, so a "
             "name has to be one line of plain text. Rename it, or change the setting, "
             "and run again." % held)
+    # Before the server's checks, so they judge the folders the run uses.
+    read_relative_folders(cfg, path)
     if os.environ.get("PAPERPULL_SERVER") == "1":
         hold_to_the_server(cfg, path)
         refuse_links_out(cfg["output_dir"], path)
@@ -496,6 +565,10 @@ def ensure_owner(config: dict, config_path) -> dict:
     if not name:
         return config
     config["owner"] = name
+    if _SPEC is not None:
+        # The file load_config read for this name, which for a bare name
+        # given to a run started in another folder is the app's own.
+        config_path = config_file(config_path)
     try:
         existing = json.loads(Path(config_path).read_text(encoding="utf-8-sig"))
         existing["owner"] = name
@@ -1301,23 +1374,60 @@ class CsvFile:
     one of these files reads it here, or through read_stored_row as both
     spreadsheet tools do."""
 
-    def __init__(self, path: Path, columns: List[str], backups_dir: Optional[Path] = None):
+    def __init__(self, path: Path, columns: List[str], backups_dir: Optional[Path] = None,
+                 once: bool = False):
         self.path = Path(path)
         self.columns = columns
         self.backups_dir = backups_dir
+        # A file that holds each row once. A document app's index gets a row
+        # for each outcome, and an outcome that is tried again on the next
+        # run, a capture that saved nothing, is written again on every run
+        # it fails. Ally's index held seven rows, word for word alike, for one
+        # tax form its page could not open (#152). A row of a saved file
+        # carries the moment it was saved, so a second save is always a row
+        # of its own. An order history holds one row per item bought, and two
+        # alike items are two rows, so it never holds its rows once.
+        self.once = once
 
     def _ensure_header(self) -> None:
         if not self.path.exists() or self.path.stat().st_size == 0:
             with shared_folder.open_to_write(self.path, "w", encoding="utf-8-sig", newline="") as f:
                 csv.DictWriter(f, fieldnames=self.columns, quoting=csv.QUOTE_MINIMAL).writeheader()
 
+    def _held(self) -> Optional[set]:
+        """Every row the file holds, as read_stored gives it back, by this
+        file's columns, or None when the file cannot be read as this app
+        writes it. A file a person saved again from Excel in the code page
+        of their Windows, with a name such as José in it, is not UTF-8, and
+        a file with a field past the csv module's limit is not one it reads.
+        Appending never read the file before, so such a file is appended to
+        as it always was, rather than every row of a run failing to be
+        written, with the files that run saved counted as failed."""
+        if not self.path.exists():
+            return set()
+        try:
+            with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig", newline="") as f:
+                return {tuple(r.get(c) or "" for c in self.columns)
+                        for r in (read_stored_row(row) for row in csv.DictReader(f))}
+        except (OSError, UnicodeError, csv.Error):
+            return None
+
     def append_rows(self, rows: Iterable[dict]) -> None:
         self._ensure_header()
+        held = self._held() if self.once else None
         with shared_folder.open_to_write(self.path, "a", encoding="utf-8-sig", newline="") as f:
             w = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore",
                                quoting=csv.QUOTE_MINIMAL)
             for row in rows:
-                w.writerow({c: store_value(row.get(c, "")) for c in self.columns})
+                stored = {c: store_value(row.get(c, "")) for c in self.columns}
+                if held is not None:
+                    # As read_stored gives it back from the file, the way
+                    # _held reads the rows already there.
+                    written = tuple(read_stored(v) or "" for v in stored.values())
+                    if written in held:
+                        continue
+                    held.add(written)
+                w.writerow(stored)
 
     def read_all(self) -> List[dict]:
         if not self.path.exists():

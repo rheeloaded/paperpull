@@ -79,6 +79,56 @@ Filenames: `YYYY-MM-DD American Express <Summary>.pdf`, e.g.
 `2025-12-31 American Express Monthly Statement.pdf`,
 `2025-12-31 American Express Year-End Summary.pdf`,
 `2025-12-31 American Express 1099-INT Tax Form.pdf`.
+For accounts with more than one card, the card name and last digits are included
+in the summary and filename (e.g. `YYYY-MM-DD American Express Monthly Statement Blue Cash Everyday (12345).pdf`),
+so statements from different cards on the same date do not collide. Single-card
+accounts keep the simple filename with no card name.
+
+## More than one card
+
+With more than one card on a sign-in, the run reads each card in the switcher
+on the statements page, one after the other, and waits for every Download that
+shows of one card's list to go before it reads the next. If any of them stays,
+even under another statement's name, the run stops there, since rows redrawn one
+by one cannot be told from the old card's, and the failure file counts how many
+stayed, and how many of those were year-end summaries and how many monthly
+statements. The one exception is a year-end summary. Its row is named by its
+year alone, the same on every card, so the page can keep it when the card
+changes, and whose PDF it then brings cannot be told. When only such rows stay,
+just as they were, or show again once the switch is done, and a Download of
+another document shows, the run reads that card's statements and leaves out
+whatever those rows are named. It names them, counts them for review and never
+presses their Download for the card on show, whatever the page renames them to
+up to the moment of the press. The list is then not noted as whole, so a Resume
+takes nothing, since a later run may make no switch to the card left on show
+and could not know which rows stayed. Rows of a document type the archive does
+not take leave nothing out. Any other row of the old list that shows again once
+the switch is done stops the run like one that stayed. A card the site has
+turned off in the switcher, a canceled card say, is
+not read. The run names it, counts it for review, writes a failure file and goes
+on with the other cards. A card the switcher holds but
+does not show, in a collapsed group say, cannot be chosen, so the run names it
+and stops, and with one card shown it does not go the one-card way.
+
+Each PDF saved for a card has to name that card by its last digits, as a
+statement does on its first page and a year-end summary beside its sections. One
+that does not is moved to Manual Review, since it may be another card's, and is
+not called done. Delete it there to have the next run try again. With one card
+nothing is checked, and files stay as they were.
+
+With statements filed by card, a Resume after a list that was not read whole
+takes nothing, since the card the switcher shows may not be the list on show.
+Run Pilot or Run All instead, which read each card again.
+
+When the switcher itself cannot be read, because it does not show, is turned off,
+is covered or offers no card, the run goes on with the card on show, as it always
+has for one card, with the same file names. It names that card, or says the card
+on show when its name is hidden too, and says any other card was not read, so
+with one card nothing is missing, and with several the failure file is worth
+sending. An archive already filed by card stops there instead, and at a page with
+no switcher, since going on would save its statements again under no card's name.
+With one option left in the switcher, such an archive reads that card under its
+own name.
 
 ## If a site change breaks it
 

@@ -93,19 +93,42 @@ step.
 | Status | Means | The button |
 |--------|-------|------------|
 | Stopped partway | The last run that downloads ended early, a page closed, a sign-out, an error | Continue, or Get new when the last run was a Continue that stopped because no run had read the provider's whole list, which only a run that lists can carry on from |
+| Sign in first | The last run that downloads found no signed-in window to work in, so nothing was downloaded | Sign in, which opens the sign-in window |
 | Needs a look | The last run set something aside, a document in Manual Review, a wrong document refused, a failure | See what to check |
 | Overdue | The newest document is far past how often this provider sends one | Get new |
 | New one likely | The newest document is past its usual date | Get new |
 | Possible gap | Documents look missing in the middle of the history | Look for them, a run over those dates |
 | Up to date, Checked | Nothing is past its usual date, or a receipt archive that was checked | Get new |
-| Not started | Set up and never run | Start |
+| Not started | Set up and never run | Sign in, which opens the sign-in window |
 
 How current an archive is comes from `tools/status.py`, run on each
 account's own folder, measured against how often that provider sends a
-document. The panel never says an account is signed in, since nothing short
+document. The date an account was checked is when a run last read the
+provider's whole list, which a Continue with nothing left to take, a check
+of the saved files or a rename never does, and a run over part of the history
+does not either. The panel never says an account is signed in, since nothing short
 of a run can know that. When several accounts may have something new,
 **Get new for all** runs them one after another, and pauses at one that does
 not finish, so you can sign in again and try it once more, or skip it.
+For a row that says Possible gap, Get new in that summary and Get new for all
+run the whole list with no dates, and the row's own Look for them looks in the
+gap's dates alone.
+A Possible gap is left out of that count once two such whole runs, ended on
+different days, have each noted it, the newer of them the newest whole run. A
+whole run is a Run All with no dates set that ends clean, with its list noted
+as read to its end and the account's own records showing nothing on that list
+left to take. It notes in `panel-runs.json` the gaps still there. That does not
+say why they are there. The provider may not offer those documents, or may have
+sent none those months, and a run does not take what comes before
+`default_start_date` or what `document_types` leaves out, so a gap your own
+settings leave out is left out of the count as well. A run whose records show a
+document left, one turned off on the provider's page that the next run takes,
+say, notes no gaps, and neither does a run of an app whose log says its list
+passed over a document it saw. Some apps can pass over a document and leave no
+trace in their records, a statement the provider has not made ready yet, say,
+and the next run usually takes it, which is why one run is not enough. Only the
+noted gaps are left out. One that shows up later still counts, and the
+account's own row still says Possible gap and offers to look for them.
 
 Each run the panel starts is noted in `panel-runs.json` in the account's
 folder, the newest twenty, with how it ended and the names of the files it
@@ -124,7 +147,7 @@ the rest are under **More**, and every one says what it does.
 | **Open sign-in window** | Opens that provider's own browser (Chromium, or Edge/Chrome for bot-protected sites). **You** sign in and leave it open |
 | **Get new documents** | Downloads everything you do not already have (`--all --yes`) |
 | **Try the newest few first** | Downloads the newest few as a test (`--pilot`) |
-| **Only check what's there** | Lists what the provider has and downloads nothing (`--discover`) |
+| **Check what's there** | Lists what the provider has and downloads nothing (`--discover`) |
 | **Continue** | Shown after a run that stopped. Picks up where it ended (`--resume --yes`) |
 
 | Under More | What it runs |
@@ -136,11 +159,18 @@ the rest are under **More**, and every one says what it does.
 | **Record steps for support** | Watches while you click to a document (`--record`), with Stop recording |
 | **Add another person** | A second account on the same provider, with its own folder, sign-in window and history |
 | **Remove from PaperPull** | Moves the provider's folder into Removed. Nothing is deleted |
-| **Open folder** | Shows the account's folder on this computer |
+| **Open folder** | Shows the folder holding the account's newest document, its documents folder once they go there, never its browser profile |
 
 A run's page leads with what it came to, "3 new documents saved", lists
-the files, and keeps the full output under **Technical details**. A run
-that wrote a failure file offers it right there, to attach to an issue.
+the files, says the folder that run saved them in with an **Open folder**
+that shows it, and keeps the full output under **Technical details**. A run
+that wrote a failure file offers it right there, to attach to an issue. A
+run that found no signed-in window says **Sign in first**, and offers the
+sign-in, then the same run again, over the same dates. A sign-in pressed on
+the page of any run that stopped is followed on its own page by the step the
+stopped run's page offered after it, **Continue**, **Check again**, or the
+restore or recording to start again. A stop that may be for PaperPull to fix
+offers **Make a support report** on the run's page.
 
 ## Which dates
 
@@ -212,7 +242,17 @@ language stays editable under **Edit as text**, see
 
 ## Moving to another computer
 
-In **Settings**, **Export history** hands the browser a file listing each
+Copying the PaperPull folder, and the Documents folder if one is set,
+moves everything, the PDFs included. Typed into the welcome's first step
+on the new computer, the copied folder's providers are found and Open
+Accounts uses them. The PaperPull folder may land anywhere, since each
+config.json names its folders relative to its own. The Documents folder has
+to land at the same path, since each config names it by its full path and
+so do the records of what was moved there, and so does a folder one account
+was given for its own documents. Settings' Move card says this first,
+naming both folders.
+
+When the folders cannot be copied, in **Settings**, **Export history** hands the browser a file listing each
 provider and person here, their settings, and every document each one has
 already downloaded. **Import a history file** on the other computer, or on
 PaperPull Server, reads it and shows what it will do before anything is
@@ -226,7 +266,9 @@ set up.
 - A provider or person already set up keeps its own settings and only
   gains the history. Nothing is ever taken out of a history, and each
   `progress.json` is backed up in its Backups folder before it is written.
-- No sign-in, password or PDF is in the file. It does hold document titles,
+- No sign-in, password or PDF is in the file, and what it lists is marked
+  downloaded, so Get new never fetches those PDFs. The import says so, and
+  points to copying them over or Restore deleted files. It does hold document titles,
   order numbers, totals and the account holders' names.
 - Nothing is imported while a provider is running.
 

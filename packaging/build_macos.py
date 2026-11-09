@@ -27,29 +27,24 @@ Mac, or on Apple Silicon through Rosetta, which runs the staged Intel Python
 and so has pip choose Intel wheels. The release workflow builds each on a
 runner of its own architecture, so each is smoke-tested on its own hardware.
 
-The bundle's main executable is a small native Cocoa program, written in
-Objective-C (packaging/macos/launcher.m) and compiled on the build machine
-with clang, because notarization requires a Mach-O main executable with the
-hardened runtime. Double-clicking PaperPull.app starts the panel as a child
-process (the bundled Python running uvicorn on 127.0.0.1) and shows it in a
-real window, a WKWebView, with a Dock icon and a menu bar. There is no
-Terminal window and no browser tab. Quitting the app (Cmd-Q) stops the
-panel. The panel's web pages, the providers and the Chrome sign-in are the
-ones the checkout runs, unchanged. The panel's output goes to
-~/Library/Logs/PaperPull/panel.log.
+The bundle's main executable is a small native window, in Objective-C
+(packaging/macos/launcher.m), compiled on the build machine because
+notarization requires a Mach-O main executable with the hardened runtime.
+It starts gui/mac_host.py with the bundled Python, which runs the panel and
+stops it, and shows the panel in a WKWebView, with a Dock icon and a menu
+bar. There is no Terminal window and no browser tab, and quitting stops the
+panel. Its output goes to ~/Library/Logs/PaperPull/panel.log.
 
-The launcher also has two self-test modes, read from the environment variable
-PAPERPULL_LAUNCHER_SELFTEST, that the release workflow and the tests use:
-"ready" starts the panel, waits for it to answer, prints one READY line and
-stops it, and "window" does the same with the real window created and loaded
-without taking focus. Resources/paperpull-panel.sh is still shipped, for
-anyone who wants the panel in a terminal, but the app does not run it.
+PAPERPULL_LAUNCHER_SELFTEST=ready or =window runs the executable as the
+release workflow does, see launcher.m. Resources/paperpull-panel.sh still
+ships, for anyone who wants the panel in a terminal.
 
 WHAT IS NOT IN IT
 
 The 400 MB Chromium. Chrome, Edge, Brave, Vivaldi or Opera already on the Mac
-is used, and the download is offered at sign-in only if none is found. Safari
-cannot be driven this way.
+is used, and the first download is offered at sign-in only if none is found. A
+private copy somebody took that way is offered its update at sign-in when it
+falls behind. Safari cannot be driven this way.
 
 Anything untracked. Only files git knows about go in.
 
@@ -93,6 +88,9 @@ PY_VERSION = "3.12.16"
 # The oldest macOS the bundle opens on. Info.plist and the launcher say so,
 # and packaging/lock.py takes only wheels that run on it.
 MACOS_MIN = "11.0"
+
+# The window saves the page's downloads with WKDownload, new in 11.3.
+WINDOW_MACOS_MIN = "11.3"
 
 # The launcher's source. It is compiled straight from the checkout into
 # Contents/MacOS and is not copied into the bundle, so it is not subject to
@@ -257,7 +255,7 @@ def compile_launcher() -> None:
         raise SystemExit("the launcher's source is missing: %s" % LAUNCHER_SRC)
     say("  launcher")
     subprocess.run(["clang", "-fobjc-arc", "-O2", "-arch", ARCH,
-                    "-mmacosx-version-min=" + MACOS_MIN,
+                    "-mmacosx-version-min=" + WINDOW_MACOS_MIN,
                     "-framework", "Cocoa", "-framework", "WebKit",
                     "-o", str(MACOS / "PaperPull"), str(LAUNCHER_SRC)], check=True)
 
@@ -267,16 +265,12 @@ def write_bundle() -> None:
     MACOS.mkdir(parents=True, exist_ok=True)
     icon = write_icon()
 
-    # The panel in a terminal, for anyone who wants it there. The app does
-    # not run this: the launcher below starts the same command itself, with
-    # the same two environment variables, and shows the panel in its own
-    # window. Same shape as paperpull.bat on Windows.
+    # The panel in a terminal, for anyone who wants it there. The app itself
+    # runs gui/mac_host.py. Same shape as PaperPull.exe on Windows.
     (RES / "paperpull-panel.sh").write_text(
         '#!/bin/bash\n'
-        '# The PaperPull control panel, in this terminal. Press Control-C to stop it.\n'
+        '# The PaperPull control panel. Close this window to stop it.\n'
         'DIR="$(cd "$(dirname "$0")" && pwd)"\n'
-        '# 8765 is the panel\'s own port. PAPERPULL_PORT is for tests.\n'
-        'PORT="${PAPERPULL_PORT:-8765}"\n'
         'export PYTHONNOUSERSITE=1\n'
         '# Bytecode goes to the user cache, never into the bundle. macOS blocks\n'
         '# writes into an app under /Applications, and a signed bundle that\n'
@@ -284,42 +278,11 @@ def write_bundle() -> None:
         'export PYTHONPYCACHEPREFIX="$HOME/Library/Caches/PaperPull/pycache"\n'
         'echo "PaperPull %s"\n'
         'echo "The panel binds 127.0.0.1 only. Nothing is reachable from the network."\n'
-        'echo "Press Control-C to stop it."\n'
+        'echo "Close this window to stop it."\n'
         'echo\n'
-        'port_answers() { (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; }\n'
-        '# PaperPull.app starts this same panel on this same port. If it is open,\n'
-        '# the port is taken, so say so instead of opening its panel as if it\n'
-        '# were this one.\n'
-        'if port_answers; then\n'
-        '  echo "Port $PORT is already in use, so this panel cannot start." >&2\n'
-        '  echo "If PaperPull.app is open, quit it first (Cmd-Q), then run this again." >&2\n'
-        '  exit 1\n'
-        'fi\n'
+        '(sleep 2; open http://127.0.0.1:8765) &\n'
         'cd "$DIR"\n'
-        '# Not exec: the browser is opened only once this panel has itself\n'
-        '# started answering, so the shell stays to watch for that. Control-C\n'
-        '# and TERM are passed on to the panel, which stops it.\n'
-        'stopped=\n'
-        '"$DIR/python/bin/python3" -m uvicorn app:app --host 127.0.0.1 --port "$PORT" --app-dir "$DIR/gui" &\n'
-        'panel=$!\n'
-        'trap \'stopped=1; kill "$panel" 2>/dev/null\' INT TERM\n'
-        '(\n'
-        '  for i in $(seq 1 100); do\n'
-        '    kill -0 "$panel" 2>/dev/null || exit 0\n'
-        '    if port_answers; then open "http://127.0.0.1:$PORT"; exit 0; fi\n'
-        '    sleep 0.2\n'
-        '  done\n'
-        ') &\n'
-        'opener=$!\n'
-        'wait "$panel"; status=$?\n'
-        '# A trapped signal ends the first wait early. Wait again until the panel\n'
-        '# has actually stopped.\n'
-        'while kill -0 "$panel" 2>/dev/null; do wait "$panel"; status=$?; done\n'
-        'kill "$opener" 2>/dev/null\n'
-        'if [ -z "$stopped" ] && [ "$status" -ne 0 ]; then\n'
-        '  echo "The panel stopped with an error (exit $status). If PaperPull.app is open, quit it first (Cmd-Q)." >&2\n'
-        'fi\n'
-        'exit "$status"\n'
+        'exec "$DIR/python/bin/python3" -m uvicorn app:app --host 127.0.0.1 --port 8765 --app-dir "$DIR/gui"\n'
         % version(), encoding="utf-8")
     os.chmod(RES / "paperpull-panel.sh", 0o755)
 
@@ -372,7 +335,7 @@ def write_bundle() -> None:
         "CFBundlePackageType": "APPL",
         "CFBundleExecutable": "PaperPull",
         "CFBundleInfoDictionaryVersion": "6.0",
-        "LSMinimumSystemVersion": MACOS_MIN,
+        "LSMinimumSystemVersion": WINDOW_MACOS_MIN,
         "LSArchitecturePriority": [ARCH],
         "NSHighResolutionCapable": True,
         "NSPrincipalClass": "NSApplication",

@@ -10,7 +10,9 @@ Venmo has **no PDF statement** on the web. Its Statements page shows one
 month's account statement as a web page, with a "Download CSV" button.
 This app opens each finished month's statement page by its own address and
 prints it to PDF, filed as `<month end> Venmo Statement.pdf`, for example
-`2026-09-30 Venmo Statement.pdf`. Read-only, delete-safe, part of
+`2026-09-30 Venmo Statement.pdf`. Where Venmo shows a month in Wallet and
+Balance tabs, the Balance tab is saved as its own file,
+`2026-09-30 Venmo Balance Statement.pdf`. Read-only, delete-safe, part of
 [PaperPull](../../README.md).
 
 ## Help test it, no programming needed
@@ -86,8 +88,10 @@ that date. A run of one year walks back to that year's first day. A month is lis
 and later printed, only when the address still names that month, the
 month picker shows exactly that month, an "Account Statement" heading is
 drawn, nothing is still loading, and either the month's transaction rows
-are drawn, the same on two reads in a row, or Venmo's own "No transactions
-yet for this month" is, unchanged for two seconds. When the page's own
+are drawn, the same on two reads in a row, or Venmo's own words for a month
+with none are, unchanged for two seconds. Venmo has two sentences for that,
+"No transactions yet for this month" and "There are no transactions for
+these dates", and which one you see goes by your own account. When the page's own
 request for the month's transactions is heard, an answer that says more
 are to come stops the month, and one that says signed out stops the run.
 The month still under way is left out, since its statement is not final
@@ -96,18 +100,39 @@ busy month draws ten transactions at a time. Before printing, the app
 presses that month's own "Show more", and nothing else, until every
 transaction is drawn, each press required to draw more and at most 60
 presses. A "Show more" that Venmo has turned off is not pressed, and that
-month is left for review and the next run. Nothing is printed while the
+month counts as failed and is tried again on the next run. Nothing is printed while the
 newest answer heard for the month says more transactions are to come. The
 number of transactions printed is kept in the month's record.
 Each statement remembers a one-way tag of the profile it was listed on.
 If the browser is later signed in to another Venmo profile, the run stops
 and prints nothing.
 
+Some accounts get a newer Statements page, where a month has a Wallet tab and,
+with a Balance account, a Balance tab. Only the open tab is on the page, so
+the app reads both, opening the Balance tab by its address with nothing
+pressed. Each tab that holds transactions is saved as its own statement, and a
+month counts as empty only when neither does. "No transactions yet for this
+month" on the Wallet tab is not enough on its own, since that page also says
+it when Venmo could not load the month, so it counts only when Venmo's own
+answer for the month says the same. The Balance tab shows a month's first ten
+transactions, and its "Show more" does nothing, so a busier Balance month is
+not saved, rather than saved with some missing, and counts as failed. Venmo's server normally
+says whether an account has tabs, and the app takes its word. When it says
+nothing, the page can learn of them a moment after it has drawn, so that month
+waits up to five seconds for them, and tabs that first appear after months read
+without them stop the list rather than leave those months unread.
+
 A page the app cannot read whole stops the run rather than being called
 complete. That is a month the page will not show as asked, a "Load more"
-control on a month, a business profile, or a month that never finishes
-drawing. If Venmo answers as signed out, the run stops and keeps what it
-saved. Sign in again and run Resume.
+control on a month, a business profile, a month that never finishes
+drawing, a month that shows neither transactions nor either sentence, as
+one does when Venmo could not load it, a month that holds only pending
+transactions, a Wallet tab saying it is empty when Venmo's own answer does
+not say so or could not be read, or a Balance tab that does not open when
+Venmo's answer does not say there is no Balance account. The run says which
+month it stopped on. If Venmo answers as
+signed out, the run stops and keeps what it saved. Sign in again and run
+Resume.
 
 ## Validation status
 
@@ -118,6 +143,13 @@ Resume). Every PDF holds the whole statement, and the two busy months
 printed 12 and 11 transactions with no "Show more" left. Not yet seen are
 the following.
 
+- "There are no transactions for these dates" on a live account. The app
+  knows it from Venmo's own page code.
+- The page with Wallet and Balance tabs on a live account. All of it comes
+  from Venmo's own page code, and it stops rather than guesses at what that
+  code does not show, which includes whether a visit can name the Balance tab
+  in its address. A failure file or a Diagnose from such an account would
+  settle it.
 - How far back Venmo's statements go past two years. A month before the
   account opened shows the same "No transactions yet" as an empty month,
   so it is skipped, and with a start date the walk goes back to it.
@@ -146,4 +178,6 @@ python -m pytest tests -q
 ```
 
 Run from this folder with PaperPull's bundled Python. They use invented
-values only and need no browser.
+values only. `tests/test_a_month_with_no_transactions.py` and
+`tests/test_a_statement_in_two_tabs.py` drive a real browser on made-up pages,
+and nothing they do reaches Venmo. The others need no browser.
