@@ -153,7 +153,7 @@ class App:
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -699,13 +699,13 @@ class App:
             step = getattr(saved, "step", "") or "capture the document"
             reason = getattr(saved, "reason", "") or "the document would not render"
             searched = getattr(saved, "row_search", None) or {}
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes=f"Could not {step}, {reason} (see the log)")
             self._write_row(doc, "Capture failed" if step == "capture the document"
-                            else f"Could not {step}", "Needs Manual Review")
+                            else f"Could not {step}", State.FAILED.value)
             self.write_failure(step, reason, extra={"row_search": searched} if searched else None)
-            self.stats["manual_review"] += 1
-            print(f"  Could not {step}, {reason}. Marked for manual review.")
+            self.stats["failed"] += 1
+            print(f"  Could not {step}, {reason}. Nothing was saved, and the next run tries it again.")
             return
 
 

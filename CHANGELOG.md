@@ -7,7 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.61.1] - 2026-11-08
+
+SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo
+reads both tabs of its newer Statements page, and American Express goes on
+past year-end rows that stay at a card switch. A document that could not be
+downloaded no longer reads as one waiting in Manual Review, a gap no run can
+fill no longer keeps an account in "may have something new", and an account
+says it was checked only when its list was read.
 
 ### Changed
 - **The control panel looks and reads like a Mac app.** It is set in the
@@ -39,6 +46,80 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the app needs setting up, now reads "This run did not start" with the
   reason, instead of "It exited with code 1" and a Continue for a run that
   never began.
+- **"May have something new" no longer keeps a gap a whole run could not
+  fill (#149).** A gap in the middle of a history, years back say, counted
+  toward the home page's "may have something new", and Get new for all ran
+  its account every time, though no run filled it. Get new and Get new for
+  all now run a gap row's whole list with no dates, and the row's own Look
+  for them still looks in the gap's dates. A Run All with no dates that ends
+  clean, with its list noted as read to its end and the account's records
+  showing nothing on it left to take, notes the gaps still there. Once the
+  newest such run and an earlier one, ended on another day, have each noted
+  a gap, the home page leaves it out of the count. A gap the person's own
+  `default_start_date` or `document_types` leave out is noted with them. A
+  Pilot, a scoped run, Download again, or a run that stopped, failed, set
+  something aside or whose records show a document left notes none, and
+  neither does a run of eleven apps whose log says their list passed over a
+  document it saw. Some apps can pass over a document with no trace in their
+  records, a statement not ready yet, say, and the second run on another
+  day is there for that. A gap that shows up later still counts, and the
+  account's row still says Possible gap and offers Look for them. An account
+  that is due is unchanged, since its next document may come any day.
+  Contributed by @JasperDale420. Before merging, the summary's buttons were
+  made to run a gap row whole, and a gap was made to settle only after two
+  such runs on different days whose records show nothing left.
+- **An account's card says it was checked only when its list was read
+  (#148).** After a run that stopped partway with every listed document
+  already saved, a Continue found nothing to take and ended in a second,
+  reading no list and opening nothing, and the card then said "checked"
+  that day. The date came from the panel's last run that downloads, a
+  Continue among them, and for an account run only from a terminal from
+  whichever run ended last, a check of the saved files or a rename too. It
+  now comes from when a run last read the provider's whole list, which
+  every app already notes, so a run over part of the history does not move
+  it either, and the card says when the last run ended where it talks about
+  that run. Reported by JasperDale420.
+- **A capture that saved nothing no longer reads as a document waiting in
+  Manual Review (#152).** Ally's tax forms API lists a 2019 Form 1099-INT
+  while its Tax Forms year picker starts at 2020, so its page cannot open it.
+  The run counted it as needing manual review, the panel said a document sat
+  in the Manual Review folder, and the folder was empty. Every run then tried
+  it again, wrote a new failure file, and added the same row to the document
+  index. Ally now says once that the form is out of reach of its page, counts
+  it on the run summary's line "Not reachable on Ally's page", and leaves it
+  on later runs, with no failure file. A run with `--redownload` asks for it
+  again. Only a year older than the first of the one year picker shown, read
+  twice, counts as out of reach, so a year the picker has not reached yet is
+  still tried. In every
+  document app a capture that saved nothing is now a failure, which the next
+  run tries again, rather than a document for Manual Review, and Anthem's
+  documents fetched through its API do the same. Wealthfront recorded a row it
+  could not find as having nothing to fetch, so it was never asked for again,
+  and now tries it again too, the records it left so before included, and
+  those in a history moved to another computer. NW Natural and Portland
+  General Electric no longer say a date two bills share is left for Manual
+  Review, since neither bill is fetched and nothing goes there. Every
+  document index now holds a row once, so a document that fails the same way
+  on several runs has one row. Refusals that save nothing, such as a wrong
+  document or a page that asks you to sign in again, are still counted for
+  review as before.
+- **American Express goes on past year-end rows that stay at a card switch.** A
+  tester's Pilot with two cards stopped at the first switch with 202 of 204
+  Downloads gone and two still showing under the same name (#135). A year-end
+  summary's row is named by its year alone, the same on every card, so the page
+  can keep it when the card changes, and whose PDF its Download then brings
+  cannot be told. When only such rows stay, just as they were, or show again
+  once the switch is done, and a Download of another document shows, the run now
+  reads that card's statements and leaves those year-end summaries out for both
+  cards. It names them, counts them for review, never presses their Download for
+  the card on show, whatever the page renames them to before the press, and does
+  not note the list as whole, so Resume says to run Pilot or Run All. A switch
+  that keeps such rows while documents are taken notes the list the same way.
+  Rows of a document type the archive does not take leave nothing out. Anything
+  else that stays, or any other row of the old list that shows again once the
+  switch is done, still stops the run, and the failure file now counts what
+  stayed as year-end summaries and as monthly statements, as counts only. No
+  real account has run this yet.
 - **Venmo reads both tabs of its newer Statements page.** Some accounts get a
   page where a month has a Wallet tab and, with a Balance account, a Balance
   tab, with only the open tab on the page. The app stopped at the first month
@@ -50,9 +131,57 @@ All notable changes to PaperPull are recorded here. Versioning follows
   could not load it, so on the Wallet tab those words count only when Venmo's
   own answer says the same. A Balance tab that will not open stops the list,
   unless Venmo's answer says there is no Balance account, and a Balance month
-  past the ten transactions that tab can show goes to review rather than be
-  saved with some missing. All of it comes from Venmo's public page code, and
-  no run has met this page yet.
+  past the ten transactions that tab can show is not saved, rather than be
+  saved with some missing, and counts as failed. All of it comes from Venmo's
+  public page code, and no run has met this page yet.
+- **SDG&E reads its Billing History again.** Since November 6 each bill
+  row on My Energy Center starts with a cell the page hides, holding the
+  row's number, and the header has no cell above it. Read cell by cell,
+  every row was one column wider than the header, so Discover, Pilot and a
+  full run stopped on the first bill, saying it did not line up with the
+  header. That first cell is now passed over when it is a plain hidden cell
+  holding only a number, the row is exactly one column wider than the
+  header, and Statement Date is the header's first column. Any other hidden
+  cell still counts as a column, so a table that hides some of its columns
+  is read by where each cell sits, and stops the list when its cells do not
+  line up. The contributor's own account listed nine bills, the eight the
+  app had recorded keeping their ids and dates. Contributed by
+  @JasperDale420. Before merging, since the page no longer says how many
+  bills it holds, the read was made to wait for the rows to settle, and the
+  list to stop on anything near the table that looks like a pager or a
+  show-more control or says there are more bills than were read, and on
+  hidden numbers that do not count the rows read from 0 or 1 at either
+  end, none of which has met the live page yet.
+- **Fidelity lists its tax forms and calls a statement of several accounts
+  Combined (#144).** The hub nests a tax form's fields, which the app did not
+  read, so every form was dropped as undated. A run now lists them and asks
+  for each through the hub's v1 download with docType `TF`, as the
+  contributor reports. A Discover on a real account listed the forms, and
+  nobody has shown one downloading that way yet. A form can be dated in the
+  year after its tax year, so a year or a date range now also asks for the
+  tax year before it, and keeps a form when its own date or the last day of
+  its tax year is inside it. `--year 2025` keeps the forms of tax year 2025
+  and the forms of 2024 dated in 2025. A form dated two or more years after
+  its tax year is listed only by a run with no year or dates set. A statement
+  with no account number kept no account, and it now reads `Combined`, which a
+  `filename_pattern` with `{account}` can make a folder of. The default file
+  name leaves it out, so files are named as before. An archive from before
+  this keeps every key and downloads nothing again. Contributed by appchamp.
+  Before merging, each document was made to find its own row of a fresh list,
+  by its stored id or else by its number among the documents of its title and
+  date, which counts across accounts, and to fail when that cannot be told,
+  since two forms on a second account saved one twice and the
+  other never, a tax year that fails was made to stop the list, the year on a
+  form was made to come from the listing rather than its first four digits,
+  and clearing manual review was taken out, since a run tries such a document
+  again anyway.
+- **The panel's tests leave a Mac's own settings alone (#153).** On macOS the
+  panel finds its settings file from the home folder alone, and the panel's
+  tests moved only the folders Windows and Linux use. So running `gui/tests`
+  on a Mac in daily use wrote over the person's own settings.json, and their
+  panel showed no accounts until `apps_root` was set again. Every panel test
+  now gets a home folder and settings folders of its own, and a test that
+  writes anywhere outside the temp folders fails, naming what it wrote.
 
 ## [0.61.0] - 2026-11-06
 

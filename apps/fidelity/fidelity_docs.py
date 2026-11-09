@@ -48,7 +48,8 @@ from paperpull_core import browser as browser_launcher
 import fidelity_site as site
 import storage
 from paperpull_core.models import State
-from paperpull_core.keys import stable_occurrences as _stable_occurrences
+from paperpull_core.keys import told_apart as _told_apart
+from paperpull_core.keys import twins as _twins
 from paperpull_core.words import shape_label, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
@@ -75,7 +76,7 @@ class Document:
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
                  date_text="", document_id="", item_id="", client_id="",
-                 occurrence=0, **kw):
+                 occurrence=0, tax_year="", **kw):
         self.title = title
         self.account = account
         self.category = category
@@ -87,6 +88,7 @@ class Document:
         self.item_id = item_id          # the hub's document id, a hint only, re-resolved
         self.client_id = client_id      # goes with it on the content call
         self.occurrence = occurrence    # nth document with this title and date
+        self.tax_year = tax_year        # the year the hub lists a tax form under
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -118,6 +120,22 @@ class Document:
         return cls(**d)
 
 
+def listed_key(d: dict) -> str:
+    """The key of the document a listed row names, before it is numbered,
+    as _record_statement_doc reads the row. A history moved to another
+    computer carries no discovery.json, and told_apart finds each saved
+    number by this key then."""
+    return Document(title=site.tidy(d.get("title")) or "Statement",
+                    category=d.get("category") or "", date=(d.get("date") or "").strip()).key
+
+
+def scope_days(date: str, tax_year) -> list:
+    """The days a scope reads a document by. A tax form can be dated in the
+    year after its tax year, and a year asked for may mean either, so it
+    counts on its own date and on the last day of its tax year."""
+    return [date, "%s-12-31" % tax_year] if tax_year else [date]
+
+
 class App:
     _journal = None
     _requests = None
@@ -142,7 +160,7 @@ class App:
         self.progress.load()
         self.discovery.load()
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -312,21 +330,59 @@ class App:
             return False
         if a.type and doc.category.lower() != a.type.lower():
             return False
-        if a.year and not (doc.date or "").startswith(str(a.year)):
+        return any(self._in_dates(day) for day in scope_days(doc.date, self._tax_year(doc)))
+
+    def _in_dates(self, day: str) -> bool:
+        a = self.args
+        if a.year and not (day or "").startswith(str(a.year)):
             return False
         # Hard floor: never process documents before the configured start date
         # (You already has Fidelity documents from 2023 and earlier).
         floor = a.start_date or self.config.get("default_start_date")
-        if floor and (not doc.date or doc.date < floor):
+        if floor and (not day or day < floor):
             return False
-        if a.end_date and (not doc.date or doc.date > a.end_date):
+        if a.end_date and (not day or day > a.end_date):
             return False
         return True
 
+    def _tax_year(self, doc: Document) -> int:
+        """A tax form's tax year, 0 for anything else. A record from before
+        the listing's year was kept has its title to go by."""
+        return site.tax_year_of(doc.title, doc.tax_year) if doc.category == doc_types.TAX else 0
 
-    def _record_statement_doc(self, d: dict, occurrence: int = 0) -> int:
-        """Record one hub row {title, date, account, category, item_id, client_id}. Returns 1 if new."""
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
+    def _known(self) -> dict:
+        """The documents discovery holds, each under the account the listing
+        gives it now. A statement of several accounts kept no account before
+        it was called Combined, so it would read as a document nobody had
+        seen and lose its number to a new row listed ahead of it."""
+        return {key: dict(rec, account=site.COMBINED)
+                if isinstance(rec, dict) and not rec.get("account") else rec
+                for key, rec in self.discovery.data.items()}
+
+    def _numbered(self, rows: List[dict]) -> list:
+        """Each row's number among the documents sharing its title and date,
+        and whether that surely names it, as (number, sure). Discover and
+        each download's fresh listing are both numbered here, so the two
+        agree on which row is which document.
+
+        A number stays with the document it was given to, by the id it was
+        saved under first (paperpull_core.keys.told_apart), so a list in
+        another order or a new row ahead of one saved moves nothing. A
+        document this run saved is not counted as saved here, since its
+        twin's download reads a list of its own and an id may last no longer
+        than one list."""
+        alike = ("category", "title", "date")
+        saved = {key: rec for key, rec in self.progress.data.items()
+                 if saved_copy.holding(self, key)}
+        return _told_apart(rows, self._known(), fields=alike, id_field="item_id",
+                           saved=saved, key_of=listed_key)
+
+
+    def _record_statement_doc(self, d: dict, occurrence: int = 0, sure: bool = True) -> int:
+        """Record one hub row {title, date, account, category, item_id, client_id}. Returns 1 if new.
+        A row that cannot be told apart from one saved keeps no id
+        (keys.told_apart), so it is never downloaded in its place."""
+        title = site.tidy(d.get("title")) or "Statement"
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
             return 0
@@ -345,10 +401,10 @@ class App:
             return 0
         date = (d.get("date") or "").strip()
         floor = self.args.start_date or self.config.get("default_start_date")
-        if floor and (not date or date < floor):
+        if floor and not any(day and day >= floor for day in scope_days(date, d.get("tax_year"))):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
+        account = site.tidy(d.get("account"))
         acct_short = re.sub(r"\b(COMBINED|ACCOUNTS?)\b", "", account, flags=re.I)
         acct_short = re.sub(r"\s+", " ", acct_short).strip()
         if acct_short.isupper():
@@ -356,18 +412,27 @@ class App:
         full_summary = f"{summary} - {acct_short}" if acct_short else summary
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, confidence=confidence, account=account,
-                       date_text=date, item_id=d.get("item_id", ""),
+                       date_text=date, item_id=d.get("item_id", "") if sure else "",
                        client_id=d.get("client_id", ""), occurrence=occurrence,
-                       href=d.get("href", ""))
+                       tax_year=d.get("tax_year", ""), href=d.get("href", ""))
         existing = self.discovery.get(doc.key)
         if existing is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
+        updates = {}
         if doc.item_id and existing.get("item_id") != doc.item_id:
-            self.discovery.update(doc.key, {"item_id": doc.item_id,
-                                            "client_id": doc.client_id}, save=False)
+            updates["item_id"] = doc.item_id
+            updates["client_id"] = doc.client_id
+        if doc.account and existing.get("account") != doc.account:
+            updates["account"] = doc.account
+        if doc.summary and existing.get("summary") != doc.summary:
+            updates["summary"] = doc.summary
+        if doc.tax_year and existing.get("tax_year") != doc.tax_year:
+            updates["tax_year"] = doc.tax_year
+        if updates:
+            self.discovery.update(doc.key, updates, save=False)
         return 0
 
 
@@ -399,8 +464,8 @@ class App:
         # the other one's number and was skipped as done while the other was
         # fetched again beside it. A number already given now stays with the
         # document it was given to.
-        for d, occ in zip(raw, _stable_occurrences(raw, self.discovery.data)):
-            n_new += self._record_statement_doc(d, occ)
+        for d, (occ, sure) in zip(raw, self._numbered(raw)):
+            n_new += self._record_statement_doc(d, occ, sure)
         self.discovery.save()
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -542,12 +607,16 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
+        alike = _twins(dict(doc.to_dict(), account=doc.account or site.COMBINED), self._known(),
+                       fields=("category", "title", "date"))
         try:
             saved = site.download_document(page, doc.title, doc.date, out_path,
                                            item_hint=doc.item_id,
                                            client_hint=doc.client_id,
                                            occurrence=doc.occurrence,
-                                           account=doc.account)
+                                           account=doc.account,
+                                           tax_year=self._tax_year(doc),
+                                           number_rows=self._numbered, twins=alike)
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as "manual review" and finish looking successful while
@@ -558,13 +627,16 @@ class App:
             self.stats["session_expired"] = 1
             raise
         if not saved:
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
+        # The id its bytes came from, which may not be the one discovery
+        # kept. A later list knows the saved document by it.
+        doc.item_id = saved
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
         # else is the document. Anything more is kept whole for a person to

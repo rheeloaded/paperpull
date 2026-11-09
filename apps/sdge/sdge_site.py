@@ -11,8 +11,8 @@ CLICKED HERE:
     draws it as #billHistoryTable, one `tr` per bill carrying the bill's
     invoice id ("ISU" and twelve digits) as its `invoiceid` attribute and
     the statement date, "Sep 12, 2026", in the column headed Statement
-    Date, after a control column and before Due Date. The rows are read
-    from the page as drawn, and this app sends no list request of its own.
+    Date, the header's first, before Due Date. The rows are read from the
+    page as drawn, and this app sends no list request of its own.
   * A bill's PDF is a plain GET of
     /portal/BillingHistory/DownloadBillPdf?invoiceId=<id> on the same host,
     which the page's own "View Your Detailed Bill PDF" link opens in a new
@@ -48,8 +48,16 @@ KNOWN CEILINGS (left as they are until a run shows otherwise)
   * The empty list has not been seen. A table whose only body cell is the
     table plugin's "No data available in table" stops the list, after a
     further wait for rows, until a real empty history has been seen.
-  * One page of the table seen. The table plugin draws a page of rows at a
-    time, so the list stops unless its own count agrees with the rows read.
+  * One page of the table seen. The live table has no table plugin API and
+    no info line, so nothing on the page says how many bills it holds. The
+    read waits for the row count to settle, and the list stops on anything
+    near the table that looks like a pager or a show-more control, or says
+    there are more bills than the rows read or a later page, and on hidden
+    row numbers that do not count the rows read from 0 or 1 at either end.
+    A count of the plugin's own, if the plugin comes back, must agree with
+    the rows read too. A pager drawn only as icons, or farther than 200
+    pixels from the table, is not seen. A history past ten bills has not
+    been seen.
   * Two bills on one statement date stop the list, since a bill's file is
     named by its date alone. None was seen.
   * A bill's date is read from the Statement Date column alone, found by
@@ -77,6 +85,7 @@ from urllib.parse import urlsplit
 from paperpull_core import intake
 from paperpull_core import redirects
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
+from paperpull_core.ready import count_settles, ready, url_matches
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import last_day as _last_day
@@ -400,12 +409,22 @@ class ListStopped(Exception):
 # empty-table cell's text. Each cell carries the column it starts at, how
 # many it spans and how many rows it is tall, so a row's Statement Date
 # cell is the one under that header (header_layout), wherever the table
-# puts it, and a row that may not line up with the header is known. Read
+# puts it, and a row that may not line up with the header is known. Since
+# November 2026 each bill row starts with a cell the page hides, holding
+# only the row's number, with no header cell above it. Each row says what
+# that cell holds, as its number, and past_row_number decides whether the
+# cell is passed over. Any other hidden cell, in the header or a row, still
+# counts as a column, so a table that hides some of its columns is read by
+# where each cell sits in the table. A bill is dated by the cell under
+# Statement Date there, seen or hidden, and cells that do not line up stop
+# the list. What is drawn near the table is read too, for shows_more. Read
 # only, and nothing on the page is changed.
 _ROWS_JS = r"""() => {
   const table = document.querySelector('#billHistoryTable');
   if (!table) return null;
   const text = (cell) => (cell.textContent || '').replace(/\s+/g, ' ').trim();
+  const rowNumber = (td) => td.tagName === 'TD' && (td.colSpan || 1) === 1 && td.rowSpan === 1
+    && getComputedStyle(td).display === 'none' && /^\d+$/.test(text(td));
   // A header cell's column counts what spans down into its row from above
   // as well as what is before it, as the table itself lays them out.
   const heads = [];
@@ -429,7 +448,9 @@ _ROWS_JS = r"""() => {
       cells.push({text: text(td), at: at, wide: td.colSpan || 1, tall: td.rowSpan});
       at += td.colSpan || 1;
     }
-    rows.push({id: tr.getAttribute('invoiceid') || '', cells: cells});
+    const first = tr.cells[0];
+    rows.push({id: tr.getAttribute('invoiceid') || '', cells: cells,
+               number: first && rowNumber(first) ? text(first) : ''});
   }
   const empty = table.querySelector('tbody td.dataTables_empty');
   // The table plugin keeps only the page it shows in the DOM, so what it
@@ -446,14 +467,69 @@ _ROWS_JS = r"""() => {
     api = {unreadable: true};
   }
   const line = document.querySelector('#billHistoryTable_info');
+  // What a person sees near the table, for shows_more. Near is over the
+  // table's own width and within 200 pixels above or below it, and never
+  // anything the table sits inside. Inside the table it is the footer and
+  // the last row drawn in its body, which on the live table is the last
+  // bill's detail row, so what that row holds is read like anything else
+  // near. The other rows are not read, since a bill's detail rows hold
+  // that bill's own links. A pager drawn only as icons, with no words, no
+  // label and no pager's name, and anything farther than 200 pixels, are
+  // not seen.
+  const box = table.getBoundingClientRect();
+  const last = Array.from(table.querySelectorAll('tbody tr')).pop();
+  const near = (el) => {
+    if (el.contains(table)) return false;
+    if (table.contains(el) && !el.closest('tfoot') && el.closest('tr') !== last) return false;
+    const b = el.getBoundingClientRect();
+    return b.width > 0 && b.height > 0 && getComputedStyle(el).visibility !== 'hidden'
+      && b.left < box.right && b.right > box.left
+      && b.top < box.bottom + 200 && b.bottom > box.top - 200;
+  };
+  const around = Array.from(document.querySelectorAll('body *')).filter(near).map((el) => ({
+    said: (text(el) || el.getAttribute('aria-label') || el.getAttribute('title')
+           || (el.tagName === 'INPUT' ? el.value : '') || '').slice(0, 60),
+    press: el.matches('a, button, input, [role="button"], [role="link"], [onclick]'),
+    marks: [el.getAttribute('class'), el.getAttribute('id'), el.getAttribute('aria-label')]
+      .filter(Boolean).join(' ').slice(0, 200)}));
   return {rows: rows, heads: heads, empty: empty ? text(empty) : '',
-          api: api, info: line ? text(line) : ''};
+          api: api, info: line ? text(line) : '', around: around};
 }"""
 
 # The table plugin's info line, "Showing 1 to 10 of 24 entries", and the
 # "(filtered from N total entries)" it adds under a search.
 INFO_TOTAL_RE = re.compile(r"\bof\s+([\d,]+)\s+entries\b", re.IGNORECASE)
 INFO_FILTERED_RE = re.compile(r"\bfiltered\b", re.IGNORECASE)
+
+# What says the table may hold more bills than it shows, among what is drawn
+# near it (shows_more). A show-more control's words, whole, in any element,
+# since a page can make a plain span one with a click handler of its own.
+# "View all 24 bills" gives a count, which has to be past the rows read.
+_N = r"[0-9][0-9,]{0,9}"
+_LISTED = r"(?:bills?|statements?|invoices?|rows?|results?|records?|entries|items?|history)"
+SHOW_MORE_RE = re.compile(
+    r"(?:show|load|view|see|get|display)(?:\s+(?P<count>" + _N + r"))?\s+"
+    r"(?P<which>more|all|older|earlier|previous|additional)(?:\s+(?P<total>" + _N + r"))?"
+    r"(?:\s+" + _LISTED + r")?"
+    r"|(?:more|older|earlier|previous)\s+" + _LISTED, re.IGNORECASE)
+# A line of what is shown, whole, "Showing 10 of 24 bills".
+SHOWING_RE = re.compile(
+    r"(?:showing|displaying|viewing)\s+" + _N + r"\s+of\s+(?P<of>" + _N + r")"
+    r"(?:\s+" + _LISTED + r")?"
+    r"|" + _N + r"\s+of\s+(?P<of_listed>" + _N + r")\s+" + _LISTED, re.IGNORECASE)
+# A pager's line, "1 to 10 of 24" or "Page 1 of 3", inside whatever it says.
+PAGE_LINE_RE = re.compile(
+    r"\b(?P<first>" + _N + r")\s*(?:-|\u2013|to)\s*" + _N + r"\s+of\s+(?P<total>" + _N + r")\b"
+    r"|\bpage\s+(?P<page>" + _N + r")\s+of\s+(?P<pages>" + _N + r")\b", re.IGNORECASE)
+# A step of a pager, whole, which counts only on something that can be
+# pressed, since a detail row can head a column Previous or First.
+PAGE_STEP_RE = re.compile(
+    r"(?:next|previous|prev|older|newer|first|last|more)(?:\s+" + _N + r")?"
+    r"(?:\s+(?:page|" + _LISTED + r"))?"
+    r"|(?:go\s+to\s+)?page\s+" + _N, re.IGNORECASE)
+PAGE_ARROW_RE = re.compile(r"[<>\u00ab\u00bb\u2039\u203a]+")
+# A class, id or label naming a pager has one of these as a word of its own.
+PAGER_WORDS = frozenset({"pager", "pagination", "paginate"})
 
 # What would identify the account holder on Billing History: every value of
 # the account selector's options and each bill row's contract account. Read
@@ -554,14 +630,50 @@ def _open(page, timeout_ms: int = 30000) -> None:
     _guard_account(page)
 
 
+# How long the count of bill rows has to stand still before the rows are
+# read, and how long that wait may take in all. It is longer than the gap
+# of a second and a half between two batches a probe drew, and it is paid
+# once per read of the list.
+ROWS_QUIET_MS = 3000
+ROWS_BUDGET_MS = 20000
+# ready() ends as soon as its invariant holds, so has(BILL_ROW) would end
+# this wait on the first row. No address matches this, so the wait lasts
+# until count_settles itself ends. That is why the journal says a further
+# bill row never became ready on a list that settled, which is the answer
+# this wait is after.
+_NO_FURTHER_ROW = url_matches(r"(?!)")
+# The run's journal, handed over by the app, so what the wait found is
+# written down. None when nobody set one.
+_journal = None
+
+
+def set_journal(journal) -> None:
+    global _journal
+    _journal = journal
+
+
+def _rows_settled(page) -> bool:
+    """Whether the count of bill rows stood still for ROWS_QUIET_MS. The
+    wait for rows ends on the first one, and rows can be drawn in batches.
+    count_settles ending with _NO_FURTHER_ROW unmet is what ready() calls
+    not_satisfied, which here is the count having settled. A count still
+    moving at the end of ROWS_BUDGET_MS, or one that could not be asked, is
+    anything else."""
+    got = ready(page, [count_settles(BILL_ROW, quiet_ms=ROWS_QUIET_MS)], _NO_FURTHER_ROW,
+                ROWS_BUDGET_MS, journal=_journal, name="a further bill row")
+    return [a.outcome for a in got.attempts] == ["not_satisfied"]
+
+
 def _bills(page) -> List[RawDoc]:
     """Every bill row on the open Billing History. A table showing only its
     empty cell is given a further wait for rows, since the table plugin can
     draw that cell, "Loading..." or "No data available in table", before
     the page's own request has filled it. A table still without rows after
     that stops the list: this app has never seen a billing history with no
-    bills, so an empty table is not read as one. The session is asked again
-    after the wait, since a sign-out can land during it."""
+    bills, so an empty table is not read as one. Rows are read once their
+    count has settled, and a count that does not settle stops the list. The
+    session is asked again after each wait, since a sign-out can land
+    during it."""
     seen = _read_rows(page)
     if seen is not None and not seen.get("rows"):
         try:
@@ -571,11 +683,19 @@ def _bills(page) -> List[RawDoc]:
         if looks_signed_out(page):
             raise SessionExpired("My Energy Center showed its sign-in page")
         seen = _read_rows(page)
+    settled = True
+    if seen is not None and seen.get("rows"):
+        settled = _rows_settled(page)
+        if looks_signed_out(page):
+            raise SessionExpired("My Energy Center showed its sign-in page")
+        seen = _read_rows(page)
     if seen is None:
         raise ListStopped("Billing History shows no bill table")
     rows = seen.get("rows") or []
     if rows:
         docs = bills_of(rows, seen.get("heads"))
+        if not settled:
+            raise ListStopped("the bill rows were still being drawn", docs)
         _whole_table(seen, docs)
         return docs
     if EMPTY_TEXT_RE.fullmatch(seen.get("empty") or ""):
@@ -585,13 +705,90 @@ def _bills(page) -> List[RawDoc]:
     raise ListStopped("the billing history did not finish loading")
 
 
+def pager_named(marks) -> bool:
+    """Whether a class, id or label names a pager by a word of its own, as
+    pager-nav, dataTables_paginate and billPagination do. Words are cut at
+    anything but a letter and where a small letter meets a capital, so
+    pageRow, pageRight and paginated-table name no pager."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(marks or ""))
+    return bool(PAGER_WORDS & set(re.split(r"[^a-z]+", spaced.lower())))
+
+
+def _whole_number(text) -> int:
+    return int(str(text).replace(",", ""))
+
+
+def says_more(said: str, read: int) -> bool:
+    """Whether words drawn near the table say it holds more bills than the
+    `read` rows read, or show a later page. A count that agrees, as
+    "Showing 1 to 3 of 3 entries", "Page 1 of 1" or "View all 3 bills" over
+    three rows, says no such thing, and "Show more" always does."""
+    words = re.sub(r"^[^0-9a-z]+|[^0-9a-z]+$", "", said, flags=re.IGNORECASE)
+    m = SHOW_MORE_RE.fullmatch(words)
+    if m:
+        count = m.group("count") or m.group("total")
+        return (m.group("which") or "").lower() != "all" or not count or _whole_number(count) > read
+    m = SHOWING_RE.fullmatch(words)
+    if m:
+        return _whole_number(m.group("of") or m.group("of_listed")) > read
+    for m in PAGE_LINE_RE.finditer(said):
+        if m.group("total") is not None:
+            if _whole_number(m.group("total")) > read or _whole_number(m.group("first")) > 1:
+                return True
+        elif _whole_number(m.group("page")) > 1 or _whole_number(m.group("pages")) > 1:
+            return True
+    return False
+
+
+def shows_more(around, read: int) -> bool:
+    """Whether anything drawn near the bill table, as _ROWS_JS reads it,
+    looks like a pager or a show-more control, or says the table holds more
+    than the `read` rows read (says_more). Only whole phrases count, a
+    pager's name only as a word of its own, and a step of a pager or a page
+    number only on something that can be pressed, so a bill's own links and
+    a column's heading are not taken for one. One page number alone says
+    there are no others, so it takes two."""
+    pages = set()
+    for el in around or []:
+        said = str(el.get("said") or "")
+        words = re.sub(r"^[^0-9a-z]+|[^0-9a-z]+$", "", said, flags=re.IGNORECASE)
+        if pager_named(el.get("marks")) or says_more(said, read):
+            return True
+        if el.get("press"):
+            if PAGE_STEP_RE.fullmatch(words) or PAGE_ARROW_RE.fullmatch(said):
+                return True
+            if re.fullmatch(r"[0-9]{1,3}", words):
+                pages.add(words)
+    return len(pages) >= 2
+
+
+def numbers_in_place(rows) -> bool:
+    """Whether every row carrying a hidden row number carries its own place
+    among the rows read, counted from 0 or 1 at either end, since the live
+    page has shown nine rows and nothing says how it counts them. A row with
+    no such number is not asked. Rows numbered from 11 are a second page,
+    and a gap or a number twice is a bill the table did not draw."""
+    numbers = [str(r.get("number") or "") for r in rows or []]
+    n = len(numbers)
+
+    def counted(places) -> bool:
+        return all(not got or got.lstrip("0") == str(p).lstrip("0")
+                   for got, p in zip(numbers, places))
+    return any(counted(places) for start in (0, 1)
+               for places in (range(start, start + n), range(start + n - 1, start - 1, -1)))
+
+
 def _whole_table(seen: dict, docs: List[RawDoc]) -> None:
-    """Stop the list unless the rows read are every bill the table holds.
+    """Stop the list unless the rows read may be every bill the table holds.
     The table plugin draws one page of rows at a time (ten by default) and
     can filter them by a remembered search, so rows alone never prove the
     whole history. Its API's totals, when it answers, and its info line,
-    when drawn, must both agree with the rows read and show no filter. A
-    table showing neither is read as its rows, as before."""
+    when drawn, must both agree with the rows read and show no filter. The
+    live table has neither, so nothing on the page counts its bills. So
+    anything near it that looks like a pager or a show-more control, or
+    says there are more bills than the rows read or a later page, stops the
+    list, and the hidden row numbers must count the rows read from 0 or 1,
+    at either end."""
     n = len(docs)
     api = seen.get("api")
     if isinstance(api, dict):
@@ -612,6 +809,11 @@ def _whole_table(seen: dict, docs: List[RawDoc]) -> None:
         total = int(m.group(1).replace(",", ""))
         if total != n:
             raise ListStopped(f"the bill table holds {total} bills and {n} were drawn", docs)
+    if shows_more(seen.get("around"), n):
+        raise ListStopped("the bill table shows a pager or a show-more control", docs)
+    if not numbers_in_place(seen.get("rows")):
+        raise ListStopped(f"the bill table's hidden row numbers do not count the {n} rows read",
+                          docs)
 
 
 def _read_rows(page):
@@ -676,6 +878,24 @@ def statement_cell(cells, column: int, width: int) -> Optional[str]:
     return text if at == width else None
 
 
+def past_row_number(row: dict, layout: Tuple[int, int]) -> list:
+    """A row's cells as they sit under the header. A first cell the page
+    hides, holding only the row's number, has no header cell above it in the
+    live table, so it is passed over. Only there, with Statement Date the
+    header's first column and the row exactly one column wider than the
+    header. Under any other first column that cell can be a real column
+    with some other cell left without a header, and passing it over would
+    put a Due Date under Statement Date, so the row keeps every cell and
+    does not line up."""
+    cells = (row or {}).get("cells") or []
+    column, width = layout
+    if not (row or {}).get("number") or column != 0 or not all(_laid_out(c) for c in cells):
+        return cells
+    if sum(c["wide"] for c in cells) != width + 1:
+        return cells
+    return [dict(c, at=c["at"] - 1) for c in cells[1:]]
+
+
 def bills_of(rows: list, heads: Optional[list]) -> List[RawDoc]:
     """RawDocs from the bill rows as read, one per invoice id. A table with
     no single Statement Date column, an id that is not "ISU" and twelve
@@ -698,7 +918,7 @@ def bills_of(rows: list, heads: Optional[list]) -> List[RawDoc]:
         inv = str((r or {}).get("id") or "")
         if not INVOICE_ID_RE.fullmatch(inv):
             raise ListStopped("a bill's invoice id is not one this can read", docs)
-        text = statement_cell((r or {}).get("cells"), *layout)
+        text = statement_cell(past_row_number(r, layout), *layout)
         if text is None:
             raise ListStopped("a bill's row does not line up with the table's header", docs)
         if not text.strip():
