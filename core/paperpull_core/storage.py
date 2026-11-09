@@ -54,19 +54,8 @@ DOCUMENTS_FOLDERS = "documents-folders.json"
 _CONFIG_READ = None
 
 
-def _base_dir_for_config() -> Optional[Path]:
-    if _CONFIG_READ:
-        return _CONFIG_READ.parent
-    return None
-
-
 def _folder_key(path) -> str:
-    p = Path(path)
-    if not p.is_absolute():
-        base = _base_dir_for_config()
-        if base:
-            p = (base / p).resolve()
-    return os.path.normcase(os.path.abspath(str(p)))
+    return os.path.normcase(os.path.abspath(str(path)))
 
 
 def documents_dir_for(output_dir) -> str:
@@ -95,14 +84,77 @@ def spec():
     return _SPEC
 
 
+def config_file(path=None) -> Path:
+    """The file a run reads for the config it was given (#165).
+
+    With none it is config.json in the app's own folder. A config named by
+    a path is that file, read from where the run starts, as it always was.
+    Only a bare file name, config.spouse.json say, that is not in the
+    folder the run starts in is the file of that name in the app's own
+    folder, where every launcher keeps it, so a run started in another
+    folder finds it. No other file is looked for, so a name with a folder
+    in it, or one that is in the folder the run starts in, never reads a
+    file other than the one named."""
+    sp = spec()
+    if not path:
+        return sp.project_dir / "config.json"
+    given = Path(path)
+    if given.is_absolute() or given.exists() or len(given.parts) != 1:
+        return given
+    beside = sp.project_dir / given
+    return beside if beside.is_file() else given
+
+
+# The settings that name a folder and may be written relative to the folder
+# a run starts in. documents_dir has to be a full path (set_documents_dir).
+_RELATIVE_FOLDERS = ("output_dir", "profile_dir")
+
+
+def _started_in(folder) -> bool:
+    """Whether this process's working folder is `folder`, however either is
+    reached, a link or a junction on the way included."""
+    try:
+        here = os.getcwd()
+    except OSError:
+        return False
+    try:
+        return os.path.samefile(here, str(folder))
+    except OSError:
+        return os.path.normcase(os.path.realpath(here)) == \
+            os.path.normcase(os.path.realpath(str(folder)))
+
+
+def read_relative_folders(cfg: dict, path) -> None:
+    """Read a relative output_dir or profile_dir from the config's own
+    folder when the run started neither there nor in the app's folder
+    (#165).
+
+    Every launcher starts a run in the app's own folder. The control panel
+    does, paperpull and paperpull.bat do, login.bat and login.command do,
+    and so does the panel on PaperPull Server. A relative folder has always
+    been read from there, and the paths a run records in progress.json and
+    its index are relative to it, which is what lets an install be moved
+    and lets a record saved before be told apart from the copy a Download
+    again saves (saved_copy). So such a run keeps each setting exactly as
+    it is written, and every path it records and compares reads as it
+    always has. A run started in any other folder, a shell in the folder
+    that holds the installs say, read "." as that folder, and made Logs,
+    Backups and a folder of each kind there, with a browser profile nobody
+    had signed in to. Such a run now reads them from the folder the config
+    is in. The config in memory is given each folder as it is used."""
+    base = Path(os.path.abspath(str(path))).parent
+    if not isinstance(cfg, dict) or _started_in(spec().project_dir) or _started_in(base):
+        return
+    for key in _RELATIVE_FOLDERS:
+        value = cfg.get(key)
+        if isinstance(value, str) and value.strip() and not Path(value).is_absolute():
+            cfg[key] = os.path.normpath(os.path.join(str(base), value))
+
+
 def load_config(path: Optional[Path] = None) -> dict:
     """Read config.json and fill in this provider's defaults."""
     sp = spec()
-    if path:
-        p = Path(path)
-        path = p if p.is_absolute() or p.exists() else (sp.project_dir / p)
-    else:
-        path = sp.project_dir / "config.json"
+    path = config_file(path)
     if not path.exists():
         copy_cmd = ("copy config.example.json config.json"
                     if sys.platform == "win32"
@@ -129,6 +181,8 @@ def load_config(path: Optional[Path] = None) -> dict:
             "and names, and the control panel reads what it prints line by line, so a "
             "name has to be one line of plain text. Rename it, or change the setting, "
             "and run again." % held)
+    # Before the server's checks, so they judge the folders the run uses.
+    read_relative_folders(cfg, path)
     if os.environ.get("PAPERPULL_SERVER") == "1":
         hold_to_the_server(cfg, path)
         refuse_links_out(cfg["output_dir"], path)
@@ -152,13 +206,13 @@ def load_config(path: Optional[Path] = None) -> dict:
     cfg.setdefault("browser", "auto")
     for key, value in sp.config_defaults.items():
         cfg.setdefault(key, value)
-    global _CONFIG_READ
-    _CONFIG_READ = Path(path).resolve()
     # How files are named (#50). Read here because every app loads its
     # config before it names anything, so no app has to remember to.
     set_filename_patterns(cfg)
     # Where documents go (#102), read here for the same reason.
     set_documents_dir(cfg, path)
+    global _CONFIG_READ
+    _CONFIG_READ = Path(path).absolute()
     return cfg
 
 
@@ -258,12 +312,6 @@ def set_documents_dir(cfg: dict, path) -> str:
         docs = os.path.normpath(raw.strip())
         profile = str(cfg.get("profile_dir") or "")
         out = str(cfg["output_dir"])
-        out_p = Path(out)
-        if not out_p.is_absolute():
-            base = Path(path).resolve().parent if path else (_CONFIG_READ.parent if _CONFIG_READ else None)
-            if base:
-                out_p = (base / out_p).resolve()
-        out = str(out_p)
         if profile and (_inside(docs, profile) or _inside(profile, docs)):
             why = ("it is the browser profile, inside it or around it, and documents are "
                    "never kept with a signed-in profile")
@@ -517,6 +565,10 @@ def ensure_owner(config: dict, config_path) -> dict:
     if not name:
         return config
     config["owner"] = name
+    if _SPEC is not None:
+        # The file load_config read for this name, which for a bare name
+        # given to a run started in another folder is the app's own.
+        config_path = config_file(config_path)
     try:
         existing = json.loads(Path(config_path).read_text(encoding="utf-8-sig"))
         existing["owner"] = name
@@ -562,14 +614,7 @@ class Paths:
 
     def __init__(self, output_dir, app_spec=None, documents_dir=None):
         self._spec = app_spec or spec()
-        root = Path(output_dir)
-        if not root.is_absolute():
-            base = _CONFIG_READ.parent if _CONFIG_READ else (
-                app_spec.project_dir if app_spec and app_spec.project_dir != Path(".") else None
-            )
-            if base:
-                root = (base / root).resolve()
-        self.root = root
+        self.root = Path(output_dir)
         if documents_dir is None:
             documents_dir = documents_dir_for(output_dir)
         self.documents = Path(documents_dir) if documents_dir else self.root

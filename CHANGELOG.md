@@ -7,6 +7,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **A run started outside its app's folder keeps to that folder (#165).** An
+  `output_dir` of `.`, a second person's `../<app> - <name>` and a relative
+  `profile_dir` were read from wherever the run was started, so a run started
+  from a shell in the folder that holds the installs made Logs, Backups, a
+  folder of each kind and a browser profile there. A run started outside both
+  its app's folder and its config's folder now reads them from the config's
+  folder, and `--config config.<name>.json` given there finds the app's own
+  file of that name. The control panel, `paperpull`, `login.bat` and
+  `login.command` start every run in the app's folder, and those runs read
+  their folders and record their paths exactly as before. Contributed by
+  @appchamp. Before merging, the folders were kept as written for a run
+  started in the app's folder or its config's, since every path such a run
+  records is relative to that folder, and the search for a config was kept to
+  a bare file name.
+
 ## [0.61.1] - 2026-11-08
 
 SDG&E reads its Billing History again, Fidelity lists its tax forms, Venmo
