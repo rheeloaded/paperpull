@@ -353,7 +353,8 @@ class OtherAccountShown(Exception):
 @dataclass
 class _History:
     answer: dict
-    channel: str
+    # The channelId header the page's own request carried.
+    channel_id: str
 
 
 def _is_history_answer(url: str) -> bool:
@@ -412,7 +413,7 @@ def _open(page, timeout_ms: int = 45000) -> _History:
     if not _CHANNEL_RE.fullmatch(channel):
         raise ListStopped("the page's own bill history request carried no channel")
     _keep_private(answer)
-    return _History(answer=answer, channel=channel)
+    return _History(answer=answer, channel_id=channel)
 
 
 def _address(answer) -> dict:
@@ -666,7 +667,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             trace.append({"note": "no single bill matches the record", "matches": len(found)})
         return False
     try:
-        return _fetch(page, pdf_url(found[0].end_date, history.channel), out_path, trace)
+        return _fetch(page, pdf_url(found[0].end_date, history.channel_id), out_path, trace)
     except SessionExpired as refused:
         # A refusal may be the session ending or this one bill. The history
         # just read is read again, and a session that ended shows there and
