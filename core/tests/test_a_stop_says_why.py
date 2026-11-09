@@ -10,6 +10,7 @@ as a sign-out or as an exit code.
 The run's result line now carries one word for why, worked out in one
 place from the exception the run is leaving on (run_reporting.stop_reason).
 """
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -103,11 +104,71 @@ class TimeoutError(Exception):
     (TimeoutError("Timeout 30000ms exceeded."), "slow"),
     (RuntimeError("Page.goto: net::ERR_CONNECTION_RESET"), "error"),
     (KeyError("statement_date"), "error"),
+    # A wait that ran out is told by its kind, never by its words. An
+    # error's own text says "exceeded" for a recursion limit or a quota
+    # too, and those are not the provider being slow.
+    (RecursionError("maximum recursion depth exceeded"), "error"),
+    (RuntimeError("Storage quota exceeded"), "error"),
+    (ValueError("the request timed out of order"), "error"),
 ])
 def test_anything_else_is_slow_or_an_error(err, why):
     def fail():
         raise err
     assert _why_leaving_on(fail) == why
+
+
+def _asks(path):
+    """Each call in path of ask_or_none or pause_for_sign_in, with the
+    statements a None or False answer runs."""
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+    for node in ast.walk(tree):
+        name = getattr(node, "func", None)
+        name = getattr(name, "attr", getattr(name, "id", ""))
+        if not isinstance(node, ast.Call) or name not in ("ask_or_none", "pause_for_sign_in"):
+            continue
+        test = parents.get(node)
+        if name == "ask_or_none" and isinstance(test, ast.Compare) \
+                and len(test.ops) == 1 and isinstance(test.ops[0], ast.Is):
+            branch = parents.get(test)
+        elif name == "pause_for_sign_in" and isinstance(test, ast.UnaryOp) \
+                and isinstance(test.op, ast.Not):
+            branch = parents.get(test)
+        else:
+            branch = None
+        yield node.lineno, name, branch.body if isinstance(branch, ast.If) else None
+
+
+APP_ENTRIES = sorted(p for p in (ROOT / "apps").glob("*/*.py")
+                     if p.name.endswith(("_docs.py", "_receipts.py")))
+
+
+@pytest.mark.parametrize("path", APP_ENTRIES, ids=lambda p: p.parent.name)
+def test_a_question_nobody_answered_ends_the_run_there(path):
+    """needs_you is the run leaving on a plain exit once a question found
+    nobody to answer it, and the note of that lasts the whole run. So an
+    app that asked nobody and went on would have a later stop of any kind
+    said as the provider needing the person. Each question nobody answers
+    ends the run there, with SystemExit(0), and a sign-in that waited for
+    nobody returns at once."""
+    for line, name, body in _asks(path):
+        assert body, "%s line %d does not end on %s finding nobody" % (path.parent.name, line, name)
+        last = body[-1]
+        if name == "ask_or_none":
+            assert isinstance(last, ast.Raise) and ast.unparse(last.exc) == "SystemExit(0)", \
+                "%s line %d goes on after a question nobody answered" % (path.parent.name, line)
+        else:
+            assert isinstance(last, ast.Return), \
+                "%s line %d goes on after a sign-in that waited for nobody" % (path.parent.name, line)
+
+
+def test_the_questions_are_found_at_all():
+    """Each app that asks is read, so a census that finds no question
+    anywhere has stopped reading them, not found every app sound."""
+    assert len(APP_ENTRIES) >= 81
+    asking = [p for p in APP_ENTRIES if any(True for _ in _asks(p))]
+    assert len(asking) >= 80
+    assert sum(1 for p in APP_ENTRIES for _ in _asks(p)) >= 160
 
 
 def test_the_result_line_carries_the_reason_only_for_a_stop(capsys):

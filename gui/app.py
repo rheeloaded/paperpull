@@ -4132,6 +4132,9 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         async def refuse_unmapped():
             for line in detail.splitlines():
                 yield _event(line)
+            # A run that did not start, said so (static/app.js finishRun),
+            # never one that began and failed with a Continue offered.
+            yield _event(" ".join(detail.split()), "refused")
             yield _event(1, "done")
         return StreamingResponse(refuse_unmapped(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",

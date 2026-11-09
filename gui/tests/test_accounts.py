@@ -382,8 +382,8 @@ def test_a_run_that_saved_documents_never_says_nothing_new(panel, action, saved)
 
 @pytest.mark.parametrize("stop, code, title, signin, resume", [
     ("needs_you", "0", "Citi needed you partway", True, True),
-    ("page", "0", "Citi's page was not what PaperPull expected", False, False),
-    ("slow", "1", "Citi was too slow to answer", False, True),
+    ("page", "0", "Citi's page was not what PaperPull expected", False, True),
+    ("slow", "1", "Citi did not answer in time", False, True),
     ("error", "1", "PaperPull ran into something it did not expect", False, True),
     ("", "0", "Stopped before finishing", True, True),
 ])
@@ -399,8 +399,50 @@ def test_a_stop_says_why_and_whose_it_is_to_fix(panel, stop, code, title, signin
     assert o["title"] == title
     assert "may have signed you out" not in o["say"] and "exited with code" not in o["say"]
     assert (o.get("signin") is not False) is signin and bool(o.get("resume")) is resume
+    # Whose it is to fix is said only where it is known. A page that was
+    # not what the app expected is a chat window over a button as often as
+    # a changed site, and that stop's own words say to close it and press
+    # Resume. A wait that ran out is a changed page or a sign-out as often
+    # as a busy site, and an error can be a window the person closed.
+    assert "not you" not in o["say"] and "busy" not in o["title"]
+    assert "too slow" not in o["title"] and "how it gets fixed" not in o["say"]
     if stop == "page":
-        assert "for PaperPull to fix, not you" in o["say"]
+        assert "If it stops at the same place again" in o["say"]
+
+
+def test_a_page_stop_of_a_check_offers_to_check_again(panel):
+    """A stop at a page offers what the stop's own words say, Resume, and
+    a Discover that stopped there offers Check again in its place."""
+    o = panel.evaluate("""(result) => {
+        Object.assign(RUN, {result, code: '0', action: 'discover', again: false, refused: '', saved: [],
+                            provider: 'Citi', kind: 'DOCUMENT', lines: []});
+        return runOutcome();
+    }""", dict(_counted(stopped=1), stop="page"))
+    assert o.get("recheck") and not o.get("resume") and o.get("signin") is False
+
+
+@pytest.mark.parametrize("code, refused, asked", [
+    ("5", "", False),
+    ("6", "", False),
+    ("1", "Citi is already running for this account, in another tab or window.", False),
+    ("1", "", True),
+])
+def test_a_run_that_wrote_no_failure_file_is_never_offered_one(panel, code, refused, asked):
+    """A sign-in with no window, a recording with nothing in it and a run
+    that did not start write no failure file. The panel asked for the
+    newest one all the same, since their codes are not 0, and an older
+    run's from the last hour then read 'This run wrote a file about what
+    went wrong'."""
+    seen = panel.evaluate("""([code, refused]) => {
+        window.checkFailure = () => { window.askedForFailure = true; };
+        window.askedForFailure = false;
+        Object.assign(RUN, {state: 'running', result: null, action: code === '5' ? 'login' : 'all',
+                            again: false, saved: [], provider: 'Citi', kind: 'DOCUMENT', lines: [],
+                            app: 'Citi Documents', account: 'primary', onDone: null, queue: false});
+        finishRun(code, refused, true);
+        return window.askedForFailure;
+    }""", [code, refused])
+    assert seen is asked
 
 
 def test_a_list_left_unread_keeps_its_own_next_step_whatever_stopped_it(panel):
