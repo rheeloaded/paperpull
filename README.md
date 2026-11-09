@@ -591,9 +591,20 @@ folder has to be inside the data folder, see
 
 ## Moving to another computer
 
-The record of what each provider already downloaded is what keeps
-PaperPull from downloading a document twice, and it can move with you. On
-the old computer, press **Export history** in the panel's Settings. On
+The simplest move brings everything: copy your PaperPull folder, and your
+Documents folder if you set one, to the new computer. Each provider's
+config.json names its folders relative to its own, so the copy works where
+it lands. On the new computer, type where the PaperPull folder is in the
+welcome's first step, and PaperPull finds its providers. Set the Documents
+folder again in Settings, since folders belong to each computer, and sign in
+to each provider once, since a sign-in rarely survives a copy.
+
+When copying the folders is not an option, the record of what each
+provider already downloaded, which is what keeps PaperPull from
+downloading a document twice, can move on its own. It brings no PDF, and
+marks every document it lists as downloaded, so Get new never fetches them
+again: copy the PDFs over too, or use **Restore deleted files** to download
+them. On the old computer, press **Export history** in the panel's Settings. On
 the new one, or on [PaperPull Server](SERVER.md#coming-from-the-desktop-app),
 choose that file under **Moving from another computer?** on the welcome
 page, or under **Import a history file** in Settings. Every provider

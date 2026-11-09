@@ -254,11 +254,11 @@ def test_on_the_server_a_download_refused_is_said_on_the_panel_it_was_asked_from
         tab.on("download", lambda download: handed.append(download))
         tab.evaluate("revealSpreadsheet()")
         assert tab.url == base + "/" and tab.title() == "PaperPull"
-        assert "Export it again" in tab.inner_text("#noticetext")
+        assert "Create it again" in tab.inner_text("#noticetext")
         tab.evaluate("failureApp = 'Shop Receipts'")
         tab.evaluate("revealFailure()")
         assert tab.url == base + "/" and tab.title() == "PaperPull"
-        assert "no recent failure file" in tab.inner_text("#noticetext")
+        assert "There is no recent file about what went wrong." in tab.inner_text("#noticetext")
         assert handed == []
     finally:
         context.close()

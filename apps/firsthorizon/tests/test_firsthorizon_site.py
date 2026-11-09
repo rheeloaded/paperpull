@@ -1524,7 +1524,7 @@ def test_a_browser_of_its_own_opens_through_the_core_and_signs_in_on_the_example
     assert seen == ["core", "playwright"]
     ports = []
     monkeypatch.setattr(docs.browser_launcher, "open_signin_browser",
-                        lambda profile, port, url, **kw: ports.append(port))
+                        lambda profile, port, url, **kw: ports.append(port) or "Chrome")
     with redirect_stdout(io.StringIO()):
         app.cmd_open_browser()
     example = json.loads((HERE / "config.example.json").read_text())["cdp_url"]
