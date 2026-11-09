@@ -464,7 +464,7 @@ def test_mtb_reads_a_long_chain_as_an_ended_session(page, server, tmp_path, monk
 
 @pytest.mark.parametrize("then, brings", WALKS)
 def test_discover_statement(then, brings, page, server, tmp_path, monkeypatch):
-    site = site_of("discovercard")
+    site = site_of("discoverbank")
     monkeypatch.setattr(site, "is_safe_url", guard_for(server))
     monkeypatch.setattr(site, "BASE", base(server))
     out = tmp_path / "statement.pdf"

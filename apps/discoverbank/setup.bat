@@ -32,7 +32,7 @@ rem somebody is present to agree to it.
 
 echo.
 echo Setup complete. Next: login.bat  (sign in, keep the browser open),
-echo then paperpull discovercard diagnose, then paperpull discovercard pilot.
+echo then paperpull discoverbank diagnose, then paperpull discoverbank pilot.
 pause
 exit /b 0
 

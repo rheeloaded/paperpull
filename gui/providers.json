@@ -30,7 +30,7 @@
     "citi": {"gets": "Credit card statements, about two years online", "group": "banks"},
     "coinbase": {"gets": "Monthly statements, One Card statements and tax documents", "group": "investing", "note": "One Card statements tested on one account"},
     "costco": {"gets": "Warehouse, gas, pharmacy and costco.com receipts", "group": "shopping", "note": "Tested on one membership so far"},
-    "discovercard": {"gets": "Credit card statements", "group": "banks", "note": "For a card moved to Capital One, choose Capital One"},
+    "discoverbank": {"gets": "Checking, savings, CD and money market statements", "group": "banks", "note": "For a card moved to Capital One, choose Capital One"},
     "dominion": {"gets": "Billing statements", "group": "bills"},
     "ebay": {"gets": "Order receipts, up to ten years back", "group": "shopping"},
     "etrade": {"gets": "Statements, trade confirmations, tax forms", "group": "investing"},
