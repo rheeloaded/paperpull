@@ -171,6 +171,10 @@ ITS_OWN = {
         "or a list that stops shows there and reaches the run, and a history that still "
         "reads leaves the refusal that bill's alone, so one bill Verizon will not give "
         "never stops every later run at it",
+    ("cetera", "download_bill", ("_fetch",)):
+        "a refusal of the headers this run kept from an earlier reading, whose token "
+        "may have run out, which reads the lists again once. A refusal right after the "
+        "lists were read reaches the run",
 }
 
 # A handler in a download path that turns a list stop into a stop of the run
@@ -253,6 +257,9 @@ NOT_A_LIST = {
         "the person answers in the browser before Continue",
     ("verizonmobile", "OtherAccountShown"):
         "another account shown in My Verizon than the one a bill was listed under, "
+        "which the person chooses again before Continue",
+    ("ziply", "OtherAccountShown"):
+        "another account asked about on Billing than the one a bill was listed under, "
         "which the person chooses again before Continue",
 }
 

@@ -25,6 +25,7 @@
     "bilt": {"gets": "Bilt Card statements from the wallet", "group": "banks"},
     "bofa": {"gets": "Checking, savings and credit card statements", "group": "banks", "note": "Tested on checking and credit card statements, not yet on savings"},
     "capitalone": {"gets": "Bank and card statements, tax forms, letters", "group": "banks"},
+    "cetera": {"gets": "Brokerage statements, quarterly performance reports", "group": "investing"},
     "chase": {"gets": "Credit card statements", "group": "banks"},
     "chasebusiness": {"gets": "Business checking and business card statements, up to seven years", "group": "banks", "note": "Tested on one profile"},
     "citi": {"gets": "Credit card statements, about two years online", "group": "banks"},
@@ -91,6 +92,7 @@
     "verizonmobile": {"gets": "Wireless monthly bills, about two years online", "group": "bills"},
     "walmart": {"gets": "Receipts", "group": "shopping"},
     "wealthfront": {"gets": "Statements, tax documents", "group": "investing"},
-    "wellsfargo": {"gets": "Account statements, tax documents", "group": "banks", "note": "Tested on credit card statements, not yet on checking, savings, mortgage or tax forms"}
+    "wellsfargo": {"gets": "Account statements, tax documents", "group": "banks", "note": "Tested on credit card statements, not yet on checking, savings, mortgage or tax forms"},
+    "ziply": {"gets": "Monthly internet bills, the whole history My Account lists", "group": "bills"}
   }
 }
