@@ -597,6 +597,7 @@ function runLine(e) {
   let said;
   if (e.closed) said = 'stopped when its page closed';
   else if (e.exit_code === 130) said = 'interrupted';
+  else if (ENDED_WITH[String(e.exit_code)]) said = ENDED_WITH[String(e.exit_code)];
   else if (e.exit_code && e.exit_code !== 0) said = 'ended with a problem';
   else if (res.stopped) said = 'stopped partway';
   else if (savedCount(res, e.saved)) said = many(savedCount(res, e.saved), 'new document');
@@ -890,6 +891,11 @@ function savedCount(res, saved) {
 // in core run_reporting (core/tests/test_every_app_says_when_nothing_happened.py
 // holds the two to each other).
 const NOTHING_OPENED = '5', NOTHING_RECORDED = '6', NOT_SIGNED_IN = '7';
+// Recent runs says each of those in the words of its outcome's title, since
+// none of them is a problem with the run, and a row that says Sign in first
+// read "ended with a problem" beside it.
+const ENDED_WITH = {[NOTHING_OPENED]: 'no sign-in window opened', [NOTHING_RECORDED]: 'nothing was recorded',
+  [NOT_SIGNED_IN]: 'nobody was signed in'};
 // What a run came to, in a title, a sentence and a tone.
 // The run to press once signed in: Get new after a sign-in, or the run
 // that found nobody signed in, over the same dates.
@@ -914,6 +920,24 @@ function rerunStep(run, key, num, after) {
   return '<li><div class="stepnum' + (after ? '' : ' on') + '">' + num + '</div><div class="body"><b>' + esc(RERUN[action][0]) + '</b><span>' +
     esc(RERUN[action][1]) + '</span></div><button type="button" class="btn ' + (after ? 'btn-s' : 'btn-p') + ' starts" ' + how +
     ' data-key="' + key + '">' + (RERUN[action][2] ? '' : PLAY) + esc(RERUN[action][0]) + '</button></li>';
+}
+// The run a sign-in pressed on a finished run's page is for, which the
+// sign-in's own page then offers in place of Get new (rerunStep). It is the
+// step that page offered after the sign-in. Continue and Get new go as their
+// buttons there go, with no dates, and anything else is that run again over
+// its own dates. A Discover is checked again, a restore or a recording opens
+// its dialog again, and a run that found nobody signed in runs again.
+function signinThen(run) {
+  const o = run.outcome || {};
+  if (o.resume) return {action: 'resume', scope: {}, again: false};
+  if (o.relist) return {action: 'all', scope: {}, again: false};
+  return {action: run.action, scope: run.scope, again: run.again};
+}
+// What a sign-in that opened its window says to do next, in the words of
+// the step its page offers, or nothing when it offers none.
+function thenSay(run) {
+  const src = run.then || {action: 'all'}, words = (RERUN[src.again ? 'restore' : src.action] || [''])[0];
+  return words ? ', then ' + words.charAt(0).toLowerCase() + words.slice(1) : '';
 }
 function runOutcome() {
   const res = RUN.result, code = RUN.code, n = noun(RUN), saved = RUN.saved || [];
@@ -975,8 +999,8 @@ function runOutcome() {
   if (why === 'page') return {tone: 'bad', title: whose(who) + ' page was not what PaperPull expected',
     say: 'The run stopped there rather than guess, and nothing already saved is lost. The technical details below say ' +
       'what it found and what to do. If it stops at the same place again, ' + whose(who) + ' site may have changed, ' +
-      'which is for PaperPull to fix, so make a support report from More.' + left,
-    clean: false, resume: downloads, recheck, signin: false};
+      'which is for PaperPull to fix, so make a support report with the button below.' + left,
+    clean: false, resume: downloads, recheck, signin: false, support: true};
   if (why === 'slow') return {tone: 'info', title: who + ' did not answer in time',
     say: 'Nothing already saved is lost. PaperPull waited for ' + whose(who) + ' page and it did not come in time, ' +
       'which can be a busy site or a page that has changed. ' +
@@ -984,11 +1008,12 @@ function runOutcome() {
     clean: false, resume: downloads, recheck, signin: false};
   if (why === 'error') return {tone: 'bad', title: 'PaperPull ran into something it did not expect',
     say: 'Nothing already saved is lost. The technical details below say what happened. ' +
-      'If it happens again, make a support report from More.' + left,
-    clean: false, resume: downloads, recheck, signin: false};
+      'If it happens again, make a support report with the button below.' + left,
+    clean: false, resume: downloads, recheck, signin: false, support: true};
   if (code !== '0') return {tone: 'bad', title: 'This run ended with a problem',
     say: 'Progress is saved. The technical details below say what happened. ' + next + '.' +
-      ' If it happens again, make a support report from More.', clean: false, resume: downloads, recheck};
+      ' If it happens again, make a support report with the button below.', clean: false, resume: downloads, recheck,
+    support: true};
   // A Resume with nothing more to carry on with, since no run read the list
   // to its end. Continue would stop here again, so the next step is a run
   // that reads the list (#124).
@@ -1037,8 +1062,8 @@ function runOutcome() {
   }
   if (inSample()) return {tone: 'ok', title: 'Nothing to run in the sample', say: RUN.lines.filter(Boolean).join(' '), clean: true};
   const plain = {
-    login: ['Sign-in window opened', SERVER ? 'Sign in to ' + who + ' in the sign-in window, then get new documents.'
-      : 'Sign in to ' + who + ' in the window that opened and leave it open, then get new documents.'],
+    login: ['Sign-in window opened', (SERVER ? 'Sign in to ' + who + ' in the sign-in window'
+      : 'Sign in to ' + who + ' in the window that opened and leave it open') + thenSay(RUN) + '.'],
     discover: ['Checked ' + who, RUN.found != null ? many(RUN.found, n) + ' listed. Nothing was downloaded.' : 'Nothing was downloaded. The technical details list what was found.'],
     verify: ['Saved files checked', 'The technical details list each file.'],
     diagnose: ['Support report saved', 'It is in ' + whose(who) + ' Diagnostics folder. Attach the file whose name starts with survey- to a problem report.'],
@@ -1048,10 +1073,10 @@ function runOutcome() {
     review_names: rvRenamed(RUN.lines) ? ['Receipts renamed', 'The technical details list each file.']
       : ['Nothing was renamed', 'The technical details say why.'],
   }[RUN.action];
-  // A sign-in window that opened is followed by Get new on this page, so
-  // nobody goes back to the account to find it.
+  // A sign-in window that opened is followed on this page by the run it was
+  // pressed for, or Get new, so nobody goes back to the account to find it.
   if (plain) return {tone: 'ok', title: plain[0], say: plain[1] + (RUN.action === 'discover' ? alike : ''), clean: true,
-    ...(RUN.action === 'login' ? {signin: false, rerun: true} : {})};
+    ...(RUN.action === 'login' ? {signin: false, rerun: true, opened: true} : {})};
   if (res) return {tone: 'ok', title: 'Finished', say: '', clean: true};
   return {tone: 'warn', title: 'Finished, check the details', say: 'No run summary came back, so read the technical details.', clean: true};
 }
@@ -1146,13 +1171,18 @@ function renderRun() {
       // Signing in again comes first, unless the outcome knows the stop had
       // nothing to do with it (signin: false), a changed page or a slow one.
       const signFirst = o.signin !== false, then = signFirst ? '2' : '1';
+      // Check again is this check again, over its own dates.
+      const s = RUN.scope || {}, dates = (s.year ? ' data-year="' + esc(s.year) + '"' : '') +
+        (s.start ? ' data-start="' + esc(s.start) + '"' : '') + (s.end ? ' data-end="' + esc(s.end) + '"' : '');
       html += '<ol class="nextsteps">' +
         // Somebody who has not signed in yet does that first, so it carries
-        // the weight, and the run after it does not.
+        // the weight, and the run after it does not. The sign-in keeps the
+        // run this page offers after it, for its own page to offer next
+        // (signinThen), never Get new in its place.
         (signFirst ? '<li><div class="stepnum' + (o.first ? ' on' : '') + '">1</div><div class="body"><b>Sign in to ' + esc(RUN.provider) + (o.first ? '' : ' again') +
           '</b><span>' + (o.first ? 'In the window that opens. Leave it open while documents download' : 'In its window, or open a new one') + '</span></div>' +
         '<button type="button" class="btn ' + (o.first ? 'btn-p' : 'btn-s') + ' starts" data-do="run" data-action="login" data-key="' + key + '"' +
-          (o.first ? ' data-then="1"' : '') + '>Open sign-in window</button></li>' : '') +
+          ' data-then="1">Open sign-in window</button></li>' : '') +
         (o.resume ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Continue where it stopped</b><span>Picks up what is left, without asking again for what is already saved</span></div>' +
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' + key + '">' + PLAY + 'Continue</button></li>' : '') +
         (o.relist ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Get new documents</b><span>Reads ' + esc(whose(RUN.provider)) +
@@ -1160,9 +1190,16 @@ function renderRun() {
           '<button type="button" class="btn btn-p starts" data-do="run" data-action="all" data-key="' + key + '">' + PLAY +
           'Get new documents</button></li>' : '') +
         (o.recheck ? '<li><div class="stepnum on">' + then + '</div><div class="body"><b>Check again</b><span>Lists what ' + esc(RUN.provider) +
-          ' has once more. Nothing is downloaded</span></div><button type="button" class="btn btn-p starts" data-do="run" data-action="discover" data-key="' +
-          key + '">Check again</button></li>' : '') +
+          ' has once more. Nothing is downloaded</span></div><button type="button" class="btn btn-p starts" data-do="run" data-action="discover"' +
+          dates + ' data-key="' + key + '">Check again</button></li>' : '') +
         (o.rerun ? rerunStep(RUN, key, then, o.first) : '') + '</ol>';
+    }
+    if (r && o.support) {
+      // A stop PaperPull may have to fix says to make a support report, and
+      // this page has no More menu, so the way to one is here.
+      html += '<div class="keepopen"><p>A support report reads ' + esc(whose(RUN.provider)) + ' page and saves a file with no ' +
+        'account details, to send with a problem report.</p><button type="button" class="btn btn-s starts" data-do="support" data-key="' +
+        key + '">' + sv(P.report) + 'Make a support report</button></div>';
     }
     if (r && ['diagnose', 'record'].includes(RUN.action) && o.clean) {
       // The server's folder is on the server, so the file comes to the browser.
@@ -2480,10 +2517,10 @@ const DO = {
     if (!r) return;
     const scope = el.dataset.start || el.dataset.year
       ? {year: el.dataset.year || '', start: el.dataset.start || '', end: el.dataset.end || ''} : null;
-    // The sign-in on the page of a run that found nobody signed in keeps
-    // that run, for the sign-in's own page to offer next (rerunStep).
+    // The sign-in on a finished run's page keeps the run that page offered
+    // after it, for the sign-in's own page to offer next (signinThen).
     const then = el.dataset.then && RUN.state === 'done' && RUN.app === r.app && RUN.account === r.account
-      ? {action: RUN.action, scope: RUN.scope, again: RUN.again} : null;
+      ? signinThen(RUN) : null;
     startRun(r, el.dataset.action, Object.assign(scope ? {scope} : {}, then ? {then} : {}));
   },
   'restore': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRestore(r); },
@@ -2498,6 +2535,8 @@ const DO = {
     // outside a dialog that is open can be pressed, so there the dialog
     // offers no sign-in of its own.
     $('sp-signrow').hidden = SERVER;
+    $('sp-log').hidden = true;
+    $('sp-log').textContent = '';
     $('dlg-support').showModal();
   },
   'record': el => { DLG_ROW = rowByKey(el.dataset.key); closeMenus(); if (DLG_ROW) $('dlg-record').showModal(); },
@@ -2536,10 +2575,20 @@ const DO = {
   'sp-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'diagnose'); },
   // The report reads a signed-in page, so the dialog that says to sign in
   // first opens the sign-in window itself, and stays open for the report.
+  // The run's own page is behind the dialog, so the dialog says what the
+  // sign-in came to when it ends, with the app's words below when no window
+  // opened.
   'sp-signin': () => {
     if (SERVER) return;
-    if (startRun(DLG_ROW, 'login', {stay: true})) $('sp-signsay').textContent = 'The sign-in window is opening. ' +
-      'Sign in there and go to the page that has your documents, then make the report.';
+    const said = () => {
+      const o = RUN.outcome || {};
+      $('sp-signsay').textContent = o.opened ? 'The sign-in window opened. Sign in there and go to the page that has ' +
+        'your documents, then make the report.' : [o.title || 'The sign-in window did not open', o.say].filter(Boolean).join('. ');
+      $('sp-log').hidden = Boolean(o.opened);
+    };
+    if (startRun(DLG_ROW, 'login', {stay: true, sink: 'sp-log', onDone: said})) {
+      $('sp-signsay').textContent = 'Opening the sign-in window. Wait here until it is open.';
+    }
   },
   'report-reveal': async el => {
     const r = rowByKey(el.dataset.key);

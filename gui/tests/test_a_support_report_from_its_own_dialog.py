@@ -100,6 +100,34 @@ def test_make_the_report_waits_while_the_sign_in_it_started_is_going():
         pw.stop()
 
 
+@pytest.mark.parametrize("code, says, log_shown", [
+    ("5", "No sign-in window opened. PaperPull could not open a browser for Chase.", True),
+    ("0", "The sign-in window opened. Sign in there", False),
+])
+def test_the_dialog_says_what_its_sign_in_came_to(code, says, log_shown):
+    """The dialog said "The sign-in window is opening" as the sign-in
+    started and kept saying it when no window opened, with what did happen
+    on the run's own page behind the dialog."""
+    pw, chromium, tab = _open(False)
+    try:
+        got = tab.evaluate("""(code) => {
+            DO['sp-signin']();
+            const during = $('sp-signsay').textContent;
+            onLine('Edge could not start, close it and try again.');
+            finishRun(code, '', true);
+            return [during, $('sp-signsay').textContent, $('sp-log').hidden, $('sp-log').textContent,
+                    $('dlg-support').open];
+        }""", code)
+        during, after, log_hidden, log, still_open = got
+        assert "opened" not in during and "is opening" not in during
+        assert after.startswith(says) and "is opening" not in after
+        assert log_hidden is (not log_shown) and "Edge could not start" in log
+        assert still_open
+    finally:
+        chromium.close()
+        pw.stop()
+
+
 # -- the slug a problem report carries ----------------------------------------
 
 STANDIN = "print('a stand-in')\n"
