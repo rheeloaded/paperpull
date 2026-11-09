@@ -102,8 +102,8 @@ def test_nothing_arriving_is_retried_once_then_a_capture_failure(
     app.process(_docs()[:1])
     assert len(spy.calls) == 2, "the statement was pressed more than twice"
     assert len(resyncs) == 1
-    assert app.stats["failed"] == 0
-    assert app.stats["manual_review"] == 1 and failures
+    assert app.stats["failed"] == 1
+    assert app.stats["manual_review"] == 0 and failures
     assert not app.stats["new_files"]
 
 
@@ -113,5 +113,5 @@ def test_a_document_that_arrived_and_was_not_placed_is_not_pressed_again(
     app, failures, resyncs = _app(tmp_path, monkeypatch)
     app.process(_docs()[:1])
     assert len(spy.calls) == 1 and not resyncs
-    assert app.stats["failed"] == 0
-    assert app.stats["manual_review"] == 1 and failures
+    assert app.stats["failed"] == 1
+    assert app.stats["manual_review"] == 0 and failures

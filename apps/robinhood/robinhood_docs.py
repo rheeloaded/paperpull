@@ -413,7 +413,7 @@ class App:
             if moved:
                 store.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
 
         self._pw = None
@@ -1155,12 +1155,12 @@ class App:
         saved = site.download_named(page, doc.title, out_path, year=year)
         if not saved:
             _clear(out_path if out_path != target else None)
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
