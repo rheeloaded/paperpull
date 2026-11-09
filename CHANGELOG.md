@@ -135,8 +135,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the last four digits of its account number with the suffix after the
   hyphen and by the day its cycle ended, so two accounts on one sign-in
   keep their bills apart, and a bill is asked for only while My Verizon
-  shows the account it was listed under. Another account shown stops the
-  run once and names the account to choose. A history that cannot be read
+  shows the account it was listed under. A run takes the bills of the
+  account shown first, so one account's bill left for later never holds
+  back another's, and stops once when only other accounts' bills are left,
+  naming the account to choose. A history that cannot be read
   whole, one that lists no bills among them, stops the run and is never
   taken for the whole list, and a sign-out partway through stops the run
   once instead of sending every bill to Manual Review. Each bill reads the

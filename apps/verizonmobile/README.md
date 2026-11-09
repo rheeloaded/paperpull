@@ -76,9 +76,12 @@ used.
 - **One account at a time.** That address names no account, so it gives
   the bill of whichever account My Verizon shows. The history is read again
   for each bill, right before its PDF is asked for, and the bill is asked
-  for only when the history shows the account it was listed under. When it
-  shows another, the run stops and names the account it wants by its last
-  four digits. Choose that account in My Verizon and run Resume.
+  for only when the history shows the account it was listed under. A run
+  takes the bills of the account shown first, so a bill of another account
+  that was refused or interrupted waits for a run with its own account
+  shown and never holds them back. Once only other accounts' bills are
+  left, the run stops and names the account it wants by its last four
+  digits. Choose that account in My Verizon and run Resume.
 - **Signing out.** A refused bill is followed by one more read of the
   history. A sign-out shows there and stops the run, keeping what it saved.
   Sign in again and run Resume. A history that still reads leaves the
