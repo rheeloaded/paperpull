@@ -10,7 +10,7 @@ if not "%~1"=="" echo Account: %~1
 echo.
 echo Your own Edge or Chrome will open, with a separate profile. Then:
 echo   1. Sign in to ziplyfiber.com (answer any verification code yourself).
-echo   2. Open Billing, then Billing History.
+echo   2. Open My Account, then Billing.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
 echo   4. Then run:  paperpull ziply diagnose   (a survey for the maintainer)
 echo.
