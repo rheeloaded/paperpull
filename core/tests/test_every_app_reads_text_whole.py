@@ -48,6 +48,7 @@ OWN = {
     ("pdf_reader.py", "_serve"): "the app's own job for its PDF reader, whose path stays as "
                                  "the disk gave it",
     ("listing.py", "last"): "the note this core wrote itself",
+    ("listing.py", "_whole_at"): "the note this core wrote itself",
     ("storage.py", "load_config"): "the person's own config.json",
     ("storage.py", "ensure_owner"): "the person's own config.json",
     ("storage.py", "documents_roots"): "a list of folders this core wrote itself",

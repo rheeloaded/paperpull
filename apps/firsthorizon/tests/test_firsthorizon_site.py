@@ -1927,3 +1927,49 @@ def test_a_title_that_finishes_drawing_during_the_wait_is_kept_beside_one_that_n
     assert [d.account_id for d in stop.value.docs] == [ACCT2, ACCT2], "the late title was read once it drew"
     assert bank.presses == [("panel", 1)]
     assert bank.reads >= 4
+
+
+def the_panel_reads_it_all_taken(monkeypatch, tmp_path, app):
+    """What the control panel makes of this run's real records, by its own
+    code. A run says nothing of a document it leaves, so these are what stop
+    it settling a gap (#149)."""
+    monkeypatch.syspath_prepend(str(HERE.parents[1] / "gui"))
+    panel = pytest.importorskip("app")
+    return panel._took_everything({"script_name": "firsthorizon_docs.py", "dir": str(tmp_path)},
+                                  "primary", app.paths.root, {})
+
+
+def test_a_statement_turned_off_is_left_for_the_panel_too(tmp_path, monkeypatch):
+    """Its Run All lists the statement, leaves no record of it, finishes
+    clean, and the next run takes it. Each of the two reads as it is."""
+    bank = Bank([acct1(), acct2()])
+    app = make_app(tmp_path, "--all")
+    wire(app, bank, tmp_path)
+    app.check_session = lambda page: None
+    asked = []
+    real = site.download_statement
+
+    def noted(page, run, dl_dir, out_path, **kw):
+        asked.append(kw["iso_date"])
+        return real(page, run, dl_dir, out_path, **kw)
+
+    def click(page, locator, *, css, what, words, step="press a control", **kw):
+        if css == site.DOWNLOAD_BUTTON and len(asked) == 1:
+            raise site.pressing.TurnedOff(step, "the control is turned off", ["turned off"])
+        page.click(locator)
+
+    with monkeypatch.context() as off:
+        off.setattr(site, "download_statement", noted)
+        off.setattr(site.pressing, "click", click)
+        with redirect_stdout(io.StringIO()) as said:
+            app.cmd_discover()
+            app.process(app._select())
+    assert "left for the next run" in said.getvalue()
+    assert app.stats["manual_review"] + app.stats["failed"] + app.stats["validation_failures"] == 0
+    assert len(app.discovery.data) == len(app.progress.data) + 1
+    assert the_panel_reads_it_all_taken(monkeypatch, tmp_path, app) is False
+    with redirect_stdout(io.StringIO()):
+        app.cmd_discover()
+        app.process(app._select())
+    assert len(app.discovery.data) == len(app.progress.data)
+    assert the_panel_reads_it_all_taken(monkeypatch, tmp_path, app) is True

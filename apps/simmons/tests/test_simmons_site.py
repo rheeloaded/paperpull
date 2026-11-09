@@ -1265,3 +1265,39 @@ def test_a_date_printed_a_few_days_off_in_the_titles_month_names_the_document():
     assert not ok and report["nearby_date"] is None
     assert site.nearby_date_offset("", "2030-04-11", "2030-04") is None
     assert site.nearby_date_offset("04/13/30", "not a date", "2030-04") is None
+
+
+def the_panel_reads_it_all_taken(monkeypatch, tmp_path, app):
+    """What the control panel makes of this run's real records, by its own
+    code. A run says nothing of a document it leaves, so these are what stop
+    it settling a gap (#149)."""
+    monkeypatch.syspath_prepend(str(HERE.parents[1] / "gui"))
+    panel = pytest.importorskip("app")
+    return panel._took_everything({"script_name": "simmons_docs.py", "dir": str(tmp_path)},
+                                  "primary", app.paths.root, {})
+
+
+def test_a_row_turned_off_is_left_for_the_panel_too(tmp_path, monkeypatch):
+    """Its Run All lists the document, leaves no record of it, finishes
+    clean, and the next run takes it. Each of the two reads as it is."""
+    page = Page()
+    app = make_app(tmp_path, monkeypatch, page)
+    real = site.pressing.press_once
+    tried = []
+
+    def off_once(*a, **kw):
+        tried.append(1)
+        if len(tried) == 1:
+            raise pressing.TurnedOff("save the document", "the control is turned off", ["off"])
+        return real(*a, **kw)
+
+    with monkeypatch.context() as turned_off:
+        turned_off.setattr(site.pressing, "press_once", off_once)
+        with redirect_stdout(io.StringIO()) as said:
+            app.cmd_run("all")
+    assert "left for the next run" in said.getvalue()
+    assert app.stats["manual_review"] + app.stats["failed"] == 0
+    assert the_panel_reads_it_all_taken(monkeypatch, tmp_path, app) is False
+    with redirect_stdout(io.StringIO()):
+        app.cmd_run("all")
+    assert the_panel_reads_it_all_taken(monkeypatch, tmp_path, app) is True
