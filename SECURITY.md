@@ -48,8 +48,8 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Coinbase, Costco, Discover, Dominion, eBay, E*TRADE, Fairfax Water, First
     Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Nelnet, Newrez,
     PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD, Spectrum,
-    State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo, Verizon
-    Mobile and Wells Fargo) decide which of the page's controls may be
+    State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
+    Wells Fargo) decide which of the page's controls may be
     pressed with `is_safe_control()`, a hard blocklist (`FORBIDDEN_CONTROL_RE`,
     buy/sell/transfer/pay/delete/change-setting) **plus** a document
     allowlist (`SAFE_DOC_CONTROL_RE`). A control must pass **both**, so
