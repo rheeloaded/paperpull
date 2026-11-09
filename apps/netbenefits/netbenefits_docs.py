@@ -183,7 +183,7 @@ class App:
         self.progress.load()
         self.discovery.load()
         self.index_csv = CsvFile(self.paths.document_index_csv,
-                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups)
+                                 DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         # The plans a login with several of them holds, as the Select Account
         # page last listed them, so a later run finds them again when the
         # site has gone back to remembering one plan. Kept beside the
@@ -842,12 +842,12 @@ class App:
             self.stats["session_expired"] = 1
             raise
         if not saved:
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing

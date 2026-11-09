@@ -46,7 +46,9 @@ from .characters import whole_characters
 from .models import State
 
 # Word for word what each receipt app noted with No Receipt Available, up to
-# 0.44.0, when the receipt page did not show the receipt.
+# 0.44.0, when the receipt page did not show the receipt. Wealthfront noted
+# the last with it, up to 0.61.0, when it found no safe download control for
+# a row, which says no more about whether there is a document (#152).
 OLD_NOTES = frozenset({
     "No printable order summary available",     # Amazon
     "Details page did not fill in",             # Best Buy, Home Depot, Lowe's
@@ -55,6 +57,7 @@ OLD_NOTES = frozenset({
     "Receipt page did not render",              # Costco, Kroger
     "Order-details receipt did not render",     # eBay, Gap
     "Receipt page did not show a receipt",      # GitHub, Meijer
+    "No safe download control found for this row",  # Wealthfront
 })
 
 TRIED_AGAIN = "tried again next run"

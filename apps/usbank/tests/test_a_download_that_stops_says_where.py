@@ -184,7 +184,8 @@ def test_the_failure_file_names_the_step_and_counts_the_search(page, tmp_path, m
     assert report["extra"]["row_search"]["rows"] == 1
     assert report["extra"]["row_search"]["this_date"] == 0
     rec = app.progress.get(doc.key)
-    assert rec["state"] == "Needs Manual Review"
+    # Nothing was saved, so it is a failure the next run tries again (#152).
+    assert rec["state"] == "Failed"
     assert "find the statement" in rec["notes"]
 
 

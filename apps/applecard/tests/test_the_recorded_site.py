@@ -515,7 +515,7 @@ def _app(page, tmp_path):
                   "max_path_length": 240, "min_pdf_bytes": 2000}
     app.rules = doc_types.load_rules()
     app.stats = {"mode": "discover", "skipped_out_of_scope": 0, "discovered": 0,
-                 "manual_review": 0, "duplicate_filenames": 0}
+                 "manual_review": 0, "failed": 0, "duplicate_filenames": 0}
     app.paths = SimpleNamespace(diagnostics=tmp_path)
     app.discovery = JsonStore(tmp_path / "discovery.json")
     app._context, app._work_page = object(), page
