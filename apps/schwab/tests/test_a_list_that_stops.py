@@ -231,7 +231,7 @@ def test_a_days_list_that_will_not_answer_leaves_the_id_the_record_keeps(
 
 def test_a_document_that_will_not_come_costs_the_next_one_nothing(tmp_path, monkeypatch):
     """One account's day may be refused while the rest answer, so a run goes
-    on past it, and the one refused waits in Manual Review for the next run."""
+    on past it, and the one refused is a failure the next run tries again."""
     cfg, out = two_documents_found(tmp_path, monkeypatch)
     monkeypatch.setattr(site, "_gateway_call",
                         gateway(ONE_ACCOUNT, DOCUMENTS_THAT_STOP["refused"]))
@@ -240,7 +240,7 @@ def test_a_document_that_will_not_come_costs_the_next_one_nothing(tmp_path, monk
 
     docs.main(["--config", str(cfg), "--resume"])
 
-    assert states(out) == ["Completed", "Needs Manual Review"]
+    assert states(out) == ["Completed", "Failed"]
 
 
 @pytest.mark.parametrize("documents", [{}, {"documents": None}, {"documents": []}],

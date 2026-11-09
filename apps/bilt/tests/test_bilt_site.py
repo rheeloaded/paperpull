@@ -1315,3 +1315,36 @@ def test_the_card_label_may_end_in_its_own_view_button_and_nothing_else():
         assert ok(label) is None, label
     assert json.dumps(site.CARD_LABEL_RE.pattern) in site._STATE_JS
     assert "new RegExp(CARD_LABEL_PATTERN)" in site._STATE_JS
+
+
+def the_panel_reads_it_all_taken(monkeypatch, tmp_path, app):
+    """What the control panel makes of this run's real records, by its own
+    code. A run says nothing of a document it leaves, so these are what stop
+    it settling a gap (#149)."""
+    monkeypatch.syspath_prepend(str(HERE.parents[1] / "gui"))
+    panel = pytest.importorskip("app")
+    return panel._took_everything({"script_name": "bilt_docs.py", "dir": str(tmp_path)},
+                                  "primary", app.paths.root, {})
+
+
+def test_a_statement_turned_off_is_left_for_the_panel_too(tmp_path, monkeypatch):
+    """Its Run All lists the statement, leaves no record of it, finishes
+    clean, and the next run takes it. Each of the two reads as it is."""
+    fake = FakeSite()
+    app = make_app(tmp_path, monkeypatch, fake)
+
+    def off(page, run, out_path, *, iso_date, **kw):
+        if iso_date == STATEMENTS[0][0]:
+            return None
+        return fake.download_statement(page, run, out_path, iso_date=iso_date, **kw)
+
+    with monkeypatch.context() as turned_off:
+        turned_off.setattr(docs.site, "download_statement", off)
+        with redirect_stdout(io.StringIO()) as said:
+            app.cmd_run("all")
+    assert "left for the next run" in said.getvalue()
+    assert app.stats["manual_review"] + app.stats["failed"] == 0
+    assert the_panel_reads_it_all_taken(monkeypatch, tmp_path, app) is False
+    with redirect_stdout(io.StringIO()):
+        app.cmd_run("all")
+    assert the_panel_reads_it_all_taken(monkeypatch, tmp_path, app) is True
