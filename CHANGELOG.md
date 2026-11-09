@@ -83,9 +83,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   document for good, two statements of one account and date were made to
   leave only that date, a list that stops while documents download was
   made to stop the run once with the list unread, and both lists were made
-  to be read once a run. Get new pressed before signing in now says Sign
-  in first, and a sign-in window that did not open or a recording with
-  nothing in it now says so, as every other app does.
+  to be read once a run. A statement that comes back twice as the list is
+  read page by page now stops the list, where one row given twice could
+  hide a statement left out. A PDF refused while the lists still answer
+  now fails that document alone, where it stopped every run there as
+  signed out. A statement keeps the name the list gives it, so a
+  confirmation or a tax form is never filed as an account statement. Get
+  new pressed before signing in now says Sign in first, and a sign-in
+  window that did not open or a recording with nothing in it now says so,
+  as every other app does.
 - **Make a request, from the main page.** A button on Accounts opens one
   sheet for asking for a provider or a feature, with the questions a request
   needs answered, and says so when PaperPull already reads the provider

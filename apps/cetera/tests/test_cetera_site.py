@@ -74,6 +74,8 @@ class Page:
         self.loads = 0
         # PDF answers to give, one each, before the page's usual one.
         self.pdf_first = []
+        # A session that ends refuses the lists too once a PDF is refused.
+        self.signs_out_on_refusal = False
 
     def on(self, event, h):
         self.handlers.append(h)
@@ -107,10 +109,11 @@ class Page:
             return {"status": 200, "data": {"statementData": part, "totalItems": str(total)}}
         if path == site.QPR_LIST_PATH:
             return {"status": 200, "data": {"statementData": self.qprs, "totalItems": str(len(self.qprs))}}
-        if self.pdf_first:
-            return {"status": self.pdf_first.pop(0), "type": "application/json"}
-        if self.pdf_status != 200:
-            return {"status": self.pdf_status, "type": "text/html"}
+        refused = self.pdf_first.pop(0) if self.pdf_first else self.pdf_status
+        if refused != 200:
+            if self.signs_out_on_refusal:
+                self.listing_status = refused
+            return {"status": refused, "type": "application/json"}
         return {"status": 200, "type": "application/pdf", "b64": base64.b64encode(self.pdf).decode()}
 
     def lists_read(self):
@@ -191,9 +194,29 @@ class Rows(unittest.TestCase):
         self.assertEqual(site.colliding_dates(got), ["2026-09-30"])
         self.assertEqual(site.colliding_dates(site.statements_of(ROWS, 3, ACCOUNTS)), [])
 
-    def test_an_odd_statement_name_is_not_kept(self):
-        got = site.statements_of([stmt("XXXX-1111", "09/30/2026", name="<b>x</b> 1234")], 1, ACCOUNTS)
-        self.assertEqual(got[0].title, "Cetera Statement 2026-09-30")
+    def test_a_statement_id_that_comes_back_twice_stops_the_list(self):
+        """Pages asked over a sort that moves can give one row twice and
+        leave another out with the count still right, and the list was
+        called whole without the statement it left out."""
+        rows = [ROWS[0], ROWS[1], ROWS[1]]
+        with self.assertRaises(site.ListStopped) as stop:
+            site.statements_of(rows, 3, ACCOUNTS)
+        self.assertIn("two statements carry one id", str(stop.exception))
+        self.assertEqual(len(stop.exception.docs), 2)
+
+    def test_a_statement_name_is_kept_safe_for_a_file_name(self):
+        """A name with a digit or a mark was read as "Statement", so a
+        confirmation or a tax form was filed as an account statement and
+        skip_patterns never saw its name."""
+        for name, title in (("Form 1099-DIV", "Cetera Form 1099-DIV 2026-09-30"),
+                            ("Trade Confirmation #4411", "Cetera Trade Confirmation #4411 2026-09-30"),
+                            ("Statement: 09/30 <draft>?", "Cetera Statement 0930 draft 2026-09-30"),
+                            ("  Brokerage   Statement ", "Cetera Brokerage Statement 2026-09-30"),
+                            ("", "Cetera Statement 2026-09-30"), (None, "Cetera Statement 2026-09-30")):
+            got = site.statements_of([stmt("XXXX-1111", "09/30/2026", name=name)], 1, ACCOUNTS)
+            self.assertEqual(got[0].title, title, name)
+            # The name never moves the key a saved statement is known by.
+            self.assertEqual(got[0].document_id, "statement-1111-20260930", name)
 
     def test_reports_say_their_quarter_and_never_the_household(self):
         got = site.reports_of(QPRS, 2)
@@ -238,6 +261,14 @@ class ListWhole(unittest.TestCase):
         with self.assertRaises(site.ListStopped) as stop:
             site.collect_download_docs(Page(total=5))
         self.assertEqual(len(stop.exception.docs), 3)
+
+    def test_a_page_that_repeats_a_row_and_drops_another_stops(self):
+        """Page two gives page one's second row again in place of its own,
+        so the count comes to totalItems with one statement never seen."""
+        page = Page(rows=[ROWS[0], ROWS[1], ROWS[1]], total=3)
+        with self.assertRaises(site.ListStopped):
+            site.collect_download_docs(page)
+        self.assertEqual(site._RUN, {})
 
     def test_a_page_that_never_asks_carries_no_authorization_or_odd_accounts_stops(self):
         for page in (Page(asks=False), Page(req=Req(headers={"content-type": "application/json"})),
@@ -290,13 +321,29 @@ class Download(unittest.TestCase):
             self.assertFalse(any("/download" in str(a[0]) for a in page.asked))
             self.assertFalse(self.out.exists())
 
-    def test_refused_answers_raise_and_save_nothing(self):
-        for page in (Page(pdf_status=401), Page(pdf_status=403)):
+    def test_a_refusal_with_the_lists_refused_too_is_a_sign_out(self):
+        for status in (401, 403):
+            page = Page(pdf_status=status)
+            page.signs_out_on_refusal = True
             site._RUN.clear()
             with self.assertRaises(site.SessionExpired):
                 site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
                                    document_id="statement-1111-20260930")
             self.assertFalse(self.out.exists())
+
+    def test_one_pdf_refused_while_the_lists_answer_fails_alone(self):
+        """One document the portal refuses with a 401 or 403, fresh headers
+        and all, stopped every run at that document for good."""
+        for status in (401, 403):
+            page = Page(pdf_status=status)
+            site._RUN.clear()
+            trace = []
+            self.assertFalse(site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
+                                                document_id="statement-1111-20260930", trace=trace))
+            self.assertFalse(self.out.exists())
+            # Read for the document, then once more after its refusal.
+            self.assertEqual(page.lists_read(), 2, status)
+            self.assertIn("the lists still answer", json.dumps(trace))
 
     def test_an_answer_that_is_not_a_pdf_fails_that_document_alone(self):
         """A 200 JSON or page for one statement was read as a sign-out, so
@@ -325,9 +372,15 @@ class Download(unittest.TestCase):
         self.assertTrue(site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
                                            document_id="statement-1111-20260930"))
         self.assertEqual((page.loads, page.lists_read()), (2, 2))
-        # Refused again right after the page gave fresh ones, the session
-        # has ended.
+        # Refused again right after the page gave fresh ones, while the
+        # lists still answer, the document fails alone.
         page.pdf_first = [401, 401]
+        self.assertFalse(site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
+                                            document_id="statement-1111-20260930"))
+        self.assertEqual((page.loads, page.lists_read()), (4, 4))
+        # And with the lists refused too, the session has ended.
+        page.pdf_first = [401, 401]
+        page.signs_out_on_refusal = True
         with self.assertRaises(site.SessionExpired):
             site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
                                document_id="statement-1111-20260930")
@@ -366,6 +419,27 @@ class Orchestrator(unittest.TestCase):
         rec = app.discovery.get("id:qpr-70000002")
         self.assertEqual((rec["href"], rec["summary"], rec["category"]),
                          (site.QPR_DOWNLOAD_PATH, "Quarterly Performance Report", "Statement"))
+
+    def test_a_confirmation_or_tax_form_in_the_list_is_never_filed_as_a_statement(self):
+        """Both were titled "Cetera Statement" and saved as account
+        statements, though this app reads neither."""
+        app = make_app(tempfile.mkdtemp(), "--discover")
+        rows = [stmt("XXXX-1111", "09/30/2026"),
+                stmt("XXXX-1111", "08/15/2026", name="Trade Confirmation #4411"),
+                stmt("XXXX-2222", "02/15/2026", name="Form 1099-DIV"),
+                stmt("XXXX-2222", "02/16/2026", name="Consolidated 1099 Tax Statement")]
+        for r in site.statements_of(rows, 4, ACCOUNTS):
+            app._record_rawdoc(r, site.BILLING_URL)
+        self.assertEqual(list(app.discovery.data), ["id:XXXX-1111:statement-1111-20260930"])
+        self.assertEqual(app.stats["skipped_out_of_scope"], 3)
+        # Left out by their own names, whatever document_types holds.
+        rules = app.rules
+        for title in ("Cetera Trade Confirmation #4411 2026-08-15", "Cetera Form 1099-DIV 2026-02-15",
+                      "Cetera Consolidated 1099 Tax Statement 2026-02-16", "Cetera Form 5498 2026-05-31"):
+            self.assertTrue(docs.doc_types.should_skip(title, rules), title)
+        for title in ("Cetera Brokerage Statement 2026-09-30",
+                      "Cetera Quarterly Performance Report 2026 Q3 2026-09-30"):
+            self.assertFalse(docs.doc_types.should_skip(title, rules), title)
 
     def test_a_file_is_told_apart_by_its_account_and_date_or_its_report(self):
         """The last six characters of statement-1111-20260930 are its date,

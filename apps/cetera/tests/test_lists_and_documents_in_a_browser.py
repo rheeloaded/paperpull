@@ -42,11 +42,12 @@ ACCOUNTS = [{"accountNum": "XXXX-3141", "accountType": "BR", "accountId": 600000
 PAGE_SIZE = 2
 
 
-def _sid(acct, day):
-    return "St" + base64.b64encode(f"{acct}|{day}|statement".encode()).decode()
+def _sid(acct, day, kind="statement"):
+    return "St" + base64.b64encode(f"{acct}|{day}|{kind}".encode()).decode()
 
 
 # The statements, newest first, as (account, MM/DD/YYYY), over two pages.
+# A third part, when there is one, sets the statement's id apart.
 STATEMENTS = [("XXXX-3141", "09/30/2026"), ("XXXX-2718", "09/30/2026"), ("XXXX-3141", "08/31/2026")]
 # The reports, as (report id, MM/DD/YYYY, name).
 REPORTS = [("50000002", "09/30/2026", "2026 Q3 Example Household"),
@@ -91,8 +92,11 @@ class FakeCetera:
         self.list_status = 200
         self.is_ria = False
         # What a document's PDF is answered with instead, by its id,
-        # "json" or "html".
+        # "json", "html" or "refused" (a 403).
         self.instead = {}
+        # Page two of the statements gives page one's last row again in
+        # place of its own, as a sort that moves between pages does.
+        self.unstable = False
 
 
 SITE = FakeCetera()
@@ -122,6 +126,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(200, {"message": "Statement not available"})
         if instead == "html":
             return self._send(200, b"<!doctype html><title>Error</title>", "text/html")
+        if instead == "refused":
+            return self._json(403, {"message": "Forbidden"})
         if key not in PDFS:
             return self._json(404, {"message": "no such document"})
         return self._send(200, PDFS[key], "application/pdf")
@@ -163,14 +169,16 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(401, {"message": "Unauthorized"})
         if SITE.list_status != 200:
             return self._json(SITE.list_status, {"message": "Server error"})
-        rows = [{"accountNum": a, "accountType": "BR", "statementName": "Brokerage Statement",
-                 "statementId": _sid(a, d), "statementDate": "1790000000000", "statementDateFormated": d}
-                for a, d in SITE.statements]
+        rows = [{"accountNum": s[0], "accountType": "BR", "statementName": "Brokerage Statement",
+                 "statementId": _sid(*s), "statementDate": "1790000000000", "statementDateFormated": s[1]}
+                for s in SITE.statements]
         if body.get("quarter") != "All":
             rows = rows[:1]
         n = int(parse_qs(parts.query)["pageNum"][0])
-        return self._json(200, {"statementData": rows[(n - 1) * PAGE_SIZE:n * PAGE_SIZE],
-                                "totalItems": str(len(rows))})
+        part = rows[(n - 1) * PAGE_SIZE:n * PAGE_SIZE]
+        if SITE.unstable and n > 1 and part:
+            part = [rows[(n - 1) * PAGE_SIZE - 1]] + part[1:]
+        return self._json(200, {"statementData": part, "totalItems": str(len(rows))})
 
     def log_message(self, *args):
         pass
@@ -356,6 +364,38 @@ def test_a_document_answered_with_no_pdf_fails_alone_and_the_older_ones_are_save
     assert saved(tmp_path) == sorted(PDFS.values()), folded(out)
 
 
+def test_a_page_that_repeats_a_row_and_drops_another_stops_discover(attached, server, tmp_path, capsys):
+    """Page two gives page one's last statement again in place of its own,
+    so the count still comes to totalItems. The list stops rather than be
+    called whole without the statement it left out."""
+    SITE.unstable = True
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--discover")
+
+    assert ended == ("exit", 1), folded(out)
+    assert "two statements carry one id" in folded(out), folded(out)
+    assert "Discovery complete" not in out
+    assert listing_note(tmp_path)["complete"] is False
+
+
+def test_one_document_refused_while_the_lists_answer_fails_alone(attached, server, tmp_path, capsys):
+    """The portal refuses the newest statement's PDF with a 403, fresh
+    headers and all, while both lists still answer. That document fails
+    alone and every other is saved, where the run stopped there as signed
+    out on every run for good."""
+    newest = _sid(*STATEMENTS[0])
+    SITE.instead = {newest: "refused"}
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert "signed out" not in out, folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == 1, folded(out)
+    assert saved(tmp_path) == sorted(v for k, v in PDFS.items() if k != newest), folded(out)
+    assert panel_reads(out)["stopped"] == 0, folded(out)
+
+
 def test_headers_that_ran_out_are_taken_again_once(attached, server, tmp_path, capsys):
     """The page's token changes after Discover read the list, as a token
     that runs out does. The first PDF asked with the kept headers is
@@ -397,7 +437,7 @@ def test_two_statements_of_one_account_and_date_are_left_and_the_rest_saved(
     """A corrected statement beside the first, same account and date.
     Neither is fetched, Discover names the date, and every other document
     is listed and saved."""
-    SITE.statements = STATEMENTS + [("XXXX-3141", "09/30/2026")]
+    SITE.statements = STATEMENTS + [("XXXX-3141", "09/30/2026", "corrected")]
     their_tab(attached, server)
 
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
