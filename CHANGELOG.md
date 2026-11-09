@@ -110,10 +110,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   ends those as the core's NOTHING_OPENED and NOTHING_RECORDED, and the
   panel says "No sign-in window opened" or "Nothing was recorded", with the
   app's own words for why under it. A run the panel would not start,
-  because another tab is running it, a history file is being imported or
-  the app needs setting up, now reads "This run did not start" with the
-  reason, instead of "It exited with code 1" and a Continue for a run that
-  never began.
+  because another tab is running it, a history file is being imported, the
+  app needs setting up or PaperPull Server does not recognize its folder,
+  now reads "This run did not start" with the reason, instead of "It
+  exited with code 1" and a Continue for a run that never began. None of
+  these offers an earlier run's failure file as one it wrote.
 
 ## [0.61.1] - 2026-11-08
 

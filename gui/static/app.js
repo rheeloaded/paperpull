@@ -832,7 +832,11 @@ function finishRun(code, refused, streamed) {
   if (RUN.again && !RUN.outcome.clean && RUN.sink) RUN.sink.textContent += AGAIN_LEFT + '.\n';
   const done = RUN.onDone;
   RUN.onDone = null;
-  if (RUN.code !== '0' || (RUN.result && RUN.result.attention)) checkFailure(RUN.app, RUN.account);
+  // A sign-in with no window, a recording with nothing in it and a run
+  // that did not start write no failure file, so none is asked for, or an
+  // earlier run's from the last hour would read as this run's.
+  const wroteNone = Boolean(RUN.refused) || [NOTHING_OPENED, NOTHING_RECORDED].includes(RUN.code);
+  if (!wroteNone && (RUN.code !== '0' || (RUN.result && RUN.result.attention))) checkFailure(RUN.app, RUN.account);
   if (savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(RUN.app, RUN.account);
   if (done) done(RUN.code);
   if (RUN.queue && QUEUE) queueStep();
