@@ -4402,7 +4402,7 @@ SIGN_IN_LOOK_EVERY = 2.0
 _SIGN_IN_PLANS: dict = {}
 
 
-@app.get("/api/sign-in/wait", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/sign-in/wait", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_sign_in_wait(app: str, account: str = "primary"):
     """A stream that ends by saying how the wait for this account's sign-in
     came out: signed_in, timed_out, no_window, run_started, or cannot_tell
