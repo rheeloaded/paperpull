@@ -2,6 +2,7 @@
 list capture and paging, and the download, all against made-up answers.
 No real account, no network."""
 import base64
+import itertools
 import sys
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -268,3 +269,20 @@ def test_only_stripe_com_and_its_subdomains_are_allowed():
     assert not site.is_safe_url("https://notstripe.com/")
     assert not site.is_safe_url("https://api.hcaptcha.com/")
     assert not site.is_safe_url("https://user:pw@dashboard.stripe.com/")
+
+
+def test_a_list_never_read_is_read_on_a_computer_just_started(tmp_path, monkeypatch):
+    """time.monotonic() counts from the computer's start on Windows, so on
+    a computer up less than four minutes the list never read passed for a
+    fresh one, and the download took the link an older list gave."""
+    ticks = itertools.count(5.0, 0.5)
+    monkeypatch.setattr(site.time, "monotonic", lambda: next(ticks))
+    row = {"id": "inv_1", "periodEndExclusive": 1927670400, "link": "https://files.stripe.com/new"}
+    page = _Page(_lists([row], []), {"https://files.stripe.com/new": {
+        "status": 200, "ct": "application/pdf", "url": "https://files.stripe.com/new",
+        "b64": base64.b64encode(PDF).decode()}})
+    site._cache.update(at=0.0, docs=[])
+    out = tmp_path / "i.pdf"
+    assert site.download_bill(page, None, "2031-01-31", out, href="https://files.stripe.com/old",
+                              document_id="inv_1")
+    assert page.fetched[-1][0] == "https://files.stripe.com/new"

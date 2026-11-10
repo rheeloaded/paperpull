@@ -7,9 +7,10 @@ STATUS. Built from the account owner's read-only survey of 2026-10-12
 2026-10-12/13 saved the newest statement and refused the rest (see below),
 which is why an older statement is chosen in page. Run that way on the
 owner's account, Discover listed 13 statements of two accounts, Pilot
-saved the newest, and Run All saved 10 more, each printing its own date,
-and left the two statements of 2026-02-26 for a manual save. Mobile is
-run live only as far as MOBILE says.
+saved the newest, and Run All saved 10 more, each printing its own date.
+It refused the two statements that shared a date, and choosing those by
+pressing each row (below) has not been run live yet. Mobile is run live
+only as far as MOBILE says.
 
   * The site is an Angular app on https://www.spectrum.net. All billing data
     comes from the page's own POSTs to https://apis.spectrum.net/selfservice/graph
@@ -45,8 +46,11 @@ run live only as far as MOBILE says.
     words, and the page must move to that statement's own page, its id in
     the page's own spelling (a DIGITAL_DOCUMENT id, unpadded) naming the
     same account and date, isAccountTransfer true for a prior account. Two
-    statements of one date have rows nothing tells apart before a press,
-    so both are left. The page's own AccountDigitalStatementV2 requests
+    statements of one date, one for each account, have rows nothing tells
+    apart before a press, so the first is pressed, and when the page it
+    opens is the other statement's own, Statements is read again and the
+    second is pressed, which must open this one. The page's own
+    AccountDigitalStatementV2 requests
     must name this statement once and otherwise only statements the list
     holds, and every answer must be an answer. Anything unexpected after
     the row press stops the run.
@@ -1311,13 +1315,20 @@ def is_safe_row(text, day: str) -> bool:
 
 
 # What a row or link that only runs the page's own script carries as its
-# href, as the survey saw it, with or without the closing semicolon.
-_VOID_HREF_RE = re.compile(r"javascript:void\(0\);?", re.I)
+# href, as the survey saw it, with or without the closing semicolon. Since
+# November 2026 Spectrum's page writes it with Angular's "unsafe:" in front,
+# the mark Angular puts on a script address it will not run as a link, so
+# it still leads nowhere. Nothing else after "unsafe:" passes. Its letters
+# are matched as ASCII letters only, since Python's IGNORECASE alone takes
+# "ſ" for "s" and a dotless or dotted i for "i", and a browser reads
+# "javaſcript:void(0)" as a path on the site, an address of its own.
+_VOID_HREF_RE = re.compile(r"(?:unsafe:)?javascript:void\(0\);?", re.I | re.A)
 
 
 def is_void_href(href) -> bool:
-    """Whether an anchor's own href leads nowhere. No href, an empty one and
-    "javascript:void(0)" do, and anything else does not."""
+    """Whether an anchor's own href leads nowhere. No href, an empty one,
+    "javascript:void(0)" and "unsafe:javascript:void(0)" do, each with or
+    without its closing semicolon, and anything else does not."""
     if href is None:
         return True
     if not isinstance(href, str):
@@ -1373,21 +1384,25 @@ def _flat(text) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
-def row_for(page, entry: Entry, entries: List[Entry]) -> Tuple[int, str, str]:
-    """(index among the drawn rows, its words, "") for the one row that
-    chooses `entry`, or (-1, "", why) when there is not exactly one. Two
-    statements of one date, one for each account, leave both, since
-    nothing the survey saw tells their rows apart before a press."""
-    if sum(1 for e in entries if e.date == entry.date) != 1:
-        return -1, "", "another statement carries the same date"
+def row_for(page, entry: Entry, entries: List[Entry], past: int = -1) -> Tuple[int, str, str]:
+    """(index among the drawn rows, its words, "") for the row to press to
+    choose `entry`, or (-1, "", why) when there is none. The rows of its date
+    must be as many as the statements of its date. Two statements of one
+    date, one for each account, draw two rows nothing the survey saw tells
+    apart before a press, so the first after the row at `past` is given,
+    and the page it opens says whose it is (choose_in_page)."""
+    same = sum(1 for e in entries if e.date == entry.date)
     try:
         texts = page.evaluate(_ROWS_JS) or []
     except Exception:
         return -1, "", "the rows could not be read"
     found = [(i, _flat(t)) for i, t in enumerate(texts)
              if re.match(r"^\s*statement\b", str(t or ""), re.I) and row_day(t) == entry.date]
-    if len(found) != 1:
-        return -1, "", "%d rows carry the statement's date, not one" % len(found)
+    if len(found) != same:
+        return -1, "", "%d rows carry the statement's date, not %d" % (len(found), same)
+    found = [f for f in found if f[0] > past]
+    if not found:
+        return -1, "", "no other row carries the statement's date"
     i, text = found[0]
     if not is_safe_row(text, entry.date):
         return -1, "", "the guard refused the statement's row"
@@ -1455,17 +1470,27 @@ def open_by_address(page, entry: Entry, entries: List[Entry], trace) -> bool:
     return True
 
 
-def choose_in_page(page, entry: Entry, entries: List[Entry], dl_dir, trace) -> bool:
+def is_its_twin(url: str, entry: Entry, entries: List[Entry]) -> bool:
+    """Whether the page a press of the entry's row moved to is the own page of
+    the other account's statement of the same date, as lands_on reads it."""
+    return any(e.date == entry.date and e.family != entry.family and lands_on(url, e)
+               for e in entries)
+
+
+def choose_in_page(page, entry: Entry, entries: List[Entry], dl_dir, trace, past: int = -1) -> bool:
     """Choose the statement by pressing its own row on Statements, the page
     the list was just read from, so the statement page the app moves to is
     the one chosen and not the newest. False, nothing pressed, when there
-    is not exactly one row the guard allows for it, when the row's words
+    is no row the guard allows for it (row_for), when the row's words
     changed before the press, when its address is refused (is_safe_href),
     or when Spectrum kept it turned off. Once the row is pressed, a tab, a
     popup or a download, a page that is not this statement's own, or a page
     that asked for anything but this statement and one the list holds stops
-    the run (chose_wrong). SessionExpired and OtpRequired propagate."""
-    index, text, why = row_for(page, entry, entries)
+    the run (chose_wrong). The one exception is the first press of two rows
+    of one date landing on the other account's statement of that date:
+    Statements is read again and the row after it, `past`, is pressed, once,
+    under all of the same checks. SessionExpired and OtpRequired propagate."""
+    index, text, why = row_for(page, entry, entries, *([past] if past >= 0 else []))
     if why:
         log.info("the statement dated %s was not chosen: %s", entry.date, why)
         _note(trace, note="no row to choose", why=why)
@@ -1535,15 +1560,20 @@ def choose_in_page(page, entry: Entry, entries: List[Entry], dl_dir, trace) -> b
             raise chose_wrong(entry, "a download began")
         detail.check_session()
         check_page(page)
-        if not lands_on(page.url or "", entry):
+        twin = past < 0 and is_its_twin(page.url or "", entry, entries)
+        if not twin and not lands_on(page.url or "", entry):
             raise chose_wrong(entry, "the page it opened is not that statement's own")
-        why = details_answered(detail, entry, entries)
+        why = "" if twin else details_answered(detail, entry, entries)
     except (SessionExpired, OtpRequired):
         raise
     except Exception as e:
         raise chose_wrong(entry, "the page could not be read after the press, %s" % type(e).__name__) from None
     if why:
         raise chose_wrong(entry, why)
+    if twin:
+        _note(trace, note="the row opened the other account's statement of this date")
+        read_statement_list(page)
+        return choose_in_page(page, entry, entries, dl_dir, trace, past=index)
     return True
 
 

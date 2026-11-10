@@ -341,6 +341,43 @@ def test_after_a_download_run_what_it_saved_moves_to_the_documents_folder(
     assert move_env[renaming.MOVE_DOCUMENTS_ENV] == "new"
 
 
+def finishing():
+    """What /api/finishing names, asked from inside the panel's event loop or
+    outside it. The route awaits nothing, so it answers on its first step."""
+    step = app_module.api_finishing()
+    try:
+        step.send(None)
+    except StopIteration as done:
+        return done.value["finishing"]
+    step.close()
+    raise AssertionError("api_finishing awaited something")
+
+
+def test_a_download_runs_move_is_named_as_finishing_while_it_goes(started, downloading, tmp_path):
+    """The move after a download run is the same Move as Settings' own, so
+    a quit of PaperPull.app waits for it (gui/mac_host.py), and it is named
+    no longer once it has ended."""
+    real = app_module.subprocess.Popen
+    seen = []
+
+    def watch(cmd, **kwargs):
+        if "--pilot" in cmd:
+            seen.append(("pilot", finishing()))
+            downloading([str(tmp_path / "Statements" / "a.pdf")])
+        else:
+            seen.append(("move", finishing()))
+        return real(cmd, **kwargs)
+
+    app_module.subprocess.Popen = watch
+    try:
+        out = ran("pilot")
+    finally:
+        app_module.subprocess.Popen = real
+    assert "event: done\ndata: 0" in out, out
+    assert seen == [("pilot", []), ("move", ["move_documents_apply"])]
+    assert finishing() == []
+
+
 def test_what_a_run_saved_is_what_the_page_lists_after_its_move(started, downloading, tmp_path):
     """The move is the app's own Rename, and every app's Rename wrote a run
     summary of its own, new-this-run.txt with nothing in it. The panel read
@@ -395,7 +432,10 @@ def test_no_move_follows_a_run_with_nothing_of_its_own_to_move(started, download
     assert len(started) == 1, started
 
 
-@pytest.mark.parametrize("inside", ["Manual Review", "Backups", ".chase-downloads"])
+@pytest.mark.parametrize("inside", ["Manual Review", "Backups", ".chase-downloads",
+                                    # In any letter case, as a run tells them
+                                    # (core storage._in_a_kept_folder).
+                                    "manual review", "BACKUPS"])
 def test_a_folder_inside_the_accounts_manual_review_or_records_is_refused(apps, inside):
     chase = apps["Chase Statements"]
     with pytest.raises(HTTPException) as e:
@@ -470,6 +510,70 @@ def test_any_other_run_is_stopped_when_its_page_closes(slow):
     closed_after_its_first_line("pilot")
     assert slow["stopped"]
     assert ("Shop Docs", "primary") not in app_module._RUNS
+
+
+@pytest.fixture()
+def held_open(slow, monkeypatch):
+    """The slow stand-in, with output that goes on until the test lets the
+    run end by setting the event this returns."""
+    import io
+    import threading
+    go = threading.Event()
+
+    class Output(io.StringIO):
+        def __init__(self):
+            super().__init__("moving one\n")
+
+        def readline(self, *args):
+            line = super().readline()
+            if not line:
+                go.wait(10)
+            return line
+
+        def __iter__(self):
+            line = self.readline()
+            while line:
+                yield line
+                line = self.readline()
+
+    class Process:
+        def __init__(self, cmd, **kwargs):
+            self.stdin = io.StringIO()
+            self.stdout = Output()
+
+        def poll(self):
+            return 0 if go.is_set() else None
+
+        def wait(self, **kwargs):
+            go.wait(10)
+            return 0
+
+        def terminate(self):
+            go.set()
+
+        kill = terminate
+
+    monkeypatch.setattr(app_module.subprocess, "Popen", Process)
+    yield go
+    go.set()
+
+
+def test_a_rename_applying_is_named_as_finishing_until_it_has_finished(held_open):
+    """PaperPull.app asks /api/finishing before a quit stops the panel and
+    every run it started, and waits while it names anything. So a Rename
+    whose page closed is named there for as long as it goes on by itself,
+    and nothing is named once it has ended and been noted."""
+    import time
+    assert finishing() == []
+    closed_after_its_first_line("rename_apply")
+    assert ("Shop Docs", "primary") in app_module._RUNS, "it goes on after its page closed"
+    assert finishing() == ["rename_apply"]
+    held_open.set()
+    for _ in range(500):
+        if ("Shop Docs", "primary") not in app_module._RUNS:
+            break
+        time.sleep(0.01)
+    assert finishing() == []
 
 
 def test_the_move_is_the_apps_own_rename_with_the_cores_mark():
@@ -1055,3 +1159,95 @@ def test_every_writer_of_a_config_holds_the_one_lock(apps, tmp_path, monkeypatch
         ("kept-profile", "Dana Example", 1, "bundled")
     assert held == [True] * 5, held
     assert not app_module._CONFIG_WRITES.locked()
+
+
+def test_a_folder_spelled_in_other_letter_case_is_judged_as_the_disk_holds_it(tmp_path):
+    """On a Mac resolve() keeps the spelling given, so "target receipts" was
+    never inside "Target Receipts" there, though the two are one folder. A
+    Mac's and Windows' names are told apart without case, and elsewhere as
+    the disk holds them, as Linux's tells "target receipts" apart."""
+    (tmp_path / "Target Receipts").mkdir()
+    # Windows tells names apart without case, as the panel does
+    # (app._in_root_name). A Mac does as its disk does, which is most often
+    # without case and can be with it. Elsewhere names are as spelled.
+    one_folder = sys.platform == "win32" or (
+        sys.platform == "darwin" and (tmp_path / "target receipts").exists())
+    inside = tmp_path / "target receipts" / "Chase"
+    assert app_module._within(inside, tmp_path / "Target Receipts") is one_folder
+    assert app_module._within(tmp_path / "target receipts", tmp_path / "Target Receipts") is one_folder
+    assert app_module._within(tmp_path / "Target Receipts" / "Chase", tmp_path / "Target Receipts")
+    assert not app_module._within(tmp_path / "Target Receiptsx" / "Chase", tmp_path / "Target Receipts")
+    assert not app_module._within(tmp_path / "Target Receipts", tmp_path / "Target Receipts" / "Chase")
+
+
+def _tells_case_apart(folder: Path) -> bool:
+    """Whether a folder tells letter case apart, as a Mac's disk can be
+    formatted to and Linux's do."""
+    probe = folder / "Probe"
+    probe.mkdir()
+    try:
+        return not (folder / "probe").exists()
+    finally:
+        probe.rmdir()
+
+
+def _made_to_tell_case_apart(folder: Path) -> bool:
+    """_tells_case_apart, made so on Windows where it can be (fsutil, a
+    folder at a time, and the folders made in it after)."""
+    if _tells_case_apart(folder) or sys.platform != "win32":
+        return _tells_case_apart(folder)
+    import subprocess
+    try:
+        subprocess.run(["fsutil.exe", "file", "setCaseSensitiveInfo", str(folder), "enable"],
+                       capture_output=True, timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return _tells_case_apart(folder)
+
+
+def test_a_disk_without_case_holds_two_spellings_as_one_folder(tmp_path):
+    """On a Mac a step of a path spelled as another account's folder is in
+    other letter case is that folder when the disk finds it so. A folder
+    not made yet is judged by the folder it would be made in."""
+    if _tells_case_apart(tmp_path):
+        pytest.skip("this disk tells letter case apart")
+    (tmp_path / "Drive" / "Target Receipts").mkdir(parents=True)
+    drive = tmp_path / "Drive"
+    assert app_module._one_folder(drive / "target receipts", drive / "Target Receipts")
+    assert app_module._one_folder(tmp_path / "drive" / "TARGET RECEIPTS", drive / "Target Receipts")
+    # Neither made yet, in a folder whose names are found in either case.
+    assert app_module._one_folder(drive / "gap receipts", drive / "Gap Receipts")
+    # A folder holding nothing cannot say, and the two are taken as one.
+    (tmp_path / "Empty").mkdir()
+    assert app_module._one_folder(tmp_path / "Empty" / "a b", tmp_path / "Empty" / "A B")
+
+
+def test_a_disk_that_tells_case_apart_holds_two_spellings_as_two_folders(tmp_path):
+    """A Mac's disk formatted to tell case apart has "target receipts" and
+    "Target Receipts" as two folders, and the panel lets one account have
+    the one beside another's, as it does on Linux."""
+    folder = tmp_path / "cs"
+    folder.mkdir()
+    if not _made_to_tell_case_apart(folder):
+        pytest.skip("no folder here can be made to tell letter case apart")
+    (folder / "Target Receipts").mkdir()
+    # Not made in the other spelling, which a disk without case would find.
+    assert not app_module._one_folder(folder / "target receipts", folder / "Target Receipts")
+    assert not app_module._one_folder(folder / "target receipts" / "Chase",
+                                      folder / "Target Receipts" / "Chase")
+    # Made in both spellings, two folders.
+    (folder / "target receipts").mkdir()
+    assert not app_module._one_folder(folder / "target receipts", folder / "Target Receipts")
+    # Neither made, in a folder that tells the names already in it apart.
+    assert not app_module._one_folder(folder / "gap receipts", folder / "Gap Receipts")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows paths compare without case before any disk is asked")
+def test_on_a_mac_a_folder_in_other_letter_case_is_judged_by_the_disk(tmp_path, monkeypatch):
+    """_within on a Mac, wherever the suite runs on a POSIX disk."""
+    monkeypatch.setattr(app_module.sys, "platform", "darwin")
+    (tmp_path / "Target Receipts").mkdir()
+    one = (tmp_path / "target receipts").exists()
+    assert app_module._within(tmp_path / "target receipts" / "Chase", tmp_path / "Target Receipts") is one
+    assert app_module._within(tmp_path / "TARGET RECEIPTS", tmp_path / "Target Receipts") is one
+    assert not app_module._within(tmp_path / "target receiptsx", tmp_path / "Target Receipts")

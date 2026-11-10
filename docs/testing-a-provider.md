@@ -86,8 +86,8 @@ That is `-arm64` when About This Mac shows a Chip line (Apple silicon) and
 `-x86_64` when it shows a Processor line (Intel). Both Mac builds
 **are** signed and notarized by Apple, so they open without a warning.
 
-Launch PaperPull. A control panel opens in your browser. Everything from here
-happens in that panel.
+Launch PaperPull. The control panel opens in your browser on Windows and in a
+window of its own on a Mac. Everything from here happens in that panel.
 
 ---
 

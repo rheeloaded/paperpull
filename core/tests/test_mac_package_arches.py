@@ -84,7 +84,7 @@ def test_the_launcher_plist_and_dmg_follow_the_arch_being_built(bm):
     """A launcher compiled for arm64 inside an Intel bundle would not open
     at all on the Mac it was made for."""
     source = (REPO / "packaging" / "build_macos.py").read_text(encoding="utf-8")
-    assert '"clang", "-arch", ARCH' in source
+    assert '"clang", "-fobjc-arc", "-O2", "-arch", ARCH' in source
     assert '"LSArchitecturePriority": [ARCH]' in source
     assert '"PaperPull-%s-%s.dmg" % (version(), ARCH)' in source
 

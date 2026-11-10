@@ -77,6 +77,10 @@ def test_a_browser_of_its_own_is_said_and_launched_as_before(capsys):
     said = capsys.readouterr().out
     assert "no cdp_url" in said and "/x/browser-profile" in said
     assert "config.example.json" in said
+    # The profile keeps a sign-in made with it before, and a second person's
+    # settings are not config.json.
+    assert "signed in only if you signed in there" in " ".join(said.split())
+    assert "not signed in" not in said and "config.json" not in said
 
 
 # -- each app's own port --------------------------------------------------------

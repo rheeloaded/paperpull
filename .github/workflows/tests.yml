@@ -150,6 +150,15 @@ jobs:
         # the one place it runs.
         run: python -m pytest core/tests/test_run_all_tests_parallel.py core/tests/test_run_all_tests_tool.py -v -rs
 
+      - name: Run the Mac app's host and packaging tests
+        # test_mac_host.py runs gui/mac_host.py for real, its process group,
+        # its quit and lsof, and the packaging tests run the terminal script
+        # with bash and check the execute bits build_macos.py sets. All of it
+        # skips itself on Windows, so this is the one place it runs. These
+        # too need nothing but pytest. The launcher itself is compiled only
+        # by build-macos.yml.
+        run: python -m pytest core/tests/test_mac_host.py core/tests/test_mac_app_is_a_native_launcher.py -v -rs
+
       - name: Check that every shell script parses
         # The parts have only Git's bash. A Mac runs a .command with
         # /bin/bash, which is 3.2, so this reads every script with that bash

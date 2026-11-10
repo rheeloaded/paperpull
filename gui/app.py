@@ -26,10 +26,11 @@ from __future__ import annotations
 import base64
 import csv
 import hashlib
+import html
 import json
 import mimetypes
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import re
 import shutil
 import stat
@@ -47,7 +48,7 @@ from pathlib import Path
 
 import run_result
 
-from anyio import to_thread
+from anyio import sleep as async_sleep, to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -67,6 +68,64 @@ try:
     VERSION = (HERE.parent / "VERSION").read_text(encoding="utf-8").strip()
 except Exception:
     VERSION = "0.1.0"
+
+# The branch and commit of the checkout the panel runs from, for a developer
+# with several worktrees to see which one this page is. Nothing in PaperPull
+# Server or the built package, which run no checkout of their own.
+_DEV_INFO_CACHE: Optional[tuple[float, Optional[dict]]] = None
+
+
+def _git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(repo_dir), capture_output=True,
+                          text=True, timeout=1, check=False)
+
+
+def _dev_info(force_refresh: bool = False) -> Optional[dict]:
+    """The branch and commit of the git checkout the panel runs from, and
+    whether it has changes, or None on PaperPull Server, in the built
+    package, outside a checkout, and whenever git is missing or fails. Never
+    its folder, since a path names whose computer it is, and the page is
+    what a screenshot in an issue shows."""
+    global _DEV_INFO_CACHE
+    if server_mode.enabled() or _is_packaged():
+        return None
+
+    now = time.time()
+    if not force_refresh and _DEV_INFO_CACHE is not None and (now - _DEV_INFO_CACHE[0]) < 2.0:
+        return _DEV_INFO_CACHE[1]
+
+    repo_dir = HERE.parent
+    # A file in a worktree, a folder in a plain checkout.
+    if not (repo_dir / ".git").exists():
+        _DEV_INFO_CACHE = (now, None)
+        return None
+
+    try:
+        # A .git that git cannot read, a worktree's copied without its
+        # repository say, is no checkout to name.
+        head = _git(repo_dir, "rev-parse", "--short", "HEAD")
+        commit = head.stdout.strip() if head.returncode == 0 else ""
+        if not commit:
+            info = None
+        else:
+            branch = (_git(repo_dir, "branch", "--show-current").stdout.strip()
+                      or _git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+                      or "HEAD")
+            # Without the index's lock, which a git working in this checkout
+            # at that moment would otherwise find taken.
+            status = _git(repo_dir, "--no-optional-locks", "status", "--porcelain")
+            info = {
+                "branch": branch,
+                "commit": commit,
+                "clean": status.returncode == 0 and not status.stdout.strip(),
+            }
+    except Exception:
+        info = None
+
+    _DEV_INFO_CACHE = (now, info)
+    return info
+
+
 # -- where the downloaders live ----------------------------------------------
 #
 # Three sources, most specific first.
@@ -153,6 +212,41 @@ def root_source() -> str:
     if _read_settings().get("apps_root"):
         return "settings"
     return "default"
+
+
+def fresh_checkout() -> bool:
+    """Whether this is a source checkout nobody has set up yet. Its apps/
+    folder holds the provider templates, which look like installs: somebody
+    following the README's quick start landed on every provider "Not
+    started", without the welcome the README promises, and a run would have
+    written PDFs and browser profiles into the git tree. Somebody already
+    running from apps/ has a config.json in one of them, and keeps doing so."""
+    if root_source() != "default" or _is_packaged() or server_mode.enabled():
+        return False
+    try:
+        return not any((d / "config.json").is_file() for d in _DEFAULT_ROOT.iterdir() if d.is_dir())
+    except OSError:
+        return False
+
+
+# Said when a fresh checkout's apps/ is chosen as the PaperPull folder, from
+# the welcome, Settings or a history import (_in_fresh_checkout_apps).
+CHECKOUT_APPS = ("PaperPull's own apps folder holds each provider's template, not your documents, so "
+                 "neither it nor a folder inside it can be your PaperPull folder. Choose another "
+                 "folder, such as one in Documents.")
+
+
+def _in_fresh_checkout_apps(root) -> bool:
+    """Whether `root` is a fresh checkout's apps/ (fresh_checkout) or a folder
+    inside it. Chosen as the PaperPull folder, its templates would read as
+    providers already set up, and each sign-in and document would go into
+    the git tree."""
+    if not fresh_checkout():
+        return False
+    try:
+        return Path(root).expanduser().resolve().is_relative_to(_DEFAULT_ROOT.resolve())
+    except (OSError, ValueError):
+        return False
 
 
 # -- the sample archive -------------------------------------------------------
@@ -276,7 +370,13 @@ MORE_ACTIONS = ("verify", "diagnose", "record", "rename", "rename_apply",
                 "move_documents", "move_documents_apply")
 # The actions that finish on their own when the page that started them goes,
 # since each moves files and then writes the ledgers that name them (#102).
-FINISHED_WHEN_LEFT = ("rename_apply", "move_documents_apply")
+# Review Names applying its new names is one too. It writes each receipt's
+# new name into the ledgers just after it renames that file, so a stop there
+# leaves that receipt's records naming a file that has moved. Each is local
+# and bounded, asks nothing and holds nothing but the account's own claim
+# here, so it always comes to its end. PaperPull.app waits for each before a
+# quit stops the panel (/api/finishing), and the page offers no Stop for them.
+FINISHED_WHEN_LEFT = ("rename_apply", "move_documents_apply", "review_names")
 # An app's own script, never a hidden file. A Mac writing to a network
 # drive or a disk it does not format itself leaves "._ally_docs.py" beside
 # ally_docs.py, a few bytes of its own about the file, and that sorts first,
@@ -634,6 +734,30 @@ def _not_in_sample() -> None:
                                  "Leave the sample first.")
 
 
+# Before the terms of use are accepted the page asks for these alone, to draw
+# itself behind the dialog and to offer the sample. Every other route of the
+# API carries _terms_first (gui/tests/test_terms.py holds each to it).
+BEFORE_THE_TERMS = {("POST", "/api/terms"), ("POST", "/api/sample"), ("GET", "/api/apps"),
+                    ("GET", "/api/accounts"), ("GET", "/api/providers")}
+# I understand was pressed in this process, whether or not the answer could
+# be saved. A page whose answer was not saved goes on (api_terms), and the
+# terms are asked again the next time the panel's page opens.
+_TERMS_TAKEN = False
+
+
+def _terms_first() -> None:
+    """A run or a sign-in, a folder shown, a file handed over, a spreadsheet
+    built or a setting saved waits for the terms of use to be accepted,
+    whatever the page shows. The sample is invented and every route that
+    changes an archive is refused there (_not_in_sample), so while the panel
+    is looking at it this lets everything through. The dialog alone kept
+    these from the page until the sample could be opened before it, and a
+    tab that still shows the sample after another left it, or after the
+    panel started again, would act on the real folder."""
+    if _SAMPLE is None and not _TERMS_TAKEN and terms_due():
+        raise HTTPException(409, "Accept the Terms of Use first. Reload the page to read them.")
+
+
 def _entry_script(app_dir: Path):
     for p in sorted(app_dir.glob("*.py")):
         if ENTRY_RE.match(p.name):
@@ -780,10 +904,27 @@ def _login_flag(script: Path) -> str:
     return "--open-browser" if "--open-browser" in text else "--login"
 
 
+def _is_example(cfg: Path) -> bool:
+    """Whether a config beside a provider is its example, or a copy a sync
+    service or Finder made of it, "config.example 2.json" from iCloud or
+    "config.example copy.json", that nobody filled in. None of those is an
+    account. The test is paperpull_core.ports.is_example, which Login's
+    port check reads by too, so a copy somebody filled in is an account in
+    both. Without the core only the example itself is passed over, and a
+    copy is listed, since an account hidden is never run."""
+    mod = _ports()
+    try:
+        if mod is not None:
+            return bool(mod.is_example(cfg))
+    except Exception:
+        pass
+    return cfg.name == "config.example.json"
+
+
 def _accounts(app_dir: Path):
     accts = ["primary"]
     for cfg in sorted(app_dir.glob("config.*.json")):
-        if cfg.name == "config.example.json":
+        if _is_example(cfg):
             continue
         name = cfg.name[len("config."):-len(".json")]
         # Linux and macOS take a line break in a file name, and the panel
@@ -874,9 +1015,15 @@ def _reviews_names(script) -> bool:
 def api_apps():
     refreshed = refresh_installs()
     apps = discover_apps()
-    return {"apps_root": str(apps_root()), "documents_root": _documents_root(), "root_source": root_source(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
+    return {"apps_root": str(apps_root()), "documents_root": _documents_root(), "root_source": root_source(),
+            "fresh_checkout": fresh_checkout(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
+            # The runs that go on to their end when their page goes, which the
+            # page offers no Stop for.
+            "finished_when_left": list(FINISHED_WHEN_LEFT),
             "apps": apps, "refreshed": refreshed,
+            # The name each provider folder goes by on the page, as the rows have it.
+            "provider_names": {name: _provider_of(meta)[0] for name, meta in apps.items()},
             # What the server's header says about where new documents go, and
             # why this host cannot give Chrome its sandbox, if it cannot.
             "server": ({"paperless": server_mode.paperless_connected(),
@@ -958,7 +1105,7 @@ def _export_module():
     return None
 
 
-@app.post("/api/export", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/export", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_export(request: Request):
     """Every purchase from every receipt archive under the root, as one
     spreadsheet written beside the installs. Rebuilt from the apps' own
@@ -994,7 +1141,7 @@ async def api_export(request: Request):
     return {"ok": True, **result}
 
 
-@app.get("/api/export/providers", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/export/providers", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_export_providers():
     """Which providers a spreadsheet makes sense for. Receipt archives have
     line items. Statement archives do not, and are left off the list rather
@@ -1018,7 +1165,7 @@ def _transactions_tool() -> Optional[Path]:
     return None
 
 
-@app.get("/api/export/transactions/providers", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/export/transactions/providers", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_export_transactions_providers():
     """Statement archives with PDFs on disk, the ones a transactions
     workbook can be built from."""
@@ -1049,7 +1196,7 @@ def _event(data="", name: Optional[str] = None) -> str:
             + "data: %s\n\n" % run_result.one_line(data))
 
 
-@app.get("/api/export/transactions", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/export/transactions", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_export_transactions(provider: str = "", csv: str = ""):
     """Build the transactions workbook, streaming the tool's progress the
     way a run streams. Only a provider the tool itself lists may be named."""
@@ -1120,7 +1267,7 @@ def api_export_transactions(provider: str = "", csv: str = ""):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 def api_export_reveal():
     """Show the last spreadsheet this panel wrote in the file manager. Takes no
     path from the page on purpose, only the one the server itself wrote."""
@@ -1139,7 +1286,7 @@ def api_export_reveal():
     return {"ok": True}
 
 
-@app.get("/api/export/download", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/export/download", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_export_download():
     """On PaperPull Server, the last spreadsheet this panel wrote, handed to
     the browser, where the desktop shows it in a folder. Like reveal, it
@@ -1209,7 +1356,7 @@ def _jsonable(value):
     return value
 
 
-@app.get("/api/status", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/status", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_status():
     """How current each archive is, and which periods look missing.
 
@@ -1265,6 +1412,31 @@ _RUNS: dict = {}
 DOWNLOAD_ACTIONS = ("pilot", "all", "resume")
 # The files a row lists as the newest it saved.
 LATEST_SHOWN = 4
+
+
+@app.get("/api/finishing", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
+async def api_finishing():
+    """What is applying its changes now and must not be stopped partway,
+    named by its action alone. A Rename or a Move applying its changes
+    (FINISHED_WHEN_LEFT), the Move into the documents folder that ends a
+    download run (_move_new_documents), named as the Move it is, and a
+    history import.
+
+    PaperPull.app asks this when its window goes, and waits while it names
+    anything before it stops the panel and every run the panel started
+    (gui/mac_host.py). A Rename or a Move stopped partway would leave the
+    index and progress.json naming files it had already moved. A run stays
+    in _RUNS until it has finished and been noted, whether its page is still
+    open or went and left it to finish by itself, so an empty list means
+    nothing is left that a stop would break. It changes nothing and names
+    no account. Only on the desktop, since PaperPull Server has no window
+    to close."""
+    names = ["move_documents_apply" if run.get("moving") else run.get("action")
+             for run in list(_RUNS.values())
+             if run.get("action") in FINISHED_WHEN_LEFT or run.get("moving")]
+    if _IMPORTING.locked():
+        names.append("history_import")
+    return {"finishing": sorted(names)}
 
 
 def _account_root(meta: dict, account: str) -> Path:
@@ -1465,17 +1637,18 @@ _NOTHING_TO_TAKE = ("Completed", "No Longer Listed")
 # person. American Express leaves out a year-end row that stays at a card
 # switch, since whose it is cannot be told. Discover Bank passes over an
 # account its menu holds with no usable id, and that run stops at its end, so
-# it would settle nothing anyway. ING leaves a document its Postbox marks
-# unread alone when include_unread is false. The others pass over a row they
-# cannot date or open.
+# it would settle nothing anyway. Chase leaves out a statement its page saves
+# only through a menu, which it never presses. ING leaves a document its
+# Postbox marks unread alone when include_unread is false. The others pass
+# over a row they cannot date or open.
 # gui/tests/test_accounts.py finds these by a log line written out as one
 # string. An app can also pass over a document and say so some other way, or
 # leave no trace at all, as Citi does with a requested statement not ready yet
 # and PayPal with a report still being made, which is why _settled waits for
 # a second run on another day.
 _LISTS_LEAVE_OUT = frozenset({"aafmaa", "affirm", "ally", "amex", "amfam", "applecard",
-                              "discoverbank", "dkb", "golden1", "ibkr", "ing", "sba",
-                              "statefarm", "tsp", "wellsfargo"})
+                              "chase", "discoverbank", "dkb", "golden1", "ibkr", "ing",
+                              "sba", "statefarm", "tsp", "wellsfargo"})
 
 
 def _gap_keys(gaps) -> list:
@@ -1618,6 +1791,185 @@ def _gaps_left(root: Path) -> list:
     return _gap_keys((row or {}).get("gaps"))
 
 
+# How long an account stays off the list once it has been checked: as long
+# as its provider usually takes to send something, within these bounds.
+QUIET_DAYS = (3, 14)
+DONE_FILE = "panel-done.json"
+
+
+def _checked_by(entry) -> bool:
+    """Whether a logged run read the provider's whole list and finished, a
+    Get new with every date and nothing stopped, failed or set aside
+    (_whole_clean_run). A Continue reads no list of its own, so it is no
+    check, as the card's "checked" never counts one (#148)."""
+    return _whole_clean_run(entry)
+
+
+def _when(text):
+    """A time a record keeps, as this computer's clock reads it, or None. One
+    written with its offset, by hand say, is taken to this computer's time,
+    since it could not be compared with one written without."""
+    try:
+        when = datetime.fromisoformat(str(text))
+        return when.astimezone().replace(tzinfo=None) if when.tzinfo is not None else when
+    except (TypeError, ValueError, OverflowError, OSError):
+        return None
+
+
+def _done_at(root: Path) -> str:
+    """When this account was last marked done, or ""."""
+    data = _read_json(root / DONE_FILE)
+    value = data.get("done_at") if isinstance(data, dict) else ""
+    return value if isinstance(value, str) else ""
+
+
+def _quieted(state: str, last, done_at: str, cadence, now=None, gaps=()) -> dict:
+    """What a check, or Mark as done, does to an account's place on the list.
+    "Due" is worked out from the age of the newest document, and a run that
+    finds nothing new leaves that age alone, so an account just checked
+    stayed due until its provider sent something. Marked done, it is off the
+    list until a run after that, or the time runs out. Checked by a whole
+    clean run, a due account is up to date for that time. A gap is left to
+    _settled, since one run saying it could not fill a gap proves little,
+    and a due account with gaps, which _account_state calls due first, is
+    shown as the gap it still has rather than up to date."""
+    now = now or datetime.now()
+    days = max(QUIET_DAYS[0], min(QUIET_DAYS[1], cadence if isinstance(cadence, (int, float)) else QUIET_DAYS[1]))
+    within = lambda when: when is not None and timedelta(0) <= now - when < timedelta(days=days)  # noqa: E731
+    marked = _when(done_at)
+    ended = _when((last or {}).get("ended")) if isinstance(last, dict) else None
+    if state not in ("unreadable", "never", "not_started", "nostatus") and within(marked) \
+            and (ended is None or marked > ended):
+        return {"state": "current", "marked_done": done_at, "checked_quiet": ""}
+    if state in ("due", "overdue") and _checked_by(last) and within(ended):
+        if gaps:
+            return {"state": "gap", "marked_done": "", "checked_quiet": ""}
+        return {"state": "current", "marked_done": "", "checked_quiet": last["ended"]}
+    return {"state": state, "marked_done": "", "checked_quiet": ""}
+
+
+# What a run set aside for a person to check, read from the account's records,
+# so one with no file to show is still named. The Manual Review folder alone
+# says nothing of a document that could not be captured at all.
+TO_CHECK_STATE = "Needs Manual Review"
+CHECKED_FILE = "panel-checked.json"
+OPENS_FROM_THE_PANEL = (".pdf", ".png", ".jpg", ".jpeg")
+# What a run left that a person's look at the documents does not answer.
+# Documents alike are never a reason to look (run_result.SAID_ONLY), so they
+# are no reason to keep one either.
+NOT_ANSWERED_BY_CHECKING = ("failed", "wrong_document")
+# The counts of what a run set aside, each of which the records it wrote in
+# that state have to cover before Needs a look goes. Target, Walmart and
+# Meijer count a document that failed its check in validation_failures with
+# no record in that state, an invoice put aside in Manual Review while its
+# order's record stays saved, say.
+SET_ASIDE_COUNTS = ("manual_review", "validation_failures")
+
+
+def _checked_items(root: Path) -> dict:
+    """The set-aside records a person has said are checked, each id with
+    when. On PaperPull Server a note that is a link is read as none, since
+    what was read through it would be written back into the shared folder."""
+    path = root / CHECKED_FILE
+    if not server_mode.own_file(path):
+        return {}
+    data = _read_json(path)
+    return data if isinstance(data, dict) else {}
+
+
+def _still_checked(when, record: dict) -> str:
+    """When a person said a set-aside record was checked, or "" when they
+    have not, or when a run has written the record since (updated_at), so a
+    document set aside again by a later run is looked at again."""
+    said, since = _when(when), _when(record.get("updated_at"))
+    if said is None or (since is not None and since > said):
+        return ""
+    return str(when)
+
+
+def _named_inside(path: Path, root: Path) -> bool:
+    """Whether a path's own words put it inside root, judged before the
+    disk is asked, so a record naming a share on another computer is never
+    reached for."""
+    try:
+        here, home = _same(str(path)), _same(str(root))
+        return os.path.commonpath([here, home]) == home
+    except ValueError:
+        return False
+
+
+def _set_aside_file(root: Path, record: dict, kept_out=(), base=None):
+    """The file a set-aside record names, or None. Only a plain document
+    inside the account's own folder and in none of `kept_out`, another
+    person's folder or a browser profile a config put inside it
+    (_not_for_documents), since a record can have come from another
+    computer. There its full path means nothing, so the file's name is
+    looked for in Manual Review too. A path a run wrote as relative is read
+    from the install's own folder, `base`, where every run starts."""
+    raw, named = str(record.get("pdf_path") or ""), str(record.get("pdf_filename") or "")
+    tries = [Path(raw) if Path(raw).is_absolute() else (base or root) / raw] if raw else []
+    tries += [root / "Manual Review" / Path(n).name for n in (raw, named) if n]
+    # A folder that holds this account's own, the first person's install
+    # folder around a second person's say, keeps nothing out of it.
+    kept_out = [other for other in kept_out if not _within(root, other)]
+    for path in tries:
+        if not _named_inside(path, root):
+            continue
+        try:
+            inside = path.resolve(strict=True).is_relative_to(root.resolve())
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if (inside and path.is_file() and not path.is_symlink()
+                and path.suffix.lower() in OPENS_FROM_THE_PANEL
+                and not any(_within(path, other) for other in kept_out)):
+            return path
+    return None
+
+
+def _to_check(root: Path, meta: dict, account: str) -> list:
+    """What this account has set aside, newest first, for its page to list.
+    A receipt's record names it by its summary and purchase date."""
+    records = _read_json(root / "progress.json")
+    if not isinstance(records, dict):
+        return []
+    aside = {key: rec for key, rec in records.items()
+             if isinstance(rec, dict) and rec.get("state") == TO_CHECK_STATE}
+    if not aside:
+        return []
+    checked, kept_out, base = _checked_items(root), _not_for_documents(meta, account), Path(meta["dir"])
+    items = [{"id": key,
+              "label": str(rec.get("title") or rec.get("summary") or rec.get("category")
+                           or rec.get("document_type") or "Document"),
+              "date": str(rec.get("date") or rec.get("purchase_date") or ""),
+              "why": str(rec.get("notes") or ""),
+              "file": _set_aside_file(root, rec, kept_out, base) is not None,
+              "saved": bool(rec.get("pdf_path")),
+              "set_aside_at": str(rec.get("updated_at") or ""),
+              "checked": _still_checked(checked.get(key), rec)}
+             for key, rec in aside.items()]
+    return sorted(items, key=lambda item: item["date"], reverse=True)
+
+
+def _all_checked(last, items: list) -> bool:
+    """Whether a person has been through all that the last run left them.
+    Never when any count of SET_ASIDE_COUNTS is more than the records the
+    run wrote in that state, since the rest have no record to list, a card
+    or a plan left unread (American Express, NetBenefits), a receipt that
+    never showed (core not_shown) or an invoice that failed its check
+    (Target). Nor when it left what checking does not answer."""
+    result = last.get("result") if isinstance(last, dict) else None
+    if not (items and isinstance(result, dict) and all(item["checked"] for item in items)):
+        return False
+    if any(result.get(k) for k in NOT_ANSWERED_BY_CHECKING):
+        return False
+    started, counts = _when(last.get("started")), [result.get(k) for k in SET_ASIDE_COUNTS]
+    if started is None or any(type(count) is not int for count in counts):
+        return False
+    at = [_when(item["set_aside_at"]) for item in items]
+    this_run = sum(1 for when in at if when is not None and when >= started)
+    return all(count <= this_run for count in counts)
+
+
 def _owner_of(meta: dict, account: str) -> str:
     """The account holder's name as the account's config gives it, or ""."""
     config = Path(meta["dir"]) / ("config.json" if account == "primary"
@@ -1648,8 +2000,12 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     log = _read_run_log(root)
     last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
     outcome = _last_outcome(last)
+    to_check = _to_check(root, meta, account) if outcome == "attention" else []
+    if _all_checked(last, to_check):
+        outcome = ""
     running = _RUNS.get((name, account))
     state = _account_state(row, outcome, gaps, known)
+    quiet = _quieted(state, last, _done_at(root), (row or {}).get("cadence_days"), gaps=gaps)
     return {
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
@@ -1659,10 +2015,13 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "gets": cards.get(slug, {}).get("documents", ""),
         "group": cards.get(slug, {}).get("group", ""),
         "kind": (row or {}).get("kind") or kind,
-        "state": state,
+        "state": quiet["state"],
+        "marked_done": quiet["marked_done"],
+        "checked_quiet": quiet["checked_quiet"],
+        "to_check": to_check,
         # A gap a whole, clean run could not fill, left out of "may have
         # something new" on the home page (#149).
-        "settled": _settled(state, (row or {}).get("gaps"), log),
+        "settled": _settled(quiet["state"], (row or {}).get("gaps"), log),
         "documents": (row or {}).get("documents") or 0,
         "newest": _jsonable((row or {}).get("newest")),
         # When the app last read the provider's whole list, from the note
@@ -1806,7 +2165,7 @@ def account_rows() -> list:
                     "group": cards.get(slug, {}).get("group", ""), "kind": kind,
                     "state": "nostatus", "settled": False, "documents": 0, "newest": None,
                     "checked": None, "ran": None,
-                    "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
+                    "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [], "to_check": [],
                     "last_run": None, "last_outcome": "", "runs": [], "latest": [],
                     "running": dict(running) if running else None,
                     "runnable": meta.get("runnable", True),
@@ -2031,7 +2390,7 @@ def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") 
     return folder
 
 
-@app.get("/api/saved-in", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.get("/api/saved-in", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 def api_saved_in(app: str = "", account: str = "primary"):
     """Where an account's last download run saved its documents
     (_saved_folder), for the page to say "Saved to" it beside an Open folder
@@ -2049,7 +2408,7 @@ def api_saved_in(app: str = "", account: str = "primary"):
     return {"folder": folder if folder and Path(folder).is_dir() else ""}
 
 
-@app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 async def api_reveal(request: Request):
     """Show where one account's documents are in the file manager
     (_where_documents_are). Takes the app's name and the account, both
@@ -2116,6 +2475,8 @@ def _root_problem(raw: str):
         return None, "Give the full path, starting from the drive (C:\\) or from /."
     if root.exists() and not root.is_dir():
         return None, "That is a file, not a folder. Choose a folder."
+    if _in_fresh_checkout_apps(root):
+        return None, CHECKOUT_APPS
     above = root
     while not above.exists() and above.parent != above:
         above = above.parent
@@ -2195,7 +2556,7 @@ def _synced_by(root: Path) -> str:
     return ""
 
 
-@app.post("/api/root/check", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.post("/api/root/check", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 async def api_root_check(request: Request):
     """What the welcome says of the folder typed in its first step, before
     the person goes on. That is what is wrong with it, the providers already
@@ -2227,7 +2588,7 @@ def _root_check(raw) -> dict:
             "synced_by": _synced_by(root)}
 
 
-@app.get("/api/root", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/root", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_root_get():
     root = apps_root()
     return {"root": str(root), "exists": root.is_dir(),
@@ -2235,7 +2596,7 @@ def api_root_get():
             "settings_file": str(_settings_path())}
 
 
-@app.post("/api/root", dependencies=[Depends(_same_origin_only), Depends(_desktop_only),
+@app.post("/api/root", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only),
                                      Depends(_not_in_sample)])
 async def api_root_set(request: Request):
     """Remember where the downloaders live.
@@ -2263,6 +2624,8 @@ async def api_root_set(request: Request):
                                  "(C:\\) or from /.")
     if not root.is_dir():
         raise HTTPException(400, "That folder does not exist. Check the path, or create the folder first.")
+    if _in_fresh_checkout_apps(root):
+        raise HTTPException(400, CHECKOUT_APPS)
     data = _read_settings()
     data["apps_root"] = str(root.resolve())
     try:
@@ -2922,7 +3285,8 @@ def _seed_missing_cores(root: Path) -> dict:
 def api_providers():
     installed = set()
     root = apps_root()
-    if root.is_dir():
+    # A fresh checkout's apps/ holds templates, none of them set up.
+    if root.is_dir() and not fresh_checkout():
         installed = {d.name for d in root.iterdir() if d.is_dir() and _entry_script(d)}
     out = list_providers()
     for p in out:
@@ -2933,7 +3297,7 @@ def api_providers():
             "suggested_root": str(suggested), "server": server_mode.enabled()}
 
 
-@app.post("/api/create", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/create", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_create(request: Request):
     """Make installs for the chosen providers under the chosen folder, and
     remember that folder. The folder is created if it does not exist, since a
@@ -3021,7 +3385,7 @@ def _account_module():
     return None
 
 
-@app.post("/api/account", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/account", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_account(request: Request):
     """Make config.<label>.json for one app, a second person's account with
     its own folder beside the first one's, its own browser profile and its
@@ -3052,6 +3416,167 @@ async def api_account(request: Request):
     return {"app": name, "account": label, "config": dest.name,
             "output_dir": cfg.get("output_dir", ""), "cdp_url": cfg.get("cdp_url", ""),
             "owner": cfg.get("owner", "")}
+
+
+@app.post("/api/account/done", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                             Depends(_not_in_sample)])
+async def api_account_done(request: Request):
+    """Take an account off the list until its next run or the time runs out,
+    or put it back. Writes only this account's own note of it."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    body = body if isinstance(body, dict) else {}
+    return await to_thread.run_sync(_save_done, body)
+
+
+def _save_done(body: dict) -> dict:
+    name = str(body.get("app") or "")
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    account = _account_named(apps[name], body.get("account"))
+    try:
+        root = _account_root(apps[name], account)
+    except ValueError:
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
+    done_at = datetime.now().isoformat(timespec="seconds") if body.get("done") else ""
+    _write_account_note(root, DONE_FILE, {"done_at": done_at})
+    return {"app": name, "account": account, "done_at": done_at}
+
+
+def _write_account_note(root: Path, name: str, data: dict) -> None:
+    try:
+        # As the panel's other notes in an account's folder are written, so
+        # on PaperPull Server a folder that leads out of the data folder
+        # through a link is refused rather than written into.
+        _replace_text(root / name, json.dumps(data))
+    except OSError as e:
+        raise HTTPException(500, "Could not save that (%s). Check that its folder can be written to, then try again." % e)
+
+
+def _set_aside_record(body: dict):
+    """(the app, the account, its folder, the item's id, its record) from
+    what the page sent, the id checked against the account's own records.
+    Refused while a run, a Rename or a Move goes on that account, since
+    each writes its records and moves its files, and a file open in a
+    viewer is one a Rename or a Move on Windows cannot move."""
+    name = str(body.get("app") or "")
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    account = _account_named(apps[name], body.get("account"))
+    if (name, account) in _RUNS:
+        raise HTTPException(409, "Wait for the run on %s to finish first." % _who(name, account))
+    try:
+        root = _account_root(apps[name], account)
+    except ValueError:
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
+    records, key = _read_json(root / "progress.json"), str(body.get("id") or "")
+    record = records.get(key) if isinstance(records, dict) else None
+    if not isinstance(record, dict) or record.get("state") != TO_CHECK_STATE:
+        raise HTTPException(404, "That document is no longer set aside. Reload the page.")
+    return apps[name], account, root, key, record
+
+
+@app.post("/api/account/check", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                              Depends(_not_in_sample)])
+async def api_account_check(request: Request):
+    """Say a person has checked one document a run set aside, or take that
+    back. Writes only this account's own note of it."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    return await to_thread.run_sync(_save_checked, body if isinstance(body, dict) else {})
+
+
+def _save_checked(body: dict) -> dict:
+    _meta, _account, root, key, _record = _set_aside_record(body)
+    checked = _checked_items(root)
+    if body.get("checked"):
+        checked[key] = datetime.now().isoformat(timespec="seconds")
+    else:
+        checked.pop(key, None)
+    _write_account_note(root, CHECKED_FILE, checked)
+    return {"id": key, "checked": checked.get(key, "")}
+
+
+@app.post("/api/account/check/open", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                                   Depends(_desktop_only), Depends(_not_in_sample)])
+async def api_account_check_open(request: Request):
+    """Open one document a run set aside in the computer's own viewer. Takes
+    the record's id and never a path."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    return await to_thread.run_sync(_open_set_aside, body if isinstance(body, dict) else {})
+
+
+def _open_set_aside(body: dict) -> dict:
+    meta, account, root, _key, record = _set_aside_record(body)
+    path = _set_aside_file(root, record, _not_for_documents(meta, account), Path(meta["dir"]))
+    if path is None:
+        raise HTTPException(404, "That file is not in this account's own folder now, so it does not "
+                                 "open from here. Reload the page.")
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(path))  # noqa: S606
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
+    except Exception as e:
+        raise HTTPException(500, "Could not open the file (%s)." % e)
+    return {"ok": True}
+
+
+@app.post("/api/account/owner", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                              Depends(_not_in_sample)])
+async def api_account_owner(request: Request):
+    """Set the name on one account, the first person's or another's, in
+    that account's own config, a copy kept in Backups first. An empty name
+    clears it. Asked for here since only a console could ever ask an app
+    for it, and the welcome asks once, for every provider at the same time."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    body = body if isinstance(body, dict) else {}
+    # Off the event loop, as a config on a share may be slow to answer.
+    return await to_thread.run_sync(_save_owner, body)
+
+
+def _save_owner(body: dict) -> dict:
+    name = str(body.get("app") or "")
+    owner = str(body.get("owner") or "").strip()[:80]
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    account = _account_named(apps[name], body.get("account"))
+    running = "Wait for the run on %s to finish first." % _who(name, account)
+    if (name, account) in _RUNS:
+        raise HTTPException(409, running)
+    cfg_path = _account_config(apps[name], account)
+    if not cfg_path.is_file():
+        raise HTTPException(404, "That account has no settings yet. Sign in to it once with Open sign-in window first.")
+    if not server_mode.own_file(cfg_path):
+        raise HTTPException(409, "%s's settings file is a link in the shared folder, so the name was not changed." % name)
+    current = _read_json(cfg_path)
+    if not isinstance(current, dict):
+        raise HTTPException(409, "%s's settings could not be read, so the name was not changed." % name)
+    if str(current.get("owner") or "").strip() == owner:
+        return {"app": name, "account": account, "owner": owner, "written": False}
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    # Asked again under the lock that write takes, for a run started since.
+    if not _write_config(cfg_path, "owner", owner, stamp, why="owner", keep_empty=True,
+                         when=lambda _cfg: (name, account) not in _RUNS):
+        if (name, account) in _RUNS:
+            raise HTTPException(409, running)
+        raise HTTPException(500, "The name could not be saved. Check that %s's folder can be written to, then try again." % name)
+    return {"app": name, "account": account, "owner": owner, "written": True}
 
 
 # Said of a provider's folder with no config.json, which a sign-in never
@@ -3159,7 +3684,7 @@ def _migrate_or_fail():
     return mod
 
 
-@app.get("/api/history/export", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.get("/api/history/export", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 def api_history_export():
     """The history file, handed to the browser. Written in memory, so no
     copy of it is left on this computer or in the server's shared folder."""
@@ -3206,6 +3731,9 @@ def _history_root(raw: str):
     root the panel is on. (root, whether it was chosen here)."""
     if server_mode.enabled():
         return server_mode.data_root(), False
+    # A fresh checkout's apps/ is its templates, so nothing is imported there.
+    if _in_fresh_checkout_apps(Path(raw).expanduser() if raw else apps_root()):
+        raise HTTPException(400, CHECKOUT_APPS)
     if not raw:
         return apps_root(), False
     root = Path(raw).expanduser()
@@ -3373,7 +3901,7 @@ def _history_walk(mod, manifest: dict, root: Path, apply: bool) -> list:
     return rows
 
 
-@app.post("/api/history/plan", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/history/plan", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_history_plan(request: Request):
     """What Import would do with a history file. Writes nothing."""
     mod, manifest, root, _ = await _history_upload(request)
@@ -3382,7 +3910,7 @@ async def api_history_plan(request: Request):
             "version": manifest.get("version") or ""}
 
 
-@app.post("/api/history/import", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/history/import", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_history_import(request: Request):
     """Set up each provider and person a history file names that is not
     set up here, with their settings, and fold in what each had already
@@ -3485,7 +4013,7 @@ def _latest_failure(meta: dict, account: str = "primary", pattern: str = "failur
     return None
 
 
-@app.get("/api/failure/latest", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/failure/latest", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_failure_latest(app: str = "", account: str = "primary"):
     """Whether the run that just stopped left a file worth attaching."""
     apps = discover_apps()
@@ -3497,7 +4025,7 @@ def api_failure_latest(app: str = "", account: str = "primary"):
     return {"found": True, "name": found.name}
 
 
-@app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 async def api_failure_reveal(request: Request):
     """Show that file in the file manager, selected. Takes no path from the
     page, only the app name and which kind of file, the failure file, or a
@@ -3529,7 +4057,7 @@ async def api_failure_reveal(request: Request):
     return {"ok": True}
 
 
-@app.get("/api/failure/download", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/failure/download", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_failure_download(app: str = "", account: str = "primary"):
     """On PaperPull Server, the newest failure file of one app, handed to the
     browser to attach to an issue. Only the app's name comes from the page,
@@ -3640,7 +4168,7 @@ def _handed(meta: dict, account: str, name: str, path: Path) -> Response:
 REPORT_FILES = {"diagnose": "survey-*.json", "record": "recording.json"}
 
 
-@app.get("/api/diagnostics/download", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/diagnostics/download", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_diagnostics_download(app: str = "", account: str = "primary", action: str = ""):
     """On PaperPull Server, the file a support report or a recording wrote
     in the last hour, handed to the browser to attach to an issue, where
@@ -3703,7 +4231,7 @@ def _zip_name(arc: str) -> str:
     return arc.replace("\\", "_")
 
 
-@app.get("/api/aside/download", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/aside/download", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_aside_download(app: str = "", account: str = "primary"):
     """On PaperPull Server, the documents an account has set aside for a
     look, in one zip, where the desktop opens the provider's folder. They
@@ -3759,7 +4287,7 @@ def api_aside_download(app: str = "", account: str = "primary"):
     return StreamingResponse(chunks(), media_type="application/zip", headers=_attachment(named))
 
 
-@app.post("/api/record/stop", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/record/stop", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_record_stop(request: Request):
     """End a recording that is waiting on us.
 
@@ -3812,7 +4340,7 @@ def _removal_summary(folder: Path) -> dict:
     return {"pdfs": pdfs, "history": history, "profile": profile}
 
 
-@app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_remove(request: Request):
     """Move an install out of the list. The name must be one the panel
     itself discovered, so nothing outside the root can ever be named."""
@@ -3924,7 +4452,7 @@ def _run_env(meta: dict) -> dict:
     return env
 
 
-@app.get("/api/run", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/run", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_run(app: str, account: str = "primary", action: str = "pilot",
             year: str = "", start: str = "", end: str = "",
             redownload: Optional[str] = None, confirmed: Optional[str] = None):
@@ -3937,7 +4465,7 @@ def api_run(app: str, account: str = "primary", action: str = "pilot",
     return _start_run(app, account, action, _scope_flags(year, start, end))
 
 
-@app.post("/api/run", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/run", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_run_body(request: Request):
     """The run GET /api/run starts, asked for with a JSON body instead.
 
@@ -4092,7 +4620,7 @@ async def _review_json(request: Request):
         raise HTTPException(400, "expected a JSON body")
 
 
-@app.post("/api/review-names", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/review-names", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_review_names(request: Request):
     """The receipts an app would ask a better name for. Renames nothing it
     names, but an app may write its own records while it reads them (Target
@@ -4122,7 +4650,7 @@ async def api_review_names(request: Request):
             _RUNNING.discard(app_name)
 
 
-@app.post("/api/review-names/apply", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/review-names/apply", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_review_names_apply(request: Request):
     """Rename each receipt given a new summary, streamed as a run is."""
     body = await _review_json(request)
@@ -4133,6 +4661,172 @@ async def api_review_names_apply(request: Request):
     return await to_thread.run_sync(_start_run, asked["app"], asked["account"],
                                     "review_names", (), False,
                                     json.dumps({"answers": answers}))
+
+
+# The runs that are the end of a visit to a provider. Try the newest few and
+# Check what's there are usually followed by a run that needs the window.
+CLOSE_WINDOW_AFTER = ("all", "resume")
+
+
+def _closes_its_window(action, code, result) -> bool:
+    """Whether a run has finished with its sign-in window. Only a run that
+    went all the way: one that stopped leaves the window open, since the
+    next thing the person needs is that page. Never on PaperPull Server,
+    whose windows live on its own screen, and never with
+    "close_signin_window": false in the settings. Which window, and whether
+    it is safe to close now, is _close_sign_in_window's to say."""
+    return (action in CLOSE_WINDOW_AFTER and code == 0 and isinstance(result, dict) and not result.get("stopped")
+            and not server_mode.enabled() and _read_settings().get("close_signin_window") is not False)
+
+
+def _port_is_only_its_own(meta: dict, account: str) -> bool:
+    """Whether no other config under the root names this account's port, as
+    paperpull_core.ports reads them. A browser on a port two configs name is
+    the one a run of either attaches to and a sign-in of either joins, so
+    it may be another account's, mid run or mid sign-in. False too when
+    that cannot be read."""
+    mod = _ports()
+    if mod is None:
+        return False
+    try:
+        return mod.key_of(_account_config(meta, account)) not in mod.findings(mod.installs_in(apps_root()))
+    except Exception:
+        return False
+
+
+def _sign_in_port(meta: dict, account: str) -> Optional[int]:
+    """The debugging port of the account's sign-in browser, or None."""
+    try:
+        return urllib.parse.urlsplit(str(_config_of(meta, account).get("cdp_url") or "")).port
+    except ValueError:
+        return None
+
+
+# -- waiting for a sign-in ------------------------------------------------------
+#
+# Open sign-in window used to end with the person coming back here to press
+# Get new. Once the window is open, the page asks here to be told when the
+# person has signed in, and starts that run itself. The address and title of
+# the window's tabs are all that is looked at, from its own debugging port on
+# this computer, and neither goes further than this file (core signin_watch).
+#
+# What to watch comes from the sign-in itself, kept here per account until the
+# wait has used it. A wrong "signed in" costs one run, which finds nobody
+# signed in and says so, and another wait needs another press of the button.
+# Each sign-in's plan is its own. A sign-in starting drops the one before it,
+# so a wait is only ever for the latest sign-in of its account, and only
+# that wait's page starts a run, once.
+
+# Long enough for a code by text or email, short enough that the panel does
+# not go on watching a window nobody came back to.
+SIGN_IN_WAIT_SECONDS = 600
+SIGN_IN_LOOK_EVERY = 2.0
+_SIGN_IN_PLANS: dict = {}
+
+
+@app.get("/api/sign-in/wait", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
+def api_sign_in_wait(app: str, account: str = "primary"):
+    """A stream that ends by saying how the wait for this account's sign-in
+    came out, as signed_in, timed_out, no_window, run_started, replaced by
+    another sign-in of the account since, or cannot_tell for a sign-in the
+    panel has no way to watch."""
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    if account not in apps[app]["accounts"]:
+        raise HTTPException(400, "That account is no longer here. Reload the page.")
+    meta = apps[app]
+    key = (app, account)
+
+    async def stream():
+        from paperpull_core import signin_watch
+        plan = _SIGN_IN_PLANS.get(key)
+        port = await to_thread.run_sync(_sign_in_port, meta, account)
+        # Not on PaperPull Server, whose sign-in is docked in the page. Nor
+        # on a port another config names too, whose window may be another
+        # account's sign-in, and whose run would then save that account's
+        # documents as this one's.
+        if server_mode.enabled() or plan is None or not port or \
+                not await to_thread.run_sync(_port_is_only_its_own, meta, account):
+            yield _event("cannot_tell", "ended")
+            return
+        yield _event("", "waiting")
+        watch = signin_watch.Watch(plan)
+        silent = 0
+        deadline = time.monotonic() + SIGN_IN_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            # Somebody pressed a run for this account, here or in another
+            # tab, and it is that run's window now. The sign-in that opened
+            # this wait may still be on its way out as it starts.
+            if _RUNS.get(key, {}).get("action") not in (None, "login"):
+                yield _event("run_started", "ended")
+                return
+            # Another sign-in of this account started since, in another tab
+            # most often, and the run is for that one's page to start.
+            if _SIGN_IN_PLANS.get(key) is not plan:
+                yield _event("replaced", "ended")
+                return
+            tabs = await to_thread.run_sync(signin_watch.read_tabs, port)
+            if tabs is None:
+                # The browser was closed. Asked again first, as a browser
+                # busy starting a page can be slow to answer.
+                silent += 1
+                if silent >= 3:
+                    yield _event("no_window", "ended")
+                    return
+            elif watch.look(tabs):
+                silent = 0
+                # Taken with nothing awaited since it was asked, so of two
+                # waits for one sign-in only one is told.
+                if _SIGN_IN_PLANS.get(key) is not plan:
+                    yield _event("replaced", "ended")
+                    return
+                _SIGN_IN_PLANS.pop(key, None)
+                yield _event("signed_in", "ended")
+                return
+            else:
+                silent = 0
+            # Said each look, so a page that went away, Stop waiting pressed
+            # or the tab closed, ends this too, not ten minutes later.
+            yield _event("", "waiting")
+            await async_sleep(SIGN_IN_LOOK_EVERY)
+        yield _event("timed_out", "ended")
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _close_sign_in_window(meta: dict, account: str) -> list:
+    """Close the account's sign-in browser once its run is done, unless the
+    person is in it, or its port is another account's too. Whatever goes
+    wrong here leaves the window open and never the run's own end."""
+    try:
+        return _close_own_window(meta, account)
+    except Exception:
+        return []
+
+
+def _close_own_window(meta: dict, account: str) -> list:
+    cfg = _config_of(meta, account)
+    port = _sign_in_port(meta, account)
+    try:
+        # As the browser was opened on it (browser._launch), "~" and all.
+        profile = Path(str(cfg.get("profile_dir") or "")).expanduser()
+    except (ValueError, RuntimeError):
+        return []
+    if not port or not str(profile) or str(profile) == ".":
+        return []
+    if not _port_is_only_its_own(meta, account):
+        return []
+    from paperpull_core import browser
+    if not profile.is_absolute():
+        profile = Path(meta["dir"]) / profile
+    closed = browser.close_signin_browser(profile, port)
+    if closed.get("in_use"):
+        return ["Left the sign-in window open, since you are using it."]
+    if not closed.get("closed"):
+        return []
+    return ["Closed the sign-in window, since this run finished."]
 
 
 def _start_run(app: str, account: str, action: str, scope_flags, redownload=False,
@@ -4265,6 +4959,10 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             root = None
         _RUNS[(app, account)] = {"action": action,
                                  "started": datetime.now().isoformat(timespec="seconds")}
+        if action == "login":
+            # What to watch is this sign-in's from now, or nothing, and a
+            # wait for an earlier one ends (api_sign_in_wait).
+            _SIGN_IN_PLANS.pop((app, account), None)
         noted = False
         handed = None
         # What the run saved, read once its process has ended (below).
@@ -4357,8 +5055,14 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                     read_all = True
                     break
                 parsed = run_result.parse(line.rstrip("\r\n"), mark)
+                plan = run_result.sign_in_plan(line.rstrip("\r\n"), mark)
                 if parsed is not None:
                     result = parsed
+                elif plan is not None:
+                    # Kept for a sign-in alone. Any run that opens a window
+                    # says it, and none shows it among its lines.
+                    if action == "login":
+                        _SIGN_IN_PLANS[(app, account)] = plan
                 else:
                     yield _event(line.rstrip())
             code = await to_thread.run_sync(proc.wait)
@@ -4380,8 +5084,20 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             # account's documents folder, if it has one (#102), after the
             # plug-ins have read each file where the run saved it.
             if action in DOWNLOAD_ACTIONS and root is not None:
-                said = await to_thread.run_sync(_move_new_documents, meta, account, saved, env)
+                # The move is a Move applying its changes, so /api/finishing
+                # names it while it goes and a quit of PaperPull.app waits.
+                running = _RUNS.get((app, account))
+                if running is not None:
+                    running["moving"] = True
+                try:
+                    said = await to_thread.run_sync(_move_new_documents, meta, account, saved, env)
+                finally:
+                    if running is not None:
+                        running.pop("moving", None)
                 for told in said:
+                    yield _event(told)
+            if _closes_its_window(action, code, result):
+                for told in await to_thread.run_sync(_close_sign_in_window, meta, account):
                     yield _event(told)
             if result is not None:
                 yield _event(json.dumps(result), "result")
@@ -4504,9 +5220,11 @@ def _read_json(p: Path):
 
 
 def _config_files(d: Path) -> list:
-    """Every account's config in an install, the first person's first."""
+    """Every account's config in an install, the first person's first, the
+    ones _accounts lists. A copy of the example nobody filled in is not
+    written to, since a pattern written into it would make it an account."""
     out = [d / "config.json"] if (d / "config.json").is_file() else []
-    out += [p for p in sorted(d.glob("config.*.json")) if p.name != "config.example.json"]
+    out += [p for p in sorted(d.glob("config.*.json")) if not _is_example(p)]
     return out
 
 
@@ -4654,7 +5372,7 @@ def _write_config_now(cfg_path: Path, key: str, value: str, stamp: str, why: str
     return True
 
 
-@app.get("/api/naming", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/naming", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_naming(app: str):
     naming = _naming()
     d = _naming_app(app)
@@ -4675,7 +5393,7 @@ def api_naming(app: str):
     }
 
 
-@app.post("/api/naming/preview", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/naming/preview", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_naming_preview(request: Request):
     body = await request.json()
     naming = _naming()
@@ -4715,7 +5433,7 @@ async def api_naming_preview(request: Request):
 
 
 @app.post("/api/naming/save",
-          dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+          dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_naming_save(request: Request):
     """Write a pattern where it applies. "shared" goes into every install of
     this app's kind, every account's config, so all receipts apps or all
@@ -4823,7 +5541,47 @@ def _within(path, folder) -> bool:
         where, home = Path(path).resolve(), Path(folder).resolve()
     except (OSError, RuntimeError, ValueError):
         return False
-    return where == home or home in where.parents
+    if where == home or home in where.parents:
+        return True
+    # A Mac's disk most often tells names apart without case, as
+    # _in_root_name has it, so "target receipts" can be the folder "Target
+    # Receipts", and resolve() there keeps the spelling it was given.
+    # Windows paths already compare so. Whether it is, the disk says.
+    if sys.platform == "darwin":
+        home_name = str(home).casefold()
+        return any(str(step).casefold() == home_name and _one_folder(step, home)
+                   for step in (where, *where.parents))
+    return False
+
+
+def _one_folder(spelled: Path, home: Path) -> bool:
+    """Whether spelled, the path home in other letter case, is that folder
+    on this disk. A Mac's disk can be formatted to tell case apart, and then
+    the two are two folders. The nearest folder made of home's is asked. A
+    disk without case finds it in either spelling, and finds a name not yet
+    made in it as it finds the names already there. A disk that cannot say
+    has the two taken as one, which refuses more than it has to."""
+    try:
+        made = home
+        while not made.exists():
+            if made.parent == made:
+                return True
+            made = made.parent
+        above = len(home.parts) - len(made.parts)
+        twin = spelled.parents[above - 1] if above else spelled
+        if not (twin.exists() and os.path.samefile(twin, made)):
+            return False
+        if not above:
+            return True
+        # The first name in name order, so one folder always gets one answer.
+        for name in sorted(os.listdir(made)):
+            other = name.swapcase()
+            if other != name and other.swapcase() == name:
+                other = os.path.join(made, other)
+                return os.path.exists(other) and os.path.samefile(other, os.path.join(made, name))
+        return True
+    except (OSError, ValueError, IndexError):
+        return True
 
 
 def _profiles_known(apps: dict) -> list:
@@ -4884,12 +5642,16 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
                         "Choose a folder of its own." % who)
             if (name, other) == (app_name, account) and _within(target, root):
                 # Inside its own folder it may be, but not where a document
-                # that failed its check or a run's own records are kept.
+                # that failed its check or a run's own records are kept, in
+                # any letter case, as a run tells them (core storage
+                # _in_a_kept_folder). The folder in it is counted, not
+                # matched, since on a Mac its spelling can be another.
                 try:
-                    first = target.resolve().relative_to(root.resolve()).parts[:1]
+                    first = target.resolve().parts[len(root.resolve().parts):][:1]
                 except (ValueError, OSError, RuntimeError):
                     first = ()
-                if first and (first[0] in KEPT_FOLDERS or first[0].startswith(".")):
+                kept = {f.casefold() for f in KEPT_FOLDERS}
+                if first and (first[0].casefold() in kept or first[0].startswith(".")):
                     return ("That folder is inside %s, where documents that failed their "
                             "check or a run's own logs and backups are kept. Choose a folder of their "
                             "own." % first[0])
@@ -5319,13 +6081,13 @@ async def _folder_body(request: Request) -> dict:
     return body
 
 
-@app.get("/api/documents", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/documents", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_documents(app: str, account: str = "primary"):
     apps, meta, root = _documents_account(app, account)
     return _documents_answer(meta, account, root, apps=apps)
 
 
-@app.post("/api/documents", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/documents", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_documents_save(request: Request):
     """Give one account a documents folder of its own, in its own config, a
     copy kept in Backups first, or, with "follow", set it back to its folder
@@ -5374,7 +6136,7 @@ def _save_account_documents(body: dict) -> dict:
 
 
 @app.post("/api/documents/root",
-          dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+          dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_documents_root_save(request: Request):
     """Set or clear the one documents folder, in the panel's settings, and
     give every account that follows it its folder inside it, in its own
@@ -5447,6 +6209,8 @@ async def api_terms(request: Request):
         raise HTTPException(400, "expected a JSON body")
     if not isinstance(body, dict) or body.get("accepted") != TERMS_VERSION:
         raise HTTPException(409, "The terms have changed. Reload the page to read them.")
+    global _TERMS_TAKEN
+    _TERMS_TAKEN = True
     data = _read_settings()
     data["terms_accepted"] = TERMS_VERSION
     try:
@@ -5496,11 +6260,36 @@ def index() -> str:
     server = server_mode.enabled()
     bar = server_mode.server_bar() if server else ""
     footer = FOOTER_SERVER if server else FOOTER_DESKTOP
-    return (HTML.replace("__FOOTER__", footer)
+    dev = _dev_info()
+    page = (HTML.replace("__FOOTER__", footer)
             .replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
             .replace("__SERVER__", "true" if server else "false")
             .replace("__TERMS_VERSION__", TERMS_VERSION)
             .replace("__TERMS_DUE__", "true" if terms_due() else "false"))
+    if dev:
+        status_suffix = "" if dev.get("clean") else "*"
+        badge_text = f"dev: {dev['branch']}{status_suffix}"
+        # The details are a card the stylesheet shows the moment the badge is
+        # hovered, or the brand link has the keyboard. A native title tooltip
+        # waits for the pointer to rest and goes on any movement (Chrome on
+        # macOS), so it took several tries to read.
+        rows = "".join("<dt>%s</dt><dd>%s</dd>" % (label, html.escape(value, quote=False))
+                       for label, value in (("Branch", dev["branch"]), ("Commit", dev["commit"]),
+                                            ("Status", "clean" if dev.get("clean") else "modified")))
+        dev_badge_html = (f'<span id="devbadge" class="badge dev-badge">'
+                          f'{html.escape(badge_text, quote=False)}'
+                          f'<span class="dev-card" role="tooltip"><dl>{rows}</dl></span></span>')
+        page = page.replace('<span id="devbadge" class="badge dev-badge" hidden></span>', dev_badge_html, 1)
+
+        about_text = (
+            f'<p class="muted small" id="g-dev-info" style="margin-top: 8px;">'
+            f'<b>Development branch:</b> {html.escape(dev["branch"], quote=False)} '
+            f'({html.escape("clean" if dev.get("clean") else "modified", quote=False)})<br>'
+            f'<b>Commit:</b> <code>{html.escape(dev["commit"], quote=False)}</code></p>'
+        )
+        page = page.replace('<p class="muted small" id="g-dev-info" hidden style="margin-top: 8px;"></p>', about_text, 1)
+
+    return page
 
 
 @app.get("/", response_class=HTMLResponse)

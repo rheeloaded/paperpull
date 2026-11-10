@@ -66,10 +66,11 @@ def test_nothing_recorded_is_never_a_recording_saved(path):
 
 def test_the_panel_reads_the_same_numbers():
     js = (REPO / "gui" / "static" / "app.js").read_text(encoding="utf-8")
-    m = re.search(r"const NOTHING_OPENED = '(\d+)', NOTHING_RECORDED = '(\d+)', NOT_SIGNED_IN = '(\d+)';", js)
-    assert m, "app.js names the three codes"
+    m = re.search(r"const NOTHING_OPENED = '(\d+)', NOTHING_RECORDED = '(\d+)', NOT_SIGNED_IN = '(\d+)', "
+                  r"NOTHING_READ = '(\d+)';", js)
+    assert m, "app.js names the four codes"
     assert tuple(map(int, m.groups())) == (run_reporting.NOTHING_OPENED, run_reporting.NOTHING_RECORDED,
-                                           run_reporting.NOT_SIGNED_IN)
+                                           run_reporting.NOT_SIGNED_IN, run_reporting.NOTHING_READ)
 
 
 def test_the_codes_are_not_ones_an_app_already_uses():
@@ -77,4 +78,66 @@ def test_the_codes_are_not_ones_an_app_already_uses():
     assert run_reporting.NOTHING_OPENED not in taken
     assert run_reporting.NOTHING_RECORDED not in taken
     assert run_reporting.NOT_SIGNED_IN not in taken
-    assert len({run_reporting.NOTHING_OPENED, run_reporting.NOTHING_RECORDED, run_reporting.NOT_SIGNED_IN}) == 3
+    assert run_reporting.NOTHING_READ not in taken
+    assert len({run_reporting.NOTHING_OPENED, run_reporting.NOTHING_RECORDED, run_reporting.NOT_SIGNED_IN,
+                run_reporting.NOTHING_READ}) == 4
+
+
+@pytest.mark.parametrize("path", ENTRIES, ids=lambda p: p.parent.name)
+def test_every_diagnose_records_whether_it_was_signed_out(path):
+    """What core reads to say Nothing was read, set in every app's Diagnose."""
+    tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+    set_it = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+              and any(isinstance(t, ast.Subscript) and ast.unparse(t) == "info['signed_out']"
+                      for t in n.targets)]
+    set_it += [n for n in ast.walk(tree) if isinstance(n, ast.Dict)
+               and any(isinstance(k, ast.Constant) and k.value == "signed_out" for k in n.keys)]
+    assert set_it, "%s never records whether Diagnose was signed out" % path.parent.name
+
+
+def _signed_out_in(fn, name: str) -> bool:
+    """Whether `name` in fn is given signed_out, by a subscript or in the
+    dict it is made from."""
+    for n in ast.walk(fn):
+        if not isinstance(n, ast.Assign):
+            continue
+        for t in n.targets:
+            if isinstance(t, ast.Subscript) and ast.unparse(t) == "%s['signed_out']" % name:
+                return True
+            if (isinstance(t, ast.Name) and t.id == name and isinstance(n.value, ast.Dict)
+                    and any(isinstance(k, ast.Constant) and k.value == "signed_out" for k in n.value.keys)):
+                return True
+    return False
+
+
+@pytest.mark.parametrize("path", ENTRIES, ids=lambda p: p.parent.name)
+def test_every_diagnose_writes_what_it_found_where_its_survey_goes(path):
+    """Core takes the finding from the detailed file written through
+    write_shaped into the folder the survey goes to (words.read_nothing_in).
+    A Diagnose that wrote it anywhere else, or wrote a dict without it,
+    would say Support report saved over a sign-in page again."""
+    fn = _method(path, "cmd_diagnose")
+    made = {t.id: ast.unparse(n.value) for n in ast.walk(fn) if isinstance(n, ast.Assign)
+            for t in n.targets if isinstance(t, ast.Name)}
+    found = []
+    for n in ast.walk(fn):
+        if not (isinstance(n, ast.Call) and getattr(n.func, "id", "") == "write_shaped" and len(n.args) >= 2):
+            continue
+        where, what = n.args[0], n.args[1]
+        folder = made.get(where.id, "") if isinstance(where, ast.Name) else ast.unparse(where)
+        if (folder.startswith("self.paths.diagnostics /") and isinstance(what, ast.Name)
+                and _signed_out_in(fn, what.id)):
+            found.append(n)
+    assert found, "%s's Diagnose never writes whether it was signed out beside its survey" % path.parent.name
+    survey = _method(path, "write_survey")
+    assert any(isinstance(n, ast.Call) and ast.unparse(n.func) == "failure.write_survey"
+               and n.args and ast.unparse(n.args[0]) == "self.paths.diagnostics"
+               for n in ast.walk(survey)), "%s's survey goes to another folder" % path.parent.name
+
+
+@pytest.mark.parametrize("path", ENTRIES, ids=lambda p: p.parent.name)
+def test_diagnose_ends_in_the_core_survey(path):
+    """Where the exit is made, so an app that stopped ending there would
+    say Support report saved again."""
+    src = path.read_text(encoding="utf-8-sig")
+    assert "failure.write_survey(" in src and "app.write_survey()" in src

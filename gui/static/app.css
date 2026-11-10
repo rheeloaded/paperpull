@@ -131,11 +131,22 @@ code, .mono { font-family: var(--mono); font-size: .93em; }
 .top { position: sticky; top: 0; height: 100vh; overflow-y: auto; background: var(--side);
        border-right: 1px solid var(--line); z-index: 25; }
 .top-in { display: flex; flex-direction: column; gap: var(--s1); min-height: 100%; padding: var(--s4) var(--s3); }
-.brand { display: flex; align-items: center; gap: 10px; padding: var(--s1) var(--s2) var(--s5); text-decoration: none;
+.brand { position: relative; display: flex; align-items: center; gap: 10px; padding: var(--s1) var(--s2) var(--s5); text-decoration: none;
          color: var(--ink); font-weight: 600; font-size: 16px; flex-wrap: wrap; }
 .brand img { width: 28px; height: 28px; border-radius: 7px; }
 .brand:hover { color: var(--ink); }
 .badge { font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 6px; background: var(--fill); color: var(--ink-2); }
+.dev-badge { background: var(--accent-soft); color: var(--accent); cursor: help; }
+/* The dev badge's details, shown at once on hover or keyboard focus. Anchored to
+   the brand so the card is the sidebar's width and a long branch wraps rather
+   than being cut off by the sidebar's scroll. */
+.dev-card { display: none; position: absolute; left: 0; right: 0; top: calc(100% - var(--s4)); z-index: 30;
+            padding: 8px 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2);
+            box-shadow: var(--shadow); color: var(--ink); font-size: 12px; font-weight: 400; cursor: default; }
+.dev-card dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; }
+.dev-card dt { color: var(--muted); }
+.dev-card dd { margin: 0; overflow-wrap: anywhere; font-family: var(--mono); }
+.dev-badge:hover .dev-card, .brand:focus-visible .dev-card { display: block; }
 .ver { font-size: 12px; font-weight: 400; color: var(--ink-2); }
 .nav { display: flex; flex-direction: column; gap: 2px; }
 .nav a, .top-right > a { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 10px;
@@ -161,6 +172,8 @@ code, .mono { font-family: var(--mono); font-size: .93em; }
 .notice.ok { background: var(--ok-soft); color: var(--ok-text); }
 .notice.warn { background: var(--warn-soft); color: var(--warn-text); }
 .notice > span, .samplebar > span { flex: 1 1 300px; }
+.roundend { margin: 6px 0 0; padding-left: 20px; }
+.notice a { color: inherit; text-decoration: underline; white-space: nowrap; }
 main { flex: 1; width: 100%; }
 .view { max-width: 1080px; margin: 0 auto; padding: var(--s8) var(--s8) 56px; }
 .view.narrow { max-width: 860px; }
@@ -513,6 +526,10 @@ dialog::backdrop { background: var(--overlay); }
 .dlg-head h2 { font-size: 19px; line-height: 1.25; }
 .dlg-head p { margin-top: 6px; color: var(--ink-2); font-size: 14px; }
 .dlg-body { padding: var(--s5) var(--s6) var(--s2); display: flex; flex-direction: column; gap: var(--s4); }
+#dlg-support .hint { margin: 4px 0 var(--s2); }
+#dlg-support .spwhat { margin-top: var(--s3); }
+#dlg-support .spwhat summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+#dlg-support .spwhat p { font-size: 13px; color: var(--muted); }
 .dlg-foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; padding: var(--s4) var(--s6) var(--s6); }
 .dlg-foot .btn { min-width: 96px; }
 /* The terms keep I understand, and the sentence saying what it accepts, in
@@ -564,6 +581,7 @@ body.docked .dock { display: flex; }
   .top { height: auto; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
   .top-in { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px var(--s2); padding: var(--s2) var(--s4); min-height: 0; }
   .brand { padding: 0; margin-right: auto; }
+  .dev-card { top: calc(100% + 6px); }
   .nav { order: 3; flex-direction: row; width: 100%; overflow-x: auto; gap: 2px; scrollbar-width: none; }
   .nav a, .top-right > a { min-height: 40px; padding: 0 var(--s3); white-space: nowrap; }
   .top-right { margin: 0; padding: 0; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center;
@@ -593,3 +611,7 @@ body.docked .dock { display: flex; }
   footer.foot { padding: var(--s4); }
   .finder { max-width: none; }
 }
+
+/* What a run set aside, on the account's page. */
+.tocheck li { align-items: center; gap: var(--s2); }
+.tocheck li.checked b, .tocheck li.checked .hint { opacity: .55; }

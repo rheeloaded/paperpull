@@ -57,7 +57,7 @@ import json
 import logging
 import textwrap
 
-from .run_reporting import ListNotRead
+from .run_reporting import ListNotRead, under_panel
 from .storage import atomic_write_json, now_iso, spec
 
 COMPLETE = "complete"
@@ -221,15 +221,18 @@ def _whose(provider: str) -> str:
 
 def _whole_run(app) -> str:
     """Pilot or Run All, and for a scoped run, that it has to be unscoped,
-    since the same scope would read the same part again."""
+    since the same scope would read the same part again, in the names the
+    panel's buttons have under the panel."""
+    if under_panel():
+        return "Get new documents or Try the newest few%s" % (", with All dates chosen" if scoped(app) else "")
     return "Pilot or Run All%s" % (" with no year or dates set" if scoped(app) else "")
 
 
 def _nothing_listed(app, noun: str) -> None:
     provider = spec().provider
-    _say("Nothing to resume. No %s %s have been listed yet, because no run "
+    _say("Nothing to %s. No %s %s have been listed yet, because no run "
          "has read %s list to its end. Run %s, which read the list first."
-         % (provider, noun, _whose(provider), _whole_run(app)))
+         % ("continue" if under_panel() else "resume", provider, noun, _whose(provider), _whole_run(app)))
     raise ListNotRead(_whole_run(app))
 
 
@@ -266,13 +269,18 @@ def resume(app, remaining, process, noun: str = "documents") -> None:
     last lists hold and that are not done, by handing them to `process`."""
     cut_short = before_resume(app, noun)
     if not remaining and not cut_short:
-        print("Nothing to resume - everything in scope is complete.")
+        # Not "saved", since a document done with may be one set aside for a
+        # look or one the provider had no file for.
+        print("Nothing to continue, since nothing listed is left to download." if under_panel()
+              else "Nothing to resume - everything in scope is complete.")
         return
     if remaining:
-        print(f"Resuming: {len(remaining)} document(s) remaining.")
+        n = len(remaining)
+        print(f"Continuing with {n} {'document' if n == 1 else 'documents'} left." if under_panel()
+              else f"Resuming: {n} document(s) remaining.")
         process(remaining)
     else:
-        print(f"Nothing left to resume from the {noun} listed so far.")
+        print(f"Nothing left to {'continue' if under_panel() else 'resume'} from the {noun} listed so far.")
     after_resume(app)
 
 

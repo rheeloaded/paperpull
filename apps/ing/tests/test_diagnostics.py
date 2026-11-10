@@ -146,7 +146,7 @@ def test_open_browser_uses_the_official_ing_login_entry(app, monkeypatch):
     app.cmd_open_browser()
 
     assert opened["url"] == "https://banking.ing.de/app/obligo"
-    assert opened["port"] == "9307"
+    assert opened["port"] == "9308"
     assert opened["prefer_real"] is True
 
 

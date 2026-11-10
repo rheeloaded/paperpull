@@ -374,3 +374,87 @@ def test_every_app_signs_in_through_the_core_with_the_config_it_read():
             missing.append(app.name)
     assert not missing, missing
     assert len(apps) >= 78, len(apps)
+
+
+# A made-up provider's example, the shape every app's has.
+EXAMPLE = {"owner": "", "output_dir": ".", "profile_dir": "./browser-profile", "browser": "auto",
+           "cdp_url": "http://127.0.0.1:9351", "document_types": ["Statement"],
+           "//note": "A made-up comment.", "pilot_count": 5}
+
+
+def write(path: Path, cfg) -> None:
+    path.write_text(cfg if isinstance(cfg, str) else json.dumps(cfg), encoding="utf-8")
+
+
+def test_a_copy_of_the_example_is_no_ones_config(tmp_path):
+    """iCloud keeps both sides of a clash as "config.example 2.json", which
+    was read as a person's config on the example's port, so the real
+    account was told it shared its browser with the copy. A copy nobody
+    filled in is no one's, the same bytes, other comments, or without a
+    setting the example has gained since, as an update gives the example
+    and never a copy."""
+    from paperpull_core import ports
+    write(tmp_path / "config.json", dict(EXAMPLE, owner="Invented Person"))
+    write(tmp_path / "config.example.json", EXAMPLE)
+    write(tmp_path / "config.example 2.json", EXAMPLE)
+    write(tmp_path / "config.example copy.json", dict(EXAMPLE, **{"//note": "Another made-up comment."}))
+    write(tmp_path / "config.example copy 2.json",
+          {k: v for k, v in EXAMPLE.items() if k != "document_types"})
+    write(tmp_path / "Config.Example 13.json", EXAMPLE)
+    write(tmp_path / "config.kim.json", EXAMPLE)
+    assert [p.name for p in ports.configs_of(tmp_path)] == ["config.json", "config.kim.json"]
+
+
+# A copy somebody filled in, and copies that cannot be told from one.
+FILLED_IN = {
+    "an owner": dict(EXAMPLE, owner="Invented Person"),
+    "a folder": dict(EXAMPLE, output_dir="../Card Statements - kim"),
+    "a profile": dict(EXAMPLE, profile_dir="./browser-profile-kim"),
+    "a port": dict(EXAMPLE, cdp_url="http://127.0.0.1:9401"),
+    "a kind": dict(EXAMPLE, document_types=["Statement", "Tax Document"]),
+    "a setting added": dict(EXAMPLE, default_start_date="2031-01-01"),
+    "no cdp_url": {k: v for k, v in EXAMPLE.items() if k != "cdp_url"},
+    "no output_dir": {k: v for k, v in EXAMPLE.items() if k != "output_dir"},
+    "no profile_dir": {k: v for k, v in EXAMPLE.items() if k != "profile_dir"},
+    "unreadable": '{"cdp_url": "http://127.0.0.1:9351",',
+    "not an object": "[]",
+}
+
+
+@pytest.mark.parametrize("copy", sorted(FILLED_IN))
+@pytest.mark.parametrize("name", ["config.example 2.json", "config.example copy.json"])
+def test_a_copy_somebody_filled_in_is_their_config(tmp_path, name, copy):
+    from paperpull_core import ports
+    write(tmp_path / "config.example.json", EXAMPLE)
+    write(tmp_path / name, FILLED_IN[copy])
+    assert [p.name for p in ports.configs_of(tmp_path)] == [name]
+
+
+@pytest.mark.parametrize("example", [None, "{", "[]"], ids=["missing", "unreadable", "not an object"])
+def test_a_copy_beside_no_example_that_can_be_read_is_a_config(tmp_path, example):
+    """With nothing to tell a copy by, it is taken for somebody's."""
+    from paperpull_core import ports
+    if example is not None:
+        write(tmp_path / "config.example.json", example)
+    write(tmp_path / "config.example 2.json", EXAMPLE)
+    assert [p.name for p in ports.configs_of(tmp_path)] == ["config.example 2.json"]
+
+
+def test_two_configs_on_one_port_are_said_when_one_is_a_copy_somebody_filled_in(tmp_path):
+    """The port check still says two real configs share a port. A copy of
+    the example filled in for a second person on the first one's port is
+    one, and an untouched copy beside them is none."""
+    from paperpull_core import ports
+    root = tmp_path / "PaperPull"
+    card = root / "Card Statements"
+    card.mkdir(parents=True)
+    write(card / "card_docs.py", "")
+    write(card / "config.example.json", EXAMPLE)
+    write(card / "config.json", dict(EXAMPLE, owner="Invented Person"))
+    write(card / "config.example 2.json", EXAMPLE)
+    assert ports.findings(ports.installs_in(root)) == {}
+    write(card / "config.example copy.json", dict(EXAMPLE, owner="Another Invented Person",
+                                                  output_dir="../Card Statements - kim"))
+    found = ports.findings(ports.installs_in(root))
+    assert sorted(Path(k).name for k in found) == ["config.example copy.json", "config.json"]
+    assert {s.port for s in found.values()} == {9351}

@@ -33,7 +33,7 @@ REPO = Path(__file__).resolve().parents[2]
 # step by reading what it was handed, as the real review does, and writes
 # down what it saw in seen.json in the folder it runs in.
 SHOP = """\
-import json, os, sys
+import json, os, sys, time
 from pathlib import Path
 listing = os.environ.get("PAPERPULL_REVIEW_LIST")
 answers = os.environ.get("PAPERPULL_REVIEW_ANSWERS")
@@ -45,13 +45,21 @@ if listing:
          "date": "2026-05-14", "confidence": "Low", "status": "Review Needed",
          "file": "2026-05-14 Unsure Receipt.pdf", "summary": "Unsure",
          "items": ["Invented Hose"]}]}), encoding="utf-8")
-    print("1 row(s) marked for review have no receipt PDF in this app's folders "
-          "to rename, so they are left out.")
-    print("1 receipt(s) need review.")
+    print("1 row marked for review has no receipt PDF in this app's folders "
+          "to rename, so it is left out.")
+    print("1 receipt needs review.")
 if answers:
     seen["answers_at"] = answers
     seen["answers"] = json.loads(Path(answers).read_text(encoding="utf-8"))
-    print("Renaming 1 receipt(s) given a new name.")
+    print("Renaming 1 receipt given a new name.")
+    if Path("hold").exists():
+        # Partway, until the test lets it go on.
+        sys.stdout.flush()
+        for _ in range(600):
+            if Path("go").exists():
+                break
+            time.sleep(0.05)
+        seen["answers_still_there"] = Path(answers).exists()
     print("    Renamed -> 2026-05-14 Garden Hose Receipt.pdf")
 Path("seen.json").write_text(json.dumps(seen), encoding="utf-8")
 """
@@ -276,6 +284,44 @@ def test_the_new_names_reach_the_app_in_a_file_gone_when_the_run_ends(shop):
     handed = Path(what["answers_at"])
     assert not handed.exists() and not handed.parent.exists()
     assert not app_module._RUNS
+
+
+def test_names_applying_go_on_to_their_end_when_the_page_goes(shop):
+    """It renames each receipt and writes its new name into the ledgers just
+    after, so a stop partway leaves that receipt's records naming a file that
+    has moved. Like a Rename, it goes on when its page closes, the account
+    stays claimed until it has ended, and /api/finishing names it meanwhile,
+    so a quit of PaperPull.app waits for it too."""
+    import time
+
+    def finishing():
+        return asyncio.run(app_module.api_finishing())["finishing"]
+
+    (shop / "hold").write_text("", encoding="utf-8")
+
+    async def left_partway():
+        response = await app_module.api_review_names_apply(
+            Asked({"app": "Shop Receipts", "answers": [answer()]}))
+        body = response.body_iterator
+        while "Renaming 1 receipt" not in await body.__anext__():
+            pass
+        await body.aclose()
+    asyncio.run(left_partway())
+    assert ("Shop Receipts", "primary") in app_module._RUNS, "it goes on after its page closed"
+    assert finishing() == ["review_names"]
+    (shop / "go").write_text("", encoding="utf-8")
+    for _ in range(1500):
+        if not app_module._RUNS and (shop / "seen.json").exists():
+            what = seen(shop)
+            if not Path(what["answers_at"]).parent.exists():
+                break
+        time.sleep(0.01)
+    assert not app_module._RUNS and finishing() == []
+    what = seen(shop)
+    assert what["answers_still_there"] is True, "its new names stay while it renames"
+    assert not Path(what["answers_at"]).parent.exists(), "and are gone once it has ended"
+    assert app_module._read_run_log(app_module._account_root(
+        app_module.discover_apps()["Shop Receipts"], "primary"))[0]["action"] == "review_names"
 
 
 def test_a_second_persons_names_go_to_their_own_config(shop):

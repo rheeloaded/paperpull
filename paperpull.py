@@ -303,7 +303,7 @@ def setup(app_dir: Path) -> int:
             return rc
         venv_py = venv_python(app_dir / ".venv")
         if venv_py is None:
-            print("Setup FAILED, the new .venv in %s has no Python in it" % app_dir.name)
+            print("Setup did not finish: the new .venv in %s has no Python in it" % app_dir.name)
             return 1
     else:
         print("Reusing .venv in %s" % app_dir.name)
@@ -315,7 +315,7 @@ def setup(app_dir: Path) -> int:
     for step in steps:
         rc = subprocess.call(step, cwd=str(app_dir))
         if rc:
-            print("Setup FAILED at: %s" % " ".join(step[2:]))
+            print("Setup did not finish: %s" % " ".join(step[2:]))
             return rc
     print("Setup complete. Next: python paperpull.py %s login" % _slug(app_dir))
     return 0

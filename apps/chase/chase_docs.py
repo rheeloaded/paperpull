@@ -28,7 +28,7 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -169,6 +169,42 @@ def migrate_legacy_keys(records: dict) -> int:
     return changed
 
 
+MENU_ROW_NOTE = "Its row on the page opens a menu, which this app does not take"
+
+
+def retire_menu_rows(progress, discovery) -> int:
+    """Set down the records an older version wrote for rows it could never
+    press, and answer how many.
+
+    With Chase's API answering nothing, the fallback read a business
+    account's documents off the page and recorded each row with no card and
+    no document id, under the words of its control, "Opens document menu".
+    Pressing that control saves nothing, and once the API answers again the
+    row is not on the list the app walks at all. Each run took the record
+    from discovery.json and failed on it again, for good, since a Needs
+    Manual Review or Failed record with no file is always tried again. Only
+    the row's own words, with no card and no id, make such a record, and a
+    saved one is never touched. No Longer Listed is not a failure and the
+    panel has nothing left to take for it.
+    """
+    retired = 0
+    done = (State.NO_LONGER_LISTED.value, State.COMPLETED.value, State.PDF_VERIFIED.value)
+    for key, rec in list(discovery.data.items()):
+        if not isinstance(rec, dict) or not site.is_document_menu_row(rec.get("title")):
+            continue
+        prog = progress.get(key) or {}
+        merged = dict(rec, **prog)
+        if merged.get("account") or merged.get("document_id") or merged.get("downloaded_ok") \
+                or merged.get("pdf_path") or merged.get("state") in done:
+            continue
+        notes = "; ".join(x for x in (merged.get("notes"), MENU_ROW_NOTE) if x and isinstance(x, str))
+        if prog:
+            progress.update(key, {"state": State.NO_LONGER_LISTED.value, "notes": notes}, save=False)
+        discovery.update(key, {"state": State.NO_LONGER_LISTED.value}, save=False)
+        retired += 1
+    return retired
+
+
 class App:
     _journal = None
     _requests = None
@@ -176,6 +212,10 @@ class App:
     # read, so the run goes on with what it read and stops at its end
     # rather than finish (_stop_if_cut_short).
     _list_cut_short = False
+    # Set when the page's text reading left out a statement saved only
+    # through a menu, so the list is not noted whole and the run still
+    # finishes, since no later run would read it either.
+    _menu_left_out = False
 
     def __init__(self, args):
         self.args = args
@@ -199,6 +239,9 @@ class App:
         for store in (self.progress, self.discovery):
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
+        if retire_menu_rows(self.progress, self.discovery):
+            self.progress.save(backup=True)
+            self.discovery.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
@@ -342,7 +385,7 @@ class App:
             raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
-        print("Sign in, keep the window OPEN, then run the pilot.")
+        print(f"Sign in, keep the window OPEN, then {after_sign_in()}.")
 
     def cmd_login(self):
         print("Checking the connection to your signed-in Chase browser...\n")
@@ -473,6 +516,20 @@ class App:
             raw = site.chase_collect(page)
             log.info("Chase: collected %d document rows", len(raw))
             passed_over += [p for p in getattr(raw, "passed_over", ()) if p not in passed_over]
+        if site.DOCUMENT_MENU in passed_over:
+            # A row the page's text reading passed over because its only
+            # control opens a menu. Its statement is on the list and no run
+            # of this app takes it, so the list is not noted whole. The run
+            # is not stopped for it, since a stop would stop every run of
+            # such an account, and the panel would offer a sign-in and a
+            # Continue that cannot change what the page draws (#124).
+            passed_over.remove(site.DOCUMENT_MENU)
+            self._menu_left_out = True
+            log.info("Chase: a statement saved only through a menu is left out of the list")
+            print("\n  Chase's statement list holds a statement saved only through a menu,")
+            print("  which this app never presses, so it is left out and the list is not")
+            print("  noted as read whole. The Chase Business app takes a business account's")
+            print("  statements. The rest of the list is read as usual.")
         if passed_over:
             # A year or a card the pickers offered and the walk could not
             # read is a part of the list missing, so the list is not noted
@@ -491,15 +548,18 @@ class App:
         self.discovery.save()
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing). A list read
-        # in part is not, and the listing stays one that stopped.
-        if not self._list_cut_short:
+        # in part is not, and the listing stays one that stopped. Nor is a
+        # list a statement was left out of, though the run goes on.
+        if not (self._list_cut_short or self._menu_left_out):
             listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
             print("\nDiscovery %s. Documents known: %d"
-                  % ("read part of the statement list" if self._list_cut_short else "complete",
+                  % ("read part of the statement list" if self._list_cut_short
+                     else "complete but for what is saved only through a menu"
+                     if self._menu_left_out else "complete",
                      len(docs)))
             by_cat = {}
             for d in docs:
@@ -538,7 +598,7 @@ class App:
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
-        docs = [d for d in docs if self._in_scope(d)]
+        docs = [d for d in docs if d.state != State.NO_LONGER_LISTED.value and self._in_scope(d)]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs

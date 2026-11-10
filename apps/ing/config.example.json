@@ -3,7 +3,7 @@
   "owner_in_filename": false,
   "output_dir": ".",
   "profile_dir": "./ing-browser-profile",
-  "cdp_url": "http://127.0.0.1:9307",
+  "cdp_url": "http://127.0.0.1:9308",
   "document_types": [
     "Statement",
     "Credit Card Statement",

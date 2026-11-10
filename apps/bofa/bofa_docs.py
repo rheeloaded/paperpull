@@ -44,7 +44,7 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -383,7 +383,7 @@ class App:
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, open Statements & Documents, keep the window OPEN, then")
-        print("run the pilot.")
+        print(f"{after_sign_in()}.")
 
     def _look_at_the_list(self, page):
         """How many accounts the statements list answered with, or why it
@@ -412,7 +412,7 @@ class App:
             print(f"!! {challenge}\nResolve it in the browser, then re-run Login.")
         elif listed:
             print(f"Success: the statements list answered, with {listed} account(s).")
-            print("Keep that window OPEN on Statements & Documents, then run the pilot.")
+            print(f"Keep that window OPEN on Statements & Documents, then {after_sign_in()}.")
         elif not site.is_safe_url(page.url or ""):
             print("Connected, but no tab is on bankofamerica.com. Open it in that")
             print("window and sign in yourself, then run Login again.")

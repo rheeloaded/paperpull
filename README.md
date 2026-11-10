@@ -75,6 +75,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements and any tax form listed with them | **Untested, built without an account. Have one? [Help test it](apps/amfam/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
+| [`amexbanking`](apps/amexbanking) | American Express Banking (deposit accounts) | Business Checking statements and 1099-INT tax forms | **Contributed by [@appchamp](https://github.com/appchamp), 61 documents saved on the contributor's own Business Checking account** ([#168](https://github.com/rheeloaded/paperpull/pull/168)). The list the Documents and Statements page asks for itself, heard as it answers, and each PDF asked for by its own id from inside the page, nothing clicked. One account a run, the one the page shows. Personal Checking and Savings are untested. American Express cards are the `amex` app |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Confirmed by [@watling777](https://github.com/watling777)** on two accounts, wireless and internet, with a full run on each ([#26](https://github.com/rheeloaded/paperpull/issues/26)) |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
 | [`apple`](apps/apple) | Apple (App Store and Apple Store) | App Store receipts for subscriptions, in-app purchases and paid apps, and Apple Store order invoices | **Built and run on the maintainer's own account.** Report a Problem's own purchase search from inside the page for the whole family, paid purchases only, each saved from Apple's own receipt, and the Apple Store's order list and invoices, nothing clicked, real Edge/Chrome |
@@ -324,7 +325,9 @@ These steps are for the desktop app. The server's are
 [above](#paperpull-server).
 
 **Want to see it first?** The panel's welcome screen offers **Open the
-sample**, a folder of invented statements and receipts. The Accounts page
+sample**, a folder of invented statements and receipts, and before you
+have accepted the Terms of Use their dialog offers it as **Just look at
+the sample**. The Accounts page
 fills in and both spreadsheets build from it, so you can see exactly what
 PaperPull produces before you sign in to anything. Nothing downloads while
 you are in it, and *Leave the sample* puts you back. Every document in it
@@ -648,7 +651,11 @@ there is `PaperPull-<version>-arm64.dmg` for Apple Silicon and
 `PaperPull-<version>-x86_64.dmg` for Intel, both signed and notarized, so
 they open with no warning. About This Mac tells them apart, a Chip line
 for Apple Silicon and a Processor line for Intel. Drag PaperPull to
-Applications and double-click it. The Windows installer and the program inside it are
+Applications and double-click it. It opens the control panel in a window of its
+own, with a Dock icon and a menu bar, and no Terminal or browser tab. Quit it
+with Cmd-Q, which stops the panel once any Rename or Move under way has
+finished. A panel already running from a terminal is shown in the window and
+left running. The Windows installer and the program inside it are
 code-signed with Azure Artifact Signing. SmartScreen can still show its
 prompt while the certificate is new, since it learns to trust a publisher
 from downloads over time. See [Code signing policy](#code-signing-policy)
@@ -829,14 +836,14 @@ first version takes no programming (see
 That provider may stop working until it is repaired. Each provider is a
 small app of its own, and everything it knows about a site lives in one
 file, so a redesign breaks only that provider and the repair is usually
-small. Make a support report from its **More** menu and
+small. Press **Get help** in its **More** menu, make a support report, and
 [report it](https://github.com/rheeloaded/paperpull/issues/new?template=app-broke.yml).
 Documents you already saved stay saved.
 
 ### Is a support report safe to attach to an issue?
 
-Yes, it is built for that. **Make a support report**, under a provider's
-**More** menu, saves a file whose name starts with `survey-`. It holds
+Yes, it is built for that. **Make the report**, under **Get help** in a
+provider's **More** menu, saves a file whose name starts with `survey-`. It holds
 counts and states and no text from your account, and it is the file to
 attach. Never attach a password, a browser profile folder, a token or an
 unredacted statement to anything you post.
@@ -885,9 +892,12 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ **Tests.** The eighty-five existing apps have 35,564 tests across the
-  repo. ING, the eighty-sixth, adds its own automated suite and has been
-  run on one contributor's account.
+- ✅ All **eighty-six** apps pass their tests, the eighty-one that are
+  supported and the five still waiting for a tester, 35,564 of them
+  across the repo. Most are in regular use by the author. The rest were built or
+  confirmed by people who hold those accounts, named in the table above
+  and in [Thanks](#thanks). ING, the eighty-seventh, adds its own
+  automated suite and has been run on one contributor's account.
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with
   every release since 0.43.0 as `ghcr.io/rheeloaded/paperpull-server`.
   See [PaperPull Server](#paperpull-server).

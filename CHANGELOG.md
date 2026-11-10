@@ -27,6 +27,56 @@ All notable changes to PaperPull are recorded here. Versioning follows
   fetching one may mark it read. Diagnose counts the Postbox rows it can
   see, and those with a link, a date or an unread mark, without downloading
   anything. See [local testing](apps/ing/README.md#local-test-before-a-pr).
+- **A sign-in starts its run by itself once it is done (#200).** Open sign-in
+  window used to end with the person coming back to the panel to press
+  Get new. Now the panel watches the sign-in window's tabs, their address
+  and title only, read from its own debugging port on this computer
+  (`core/paperpull_core/signin_watch.py`), and starts the run the sign-in
+  was for as soon as the person is signed in. A round of Get new that
+  stopped at an account for its sign-in goes on with the round from there.
+  One stopped at another account still waits for Continue, and one that is
+  over has no say. The wait ends after ten minutes, when the window is
+  closed, or when a run for the account is started some other way. A later
+  sign-in of the account, in another tab say, ends an earlier one's wait,
+  so only one page starts a run, once. A window on a port another
+  account's config names too is not watched, since a sign-in there may be
+  that account's. Not on PaperPull Server, whose sign-in is in the page.
+  Contributed by @JasperDale420.
+- **A panel run from a git checkout says which one (#202).** A small badge beside
+  the version names the checkout's branch, with a `*` when it has changes,
+  and its card and Settings, About PaperPull, add the commit. It never names
+  the folder, and git is never run on PaperPull Server, in the built
+  package, or in a folder with no `.git`. Contributed by @appchamp.
+- **American Express Banking, the 86th app, Business Checking statements
+  and tax forms (#168).** `amexbanking` reads American Express National
+  Bank deposit accounts, apart from the `amex` card app. It saves every
+  monthly statement and 1099-INT the Documents and Statements page
+  lists, a statement dated the last day of its month and a tax form
+  December 31 of its tax year. Nothing is clicked. The list is the one
+  the page asks for itself, heard as it answers, and each PDF is asked
+  for by its own id and its own account's token from inside the
+  signed-in page, the way the page does. Contributed by @appchamp and
+  run on the contributor's own Business Checking account, 61 documents
+  saved. Personal Checking and Savings are untested. Before merging, a
+  list that answered in part, a document whose id, month or year could
+  not be read, a list its own count disagrees with or that says no
+  count, and lists of more than one account were made to leave the list
+  not whole, so the run keeps what it saved and stops at its end. A
+  config is tied to the account its records hold, so a list of another
+  account, by its token or by the last four digits the account switcher
+  shows, stops the run before anything is listed or downloaded, and a
+  document known already keeps the account it was first listed under. A
+  list or a PDF refused as signed out stops the run once. A document is
+  no longer taken as saved because a PDF of its date is in its folder,
+  which may be another account's statement, Rename no longer rewrites
+  the document index first, and a PDF that comes back with the bytes of
+  another document saved in the same run is not saved. The account a
+  file is named for is read from the page once its list has answered,
+  never from the page the tab was found on or from the page's text, and
+  the switcher is read even when the config names the account. Login
+  says signed in only once the list answers, and like every other app,
+  it says Sign in first when nobody is signed in, and says when no
+  sign-in window opened or nothing was recorded.
 
 ### Changed
 - **Record can keep the shape of a page rendered by the server.** An app
@@ -38,6 +88,238 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **Personal run files stay out of panel templates.** When a checkout is
   used as a template, new installs and code refreshes no longer copy its
   run history and its backups, document indexes or downloaded archives.
+- **PaperPull.app opens the control panel in a window of its own (#141).**
+  Double-clicking it on a Mac no longer opens Terminal and a browser tab.
+  The window shows the same panel, with a Dock icon and a menu bar, and
+  Cmd-Q or closing the window stops the panel and the runs it started. The
+  window shows only the panel at 127.0.0.1, and any other link opens in
+  the default browser. The panel's output goes to
+  ~/Library/Logs/PaperPull/panel.log, and Resources/paperpull-panel.sh
+  still runs the panel in a terminal. Contributed by @JasperDale420.
+  Before merging, a quit was made to wait for a Rename, a Move, Review
+  Names, the move into the documents folder that ends a download run, or a
+  history import that is applying its changes, since one stopped partway
+  would leave the index and progress.json naming files that had moved, and
+  the window and the log say why it waits. Review Names applying its new
+  names now goes on to its end when its page closes, as a Rename and a Move
+  already did, and the Run page offers no Stop for any of the three, where
+  its Stop said a run had stopped that went on. When this person's own
+  panel, one started from a terminal for instance, already holds port 8765,
+  the window shows that panel rather than start a second one on the same
+  records, and closing the window leaves it running. panel.log keeps no
+  line per request, which
+  named every provider and person, the window looks up no site in WebKit's
+  list of fraudulent ones, and the release workflow removes its signing key
+  before it runs the bundle.
+- **One Get help under More (#181).** Make a support report and Record steps for
+  support were two items and two dialogs, and the file a failed run had
+  just written was a third place to look. Get help opens one dialog that
+  offers a recent failure file first, then the support report with its
+  sign-in button, then recording as the next step. What each file holds
+  moved under What's in the file?, every word of it kept. Contributed by
+  @JasperDale420. Before merging, Record steps waits while the sign-in the
+  dialog started is going, as Make the report does, and the failure file
+  is offered as one written in the last hour, with what the Run page says
+  of it, rather than as the last run's, which may have gone well since. Contributed by @JasperDale420.
+- **A run can be followed from the tab, and a round leaves you where you
+  are (#180).** The browser tab's title shows a run's progress and how it ended,
+  so somebody working in the provider's window can see it. A run that ends
+  while you are on another page of PaperPull says so with a link to the
+  outcome. Get new for all no longer pulls you back to the Run page at each
+  account, and its last line lists each account with what it came to, so
+  one that saved documents and set one aside no longer reads as a failure.
+  Contributed by @JasperDale420. Before merging, a run that did not finish
+  is named in the title by its outcome's own words, such as You stopped
+  this run or This run did not start, where it read "stopped" for a run
+  that never started and for one the page had lost touch with.
+- **The name on an account can be changed (#183).** The welcome asked once, for
+  every provider at the same time, and skipping it was for good unless you
+  edited a settings file. More now has Name on the account, for the first
+  person and anyone added, kept in that account's own settings with a copy
+  in Backups first. It cannot be changed while that account is running,
+  a Rename or a Move of its documents included, and files already saved
+  keep their names until a Rename. Contributed by @JasperDale420.
+- **Providers go by their names, and a run's lines by the names on the
+  buttons (#184).** The File names picker, the Updated notice and File names'
+  Stopped at line said the folder's name instead of the provider's. The
+  example path in Settings fits the computer. Under the control panel the
+  lines every provider shares, when a run stops or has nothing left to
+  continue, name Get new documents, Try the newest few, Check what's there
+  and Continue, and in a terminal they still name Pilot, Run All, Discover
+  and Resume. Review names and the line about refused documents count
+  "1 receipt" rather than "1 receipt(s)", and the providers' lists read
+  alike. Contributed by @JasperDale420.
+- **A sign-in window comes to the front, and goes when it is done (#186).** Opening
+  one, or reusing one already open, now brings it forward. When Get new
+  documents or Continue finishes on a Mac, PaperPull closes that account's
+  sign-in window, unless you are in it. A run that stops leaves the window
+  open, and so does one whose port another account names too, since that
+  browser may be the other account's. Only a browser PaperPull opened on
+  the account's own port and profile folder is ever closed, never an
+  everyday one, and `"close_signin_window": false` in settings.json turns
+  closing off. Contributed by @JasperDale420 (#186).
+- **An account just checked comes off the list, and can be marked done (#187).**
+  "Due" came only from the age of the newest document, so a run that found
+  nothing new left the account due until its provider sent something. A Get
+  new that read the whole list and finished clean now counts as a check for
+  as long as that provider usually takes, between 3 and 14 days. A Continue
+  reads no list, so it is no check, and an account with gaps still shows
+  them. **Mark as done** under the three dots takes an account off the list
+  until its next run, or for that time at most, and can be undone.
+  Contributed by @JasperDale420 (#187).
+- **The sample can be looked at before the terms (#188).** Somebody only looking
+  had to accept the Terms of Use to see invented data. With no accounts yet,
+  the dialog offers Just look at the sample, which sets the dialog aside
+  only once the sample is open and says why when it cannot be opened.
+  Leaving the sample brings the dialog back. Until I understand is pressed
+  the panel itself refuses a run, a sign-in, a folder shown, a file handed
+  over, a spreadsheet or a setting saved anywhere but in the sample, so a
+  tab still showing the sample after another tab left it, or after the
+  panel started again, does nothing real, and has the dialog back the next
+  time it reads the accounts. Contributed by @JasperDale420.
+- **An account's page names what a run set aside (#193).** Needs a look said
+  a run had set documents aside and named none of them, and one that could
+  not be captured has no file to find. The account's page now lists each
+  from its records, by name, date and why, with **Open** for a PDF or image
+  in the account's own folder, on the desktop only, and **Done** with
+  **Undo** on each. Once all are done, Needs a look goes. A document set
+  aside again by a later run brings it back, and a run that also failed,
+  refused a wrong document, or counted more set aside than its records name,
+  a card or a plan left unread, a receipt that never showed or an invoice
+  that failed its check, keeps it.
+  Done writes only the account's own note and never moves or deletes a
+  document or a record, and neither Done nor Open is taken while a run, a
+  Rename or a Move goes on that account. Contributed by @JasperDale420 (#193).
+
+### Fixed
+- **Chase no longer tries, on every run, statements it can never take (#191).**
+  When its document API answered nothing, the fallback read a business
+  account's documents off the page, with no card and no document id, and
+  recorded each row by its "Opens document menu" control. Such a record
+  failed on every later run, and a press on that control never saved
+  anything. Those controls are no longer pressed or listed, and a record of
+  that shape left by an older version is set down as No Longer Listed.
+  Contributed by @JasperDale420 (#191). Before merging, a list with such a
+  row was made to read as not whole, since its statement is on the list and
+  is not taken. The run says it left that statement out, that the Chase
+  Business app takes a business account's statements, and finishes, and a
+  run of Chase settles no gap in the panel. A year, a card or an account
+  that could not be chosen still stops the run at its end.
+- **Chase Business keeps a Business Checking statement (#195).** Every
+  real checking statement was refused and deleted once downloaded, since
+  its text leaves the "Account Number" label's line empty and the number
+  read after the label was a transaction's. A statement is now judged by
+  the number printed alone at the very top of its text when the label's
+  line and the line after it print none. Contributed by @JasperDale420.
+  Before merging, any other number printed before the label was made never
+  to stand for the label's, so another account's statement is not kept for
+  a long number that happens to end in the same four digits.
+- **A refused address is named by where it leads (#199).** Chase's and Ally's
+  "refusing to fetch a document from outside" and the same refusal in
+  American Express, Dominion and Robinhood said nothing of the address, so a
+  refusal seen in a real run could not be told from a guard gone wrong. Each
+  now names its scheme and host, from `urls.where_it_leads`, and never its
+  path, query or a user or password in it, which can carry an account's ids.
+  A host that is no host name but words, or a part of one that reads like an
+  account's number or a token, is written as its shape, every letter as a
+  and every digit as 9. Nothing is asked of the address to name it.
+  Contributed by @JasperDale420 (#199).
+- **On a Mac, an account's documents folder is never another's in other
+  letter case (#198).** A Mac tells folder names apart without case, so
+  `target receipts/Chase` is inside Target Receipts' folder. The check
+  that a folder is no other account's compared the paths as spelled, which
+  Windows does without case and a Mac did not, so the panel saved such a
+  folder there and two accounts' documents would have shared it. The
+  suites run on Windows in CI, where it held, and the test that says so
+  failed only on a Mac. A Mac disk formatted to tell case apart is asked,
+  and there the two spellings stay two folders. A folder inside an
+  account's own Manual Review, Logs, Diagnostics or Backups is refused in
+  any letter case, as a run already refused it. Contributed by
+  @JasperDale420.
+- **FedEx and Stripe read their list on a computer just started.** Each
+  keeps its list with the time it was read and reads it again once it is
+  four minutes old, and a list never read was judged by that age alone. On
+  Windows the clock it is measured by starts with the computer, so in the
+  first four minutes after a restart a download took the list it had never
+  read for a fresh one. FedEx then sent the invoice to Manual Review, and
+  Stripe fetched the address saved with the record, which can have expired.
+  A list never read is now always read first, and a census holds every
+  app's list to it. Both apps are still waiting for someone with an account
+  to test them.
+- **A checkout nobody has set up shows the welcome (#179).** Its `apps/` holds the
+  provider templates, which looked like installs, so the README's quick
+  start landed on every provider "Not started" with no welcome, and a run
+  there wrote its log into the git tree. A checkout with no chosen folder
+  and no `config.json` in `apps/` now shows the welcome, and somebody
+  already running from `apps/` carries on as before. Contributed by
+  @JasperDale420. Before merging, the welcome, Settings and Import history
+  refuse that `apps/` folder, or one inside it, as the PaperPull folder
+  until one of its apps has a `config.json`, and Settings no longer names
+  it as the folder, fills it in, or lists its templates as accounts. Contributed by @JasperDale420.
+- **A support report that read nothing says so (#182).** Made with the window on a
+  sign-in page or a security check, it still read "Support report saved",
+  and people attached it. It now ends as Nothing was read, says to sign in
+  and leave the window on the documents page, and offers the sign-in window
+  and the report again. A report from a signed-in page PaperPull cannot make
+  sense of still reads as saved, since that is the one a repair needs. Contributed by @JasperDale420.
+- **A list that stopped partway no longer asks you to sign in again
+  (#185).** The run ended as "This run ended with a problem", with signing
+  in again as its first step, which could not help. It now says the
+  provider's page was not what PaperPull expected, as a stop at a page
+  does, and offers Continue, which takes what was listed before the stop
+  and then offers Get new documents. Charles Schwab's list, stopped by an
+  answer refused as signed out, still offers the sign-in first. A run that
+  found nobody signed in no longer ends its log saying Continue carries on,
+  and the log of Open sign-in window names Try the newest few first under
+  the control panel, for every provider. Contributed by @JasperDale420.
+- **Wealthfront never calls its list whole with a kind of statement left
+  out (#189, #197).** The Documents page shows statements through a dropdown, and a kind
+  it would not choose was logged and passed over, so the list was still
+  noted as read whole, and a run that read no statements at all could finish
+  clean. Now Statements not read, or Quarterly Statements offered and not
+  taken, stops the run at its end the way a tax year passed over does, with
+  a failure file. So does a kind chosen that shows no statement after a few
+  seconds more, which a page still drawing or a press that chose something
+  else looks like too, since every account has statements. An account
+  whose dropdown has no Quarterly Statements has none to read and finishes
+  as before, a minute sooner, since asking for that option no longer waits
+  for it twice (#197). Contributed by @JasperDale420. Before merging #197,
+  only a dropdown read whole that lists other kinds and no Quarterly
+  Statements at all says the account has none. A Quarterly Statements
+  listed and turned off, or a dropdown that lists no kind yet or cannot be
+  read by then, still leaves the list not whole.
+- **Spectrum takes both statements two accounts share a date on (#190).** After a
+  transfer the current and the prior account can each have a statement of
+  one date, and their rows on Statements read alike, so both were refused
+  before any press and every run failed them. The app now presses the
+  first of the two rows, and when the page it opens is the other account's
+  statement it reads Statements again and presses the second, once. Each is
+  saved only from its own page, whose address and the PDF it asks for name
+  its account and date, and never as the same file as the other. Anything
+  else after a press still stops the run. Not yet run on a live account. Contributed by @JasperDale420.
+- **Spectrum reads its Mobile statements again (#194).** Billing's Mobile
+  Account Number link and each Mobile statement row now carry
+  `unsafe:javascript:void(0)` as their address, the way Angular writes a
+  script address it will not follow, so they still lead nowhere. The app
+  took that for an address of its own and stopped every Get new on Billing
+  after the Internet statements were listed. That one form now passes,
+  and nothing else after `unsafe:` does. Contributed by @JasperDale420 and
+  run on the contributor's own account. Before merging, the check reads
+  its letters as plain ASCII letters only, so an address spelled with a
+  look-alike letter, which a browser follows as a path on the site, is
+  refused.
+- **A copy of a provider's example config is no account (#196).** iCloud
+  keeps both sides of a clash as `config.example 2.json`, and Finder's
+  Duplicate makes `config.example copy.json`. The control panel listed
+  each as an account, "example 2", which then said it shared a browser
+  with the real account and asked for a port to be changed in the copy. A
+  copy that holds only the example's settings is now passed over by the
+  panel, by the port check Login makes, by the naming page and by Export
+  history. Contributed by @JasperDale420. Before merging, a copy somebody
+  filled in, with any setting changed or added, or without the example's
+  `cdp_url`, `output_dir` or `profile_dir`, stays their account and is still
+  checked for a shared port, and a copy is listed whenever it or the
+  example beside it cannot be read.
 
 ## [0.62.0] - 2026-11-09
 

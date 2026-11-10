@@ -30,6 +30,23 @@ NOTHING_RECORDED = 6
 # a first Get new pressed before Open sign-in window. Nothing was started,
 # so the panel says to sign in first and never offers Continue.
 NOT_SIGNED_IN = 7
+# A support report that ran, and whose own findings say the window was on a
+# sign-in page or a security check. Its files are there and say so, but it
+# read nothing of the account's documents, and "Support report saved" read
+# as though it had.
+NOTHING_READ = 8
+
+
+def under_panel() -> bool:
+    """Whether the control panel started this run, so its words are the
+    names on the panel's buttons. In a terminal they are the flags' names."""
+    return bool(os.environ.get(MARK_ENV, ""))
+
+
+def after_sign_in() -> str:
+    """What to do once signed in, in the words of where the run is: the
+    panel's button under the panel, the command in a terminal."""
+    return "press Try the newest few first" if os.environ.get(MARK_ENV, "") else "run the pilot"
 
 
 def not_signed_in(cdp_url, err) -> SystemExit:
@@ -45,6 +62,23 @@ def not_signed_in(cdp_url, err) -> SystemExit:
                  "Run login.bat first and keep that browser window OPEN.")
     print(f"{words}\n({err})", file=sys.stderr, flush=True)
     return SystemExit(NOT_SIGNED_IN)
+
+
+def nothing_read() -> SystemExit:
+    """The exit of a Diagnose that read no signed-in page, after saying so
+    in the words of where it runs. Raised from failure.write_survey, which
+    every app's Diagnose ends in, once the survey is written."""
+    if os.environ.get(MARK_ENV, ""):
+        words = ("The window was on a sign-in page or a security check, so this support report "
+                 "read nothing useful. Sign in, leave the window on the page that has your "
+                 "documents, then make the report again.")
+    else:
+        words = ("The browser window was on a sign-in page or a security check, so Diagnose read "
+                 "nothing useful.\nSign in, leave that window on the documents page, then run "
+                 "Diagnose again.")
+    print(words, flush=True)
+    return SystemExit(NOTHING_READ)
+
 
 # What cannot be shown on one line of a run's output. A line feed or a
 # carriage return ends the line, the other control characters and the two
@@ -146,7 +180,13 @@ def stop_reason() -> str:
         return ""
     seen, link = set(), exc
     while link is not None and id(link) not in seen:
-        if isinstance(link, Stop):
+        # A list that stopped partway is its provider's page not reading as
+        # expected too. Each app that has one keeps its own class, in its own
+        # site file, so it is known here by name. Only that name is, so a
+        # class an app puts under it for a stop a sign-in may cure, as
+        # Charles Schwab's for an answer refused, gives no reason, and the
+        # panel offers the sign-in first.
+        if isinstance(link, Stop) or type(link).__name__ == "ListStopped":
             return "page"
         seen.add(id(link))
         link = link.__context__
@@ -197,10 +237,12 @@ def report_run_result(stats):
     wrong = int(stats.get("wrong_document", 0) or 0)
     result["wrong_document"] = wrong
     if wrong:
-        print("\n%d document(s) were refused because they were not the one "
-              "asked for. Nothing was saved under their names. That is a "
-              "wrong document arriving, not a missing one, so it is worth "
-              "reporting." % wrong, flush=True)
+        print("\n%s, since %s not the one asked for. Nothing was saved under "
+              "%s. That is a wrong document arriving, not a missing one, so "
+              "it is worth reporting."
+              % ("1 document was refused" if wrong == 1 else "%d documents were refused" % wrong,
+                 "it was" if wrong == 1 else "each was",
+                 "its name" if wrong == 1 else "their names"), flush=True)
     # Documents the list held that share a type and a date with another,
     # so a row could not be bound to one of them, and they were left
     # unsaved. The rest of the run went on, so this is said on its own.
@@ -225,22 +267,29 @@ def report_run_result(stats):
         print("\nThis run did its work, but its run state could not be written, so "
               "the next run may download again what this one saved. Close the "
               "program that has it open before running again.", flush=True)
+    elif result["stopped"] and getattr(sys.exc_info()[1], "code", None) == NOT_SIGNED_IN:
+        # Nothing started, and not_signed_in has said to sign in first, so
+        # there is nothing here for Continue to carry on with.
+        pass
     elif result["stopped"] and stats.get("mode") == "rename":
         # Rename downloads nothing for Resume to carry on with, and when it
         # stops it has just said what it put back and what to do instead.
         print("\nThis run stopped before it finished.", flush=True)
     elif result["stopped"] and stats.get("mode") == "discover":
         # Resume downloads, and Discover was run only to see what is there.
-        print("\nThis run stopped before it finished. Discover downloads nothing, "
+        print("\nThis run stopped before it finished. Check what's there downloads nothing, "
+              "so run it again rather than Continue." if under_panel() else
+              "\nThis run stopped before it finished. Discover downloads nothing, "
               "so press Discover again rather than Resume.", flush=True)
     elif result["stopped"] and whole_run:
         # Resume has just said the list was not read to its end. Saying here
         # that Resume carries on is what sent people round again (#124).
         print("\nThis run stopped before it finished. Whatever it saved is kept. "
-              "Resume would only stop here again, so run %s, either of which "
-              "reads the list first." % whole_run, flush=True)
+              "%s would only stop here again, so run %s, either of which "
+              "reads the list first." % ("Continue" if under_panel() else "Resume", whole_run), flush=True)
     elif result["stopped"]:
         print("\nThis run stopped before it finished. Whatever it saved is kept, "
-              "and Resume carries on from where it stopped.", flush=True)
+              "and %s carries on from where it stopped."
+              % ("Continue" if under_panel() else "Resume"), flush=True)
     # Never include account labels, paths, or provider response text.
     print(marked(PREFIX, result), flush=True)
