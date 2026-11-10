@@ -288,6 +288,7 @@ ROUTES = {
     ("GET", "/api/aside/download"): dict(ask="/api/aside/download?app=Shop%20Receipts",
                                          desktop="reads", server="changes"),
     ("POST", "/api/record/stop"): dict(body={"app": SHOP}, desktop="changes", server="changes"),
+    ("GET", "/api/sign-in/wait"): dict(ask="/api/sign-in/wait?app=Shop%20Receipts", desktop="reads", server="reads"),
     ("POST", "/api/remove"): dict(body={"app": SHOP}, desktop="changes", server="changes"),
     # A real provider, because the server runs only the code the image ships
     # and refuses a folder that maps to no shipped provider, so a made-up name

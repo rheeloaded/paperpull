@@ -47,7 +47,7 @@ from pathlib import Path
 
 import run_result
 
-from anyio import to_thread
+from anyio import sleep as async_sleep, to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -4375,6 +4375,85 @@ def _port_is_only_its_own(meta: dict, account: str) -> bool:
         return False
 
 
+def _sign_in_port(meta: dict, account: str) -> Optional[int]:
+    """The debugging port of the account's sign-in browser, or None."""
+    try:
+        return urllib.parse.urlsplit(str(_config_of(meta, account).get("cdp_url") or "")).port
+    except ValueError:
+        return None
+
+
+# -- waiting for a sign-in ------------------------------------------------------
+#
+# Open sign-in window used to end with the person coming back here to press
+# Get new. Once the window is open, the page asks here to be told when the
+# person has signed in, and starts that run itself. The address and title of
+# the window's tabs are all that is looked at, from its own debugging port on
+# this computer, and neither goes further than this file (core signin_watch).
+#
+# What to watch comes from the sign-in itself, kept here per account until the
+# wait has used it. A wrong "signed in" costs one run, which finds nobody
+# signed in and says so, and another wait needs another press of the button.
+
+# Long enough for a code by text or email, short enough that the panel does
+# not go on watching a window nobody came back to.
+SIGN_IN_WAIT_SECONDS = 600
+SIGN_IN_LOOK_EVERY = 2.0
+_SIGN_IN_PLANS: dict = {}
+
+
+@app.get("/api/sign-in/wait", dependencies=[Depends(_same_origin_only)])
+def api_sign_in_wait(app: str, account: str = "primary"):
+    """A stream that ends by saying how the wait for this account's sign-in
+    came out: signed_in, timed_out, no_window, run_started, or cannot_tell
+    for a sign-in the panel has no way to watch."""
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    if account not in apps[app]["accounts"]:
+        raise HTTPException(400, "That account is no longer here. Reload the page.")
+    meta = apps[app]
+
+    async def stream():
+        from paperpull_core import signin_watch
+        plan = _SIGN_IN_PLANS.get((app, account))
+        port = await to_thread.run_sync(_sign_in_port, meta, account)
+        # Not on PaperPull Server, whose sign-in is docked in the page.
+        if server_mode.enabled() or plan is None or not port:
+            yield _event("cannot_tell", "ended")
+            return
+        yield _event("", "waiting")
+        watch = signin_watch.Watch(plan)
+        silent = 0
+        deadline = time.monotonic() + SIGN_IN_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            # Somebody pressed a run for this account, here or in another
+            # tab, and it is that run's window now. The sign-in that opened
+            # this wait may still be on its way out as it starts.
+            if _RUNS.get((app, account), {}).get("action") not in (None, "login"):
+                yield _event("run_started", "ended")
+                return
+            tabs = await to_thread.run_sync(signin_watch.read_tabs, port)
+            if tabs is None:
+                # The browser was closed. Asked again first, as a browser
+                # busy starting a page can be slow to answer.
+                silent += 1
+                if silent >= 3:
+                    yield _event("no_window", "ended")
+                    return
+            else:
+                silent = 0
+                if watch.look(tabs):
+                    _SIGN_IN_PLANS.pop((app, account), None)
+                    yield _event("signed_in", "ended")
+                    return
+            await async_sleep(SIGN_IN_LOOK_EVERY)
+        yield _event("timed_out", "ended")
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 def _close_sign_in_window(meta: dict, account: str) -> list:
     """Close the account's sign-in browser once its run is done, unless the
     person is in it, or its port is another account's too. Whatever goes
@@ -4387,8 +4466,8 @@ def _close_sign_in_window(meta: dict, account: str) -> list:
 
 def _close_own_window(meta: dict, account: str) -> list:
     cfg = _config_of(meta, account)
+    port = _sign_in_port(meta, account)
     try:
-        port = urllib.parse.urlsplit(str(cfg.get("cdp_url") or "")).port
         # As the browser was opened on it (browser._launch), "~" and all.
         profile = Path(str(cfg.get("profile_dir") or "")).expanduser()
     except (ValueError, RuntimeError):
@@ -4630,8 +4709,11 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                     read_all = True
                     break
                 parsed = run_result.parse(line.rstrip("\r\n"), mark)
+                plan = run_result.sign_in_plan(line.rstrip("\r\n"), mark) if action == "login" else None
                 if parsed is not None:
                     result = parsed
+                elif plan is not None:
+                    _SIGN_IN_PLANS[(app, account)] = plan
                 else:
                     yield _event(line.rstrip())
             code = await to_thread.run_sync(proc.wait)
