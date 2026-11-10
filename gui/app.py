@@ -1736,6 +1736,59 @@ def _quieted(state: str, last, done_at: str, cadence, now=None, gaps=()) -> dict
     return {"state": state, "marked_done": "", "checked_quiet": ""}
 
 
+# What a run set aside for a person to check, read from the account's records,
+# so one with no file to show is still named. The Manual Review folder alone
+# says nothing of a document that could not be captured at all.
+TO_CHECK_STATE = "Needs Manual Review"
+CHECKED_FILE = "panel-checked.json"
+OPENS_FROM_THE_PANEL = (".pdf", ".png", ".jpg", ".jpeg")
+# What a run left that a person's look at the documents does not answer.
+NOT_ANSWERED_BY_CHECKING = ("failed", "wrong_document", "alike")
+
+
+def _checked_items(root: Path) -> dict:
+    data = _read_json(root / CHECKED_FILE)
+    return data if isinstance(data, dict) else {}
+
+
+def _set_aside_file(root: Path, record: dict):
+    """The file a set-aside record names, or None. Only a plain document
+    inside the account's own folder, since a record can have come from
+    another computer. There its full path means nothing, so the file's name
+    is looked for in Manual Review too."""
+    raw, named = str(record.get("pdf_path") or ""), str(record.get("pdf_filename") or "")
+    tries = [Path(raw) if Path(raw).is_absolute() else root / raw] if raw else []
+    tries += [root / "Manual Review" / Path(n).name for n in (raw, named) if n]
+    for path in tries:
+        try:
+            inside = path.resolve(strict=True).is_relative_to(root.resolve())
+        except OSError:
+            continue
+        if inside and path.is_file() and not path.is_symlink() and path.suffix.lower() in OPENS_FROM_THE_PANEL:
+            return path
+    return None
+
+
+def _to_check(root: Path) -> list:
+    """What this account has set aside, newest first, for its page to list."""
+    records, checked = _read_json(root / "progress.json"), _checked_items(root)
+    if not isinstance(records, dict):
+        return []
+    items = [{"id": key, "label": str(rec.get("title") or rec.get("category") or "Document"),
+              "date": str(rec.get("date") or ""), "why": str(rec.get("notes") or ""),
+              "file": _set_aside_file(root, rec) is not None, "saved": bool(rec.get("pdf_path")),
+              "checked": str(checked.get(key) or "")}
+             for key, rec in records.items() if isinstance(rec, dict) and rec.get("state") == TO_CHECK_STATE]
+    return sorted(items, key=lambda item: item["date"], reverse=True)
+
+
+def _all_checked(last, items: list) -> bool:
+    """Whether a person has been through all that the last run left them."""
+    result = last.get("result") if isinstance(last, dict) else None
+    return (bool(items) and all(item["checked"] for item in items) and isinstance(result, dict)
+            and not any(result.get(k) for k in NOT_ANSWERED_BY_CHECKING))
+
+
 def _owner_of(meta: dict, account: str) -> str:
     """The account holder's name as the account's config gives it, or ""."""
     config = Path(meta["dir"]) / ("config.json" if account == "primary"
@@ -1766,6 +1819,9 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     log = _read_run_log(root)
     last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
     outcome = _last_outcome(last)
+    to_check = _to_check(root) if outcome == "attention" else []
+    if _all_checked(last, to_check):
+        outcome = ""
     running = _RUNS.get((name, account))
     state = _account_state(row, outcome, gaps, known)
     quiet = _quieted(state, last, _done_at(root), (row or {}).get("cadence_days"), gaps=gaps)
@@ -1781,6 +1837,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "state": quiet["state"],
         "marked_done": quiet["marked_done"],
         "checked_quiet": quiet["checked_quiet"],
+        "to_check": to_check,
         # A gap a whole, clean run could not fill, left out of "may have
         # something new" on the home page (#149).
         "settled": _settled(quiet["state"], (row or {}).get("gaps"), log),
@@ -1927,7 +1984,7 @@ def account_rows() -> list:
                     "group": cards.get(slug, {}).get("group", ""), "kind": kind,
                     "state": "nostatus", "settled": False, "documents": 0, "newest": None,
                     "checked": None, "ran": None,
-                    "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [],
+                    "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [], "to_check": [],
                     "last_run": None, "last_outcome": "", "runs": [], "latest": [],
                     "running": dict(running) if running else None,
                     "runnable": meta.get("runnable", True),
@@ -3204,14 +3261,88 @@ def _save_done(body: dict) -> dict:
         raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
                                  "or remove the provider and add it again.")
     done_at = datetime.now().isoformat(timespec="seconds") if body.get("done") else ""
+    _write_account_note(root, DONE_FILE, {"done_at": done_at})
+    return {"app": name, "account": account, "done_at": done_at}
+
+
+def _write_account_note(root: Path, name: str, data: dict) -> None:
     try:
         # As the panel's other notes in an account's folder are written, so
         # on PaperPull Server a folder that leads out of the data folder
         # through a link is refused rather than written into.
-        _replace_text(root / DONE_FILE, json.dumps({"done_at": done_at}))
+        _replace_text(root / name, json.dumps(data))
     except OSError as e:
         raise HTTPException(500, "Could not save that (%s). Check that its folder can be written to, then try again." % e)
-    return {"app": name, "account": account, "done_at": done_at}
+
+
+def _set_aside_record(body: dict):
+    """(the account's folder, the item's id, its record) from what the page
+    sent, the id checked against the account's own records."""
+    name = str(body.get("app") or "")
+    apps = discover_apps()
+    if name not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    account = _account_named(apps[name], body.get("account"))
+    try:
+        root = _account_root(apps[name], account)
+    except ValueError:
+        raise HTTPException(404, "PaperPull cannot find this account's folder. Check its config.json, "
+                                 "or remove the provider and add it again.")
+    records, key = _read_json(root / "progress.json"), str(body.get("id") or "")
+    record = records.get(key) if isinstance(records, dict) else None
+    if not isinstance(record, dict) or record.get("state") != TO_CHECK_STATE:
+        raise HTTPException(404, "That document is no longer set aside. Reload the page.")
+    return root, key, record
+
+
+@app.post("/api/account/check", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                              Depends(_not_in_sample)])
+async def api_account_check(request: Request):
+    """Say a person has checked one document a run set aside, or take that
+    back. Writes only this account's own note of it."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    return await to_thread.run_sync(_save_checked, body if isinstance(body, dict) else {})
+
+
+def _save_checked(body: dict) -> dict:
+    root, key, _record = _set_aside_record(body)
+    checked = _checked_items(root)
+    if body.get("checked"):
+        checked[key] = datetime.now().isoformat(timespec="seconds")
+    else:
+        checked.pop(key, None)
+    _write_account_note(root, CHECKED_FILE, checked)
+    return {"id": key, "checked": checked.get(key, "")}
+
+
+@app.post("/api/account/check/open", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                                   Depends(_desktop_only), Depends(_not_in_sample)])
+async def api_account_check_open(request: Request):
+    """Open one document a run set aside in the computer's own viewer. Takes
+    the record's id and never a path."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    return await to_thread.run_sync(_open_set_aside, body if isinstance(body, dict) else {})
+
+
+def _open_set_aside(body: dict) -> dict:
+    root, _key, record = _set_aside_record(body)
+    path = _set_aside_file(root, record)
+    if path is None:
+        raise HTTPException(404, "That file is no longer where PaperPull left it.")
+    try:
+        if sys.platform == "win32":
+            os.startfile(str(path))  # noqa: S606
+        else:
+            subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(path)])
+    except Exception as e:
+        raise HTTPException(500, "Could not open the file (%s)." % e)
+    return {"ok": True}
 
 
 @app.post("/api/account/owner", dependencies=[Depends(_same_origin_only), Depends(_terms_first),

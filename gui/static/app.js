@@ -561,7 +561,7 @@ function renderAccount() {
     esc(p.say) + '</span>' + (stoppedHere ? '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' +
     esc(keyOf(r)) + '">' + PLAY + 'Continue where it stopped</button>' : '') +
     (again && !SERVER && !inSample() ? '<button type="button" class="btn btn-p starts" data-do="restore" data-key="' + esc(keyOf(r)) + '">Restore the rest</button>' : '') +
-    '</div>' + gapList(r) +
+    '</div>' + toCheckList(r) + gapList(r) +
     '<div class="steps"><h2 id="getdocs" style="margin-bottom:18px">Get your documents</h2>' +
     '<div class="step"><div class="stepnum' + (signFirst ? ' on' : '') + '">1</div><div class="body"><h3>Sign in to ' + esc(r.provider) + '</h3><p id="steplogin">' +
     esc(loginSay) + '</p><button type="button" class="btn ' + (signFirst ? 'btn-p' : 'btn-s') + ' starts" data-do="run" data-action="login" data-key="' +
@@ -596,6 +596,26 @@ function renderAccount() {
   for (const id of ['year', 'start', 'end']) $(id).addEventListener('change', onScope);
   onScope();
   lockStarts();
+}
+// What the last run set aside, each with its file when there is one and a
+// way to say it has been looked at, which clears Needs a look once all are.
+function toCheckList(r) {
+  const items = r.to_check || [];
+  if (!items.length) return '';
+  const left = items.filter(i => !i.checked).length;
+  const key = esc(keyOf(r)), canChange = !inSample();
+  const line = i => {
+    const id = ' data-key="' + key + '" data-id="' + esc(i.id) + '"';
+    const why = i.file ? i.why : i.saved ? 'The file is no longer where PaperPull left it.'
+      : 'PaperPull could not save this one, so there is no file to open. Get new documents can try it again.';
+    return '<li' + (i.checked ? ' class="checked"' : '') + '><span style="flex:1"><b>' + esc(i.label) + '</b>' +
+      (i.date ? ' · ' + esc(when(i.date)) : '') + '<span class="hint" style="display:block">' + esc(why) + '</span></span>' +
+      (i.file && !SERVER && canChange ? '<button type="button" class="btn btn-s" data-do="check-open"' + id + '>' + sv(P.file, 16) + 'Open</button>' : '') +
+      (canChange ? '<button type="button" class="link" data-do="check-done" data-checked="' + (i.checked ? '' : '1') + '"' + id + '>' +
+        (i.checked ? 'Undo' : 'Done') + '</button>' : '') + '</li>';
+  };
+  return '<div style="padding:16px 24px 0"><p class="small" style="font-weight:700;margin-bottom:6px">' +
+    (left ? esc(many(left, 'document')) + ' to check' : 'All checked') + '</p><ul class="runs tocheck">' + items.map(line).join('') + '</ul></div>';
 }
 function gapList(r) {
   // Shown whenever there are any, since an account that is also past its
@@ -2681,6 +2701,20 @@ const DO = {
     closeMenus();
     if (!r) return;
     try { await postJSON('/api/account/done', {app: r.app, account: r.account, done: !r.marked_done}); }
+    catch (e) { notice(e.message, 'warn'); return; }
+    await loadAccounts();
+    renderAll();
+  },
+  'check-open': async el => {
+    const r = rowByKey(el.dataset.key);
+    if (!r) return;
+    try { await postJSON('/api/account/check/open', {app: r.app, account: r.account, id: el.dataset.id}); }
+    catch (e) { notice(e.message, 'warn'); }
+  },
+  'check-done': async el => {
+    const r = rowByKey(el.dataset.key);
+    if (!r) return;
+    try { await postJSON('/api/account/check', {app: r.app, account: r.account, id: el.dataset.id, checked: Boolean(el.dataset.checked)}); }
     catch (e) { notice(e.message, 'warn'); return; }
     await loadAccounts();
     renderAll();
