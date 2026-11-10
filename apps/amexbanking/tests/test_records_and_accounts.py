@@ -541,7 +541,7 @@ def test_login_says_signed_in_only_once_the_list_answers(app_env, monkeypatch, c
     "Open New Account", "View All Account Details", "View All Gift Cards",
     "Download the App", "Order Checks", "Give Feedback", "Go to Business Line of Credit",
     "Send a Payment", "Make a Payment", "Scheduled Payments", "Redeem Rewards",
-    "View Rewards",
+    "View Rewards", "Redeem Points", "Redeem a Statement Credit",
 ])
 def test_controls_that_are_not_documents_are_not_safe(name):
     assert site.is_safe_control(name) is False

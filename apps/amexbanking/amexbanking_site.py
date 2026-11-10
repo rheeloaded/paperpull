@@ -59,7 +59,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"(pay\b|pay\s+bill|payments?\b|autopay|auto\s*pay|"
     r"transfer|wire\b|withdraw|deposit|move\s+money|send\s+money|"
     r"apply|apply\s+now|open\s+(a\s+)?(new\s+)?account|new\s+account|"
-    r"link\s+(bank|account)|order\b|give\b|gift|rewards?\b(?!\s+checking)|"
+    r"link\s+(bank|account)|order\b|give\b|gift|redeem|rewards?\b(?!\s+checking)|"
     r"line\s+of\s+credit|download\s+(the\s+)?app|"
     r"close\s+account|lock\b|freeze\b|dispute|report\s+fraud|"
     r"change\s+password|edit\s+profile|update\s+address|manage\b|"
