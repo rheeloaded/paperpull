@@ -7,6 +7,9 @@ PREFIX = "PAPERPULL_RUN_RESULT "
 # The line tools/export_transactions.py writes naming the spreadsheet it
 # wrote, which the panel offers to show or hand over.
 EXPORT_PREFIX = "PAPERPULL_EXPORT_RESULT "
+# The line a sign-in that opened its window writes, saying what to watch for
+# it (core signin_watch).
+SIGN_IN_PLAN_PREFIX = "PAPERPULL_SIGN_IN_PLAN "
 # The mark the panel gives each run it starts, in this variable. Only the
 # run's own result line carries it (core run_reporting.marked), and a line
 # without it is shown as any other line, never taken as a result. A run
@@ -101,6 +104,20 @@ def parse(line, mark):
     stop = data.get("stop")
     result["stop"] = stop if result["stopped"] and stop in STOP_REASONS else ""
     return result
+
+
+def sign_in_plan(line, mark):
+    """What to watch for this sign-in, from its own marked line, or None.
+    Every field has to be as signin_watch.plan_for wrote it."""
+    data = _marked(line, SIGN_IN_PLAN_PREFIX, mark)
+    if data is None or not (isinstance(data.get("start"), str) and data["start"]):
+        return None
+    if not all(isinstance(data.get(k), list) and all(isinstance(v, str) for v in data[k])
+               for k in ("markers", "inside", "hosts")):
+        return None
+    if not all(isinstance(data.get(k), bool) for k in ("dedicated", "start_is_inside")):
+        return None
+    return {k: data[k] for k in ("start", "markers", "inside", "hosts", "dedicated", "start_is_inside")}
 
 
 def exported(line, mark):

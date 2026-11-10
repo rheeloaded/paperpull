@@ -18,6 +18,7 @@ the browsers live, which is what BROWSERS below records.
 """
 from __future__ import annotations
 
+import functools
 import glob
 import importlib.util
 import json
@@ -1438,6 +1439,21 @@ def close_signin_browser(profile_dir, port) -> dict:
 ALREADY_ON_PORT = "the browser already on this port"
 
 
+def _says_what_to_watch(open_window):
+    """A sign-in that opened its window says what the panel should watch for
+    once the person has signed in (signin_watch). Every app comes here to open
+    its window, so this is the one place it needs saying."""
+    @functools.wraps(open_window)
+    def opened(profile_dir, port, url, *args, **kwargs):
+        name = open_window(profile_dir, port, url, *args, **kwargs)
+        if name:
+            from . import signin_watch
+            signin_watch.announce(url)
+        return name
+    return opened
+
+
+@_says_what_to_watch
 def open_signin_browser(profile_dir, port: str, url: str,
                         prefer_real: bool = False, mode: str = AUTO,
                         allow_fetch: bool = True) -> Optional[str]:

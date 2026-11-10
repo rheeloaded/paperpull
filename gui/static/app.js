@@ -60,6 +60,8 @@ let META = null;        // /api/apps
 let ROWS = null;        // /api/accounts, one per provider and person
 let PROVIDERS = null;   // /api/providers, for choosing providers
 let VIEW = '';
+// The wait for a sign-in to finish, waitForSignIn below.
+let SIGNIN_WAIT = null;
 const ROUTE = {view: '', app: '', account: ''};
 
 // PaperPull Server signs a session out after hours without use, and the
@@ -766,6 +768,9 @@ function startRun(r, action, opts) {
   if (!s.year && s.start && s.end && s.start > s.end) { notice('The From date is after the To date.', 'warn'); return false; }
   const again = opts.redownload === true;
   if (again && (SERVER || !againScoped(s) || !(META.redownload_actions || []).includes(action))) return false;
+  // Any run that starts ends a wait for a sign-in, Get new pressed by hand
+  // above all. One account at a time, and this is the one now.
+  endSignInWait();
   Object.assign(RUN, {state: 'running', app, account, provider: r.provider, kind: r.kind, who: whoOf(r), action,
     scope: s, again, lines: [], result: null, saved: null, code: null, refused: '', found: null, step: 0, total: 0,
     connected: false, now: '', failure: false, startedAt: new Date(), endedAt: null, outcome: null, savedIn: '', then: opts.then || null,
@@ -880,6 +885,7 @@ function finishRun(code, refused, streamed) {
   if (savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(RUN.app, RUN.account);
   if (done) done(RUN.code);
   if (RUN.queue && QUEUE) queueStep();
+  waitForSignIn();
   tabEnd = RUN.queue && QUEUE && QUEUE.finished ? 'Round done' : endedInWords(RUN);
   paintTitle();
   tellRunEnded();
@@ -893,6 +899,7 @@ let tabEnd = '';
 function paintTitle() {
   const title = RUN.state === 'running'
     ? (RUN.total ? '(' + RUN.step + '/' + RUN.total + ') ' : '') + RUN.provider + ' · PaperPull'
+    : SIGNIN_WAIT ? 'Waiting for sign-in · PaperPull'
     : tabEnd ? tabEnd + ' · PaperPull' : 'PaperPull';
   if (document.title !== title) document.title = title;
 }
@@ -1000,6 +1007,72 @@ function signinThen(run) {
   if (o.resume) return {action: 'resume', scope: {}, again: false};
   if (o.relist) return {action: 'all', scope: {}, again: false};
   return {action: run.action, scope: run.scope, again: run.again};
+}
+// -- waiting for a sign-in to finish ------------------------------------------
+// Once a sign-in window has opened, the run its page offers next starts by
+// itself when the person has signed in, so they need not come back here. The
+// panel watches the window (/api/sign-in/wait), the wait can be stopped, and
+// the step on the page keeps working the whole time.
+// The run a finished sign-in may start by itself, or null. Only a sign-in the
+// run's page would follow with Get new or with the run it was pressed for,
+// and only a run with nothing to ask: not a sign-in from Get help, which keeps
+// the person in that dialog, not one in a round, which has its own Try it
+// again, and not a restore or a report, each of which opens its own dialog.
+function signinNext(run) {
+  if (SERVER || inSample() || run.sink || run.action !== 'login' || !(run.outcome || {}).opened) return null;
+  // A round paused at this account goes on from there. One paused elsewhere
+  // waits for the person, and one that is over has no say in this sign-in.
+  const it = QUEUE && QUEUE.held && !QUEUE.finished ? QUEUE.items[QUEUE.i] : null;
+  const held = it ? rowByKey(it.key) : null;
+  if (held && held.app === run.app && held.account === run.account) return {action: it.action, scope: it.scope, again: false, round: it};
+  if (QUEUE && !QUEUE.finished) return null;
+  const src = run.then || {action: 'all', scope: {}, again: false};
+  return src.again || !RERUN[src.action] || RERUN[src.action][2] ? null : src;
+}
+function endSignInWait() {
+  if (!SIGNIN_WAIT) return;
+  SIGNIN_WAIT.es.close();
+  SIGNIN_WAIT = null;
+  paintTitle();
+}
+function waitForSignIn() {
+  const then = signinNext(RUN);
+  if (!then) return;
+  const es = new EventSource('/api/sign-in/wait?' + new URLSearchParams({app: RUN.app, account: RUN.account}));
+  const wait = {app: RUN.app, account: RUN.account, provider: RUN.provider, who: RUN.who, then, es};
+  SIGNIN_WAIT = wait;
+  RUN.outcome.say = 'Sign in to ' + RUN.provider + ' in the window that opened and leave it open.';
+  es.addEventListener('ended', e => {
+    if (SIGNIN_WAIT === wait) signInWaitEnded(wait, e.data);
+  });
+  es.onerror = () => {
+    // The panel went away. Nothing to say, and the page is as it always was.
+    if (SIGNIN_WAIT === wait) { endSignInWait(); renderAll(); }
+  };
+  paintTitle();
+}
+function signInWaitEnded(wait, how) {
+  endSignInWait();
+  const words = (RERUN[wait.then.action] || ['Get new documents'])[0];
+  if (how === 'signed_in') {
+    const r = rowFor(wait.app, wait.account);
+    if (wait.then.round) {
+      // Only the stop this sign-in was for: the person may have skipped it.
+      if (QUEUE && QUEUE.held && QUEUE.items[QUEUE.i] === wait.then.round && RUN.state !== 'running') { queueRun(); return; }
+    } else if (r && RUN.state !== 'running') {
+      const s = wait.then.scope || {};
+      // Started from wherever the person is, as a run of a round is.
+      startRun(r, wait.then.action, {scope: {year: s.year || '', start: s.start || '', end: s.end || ''},
+                                     stay: VIEW !== 'run'});
+      return;
+    }
+  } else if (how === 'timed_out') {
+    notice('PaperPull stopped waiting for your sign-in to ' + wait.provider + '. Once you have signed in, press ' +
+      words + '.', 'warn');
+  } else if (how === 'no_window') {
+    notice('The sign-in window for ' + wait.provider + ' was closed, so PaperPull stopped waiting.', 'warn');
+  }
+  renderAll();
 }
 // What a sign-in that opened its window says to do next, in the words of
 // the step its page offers, or nothing when it offers none.
@@ -1247,6 +1320,12 @@ function renderRun() {
       '<div class="text"><h1 id="r-title" tabindex="-1">' + esc(o.title) + '</h1>' + (o.say ? '<p id="statustext">' + esc(o.say) + '</p>' : '') + '</div>' +
       '<div class="row-actions">' + (r ? '<a class="btn btn-s" href="' + accountHash(r) + '">Back to ' + esc(RUN.provider) + '</a>' : '') +
       '<a class="btn btn-s" href="#/">All accounts</a></div></div>';
+    if (SIGNIN_WAIT && SIGNIN_WAIT.app === RUN.app && SIGNIN_WAIT.account === RUN.account) {
+      const next = RERUN[SIGNIN_WAIT.then.action][0];
+      html += '<div class="keepopen" id="r-waiting" role="status"><span class="spinner sm" aria-hidden="true"></span><p><b>Waiting for you to sign in.</b> ' +
+        esc(next) + ' starts by itself once you have, so there is no need to come back here.</p>' +
+        '<button type="button" class="btn btn-s" data-do="stop-sign-in-wait">Stop waiting</button></div>';
+    }
     if ((RUN.saved || []).length) {
       html += '<ul class="saved" aria-label="Saved this run">' + RUN.saved.slice(0, 50).map(n => '<li>' + sv(P.check, 16, 3) +
         '<span>' + esc(n) + '</span></li>').join('') + (RUN.saved.length > 50 ? '<li>and ' + (RUN.saved.length - 50) + ' more</li>' : '') + '</ul>';
@@ -1346,14 +1425,15 @@ function paintRunLive() {
 }
 function renderRunbar() {
   paintTitle();
-  const show = RUN.state === 'running' && VIEW !== 'run';
+  const running = RUN.state === 'running', show = (running || Boolean(SIGNIN_WAIT)) && VIEW !== 'run';
   $('runbar').hidden = !show;
   if (!show) return;
   $('rb-what').textContent = RUN.provider + (RUN.who ? ' · ' + RUN.who : '');
-  $('rb-state').textContent = (RUN.again ? 'Restoring' : ACTION_WORDS[RUN.action]) + ' · ' + runStateText();
+  $('rb-state').textContent = running ? (RUN.again ? 'Restoring' : ACTION_WORDS[RUN.action]) + ' · ' + runStateText()
+    : 'Waiting for you to sign in';
   const bar = $('rb-bar');
-  bar.classList.toggle('indeterminate', !RUN.total);
-  bar.firstChild.style.width = runPercent() + '%';
+  bar.classList.toggle('indeterminate', !running || !RUN.total);
+  bar.firstChild.style.width = (running ? runPercent() : 0) + '%';
 }
 
 // -- a round of runs, Get new for all -----------------------------------------------
@@ -2699,6 +2779,7 @@ const DO = {
   'queue-skip': () => { QUEUE.items[QUEUE.i].said = 'skipped'; QUEUE.i++; queueRun(); },
   'queue-end': () => { QUEUE = null; renderAll(); },
   'stop-run': () => stopRun(),
+  'stop-sign-in-wait': () => { endSignInWait(); renderAll(); },
   'stop-recording': () => stopRecording(),
   'failure': () => revealFailure(),
   'report-download': el => {
