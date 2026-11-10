@@ -5099,7 +5099,16 @@ def _within(path, folder) -> bool:
         where, home = Path(path).resolve(), Path(folder).resolve()
     except (OSError, RuntimeError, ValueError):
         return False
-    return where == home or home in where.parents
+    if where == home or home in where.parents:
+        return True
+    # A Mac tells names apart without case, as _in_root_name has it, so
+    # "target receipts" is the folder "Target Receipts", made yet or not.
+    # Windows paths already compare so, and resolve() on a Mac keeps the
+    # spelling it was given.
+    if sys.platform == "darwin":
+        home_name = str(home).casefold()
+        return any(str(step).casefold() == home_name for step in (where, *where.parents))
+    return False
 
 
 def _profiles_known(apps: dict) -> list:
