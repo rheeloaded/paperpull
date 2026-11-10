@@ -812,3 +812,49 @@ def test_set_up_refuses_what_the_welcome_said(settings, tmp_path):
     with pytest.raises(fastapi.HTTPException) as e:
         asyncio.run(app_module.api_create(_Req({"root": str(a_file), "providers": ["github"]})))
     assert e.value.status_code == 400 and e.value.detail == _check({"root": str(a_file)})["problem"]
+
+
+# -- a checkout nobody has set up ------------------------------------------------
+
+@pytest.fixture
+def checkout(settings, tmp_path, monkeypatch):
+    """A repo's apps/ of templates, as a fresh clone has."""
+    apps = _installs(tmp_path / "apps", 2)
+    monkeypatch.setattr(app_module, "_DEFAULT_ROOT", apps)
+    return apps
+
+
+def test_a_fresh_checkout_is_shown_the_welcome_not_its_templates(checkout):
+    """The README promises the welcome, and a run from apps/ would have
+    written PDFs and sign-ins into the git tree."""
+    assert app_module.fresh_checkout() is True
+    assert app_module.api_apps()["fresh_checkout"] is True
+
+
+def test_its_templates_are_not_called_already_set_up(checkout, monkeypatch):
+    monkeypatch.setattr(app_module, "list_providers", lambda: [{"folder": "App 0"}])
+    assert app_module.api_providers()["providers"][0]["installed"] is False
+
+
+def test_somebody_already_running_from_apps_keeps_doing_so(checkout):
+    (checkout / "App 1" / "config.json").write_text("{}", encoding="utf-8")
+    assert app_module.fresh_checkout() is False
+
+
+def test_a_chosen_folder_ends_it(checkout, settings, tmp_path):
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({"apps_root": str(tmp_path)}), encoding="utf-8")
+    assert app_module.fresh_checkout() is False
+
+
+def test_an_environment_folder_a_package_and_a_server_are_never_one(checkout, monkeypatch, tmp_path):
+    with monkeypatch.context() as m:
+        m.setenv("APPS_ROOT", str(tmp_path))
+        assert app_module.fresh_checkout() is False
+    with monkeypatch.context() as m:
+        m.setattr(app_module, "_is_packaged", lambda: True)
+        assert app_module.fresh_checkout() is False
+    with monkeypatch.context() as m:
+        m.setattr(app_module.server_mode, "enabled", lambda: True)
+        assert app_module.fresh_checkout() is False
+    assert app_module.fresh_checkout() is True

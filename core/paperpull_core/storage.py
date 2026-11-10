@@ -584,7 +584,7 @@ def ensure_owner(config: dict, config_path) -> dict:
             atomic_write_text(Path(config_path), json.dumps(existing, indent=2))
         else:
             Path(config_path).write_text(json.dumps(existing, indent=2), encoding="utf-8")
-        print(f"Saved. Documents will be associated with: {name}\n")
+        print(f"Saved. {name} is the name on these documents.\n")
     except Exception:
         pass
     return config
@@ -1262,8 +1262,8 @@ def atomic_write_text(path: Path, text: str, encoding: str = "utf-8", *,
             except PermissionError:
                 if tries > 1:
                     if attempt == 0:
-                        print(f"  ! {path.name} is locked (open in Excel?). "
-                              f"Close it - retrying for up to 60s...")
+                        print(f"  ! {path.name} is open in another program, perhaps Excel. "
+                              f"Close it. Trying again for up to a minute.")
                     time.sleep(_LOCKED_PAUSE_S)
         else:
             _HELD.add(_held_key(path))

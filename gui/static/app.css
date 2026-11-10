@@ -161,6 +161,8 @@ code, .mono { font-family: var(--mono); font-size: .93em; }
 .notice.ok { background: var(--ok-soft); color: var(--ok-text); }
 .notice.warn { background: var(--warn-soft); color: var(--warn-text); }
 .notice > span, .samplebar > span { flex: 1 1 300px; }
+.roundend { margin: 6px 0 0; padding-left: 20px; }
+.notice a { color: inherit; text-decoration: underline; white-space: nowrap; }
 main { flex: 1; width: 100%; }
 .view { max-width: 1080px; margin: 0 auto; padding: var(--s8) var(--s8) 56px; }
 .view.narrow { max-width: 860px; }
@@ -513,6 +515,10 @@ dialog::backdrop { background: var(--overlay); }
 .dlg-head h2 { font-size: 19px; line-height: 1.25; }
 .dlg-head p { margin-top: 6px; color: var(--ink-2); font-size: 14px; }
 .dlg-body { padding: var(--s5) var(--s6) var(--s2); display: flex; flex-direction: column; gap: var(--s4); }
+#dlg-support .hint { margin: 4px 0 var(--s2); }
+#dlg-support .spwhat { margin-top: var(--s3); }
+#dlg-support .spwhat summary { cursor: pointer; font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+#dlg-support .spwhat p { font-size: 13px; color: var(--muted); }
 .dlg-foot { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; padding: var(--s4) var(--s6) var(--s6); }
 .dlg-foot .btn { min-width: 96px; }
 /* The terms keep I understand, and the sentence saying what it accepts, in
