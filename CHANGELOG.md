@@ -110,6 +110,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   time it reads the accounts. Contributed by @JasperDale420.
 
 ### Fixed
+- **Chase no longer tries, on every run, statements it can never take.**
+  When its document API answered nothing, the fallback read a business
+  account's documents off the page, with no card and no document id, and
+  recorded each row by its "Opens document menu" control. Such a record
+  failed on every later run, and a press on that control never saved
+  anything. Those controls are no longer pressed or listed, and a record of
+  that shape left by an older version is set down as No Longer Listed.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On
