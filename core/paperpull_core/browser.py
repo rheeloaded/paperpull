@@ -1337,9 +1337,10 @@ def bring_forward(port) -> bool:
     """Put the browser on this debugging port in front of the person, its
     first page showing, through the browser's own endpoint. No permission is
     asked of the operating system. False when it could not be reached, or
-    answered with anything but its pages, which costs nothing: the window
-    is still there. Anything at all that goes wrong here is only that, so a
-    browser that closes while it answers never ends the sign-in it opened."""
+    answered with anything but its pages, which costs nothing, since the
+    window is still there. Anything at all that goes wrong here is only
+    that, so a browser that closes while it answers never ends the sign-in
+    it opened."""
     import json
     import urllib.request
     from .characters import whole_json

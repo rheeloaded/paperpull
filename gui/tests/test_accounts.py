@@ -2080,6 +2080,21 @@ def test_a_finished_run_closes_only_its_own_window(root, monkeypatch):
     assert said == ["Closed the sign-in window, since this run finished."]
 
 
+def test_a_profile_under_the_home_folder_is_the_one_the_browser_opened(root, monkeypatch):
+    """A sign-in opens "~/..." as the home folder (browser._launch), so the
+    window to close is found there, never under the install."""
+    config = root / "Bank Statements" / "config.json"
+    config.write_text(json.dumps({"output_dir": ".", "cdp_url": "http://127.0.0.1:9481",
+                                  "profile_dir": "~/an-invented-profile"}), encoding="utf-8")
+    assert app_module._ports() is not None
+    from paperpull_core import browser
+    asked = []
+    monkeypatch.setattr(browser, "close_signin_browser",
+                        lambda profile, port: asked.append(Path(profile)) or {"closed": False, "in_use": False})
+    app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary")
+    assert asked == [Path("~/an-invented-profile").expanduser()]
+
+
 @pytest.mark.parametrize("other", ["config.second.json", "Shop Receipts"])
 def test_a_window_on_a_port_another_account_names_is_left_open(root, monkeypatch, other):
     """A browser on a port two configs name is the one a run of either

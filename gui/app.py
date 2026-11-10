@@ -4336,8 +4336,9 @@ def _close_own_window(meta: dict, account: str) -> list:
     cfg = _config_of(meta, account)
     try:
         port = urllib.parse.urlsplit(str(cfg.get("cdp_url") or "")).port
-        profile = Path(str(cfg.get("profile_dir") or ""))
-    except ValueError:
+        # As the browser was opened on it (browser._launch), "~" and all.
+        profile = Path(str(cfg.get("profile_dir") or "")).expanduser()
+    except (ValueError, RuntimeError):
         return []
     if not port or not str(profile) or str(profile) == ".":
         return []
