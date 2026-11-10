@@ -42,6 +42,25 @@ All notable changes to PaperPull are recorded here. Versioning follows
   sign-in window opened or nothing was recorded.
 
 ### Changed
+- **PaperPull.app opens the control panel in a window of its own (#141).**
+  Double-clicking it on a Mac no longer opens Terminal and a browser tab.
+  The window shows the same panel, with a Dock icon and a menu bar, and
+  Cmd-Q or closing the window stops the panel and the runs it started. The
+  window shows only the panel at 127.0.0.1, and any other link opens in
+  the default browser. The panel's output goes to
+  ~/Library/Logs/PaperPull/panel.log, and Resources/paperpull-panel.sh
+  still runs the panel in a terminal. Contributed by @JasperDale420.
+  Before merging, a quit was made to wait for a Rename, a Move, the move
+  into the documents folder that ends a download run, or a history import
+  that is applying its changes, since one stopped partway would leave the
+  index and progress.json naming files that had moved, and the window and
+  the log say why it waits. When this person's own panel, one started from
+  a terminal for instance, already holds port 8765, the window shows that
+  panel rather than start a second one on the same records, and closing
+  the window leaves it running. panel.log keeps no line per request, which
+  named every provider and person, the window looks up no site in WebKit's
+  list of fraudulent ones, and the release workflow removes its signing key
+  before it runs the bundle.
 - **One Get help under More (#181).** Make a support report and Record steps for
   support were two items and two dialogs, and the file a failed run had
   just written was a third place to look. Get help opens one dialog that

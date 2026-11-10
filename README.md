@@ -652,7 +652,9 @@ they open with no warning. About This Mac tells them apart, a Chip line
 for Apple Silicon and a Processor line for Intel. Drag PaperPull to
 Applications and double-click it. It opens the control panel in a window of its
 own, with a Dock icon and a menu bar, and no Terminal or browser tab. Quit it
-with Cmd-Q, which stops the panel. The Windows installer and the program inside it are
+with Cmd-Q, which stops the panel once any Rename or Move under way has
+finished. A panel already running from a terminal is shown in the window and
+left running. The Windows installer and the program inside it are
 code-signed with Azure Artifact Signing. SmartScreen can still show its
 prompt while the certificate is new, since it learns to trust a publisher
 from downloads over time. See [Code signing policy](#code-signing-policy)
