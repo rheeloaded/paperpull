@@ -44,7 +44,7 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, nothing_read, report_run_result)
 
 import argparse
 import logging
@@ -391,7 +391,7 @@ class App:
             raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
-        print("Sign in, keep the window OPEN, then run the pilot.")
+        print(f"Sign in, keep the window OPEN, then {after_sign_in()}.")
 
     def _reads_notices(self) -> bool:
         """Whether a run opens the notices page at all, only when notices
@@ -1195,6 +1195,9 @@ def main(argv=None):
         elif args.diagnose:
             if app.cmd_diagnose():
                 app.write_survey()
+            else:
+                # The tab was on a sign-in page, so no survey was written.
+                raise nothing_read()
         elif args.dry_run:
             app.cmd_run("dry-run")
         else:

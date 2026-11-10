@@ -137,7 +137,7 @@ def test_a_held_file_saved_on_the_way_out_is_waited_for_then_named(tmp_path, hel
     out = capsys.readouterr().out
     assert len(held.tries) == storage._LOCKED_TRIES
     assert len(held.pauses) == storage._LOCKED_TRIES
-    assert out.count("is locked") == 1
+    assert out.count("is open in another program") == 1
     assert out.splitlines()[-1] == _line(store.path)
     assert _saved_keys(store) == ["Online:1"]
     assert not list(tmp_path.glob("*.tmp")), "the copy it could not put in place was left"

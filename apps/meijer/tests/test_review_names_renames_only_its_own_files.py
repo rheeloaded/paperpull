@@ -141,7 +141,7 @@ def test_with_the_output_folder_where_it_runs_only_its_own_receipts_are_offered(
     review(tmp_path, monkeypatch, ["Groceries"] * 5, output_dir=".")
 
     out = " ".join(capsys.readouterr().out.split())
-    assert "1 receipt(s) need review." in out, out
+    assert "1 receipt needs review." in out, out
     assert cfg.is_file() and diagnosed.is_file() and loose.is_file() and ini.is_file()
     assert (tmp_path / "In-Store" / GROCERIES).is_file() and not held.exists()
     assert [r["PDF Filename"] for r in index.read_all()] == [

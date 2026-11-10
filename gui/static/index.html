@@ -31,7 +31,7 @@ __CSS__
   <button class="btn btn-s btn-sm" type="button" data-do="leave-sample">Leave the sample</button>
 </div>
 <div id="sandboxbar" class="notice warn" role="alert" hidden><span id="sandboxtext"></span></div>
-<div id="notice" class="notice" role="status" hidden><span id="noticetext"></span>
+<div id="notice" class="notice" role="status" hidden><span id="noticetext"></span><a id="noticelink" href="#/run" hidden></a>
   <button class="btn btn-ghost btn-sm" type="button" data-do="dismiss-notice">Dismiss</button></div>
 
 <main id="main" tabindex="-1">
@@ -476,6 +476,22 @@ __CSS__
   </form>
 </dialog>
 
+<dialog id="dlg-owner" aria-labelledby="on-title">
+  <form method="dialog">
+    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg></div>
+      <div><h2 id="on-title">Name on the account</h2>
+        <p>The name as the provider writes it. It stays on this computer, and lets PaperPull take your name out of a
+          file you share or put it in your file names. Files already saved keep their names.</p></div></div>
+    <div class="dlg-body">
+      <label class="field" for="on-owner">Name on the account<input id="on-owner" type="text" autocomplete="off" spellcheck="false" maxlength="80"></label>
+      <p class="hint" style="margin-top:-10px">Leave it blank to clear it.</p>
+      <p class="err" id="on-err" role="alert" hidden></p>
+    </div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
+      <button class="btn btn-p" type="button" data-do="on-go">Save</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlg-remove" aria-labelledby="rm-title">
   <form method="dialog">
     <div class="dlg-head"><div class="icon bad" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7h18v4H3zM5 11v8h14v-8M10 15h4"/></svg></div>
@@ -528,33 +544,33 @@ __CSS__
 <dialog id="dlg-support" aria-labelledby="sp-title">
   <form method="dialog">
     <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></div>
-      <div><h2 id="sp-title">Make a support report</h2>
-        <p id="sp-diagnose">A support report reads the provider's page and saves two files to its Diagnostics folder,
-          downloading nothing. Attach the one whose name starts with <b>survey-</b> to a problem report, a GitHub issue.
-          It holds counts and page states, never text from your account. The detailed file beside it keeps only words on
-          PaperPull's fixed list, and of a title, row or label only the words that say what kind of document it is
-          and when, never a card's name, so it can go too. A screenshot,
-          when one is taken, shows your page and stays on this computer.</p></div></div>
-    <div class="dlg-body"><p class="hint" id="sp-signsay">Sign in to the provider first and leave its window on the page that has your
-      documents, so the report reads the right page.</p>
-      <div class="row-actions" id="sp-signrow"><button class="btn btn-s starts" type="button" data-do="sp-signin">Open sign-in window</button></div>
-      <pre class="log short" id="sp-log" hidden></pre></div>
-    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
-      <button class="btn btn-p starts" type="button" data-do="sp-go">Make the report</button></div>
-  </form>
-</dialog>
-
-<dialog id="dlg-record" aria-labelledby="rc-title">
-  <form method="dialog">
-    <div class="dlg-head"><div class="icon" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/></svg></div>
-      <div><h2 id="rc-title">Record steps for support</h2>
-        <p><b>Record</b> watches one signed-in page while you click your way to a document, and saves what you clicked to
-          the Diagnostics folder. It downloads nothing and records no typing. Use it when a support report is not enough,
-          since a recording shows which button matters.</p></div></div>
-    <div class="dlg-body"><p class="hint">Start it, click through the provider's site to one document in its window, then
-      press Stop recording here.</p></div>
-    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Cancel</button>
-      <button class="btn btn-p" type="button" data-do="rc-go">Start recording</button></div>
+      <div><h2 id="sp-title">Get help</h2>
+        <p>PaperPull can make a file that shows where it got stuck. Attach it to a problem report, a GitHub issue.</p></div></div>
+    <div class="dlg-body">
+      <section id="sp-failure" hidden><h3>A file about what went wrong</h3>
+        <p class="hint">A run in the last hour wrote a file about what went wrong. It holds counts and page states, never
+          text from your account. Read it, then attach it to a problem report first.</p>
+        <div class="row-actions" id="sp-failacts"></div></section>
+      <section><h3>Make a support report</h3>
+        <p class="hint" id="sp-signsay">Sign in to the provider first and leave its window on the page that has your
+          documents, so the report reads the right page.</p>
+        <div class="row-actions"><button class="btn btn-s starts" id="sp-signrow" type="button" data-do="sp-signin">Open sign-in window</button>
+          <button class="btn btn-p starts" type="button" data-do="sp-go">Make the report</button></div>
+        <pre class="log short" id="sp-log" hidden></pre>
+        <details class="spwhat group-more"><summary>What's in the file?</summary>
+          <p id="sp-diagnose">A support report reads the provider's page and saves two files to its Diagnostics folder,
+            downloading nothing. Attach the one whose name starts with <b>survey-</b> to a problem report, a GitHub issue.
+            It holds counts and page states, never text from your account. The detailed file beside it keeps only words on
+            PaperPull's fixed list, and of a title, row or label only the words that say what kind of document it is
+            and when, never a card's name, so it can go too. A screenshot,
+            when one is taken, shows your page and stays on this computer.</p></details></section>
+      <section><h3>Then, if a support report is not enough</h3>
+        <p class="hint"><b>Record steps</b> watches one signed-in page while you click your way to a document, and saves what you
+          clicked to the Diagnostics folder. It downloads nothing and records no typing. A recording shows which button
+          matters. Start it, click through the provider's site to one document in its window, then press Stop recording.</p>
+        <div class="row-actions"><button class="btn btn-s starts" type="button" data-do="rc-go">Record steps</button></div></section>
+    </div>
+    <div class="dlg-foot"><button class="btn btn-s" value="cancel" formnovalidate>Close</button></div>
   </form>
 </dialog>
 

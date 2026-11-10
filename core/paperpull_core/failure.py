@@ -916,8 +916,13 @@ def write_survey(diagnostics_dir, page=None, selectors=None, provider="",
                 "  The detailed file beside it can go with it. A screenshot,",
                 "  where Diagnose takes one, stays on this machine.")
 
-    return write_failure(
+    out = write_failure(
         diagnostics_dir, command="diagnose", step="survey the page",
         reason="", page=page, selectors=selectors, provider=provider,
         journal=journal, requests=requests, extra=extra, say=say,
         kind="paperpull-survey", stem="survey", note=SURVEY_NOTE, told=told)
+    from .run_reporting import nothing_read
+    from .words import read_nothing_in
+    if read_nothing_in(diagnostics_dir):
+        raise nothing_read()
+    return out

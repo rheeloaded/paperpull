@@ -44,7 +44,6 @@ const P = {
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
   report: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>',
   file: '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/>',
-  record: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/>',
   person: '<circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/>',
   box: '<path d="M3 7h18v4H3zM5 11v8h14v-8M10 15h4"/>', plus: '<path d="M12 5v14M5 12h14"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>', x: '<path d="M6 6l12 12M18 6L6 18"/>',
@@ -140,7 +139,7 @@ const ACTION_DOING = {login: 'Opening the sign-in window for %s', discover: 'Che
 // says an account is signed in, since nothing short of a run knows that.
 const NEEDS = ['stopped', 'signin', 'attention', 'unreadable', 'overdue', 'due', 'gap'];
 const FRESH = ['never', 'not_started'];
-function groupOf(r) { return NEEDS.includes(r.state) ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
+function groupOf(r) { return NEEDS.includes(r.state) && !r.checked_quiet ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
 // Whether a stopped account is carried on with Continue. Not after a Resume
 // that stopped because no run read the list to its end, since only a run
 // that lists carries on from that, and Continue would stop there again (#124).
@@ -161,6 +160,12 @@ function present(r) {
     act: {label: 'Get new', run: 'all', primary: true}});
   if (!r.runnable) return {chip: {cls: 'bad', text: "Can't run"}, say: 'PaperPull does not recognize this folder. Open it to see what to do.', act: {label: 'Open', nav: true}};
   if (r.needs_setup) return {chip: {cls: 'bad', text: 'Needs setup'}, say: 'Run setup-all (setup-all.command on a Mac, setup-all.bat on Windows) in the PaperPull folder, then reload this page.', act: {label: 'Open', nav: true}};
+  if (r.marked_done) return {chip: {cls: 'ok', text: 'Marked done'},
+    say: 'Marked done on ' + when(r.marked_done) + '. It comes back after a while, or if a run needs a look.',
+    act: {label: 'Get new', run: 'all'}};
+  if (r.checked_quiet && r.state === 'current') return {chip: {cls: 'ok', text: 'Up to date'},
+    say: 'Checked ' + when(r.checked_quiet) + ', nothing new yet.' + (latest ? ' Newest ' + n + ' is ' + latest + '.' : ''),
+    act: {label: 'Get new', run: 'all'}};
   switch (r.state) {
     case 'stopped': {
       const again = Boolean(r.last_run && r.last_run.redownload);
@@ -251,12 +256,16 @@ function parseRoute() {
   if (parts[0] === 'add') return {view: 'welcome', add: true};
   return {view: 'home'};
 }
+// A provider folder's name on the page. /api/apps has it, since the rows are
+// not read yet when the Updated notice is said.
+function providerName(folder) { return (META.provider_names || {})[folder] || folder; }
 function accountHash(r) { return '#/a/' + encodeURIComponent(r.app) + '/' + encodeURIComponent(r.account); }
 function route() {
   if (!META) return;
   closeMenus();
   const want = parseRoute();
-  const empty = !Object.keys(META.apps).length;
+  // A fresh checkout's providers are templates, not accounts of anybody's.
+  const empty = !Object.keys(META.apps).length || Boolean(META.fresh_checkout);
   if (empty && !['welcome', 'settings'].includes(want.view)) { want.view = 'welcome'; want.add = false; }
   Object.assign(ROUTE, {view: want.view, app: want.app || '', account: want.account || ''});
   const changed = VIEW !== want.view;
@@ -274,6 +283,10 @@ function route() {
   else if (VIEW === 'sheets') openSheets();
   else if (VIEW === 'names') openNames();
   else if (VIEW === 'settings') renderSettings();
+  // Moving on is having seen how the run ended, and the Run page says the
+  // rest, so neither the tab's title nor the link to that page stays.
+  tabEnd = '';
+  if (VIEW === 'run' && !$('noticelink').hidden) notice('', '');
   renderRunbar();
   if (changed) {
     const h = document.querySelector('#view-' + VIEW + ' h1');
@@ -289,8 +302,11 @@ function renderAll() {
   renderRunbar();
 }
 
-function notice(text, tone) {
+// link, the words of a link to the Run page, for a run that ended elsewhere.
+function notice(text, tone, link) {
   $('noticetext').textContent = text;
+  $('noticelink').textContent = link || '';
+  $('noticelink').hidden = !link;
   $('notice').className = 'notice' + (tone ? ' ' + tone : '');
   $('notice').hidden = !text;
 }
@@ -312,7 +328,7 @@ async function load() {
   $('sandboxbar').hidden = !sandbox;
   const fresh = Object.keys(META.refreshed || {});
   if (fresh.length) {
-    notice('Updated ' + fresh.join(', ') +
+    notice('Updated ' + fresh.map(providerName).join(', ') +
            " to this version of PaperPull. The old files are in each one's Backups folder.", '');
   }
   await loadAccounts();
@@ -337,7 +353,7 @@ function queueTargets() {
   // still offers Look for them.
   return (ROWS || []).filter(r => r.runnable && !r.needs_setup && !r.running && !r.settled && (
     (r.state === 'stopped' && !(r.last_run && r.last_run.redownload)) ||
-    ['overdue', 'due', 'gap', 'never'].includes(r.state)));
+    ['overdue', 'due', 'gap', 'never'].includes(r.state) && !r.checked_quiet));
 }
 // Where a row stands on Accounts. A provider never run stands with what
 // needs a look, never folded away under Not started, while its first run
@@ -612,7 +628,7 @@ function closeMenus() {
   for (const b of document.querySelectorAll('[aria-expanded="true"][data-do="menu"]')) b.setAttribute('aria-expanded', 'false');
 }
 function menuItem(doIt, key, ico, title, line, disabled) {
-  return '<button type="button" role="menuitem" class="mi' + (doIt === 'run' || doIt === 'record' || doIt === 'support' ||
+  return '<button type="button" role="menuitem" class="mi' + (doIt === 'run' || doIt === 'support' ||
     doIt === 'rename' || doIt === 'review' || doIt === 'restore' ? ' starts' : '') + '" data-do="' + doIt + '" data-key="' + esc(key) + '"' +
     (disabled ? ' disabled' : '') + (doIt === 'run' ? ' data-action="verify"' : '') + '>' + sv(ico, 20) +
     '<span><b>' + esc(title) + '</b><span>' + esc(line) + '</span></span></button>';
@@ -635,10 +651,12 @@ function openMenu(btn) {
   html += menuItem('run', k, P.shield, 'Check saved files', 'Checks every PDF already saved. Downloads nothing');
   if (!SERVER && !sample) html += menuItem('reveal', k, P.folder, 'Open folder', 'Where ' + whose(r.provider) + ' files are saved');
   html += '<div class="rule" role="separator"></div>' +
-    menuItem('support', k, P.report, 'Make a support report', "Reads " + whose(r.provider) + " page and saves a file with no account details, to send with a problem report") +
-    menuItem('record', k, P.record, 'Record steps for support', 'Watches while you click your way to a document. Downloads nothing and records no typing');
+    menuItem('support', k, P.report, 'Get help', 'Makes a file with no account details, to send with a problem report');
   if (!sample) {
     html += '<div class="rule" role="separator"></div>' +
+      menuItem('mark-done', k, P.check, r.marked_done ? 'Undo marked done' : 'Mark as done',
+        r.marked_done ? 'Put this account back on the list' : 'Take this account off the list for now') +
+      menuItem('owner', k, P.pencil, 'Name on the account', 'Change the name PaperPull uses for this account') +
       menuItem('person', k, P.person, 'Add another person', 'Their own sign-in window, folder and download history') +
       menuItem('remove', k, P.box, 'Remove from PaperPull', 'Moves its folder to Removed. Nothing is deleted');
   }
@@ -782,7 +800,11 @@ function startRun(r, action, opts) {
   };
   if (SERVER && action === 'login') openDock(r.provider);
   closeMenus();
-  notice('', '');
+  // A later run of a round starts on its own, perhaps under a notice the
+  // person is reading on another page.
+  if (!(opts.queue && opts.stay)) notice('', '');
+  tabEnd = '';
+  paintTitle();
   if (!opts.stay && location.hash !== '#/run') location.hash = '#/run'; else renderAll();
   lockStarts();
   return true;
@@ -798,6 +820,9 @@ function onLine(text) {
   else if ((m = /Downloading (\d+) document/i.exec(t))) { RUN.total = +m[1]; }
   if (/^Connected\b/.test(t)) RUN.connected = true;
   if (t && !t.startsWith('$ ')) RUN.now = t;
+  // Not left to the frame below, which a browser holds back while the tab
+  // is out of sight, the very time the title is there to be read.
+  paintTitle();
   if (!paintQueued) {
     paintQueued = true;
     requestAnimationFrame(() => { paintQueued = false; paintRunLive(); renderRunbar(); });
@@ -852,9 +877,49 @@ function finishRun(code, refused, streamed) {
   if (savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(RUN.app, RUN.account);
   if (done) done(RUN.code);
   if (RUN.queue && QUEUE) queueStep();
+  tabEnd = RUN.queue && QUEUE && QUEUE.finished ? 'Round done' : endedInWords(RUN);
+  paintTitle();
+  tellRunEnded();
   loadAccounts().then(renderAll);
   renderAll();
   lockStarts();
+}
+// What the tab's own title says of a run that has ended, until the person
+// moves on, as somebody working in the provider's window sees only the tab.
+let tabEnd = '';
+function paintTitle() {
+  const title = RUN.state === 'running'
+    ? (RUN.total ? '(' + RUN.step + '/' + RUN.total + ') ' : '') + RUN.provider + ' · PaperPull'
+    : tabEnd ? tabEnd + ' · PaperPull' : 'PaperPull';
+  if (document.title !== title) document.title = title;
+}
+// A sign-in window that opened leaves the person to work in it, so there
+// is no end of anything to announce. A run that did not finish is said in
+// its outcome's own title, the words its page has. "Stopped" was said of a
+// run that never started too, and of one the page lost touch with, which
+// may still be going.
+function endedInWords(run) {
+  const o = run.outcome || {};
+  if ((run.action === 'login' && o.clean) || !o.title) return '';
+  if (o.clean) return run.provider + (o.attention ? ' needs a look' : ' done');
+  return o.title.startsWith(run.provider) ? o.title : run.provider + ': ' + o.title;
+}
+// A run that ends while the person is on another page of PaperPull only
+// loses its bar at the bottom, so it says so, with the way to its outcome.
+// A dialog that started one shows its output and says how it went. A round
+// says so once, when it pauses for the person or comes to its end, as the
+// next run of it would clear anything said sooner.
+function tellRunEnded() {
+  const o = RUN.outcome || {};
+  if (VIEW === 'run' || RUN.sink || (RUN.action === 'login' && o.clean)) return;
+  if (RUN.queue && QUEUE) {
+    if (QUEUE.finished) notice('The round is done.', 'ok', 'See how each one went');
+    else if (QUEUE.held) notice('Paused at ' + QUEUE.items[QUEUE.i].provider + '. The rest wait for you.', 'warn', 'See what it needs');
+    return;
+  }
+  const name = RUN.provider + (RUN.who ? ' (' + RUN.who + ')' : '');
+  notice((o.title.startsWith(RUN.provider) ? o.title : name + ': ' + o.title) + '.',
+    {ok: 'ok', warn: 'warn', bad: 'warn'}[o.tone] || '', 'See what happened');
 }
 // Where a run's documents went, said beside them with a button to show
 // them, so nobody leaves the page to find them. The panel names the folder
@@ -890,12 +955,12 @@ function savedCount(res, saved) {
 // How an app ends when what it was asked for did not happen, the numbers
 // in core run_reporting (core/tests/test_every_app_says_when_nothing_happened.py
 // holds the two to each other).
-const NOTHING_OPENED = '5', NOTHING_RECORDED = '6', NOT_SIGNED_IN = '7';
+const NOTHING_OPENED = '5', NOTHING_RECORDED = '6', NOT_SIGNED_IN = '7', NOTHING_READ = '8';
 // Recent runs says each of those in the words of its outcome's title, since
 // none of them is a problem with the run, and a row that says Sign in first
 // read "ended with a problem" beside it.
 const ENDED_WITH = {[NOTHING_OPENED]: 'no sign-in window opened', [NOTHING_RECORDED]: 'nothing was recorded',
-  [NOT_SIGNED_IN]: 'nobody was signed in'};
+  [NOT_SIGNED_IN]: 'nobody was signed in', [NOTHING_READ]: 'nothing was read'};
 // What a run came to, in a title, a sentence and a tone.
 // The run to press once signed in: Get new after a sign-in, or the run
 // that found nobody signed in, over the same dates.
@@ -981,6 +1046,13 @@ function runOutcome() {
   if (code === NOT_SIGNED_IN) return {tone: 'info', title: 'Sign in first',
     say: 'No signed-in ' + who + ' window was open, so nothing was downloaded. Open the sign-in window, sign in there, ' +
       'then run this again.', clean: false, signin: true, first: true, rerun: true};
+  // A support report that found only a sign-in page or a security check.
+  // Its files are there, and a sign-in check can be wrong, so the file is
+  // still offered (report: true), under what to do first.
+  if (code === NOTHING_READ) return {tone: 'info', title: 'Nothing was read',
+    say: whose(who) + ' window was on a sign-in page or a security check, so this support report read nothing useful. ' +
+      'Sign in, leave the window on the page that has your documents, then make the report again.',
+    clean: false, signin: true, first: true, rerun: true, report: true};
   // Why it stopped, when the run knows (core run_reporting.stop_reason),
   // and so whose it is to fix. Each says that nothing saved is lost, and
   // only a stop that a sign-in can fix offers one. Whose it is is said
@@ -1109,17 +1181,30 @@ async function fetchDownload(url) {
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
 }
-async function revealFailure() {
-  if (!failureApp) return;
+async function revealFailure(app = failureApp, account = failureAccount) {
+  if (!app) return;
   if (SERVER) {
-    await fetchDownload('/api/failure/download?' + new URLSearchParams({app: failureApp, account: failureAccount}).toString());
+    await fetchDownload('/api/failure/download?' + new URLSearchParams({app, account}).toString());
     return;
   }
   try {
     await fetch('/api/failure/reveal', { method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app: failureApp, account: failureAccount }) });
+      body: JSON.stringify({ app, account }) });
   } catch (e) { /* the file is still there */ }
+}
+// A recent failure file is what helps most, so the dialog offers it first.
+// Asked of the server each time the dialog opens, for the account it was
+// opened on, and shown only while that is still the account it is open on.
+async function offerFailure(r) {
+  $('sp-failure').hidden = true;
+  try {
+    const d = await getJSON('/api/failure/latest?' + new URLSearchParams({app: r.app, account: r.account}));
+    if (!d.found || DLG_ROW !== r) return;
+    $('sp-failacts').innerHTML = '<button type="button" class="btn btn-s" data-do="sp-failure">' +
+      (SERVER ? 'Download the file to attach' : 'Show the file to attach') + '</button>' + reportLink(r);
+    $('sp-failure').hidden = false;
+  } catch (e) { /* nothing to offer */ }
 }
 function renderRun() {
   const body = $('r-body');
@@ -1201,7 +1286,7 @@ function renderRun() {
         'account details, to send with a problem report.</p><button type="button" class="btn btn-s starts" data-do="support" data-key="' +
         key + '">' + sv(P.report) + 'Make a support report</button></div>';
     }
-    if (r && ['diagnose', 'record'].includes(RUN.action) && o.clean) {
+    if (r && ['diagnose', 'record'].includes(RUN.action) && (o.clean || o.report)) {
       // The server's folder is on the server, so the file comes to the browser.
       html += '<div class="keepopen"><p>The file holds counts and page states, never text from your account.</p>' +
         (SERVER ? '<button type="button" class="btn btn-s" data-do="report-download" data-key="' + key + '" data-action="' +
@@ -1257,6 +1342,7 @@ function paintRunLive() {
   }
 }
 function renderRunbar() {
+  paintTitle();
   const show = RUN.state === 'running' && VIEW !== 'run';
   $('runbar').hidden = !show;
   if (!show) return;
@@ -1277,7 +1363,7 @@ function startQueue() {
     key: keyOf(r), provider: r.provider + (whoOf(r) ? ' (' + whoOf(r) + ')' : ''),
     action: continues(r) ? 'resume' : 'all', scope: {year: '', start: '', end: ''}, said: ''}));
   if (!items.length) return;
-  QUEUE = {items, i: 0, held: false, finished: false};
+  QUEUE = {items, i: 0, held: false, finished: false, started: false};
   queueRun();
 }
 function queueRun() {
@@ -1292,7 +1378,12 @@ function queueRun() {
   // Another run started in the moment before this one could, and only
   // one goes at a time, so the round waits for the person instead of
   // saying the next starts on its own when it never would.
-  if (!startRun(rowByKey(it.key), it.action, {scope: it.scope, queue: true})) {
+  // The first run of the round opens the Run page. The rest stay put, so
+  // somebody reading another page meanwhile is not pulled back at each one,
+  // and the bar at the bottom carries the progress.
+  if (startRun(rowByKey(it.key), it.action, {scope: it.scope, queue: true, stay: QUEUE.started})) {
+    QUEUE.started = true;
+  } else {
     QUEUE.held = true;
     renderAll();
   }
@@ -1300,6 +1391,7 @@ function queueRun() {
 function queueStep() {
   const it = QUEUE.items[QUEUE.i];
   const o = RUN.outcome || {};
+  it.title = o.title;
   if (o.clean) {
     it.said = o.attention ? 'held' : 'done';
     QUEUE.i++;
@@ -1328,9 +1420,16 @@ function renderQueueList() {
 function queueHeld() {
   if (!QUEUE) return '';
   if (QUEUE.finished) {
-    const done = QUEUE.items.filter(it => it.said === 'done').length;
-    return '<section class="callout info" style="margin-top:20px"><div class="text"><h2>All done</h2><p>' +
-      esc(done + ' of ' + QUEUE.items.length + ' finished with nothing to look at.') + '</p><div class="row-actions">' +
+    // One line each, in what the run itself came to, so a run that saved
+    // four documents and set one aside reads as that, not as one of the
+    // few that did not finish.
+    const each = QUEUE.items.map(it => {
+      const r = rowByKey(it.key);
+      const said = it.said === 'skipped' ? 'Skipped' : it.said === 'gone' ? 'No longer in PaperPull' : it.title;
+      return '<li>' + (r ? '<a href="' + accountHash(r) + '">' + esc(it.provider) + '</a>' : esc(it.provider)) + ': ' + esc(said) + '</li>';
+    }).join('');
+    return '<section class="callout info" style="margin-top:20px"><div class="text"><h2>The round is done</h2>' +
+      '<ul class="roundend">' + each + '</ul><div class="row-actions">' +
       '<a class="btn btn-s" href="#/" data-do="queue-end">All accounts</a></div></div></section>';
   }
   if (!QUEUE.held) return '<p class="hint" style="margin-top:12px">' + esc('Account ' + (QUEUE.i + 1) + ' of ' + QUEUE.items.length +
@@ -1407,6 +1506,23 @@ async function psGo() {
   location.hash = r ? accountHash(r) : '#/';
   notice('Added ' + (d.owner || d.account) + ' to ' + DLG_ROW.provider + '. Their documents go to ' + d.output_dir +
     '. Open the sign-in window and sign in as them, then get new documents.', 'ok');
+}
+function openOwner(r) {
+  DLG_ROW = r;
+  $('on-title').textContent = 'Name on ' + r.provider + (whoOf(r) && r.account !== 'primary' ? ' (' + whoOf(r) + ')' : '');
+  $('on-owner').value = r.owner || '';
+  $('on-err').hidden = true;
+  $('dlg-owner').showModal();
+}
+async function onGo() {
+  const r = DLG_ROW, err = $('on-err');
+  let d;
+  try { d = await postJSON('/api/account/owner', {app: r.app, account: r.account, owner: $('on-owner').value}); }
+  catch (e) { err.textContent = e.message; err.hidden = false; return; }
+  $('dlg-owner').close();
+  await loadAccounts();
+  renderAll();
+  notice(d.owner ? 'The name on ' + r.provider + ' is now ' + d.owner + '.' : 'The name on ' + r.provider + ' is cleared.', 'ok');
 }
 function openRemove(r) {
   DLG_ROW = r;
@@ -1596,7 +1712,7 @@ async function rootChecked() {
   if (!d.ok) { rootSay(d.problem, true); $('newroot').focus(); return false; }
   if (d.found_count && !W.add) {
     rootSay('Found ' + many(d.found_count, 'provider') + ' already set up here (' + d.found.join(', ') +
-      (d.found_count > d.found.length ? ' and more' : '') + '). Open Accounts to use them, or continue to add more.', false);
+      (d.found_count > d.found.length ? ' and more' : '') + '). Open Accounts to use ' + (d.found_count === 1 ? 'it' : 'them') + ', or continue to add more.', false);
     $('w-useroot').hidden = false;
     if (!ROOTCHECK.warned) { ROOTCHECK.warned = true; return false; }
   } else if (d.synced_by) {
@@ -2117,7 +2233,9 @@ function openNames() {
   const sel = $('nmapp');
   const apps = Object.keys(META.apps);
   const want = sel.value || (ROUTE.app && META.apps[ROUTE.app] ? ROUTE.app : apps[0]);
-  sel.innerHTML = apps.map(a => '<option' + (a === want ? ' selected' : '') + '>' + esc(a) + '</option>').join('');
+  // Two folders can hold one provider, so those two also show the folder.
+  const label = a => apps.filter(b => providerName(b) === providerName(a)).length > 1 ? providerName(a) + ' (' + a + ')' : providerName(a);
+  sel.innerHTML = apps.map(a => '<option value="' + esc(a) + '"' + (a === want ? ' selected' : '') + '>' + esc(label(a)) + '</option>').join('');
   if (!$('nmsep').options.length) {
     $('nmsep').innerHTML = NM_SEPS.map(([v, name]) => '<option value="' + esc(v) + '">' + esc(name) + ', ' +
       esc(nmDateExample('yyyy-mm-dd') + v + 'Amazon') + '</option>').join('');
@@ -2286,7 +2404,7 @@ function nmRename(apply) {
   let i = 0;
   const next = (code) => {
     if (code !== undefined && code !== '0') {
-      $('nmofferstate').textContent = 'Stopped at ' + pairs[i - 1][0] + (pairs[i - 1][1] === 'primary' ? '' : ', ' + pairs[i - 1][1]) +
+      $('nmofferstate').textContent = 'Stopped at ' + providerName(pairs[i - 1][0]) + (pairs[i - 1][1] === 'primary' ? '' : ', ' + pairs[i - 1][1]) +
         ', which did not finish. The list below says why.';
       $('nmprevbtn').disabled = false;
       return;
@@ -2318,13 +2436,19 @@ function nmRename(apply) {
 
 // -- settings -----------------------------------------------------------------------
 function renderSettings() {
-  $('root').textContent = META.apps_root || '';
+  // A fresh checkout's apps folder holds the templates (gui/app.py
+  // fresh_checkout), so it is not named as the folder or offered as one.
+  const fresh = Boolean(META.fresh_checkout);
+  $('root').textContent = fresh ? 'None chosen yet' : META.apps_root || '';
   $('rootwhy').textContent = inSample() ? 'This is the sample archive. Leave it to see your own.'
     : SERVER ? 'The data folder beside compose.yaml on your server, named /data inside the container.'
     : META.root_source === 'environment' ? 'Set by the APPS_ROOT setting PaperPull was started with.'
+    : fresh ? "This copy of PaperPull is its source, and its apps folder holds each provider's template, not your " +
+      'documents. Set up from the welcome, or use a folder that already holds your providers.'
     : 'Each provider has a folder of its own in here, holding its documents and its download history.';
   $('existing').hidden = SERVER || inSample() || META.root_source === 'environment';
-  $('rootinput').value = $('rootinput').value || META.apps_root || '';
+  $('rootinput').value = $('rootinput').value || (fresh ? '' : META.apps_root) || '';
+  $('rootinput').placeholder = (META.apps_root || '').startsWith('/') ? '/Users/you/Documents/PaperPull' : 'C:\\Users\\you\\Documents\\PaperPull';
   $('stmove').hidden = inSample();
   if (!hxWelcome()) placeMove(false);
   $('g-sampleopen').hidden = inSample();
@@ -2348,7 +2472,7 @@ function dcPick() {
   return app ? {app, account: account || 'primary'} : null;
 }
 function openDocuments() {
-  $('g-docscard').hidden = inSample() || !Object.keys(META.apps || {}).length;
+  $('g-docscard').hidden = inSample() || Boolean(META.fresh_checkout) || !Object.keys(META.apps || {}).length;
   if ($('g-docscard').hidden) return;
   const sel = $('dcpick'), was = sel.value;
   const opts = [];
@@ -2491,7 +2615,7 @@ async function saveRoot() {
   XL_LOADED = false;
   // Somebody sent here from the welcome, with no providers before, goes on
   // to the ones just found, since Settings has nothing more for them.
-  const first = !Object.keys((META && META.apps) || {}).length;
+  const first = !Object.keys((META && META.apps) || {}).length || Boolean(META && META.fresh_checkout);
   await load();
   if (first && d.apps) location.hash = '#/';
 }
@@ -2526,11 +2650,14 @@ const DO = {
   'restore': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRestore(r); },
   'rename': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRename(r); },
   'review': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openReview(r); },
+  // Record steps is a section of Get help, so its step opens that sheet.
+  'record': el => DO.support(el),
   'support': el => {
     DLG_ROW = rowByKey(el.dataset.key); closeMenus();
     if (!DLG_ROW) return;
     $('sp-signsay').textContent = 'Sign in to the provider first and leave its window on the page that has your ' +
       'documents, so the report reads the right page.';
+    offerFailure(DLG_ROW);
     // PaperPull Server's sign-in window is docked in this page, and nothing
     // outside a dialog that is open can be pressed, so there the dialog
     // offers no sign-in of its own.
@@ -2539,8 +2666,17 @@ const DO = {
     $('sp-log').textContent = '';
     $('dlg-support').showModal();
   },
-  'record': el => { DLG_ROW = rowByKey(el.dataset.key); closeMenus(); if (DLG_ROW) $('dlg-record').showModal(); },
   'person': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openPerson(r); },
+  'owner': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openOwner(r); },
+  'mark-done': async el => {
+    const r = rowByKey(el.dataset.key);
+    closeMenus();
+    if (!r) return;
+    try { await postJSON('/api/account/done', {app: r.app, account: r.account, done: !r.marked_done}); }
+    catch (e) { notice(e.message, 'warn'); return; }
+    await loadAccounts();
+    renderAll();
+  },
   'remove': el => { const r = rowByKey(el.dataset.key); closeMenus(); if (r) openRemove(r); },
   'reveal': async el => {
     const r = rowByKey(el.dataset.key);
@@ -2568,6 +2704,7 @@ const DO = {
   },
   'rs-go': () => rsGo(),
   'ps-go': () => psGo(),
+  'on-go': () => onGo(),
   'rm-go': () => rmGo(),
   'rn-preview': () => rnRun(false),
   'rn-apply': () => rnRun(true),
@@ -2596,7 +2733,8 @@ const DO = {
     try { await postJSON('/api/failure/reveal', {app: r.app, account: r.account, kind: el.dataset.kind}); }
     catch (e) { notice(e.message, 'warn'); }
   },
-  'rc-go': () => { $('dlg-record').close(); startRun(DLG_ROW, 'record'); },
+  'rc-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'record'); },
+  'sp-failure': () => { if (DLG_ROW) revealFailure(DLG_ROW.app, DLG_ROW.account); },
   'tm-go': () => tmGo(),
   'request': el => openRequest(el.dataset.kind, el.id === 'w-request' ? W.search.trim() : ''),
   'rq-close': () => $('dlg-request').close(),

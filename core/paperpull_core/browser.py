@@ -23,6 +23,7 @@ import importlib.util
 import json
 import os
 import re
+import signal
 import shlex
 import subprocess
 import sys
@@ -958,11 +959,10 @@ def launch_own_browser(chromium, user_data_dir, **kwargs):
     browser type, and the rest goes to sandboxed_persistent_context, so the
     browser always starts inside its sandbox. One whose sandbox cannot
     start ends the run and says why."""
-    print("This app's settings name no cdp_url, so this run opens a browser of its")
-    print("own, with the profile in %s," % user_data_dir)
-    print("instead of attaching to the window you signed in with, and it is signed in")
-    print("only if you sign in there. To use your sign-in window, copy the cdp_url")
-    print("line from config.example.json into this app's config.json.")
+    print("This provider's config.json has no cdp_url, so this run opens a new browser")
+    print("that is not signed in, with the profile in %s." % user_data_dir)
+    print("To use your sign-in window, copy the cdp_url line from config.example.json")
+    print("into config.json.")
     try:
         return sandboxed_persistent_context(chromium, user_data_dir, **kwargs)
     except SandboxRefused as e:
@@ -1333,6 +1333,73 @@ def _open_tab_in(port: str, url: str) -> bool:
         return False
 
 
+def bring_forward(port) -> bool:
+    """Put the browser on this debugging port in front of the person, its
+    first page showing, through the browser's own endpoint. No permission is
+    asked of the operating system. False when it could not be reached, which
+    costs nothing: the window is still there."""
+    import json
+    import urllib.request
+    from .characters import whole_json
+    try:
+        with open_local(urllib.request.Request("http://127.0.0.1:%d/json/list" % int(port)), timeout=3) as r:
+            pages = [t for t in whole_json(json.load(r)) if isinstance(t, dict) and t.get("type") == "page" and t.get("id")]
+        if not pages:
+            return False
+        with open_local(urllib.request.Request("http://127.0.0.1:%d/json/activate/%s" % (int(port), pages[0]["id"])),
+                        timeout=3) as r:
+            return 200 <= r.status < 300
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def signin_browser_pid(profile_dir, port) -> Optional[int]:
+    """The process of this account's own sign-in browser, or None. Named by
+    both its debugging port and its profile folder on its command line, so
+    a person's everyday browser, or another account's window, is never one.
+    On Windows there is no such listing here, and the answer is None."""
+    if sys.platform == "win32":
+        return None
+    try:
+        real = str(Path(profile_dir).expanduser().resolve())
+        out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    for line in out.splitlines():
+        pid, _, command = line.strip().partition(" ")
+        if ("--remote-debugging-port=%s " % port) in (command + " ") and ("--user-data-dir=" + real) in command \
+                and "--type=" not in command and pid.isdigit():
+            return int(pid)
+    return None
+
+
+def frontmost_pid() -> Optional[int]:
+    """The process of the application in front, on a Mac, or None."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        asn = subprocess.run(["lsappinfo", "front"], capture_output=True, text=True, timeout=5).stdout.strip()
+        said = subprocess.run(["lsappinfo", "info", "-only", "pid", asn], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(r"=\s*([0-9]+)", said)
+    return int(m.group(1)) if m else None
+
+
+def close_signin_browser(profile_dir, port) -> dict:
+    """Close this account's sign-in browser, as quitting it would. Answers
+    {"closed": whether it did, "was_front": whether the person was in it}."""
+    pid = signin_browser_pid(profile_dir, port)
+    if pid is None:
+        return {"closed": False, "was_front": False}
+    was_front = frontmost_pid() == pid
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return {"closed": False, "was_front": False}
+    return {"closed": True, "was_front": was_front}
+
+
 # What open_signin_browser answers with when the port was already held, in
 # place of the name of a browser it opened.
 ALREADY_ON_PORT = "the browser already on this port"
@@ -1392,6 +1459,7 @@ def open_signin_browser(profile_dir, port: str, url: str,
         print("recognize, close it and sign in again.")
         if _open_tab_in(port, url):
             print("The sign-in page is open in a new tab there.")
+        bring_forward(port)
         return ALREADY_ON_PORT
     candidates = browser_candidates(prefer_real=prefer_real, mode=mode)
 
@@ -1442,6 +1510,7 @@ def open_signin_browser(profile_dir, port: str, url: str,
 
     opened = _try_each(candidates, profile_dir, port, url, fallback=keep_off_profile, mode=mode)
     if opened:
+        bring_forward(port)
         return opened
 
     # Nothing ANSWERED, which is not the same as nothing being installed. A

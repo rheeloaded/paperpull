@@ -39,7 +39,7 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
 import logging
@@ -360,7 +360,7 @@ class App:
             raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
-        print("Sign in, keep the window OPEN, then run the pilot.")
+        print(f"Sign in, keep the window OPEN, then {after_sign_in()}.")
 
     def cmd_login(self):
         print("Checking the connection to your signed-in Coinbase browser...\n")
@@ -374,7 +374,7 @@ class App:
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif ok:
             print("Connected and signed in, and the statements list is showing.")
-            print("Keep that browser window OPEN, then run the pilot.")
+            print(f"Keep that browser window OPEN, then {after_sign_in()}.")
         else:
             print("Connected, but the statements list did not load, so this cannot say")
             print("whether you are signed in. Look at the browser window and answer")
