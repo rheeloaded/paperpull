@@ -187,6 +187,9 @@ def test_text_on_a_tinted_background_reads_in_a_browser(page, theme, where):
     }""", theme)
     if where.startswith("#dlg-"):
         page.evaluate("id => $(id).showModal()", where.split()[0][1:])
+    # Buttons fade their colours, so a theme just switched is read once the
+    # fade is over, not part way, which on a slow runner read 1.79:1.
+    page.evaluate("() => { for (const a of document.getAnimations()) a.finish(); }")
     got = page.evaluate(MEASURE, [where])[where]
     assert got is not None, "%s is not on the page" % where
     assert got >= 4.5, "%s reads %.2f:1 in %s" % (where, got, theme)
