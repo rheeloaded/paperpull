@@ -311,7 +311,13 @@ MORE_ACTIONS = ("verify", "diagnose", "record", "rename", "rename_apply",
                 "move_documents", "move_documents_apply")
 # The actions that finish on their own when the page that started them goes,
 # since each moves files and then writes the ledgers that name them (#102).
-FINISHED_WHEN_LEFT = ("rename_apply", "move_documents_apply")
+# Review Names applying its new names is one too. It writes each receipt's
+# new name into the ledgers just after it renames that file, so a stop there
+# leaves that receipt's records naming a file that has moved. Each is local
+# and bounded, asks nothing and holds nothing but the account's own claim
+# here, so it always comes to its end. PaperPull.app waits for each before a
+# quit stops the panel (/api/finishing), and the page offers no Stop for them.
+FINISHED_WHEN_LEFT = ("rename_apply", "move_documents_apply", "review_names")
 # An app's own script, never a hidden file. A Mac writing to a network
 # drive or a disk it does not format itself leaves "._ally_docs.py" beside
 # ally_docs.py, a few bytes of its own about the file, and that sorts first,
@@ -936,6 +942,9 @@ def api_apps():
     return {"apps_root": str(apps_root()), "documents_root": _documents_root(), "root_source": root_source(),
             "fresh_checkout": fresh_checkout(), "actions": {k: v["label"] for k, v in ACTIONS.items()},
             "more_actions": list(MORE_ACTIONS), "redownload_actions": list(REDOWNLOAD_ACTIONS),
+            # The runs that go on to their end when their page goes, which the
+            # page offers no Stop for.
+            "finished_when_left": list(FINISHED_WHEN_LEFT),
             "apps": apps, "refreshed": refreshed,
             # The name each provider folder goes by on the page, as the rows have it.
             "provider_names": {name: _provider_of(meta)[0] for name, meta in apps.items()},
