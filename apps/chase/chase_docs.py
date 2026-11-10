@@ -169,6 +169,42 @@ def migrate_legacy_keys(records: dict) -> int:
     return changed
 
 
+MENU_ROW_NOTE = "Its row on the page opens a menu, which this app does not take"
+
+
+def retire_menu_rows(progress, discovery) -> int:
+    """Set down the records an older version wrote for rows it could never
+    press, and answer how many.
+
+    With Chase's API answering nothing, the fallback read a business
+    account's documents off the page and recorded each row with no card and
+    no document id, under the words of its control, "Opens document menu".
+    Pressing that control saves nothing, and once the API answers again the
+    row is not on the list the app walks at all. Each run took the record
+    from discovery.json and failed on it again, for good, since a Needs
+    Manual Review or Failed record with no file is always tried again. Only
+    the row's own words, with no card and no id, make such a record, and a
+    saved one is never touched. No Longer Listed is not a failure and the
+    panel has nothing left to take for it.
+    """
+    retired = 0
+    done = (State.NO_LONGER_LISTED.value, State.COMPLETED.value, State.PDF_VERIFIED.value)
+    for key, rec in list(discovery.data.items()):
+        if not isinstance(rec, dict) or not site.is_document_menu_row(rec.get("title")):
+            continue
+        prog = progress.get(key) or {}
+        merged = dict(rec, **prog)
+        if merged.get("account") or merged.get("document_id") or merged.get("downloaded_ok") \
+                or merged.get("pdf_path") or merged.get("state") in done:
+            continue
+        notes = "; ".join(x for x in (merged.get("notes"), MENU_ROW_NOTE) if x and isinstance(x, str))
+        if prog:
+            progress.update(key, {"state": State.NO_LONGER_LISTED.value, "notes": notes}, save=False)
+        discovery.update(key, {"state": State.NO_LONGER_LISTED.value}, save=False)
+        retired += 1
+    return retired
+
+
 class App:
     _journal = None
     _requests = None
@@ -199,6 +235,9 @@ class App:
         for store in (self.progress, self.discovery):
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
+        if retire_menu_rows(self.progress, self.discovery):
+            self.progress.save(backup=True)
+            self.discovery.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
@@ -538,7 +577,7 @@ class App:
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
-        docs = [d for d in docs if self._in_scope(d)]
+        docs = [d for d in docs if d.state != State.NO_LONGER_LISTED.value and self._in_scope(d)]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs

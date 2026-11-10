@@ -590,6 +590,18 @@ _ROW_JS = r"""() => {
 }"""
 
 
+_DOCUMENT_MENU_RE = re.compile(r"\bopens document menu\b", re.I)
+
+
+def is_document_menu_row(title: str) -> bool:
+    """True for a row read from the page whose only control opens a menu of
+    ways to take the document. No row control of this app's is a press on
+    such a menu (row_label_re), so the row can never be taken here. Chase
+    draws them on a business account's documents, which Chase Business
+    takes from that menu."""
+    return isinstance(title, str) and bool(_DOCUMENT_MENU_RE.search(title))
+
+
 def collect_documents(page) -> List[RawDoc]:
     """Rows currently rendered. Used by --diagnose (and as the generic
     fallback inside chase_collect)."""
@@ -765,6 +777,9 @@ def chase_collect(page) -> Listed:
             date, _ = parse_period_date(r.date_text or r.text)
             if not date:
                 continue
+            if is_document_menu_row(r.title):
+                log.info("passing over a row whose only control opens a menu")
+                continue
             key = (acct, date, r.title)
             if key in seen:
                 continue
@@ -838,8 +853,12 @@ def row_label_re(date: str, account: str, action: str = "Saves document"):
     month = _MONTHS_ABBR[int(date[5:7]) - 1]
     day = date[8:10]
     day_pat = f"0?{int(day)}"                      # "Aug 9" or "Aug 09"
+    # "Opens document menu" names a control that only shows a menu. Pressed
+    # as the row's document it fires no download, and the press lands
+    # wherever the menu puts it.
     return re.compile(rf"{month}\s+{day_pat},\s*{date[:4]}.*"
-                      rf"{escape_for_locator(account)}.*{escape_for_locator(action)}", re.I | re.S)
+                      rf"{escape_for_locator(account)}.*{escape_for_locator(action)}(?!\s+menu)",
+                      re.I | re.S)
 
 
 def chase_download(page, ctx, account: str, date: str, out_path,
