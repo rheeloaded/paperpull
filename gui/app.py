@@ -1642,18 +1642,21 @@ DONE_FILE = "panel-done.json"
 
 
 def _checked_by(entry) -> bool:
-    """Whether a logged run read the whole list and finished: Get new or
-    Continue, every date, with nothing stopped, failed or left unread."""
-    result = entry.get("result") if isinstance(entry, dict) else None
-    return (isinstance(result, dict) and entry.get("action") in ("all", "resume") and entry.get("exit_code") == 0
-            and not entry.get("closed") and not entry.get("scope") and not entry.get("redownload")
-            and not any(result.get(k) for k in ("stopped", "failed", "validation_failures", "list_not_read")))
+    """Whether a logged run read the provider's whole list and finished, a
+    Get new with every date and nothing stopped, failed or set aside
+    (_whole_clean_run). A Continue reads no list of its own, so it is no
+    check, as the card's "checked" never counts one (#148)."""
+    return _whole_clean_run(entry)
 
 
 def _when(text):
+    """A time a record keeps, as this computer's clock reads it, or None. One
+    written with its offset, by hand say, is taken to this computer's time,
+    since it could not be compared with one written without."""
     try:
-        return datetime.fromisoformat(str(text))
-    except (TypeError, ValueError):
+        when = datetime.fromisoformat(str(text))
+        return when.astimezone().replace(tzinfo=None) if when.tzinfo is not None else when
+    except (TypeError, ValueError, OverflowError, OSError):
         return None
 
 
@@ -1664,14 +1667,16 @@ def _done_at(root: Path) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _quieted(state: str, last, done_at: str, cadence, now=None) -> dict:
+def _quieted(state: str, last, done_at: str, cadence, now=None, gaps=()) -> dict:
     """What a check, or Mark as done, does to an account's place on the list.
     "Due" is worked out from the age of the newest document, and a run that
     finds nothing new leaves that age alone, so an account just checked
     stayed due until its provider sent something. Marked done, it is off the
     list until a run after that, or the time runs out. Checked by a whole
     clean run, a due account is up to date for that time. A gap is left to
-    _settled, since one run saying it could not fill a gap proves little."""
+    _settled, since one run saying it could not fill a gap proves little,
+    and a due account with gaps, which _account_state calls due first, is
+    shown as the gap it still has rather than up to date."""
     now = now or datetime.now()
     days = max(QUIET_DAYS[0], min(QUIET_DAYS[1], cadence if isinstance(cadence, (int, float)) else QUIET_DAYS[1]))
     within = lambda when: when is not None and timedelta(0) <= now - when < timedelta(days=days)  # noqa: E731
@@ -1681,6 +1686,8 @@ def _quieted(state: str, last, done_at: str, cadence, now=None) -> dict:
             and (ended is None or marked > ended):
         return {"state": "current", "marked_done": done_at, "checked_quiet": ""}
     if state in ("due", "overdue") and _checked_by(last) and within(ended):
+        if gaps:
+            return {"state": "gap", "marked_done": "", "checked_quiet": ""}
         return {"state": "current", "marked_done": "", "checked_quiet": last["ended"]}
     return {"state": state, "marked_done": "", "checked_quiet": ""}
 
@@ -1717,7 +1724,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     outcome = _last_outcome(last)
     running = _RUNS.get((name, account))
     state = _account_state(row, outcome, gaps, known)
-    quiet = _quieted(state, last, _done_at(root), (row or {}).get("cadence_days"))
+    quiet = _quieted(state, last, _done_at(root), (row or {}).get("cadence_days"), gaps=gaps)
     return {
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
@@ -1732,7 +1739,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "checked_quiet": quiet["checked_quiet"],
         # A gap a whole, clean run could not fill, left out of "may have
         # something new" on the home page (#149).
-        "settled": _settled(state, (row or {}).get("gaps"), log),
+        "settled": _settled(quiet["state"], (row or {}).get("gaps"), log),
         "documents": (row or {}).get("documents") or 0,
         "newest": _jsonable((row or {}).get("newest")),
         # When the app last read the provider's whole list, from the note

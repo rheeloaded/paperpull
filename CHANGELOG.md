@@ -19,6 +19,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the account's own port and profile folder is ever closed, never an
   everyday one, and `"close_signin_window": false` in settings.json turns
   closing off. Contributed by @JasperDale420 (#186).
+- **An account just checked comes off the list, and can be marked done.**
+  "Due" came only from the age of the newest document, so a run that found
+  nothing new left the account due until its provider sent something. A Get
+  new that read the whole list and finished clean now counts as a check for
+  as long as that provider usually takes, between 3 and 14 days. A Continue
+  reads no list, so it is no check, and an account with gaps still shows
+  them. **Mark as done** under the three dots takes an account off the list
+  until its next run, or for that time at most, and can be undone.
+  Contributed by @JasperDale420 (#187).
 
 ### Fixed
 - **FedEx and Stripe read their list on a computer just started.** Each
@@ -212,11 +221,6 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
-- **An account just checked comes off the list.** "Due" came only from the
-  age of the newest document, so a run that found nothing new left it due
-  until its provider sent something. A whole clean run now counts as a check
-  for as long as that provider usually takes, between 3 and 14 days. **Mark as done** under the three dots takes
-  any account off the list for that time, and can be undone.
 - **What a real run on a real account showed.** A list that stopped partway
   is said as a page PaperPull did not expect, not as a sign-out with
   Continue, for each of the providers that can stop that way. The last line
