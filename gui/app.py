@@ -780,10 +780,17 @@ def _login_flag(script: Path) -> str:
     return "--open-browser" if "--open-browser" in text else "--login"
 
 
+# The example config and the copies a sync service or Finder makes of it,
+# "config.example 2.json" from iCloud or "config.example copy.json". None is
+# an account: the panel names an account only in lowercase letters, digits,
+# - or _ (_LABEL_RE), so no account it made has a space in its name.
+_EXAMPLE_CONFIG_RE = re.compile(r"config\.example(?: \d+| copy(?: \d+)?)?\.json", re.I)
+
+
 def _accounts(app_dir: Path):
     accts = ["primary"]
     for cfg in sorted(app_dir.glob("config.*.json")):
-        if cfg.name == "config.example.json":
+        if _EXAMPLE_CONFIG_RE.fullmatch(cfg.name):
             continue
         name = cfg.name[len("config."):-len(".json")]
         # Linux and macOS take a line break in a file name, and the panel
