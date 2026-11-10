@@ -148,7 +148,7 @@ def _settings_in(path: Path) -> Optional[dict]:
         st = path.stat()
         if not stat.S_ISREG(st.st_mode) or st.st_size > _MOST_BYTES:
             return None
-        cfg = json.loads(path.read_text(encoding="utf-8-sig"))
+        cfg = whole_json(json.loads(path.read_text(encoding="utf-8-sig")))
     except (OSError, ValueError, RecursionError):
         return None
     return cfg if isinstance(cfg, dict) else None
