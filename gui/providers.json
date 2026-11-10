@@ -16,6 +16,7 @@
     "ally": {"gets": "Account statements, tax forms", "group": "banks"},
     "amazon": {"gets": "Order invoices, your full history", "group": "shopping"},
     "amex": {"gets": "Card statements, year-end summaries", "group": "banks"},
+    "amexbanking": {"gets": "American Express Banking (Checking, Savings) statements, tax documents", "group": "banks", "note": "Tested on business checking; needs testing with personal checking and savings"},
     "amfam": {"gets": "Billing statements and any tax form listed with them", "group": "insurance", "tested": false},
     "anthem": {"gets": "Claims (EOBs), plan documents, ID cards and letters", "group": "insurance"},
     "apple": {"gets": "Receipts for App Store purchases, subscriptions and Apple Store orders", "group": "shopping"},
