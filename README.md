@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty providers are supported today, all built on the same pattern.
+Eighty-one providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -75,6 +75,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements and any tax form listed with them | **Untested, built without an account. Have one? [Help test it](apps/amfam/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
+| [`amexbanking`](apps/amexbanking) | American Express Banking (deposit accounts) | Business Checking statements and 1099-INT tax forms | **Contributed by [@appchamp](https://github.com/appchamp), 61 documents saved on the contributor's own Business Checking account** ([#168](https://github.com/rheeloaded/paperpull/pull/168)). The list the Documents and Statements page asks for itself, heard as it answers, and each PDF asked for by its own id from inside the page, nothing clicked. One account a run, the one the page shows. Personal Checking and Savings are untested. American Express cards are the `amex` app |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills | **Confirmed by [@watling777](https://github.com/watling777)** on two accounts, wireless and internet, with a full run on each ([#26](https://github.com/rheeloaded/paperpull/issues/26)) |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
 | [`apple`](apps/apple) | Apple (App Store and Apple Store) | App Store receipts for subscriptions, in-app purchases and paid apps, and Apple Store order invoices | **Built and run on the maintainer's own account.** Report a Problem's own purchase search from inside the page for the whole family, paid purchases only, each saved from Apple's own receipt, and the Apple Store's order list and invoices, nothing clicked, real Edge/Chrome |
@@ -884,7 +885,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **eighty-five** apps pass their tests, the eighty that are
+- ✅ All **eighty-six** apps pass their tests, the eighty-one that are
   supported and the five still waiting for a tester, 35,564 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above

@@ -9,6 +9,33 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **American Express Banking, the 86th app, Business Checking statements
+  and tax forms (#168).** `amexbanking` reads American Express National
+  Bank deposit accounts, apart from the `amex` card app. It saves every
+  monthly statement and 1099-INT the Documents and Statements page
+  lists, a statement dated the last day of its month and a tax form
+  December 31 of its tax year. Nothing is clicked. The list is the one
+  the page asks for itself, heard as it answers, and each PDF is asked
+  for by its own id and its own account's token from inside the
+  signed-in page, the way the page does. Contributed by @appchamp and
+  run on the contributor's own Business Checking account, 61 documents
+  saved. Personal Checking and Savings are untested. Before merging, a
+  list that answered in part, a document whose id, month or year could
+  not be read, a list its own count disagrees with, and lists of more
+  than one account were made to leave the list not whole, so the run
+  keeps what it saved and stops at its end. A list or a PDF refused as
+  signed out stops the run once. A document is no longer taken as saved
+  because a PDF of its date is in its folder, which may be another
+  account's statement, Rename no longer rewrites the document index
+  first, and a PDF that comes back with the bytes of another document
+  saved in the same run is not saved. The account a file is named for is
+  read from the page once its list has answered, never from the page the
+  tab was found on or from the page's text. Login says signed in only
+  once the list answers, and like every other app, it says Sign in first
+  when nobody is signed in, and says when no sign-in window opened or
+  nothing was recorded.
+
 ### Fixed
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
