@@ -686,7 +686,6 @@ ANSWERS = {
     # Read inside the page, by the snippet's name or the function holding it.
     ("apps/adp/adp_site.py", "_FETCH_JSON_JS"): IN_PAGE,
     ("apps/affirm/affirm_site.py", "_GET_JS"): IN_PAGE,
-    ("apps/amexbanking/amexbanking_site.py", "amexbanking_download"): IN_PAGE_BESIDE,
     ("apps/anthem/anthem_site.py", "_SUMMARY_JS"): IN_PAGE,
     ("apps/anthem/anthem_site.py", "_MEMBER_DOCS_LIST_JS"): IN_PAGE,
     ("apps/anthem/anthem_site.py", "_IDCARD_LIST_JS"): IN_PAGE,
