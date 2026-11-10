@@ -37,6 +37,10 @@ from .run_reporting import one_line
 # reads the ports beside an app from the same folders.
 ENTRY_RE = re.compile(r"[^.].*_(receipts|docs)\.py$")
 EXAMPLE = "config.example.json"
+# The example and the copies a sync service or Finder makes of it,
+# "config.example 2.json" from iCloud or "config.example copy.json", none of
+# them a person's config (gui/app.py _accounts reads them the same way).
+_EXAMPLE_COPY_RE = re.compile(r"config\.example(?: \d+| copy(?: \d+)?)?\.json", re.I)
 # Where a moved config goes, the range tools/add_account.py gives each person
 # after the first (its PEOPLE_PORTS, which a test holds to this), above
 # every port an app comes with.
@@ -123,10 +127,10 @@ def shipped_folders() -> List[Path]:
 
 def configs_of(install: Path) -> List[Path]:
     """Every person's config in an install, config.json first, never the
-    example."""
+    example or a copy of it."""
     own = [install / "config.json"] if (install / "config.json").is_file() else []
     try:
-        return own + [p for p in sorted(install.glob("config.*.json")) if p.name != EXAMPLE]
+        return own + [p for p in sorted(install.glob("config.*.json")) if not _EXAMPLE_COPY_RE.fullmatch(p.name)]
     except OSError:
         return own
 

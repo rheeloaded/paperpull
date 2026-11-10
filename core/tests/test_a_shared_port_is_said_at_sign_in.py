@@ -374,3 +374,14 @@ def test_every_app_signs_in_through_the_core_with_the_config_it_read():
             missing.append(app.name)
     assert not missing, missing
     assert len(apps) >= 78, len(apps)
+
+
+def test_a_copy_of_the_example_is_no_ones_config(tmp_path):
+    """iCloud keeps both sides of a clash as "config.example 2.json", which
+    was read as a person's config on the example's port, so the real
+    account was told it shared its browser with the copy."""
+    from paperpull_core import ports
+    for name in ("config.json", "config.example.json", "config.example 2.json", "config.example copy.json",
+                 "config.kim.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    assert [p.name for p in ports.configs_of(tmp_path)] == ["config.json", "config.kim.json"]
