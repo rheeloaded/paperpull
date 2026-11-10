@@ -894,11 +894,15 @@ function paintTitle() {
   if (document.title !== title) document.title = title;
 }
 // A sign-in window that opened leaves the person to work in it, so there
-// is no end of anything to announce.
+// is no end of anything to announce. A run that did not finish is said in
+// its outcome's own title, the words its page has. "Stopped" was said of a
+// run that never started too, and of one the page lost touch with, which
+// may still be going.
 function endedInWords(run) {
   const o = run.outcome || {};
-  if (run.action === 'login' && o.clean) return '';
-  return run.provider + (o.attention ? ' needs a look' : o.clean ? ' done' : ' stopped');
+  if ((run.action === 'login' && o.clean) || !o.title) return '';
+  if (o.clean) return run.provider + (o.attention ? ' needs a look' : ' done');
+  return o.title.startsWith(run.provider) ? o.title : run.provider + ': ' + o.title;
 }
 // A run that ends while the person is on another page of PaperPull only
 // loses its bar at the bottom, so it says so, with the way to its outcome.

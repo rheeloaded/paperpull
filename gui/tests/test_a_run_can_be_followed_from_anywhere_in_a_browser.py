@@ -164,6 +164,33 @@ def test_a_run_ending_on_its_own_page_says_nothing_more(panel, apps):
     assert tab.is_hidden("#notice")
 
 
+def test_a_run_you_stopped_is_said_as_that(panel, apps):
+    tab = panel.tab
+    get_new(panel)
+    tab.click("#view-run [data-do=stop-run]")
+    title_is(tab, "%s: You stopped this run · PaperPull" % panel.name)
+    release(apps[0])
+
+
+def test_a_run_the_page_lost_touch_with_is_not_said_to_have_stopped(panel, apps):
+    """It read "stopped", for a run that may still be going."""
+    tab = panel.tab
+    get_new(panel)
+    tab.evaluate("es.onerror()")
+    title_is(tab, "%s: Lost touch with this run · PaperPull" % panel.name)
+    release(apps[0])
+
+
+def test_a_run_that_never_started_is_not_said_to_have_stopped(panel, apps):
+    """An import going holds every run back, and the panel refuses one."""
+    assert app_module._IMPORTING.acquire(blocking=False)
+    try:
+        panel.tab.click("#view-account [data-do=run][data-action=all]")
+        title_is(panel.tab, "%s: This run did not start · PaperPull" % panel.name)
+    finally:
+        app_module._IMPORTING.release()
+
+
 def test_a_run_a_dialog_started_is_not_announced_over_it(panel, apps):
     tab = panel.tab
     tab.evaluate("""() => {
