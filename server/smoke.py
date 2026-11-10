@@ -247,16 +247,18 @@ def set_up_provider(cookie: str) -> None:
            and answer.get("suggested_root") == "/data",
            "signed in, the API answers %d, server %s, folder %s"
            % (status, answer.get("server"), answer.get("suggested_root")))
-    # Setting a provider up waits for the terms of use, as every route that
-    # changes the archive does (_terms_first). They are accepted as the page's
-    # I understand does, with the version the page itself is given.
-    _, _, page = http("GET", "/", cookie=cookie)
-    version = re.search(r"const TERMS_VERSION = '([^']+)'", page)
-    status, _, _ = http("POST", "/api/terms", cookie=cookie,
-                        body={"accepted": version.group(1) if version else ""})
-    report("terms", status == 200,
-           "the terms of use accepted, %d, version %s"
-           % (status, version.group(1) if version else "not on the page"))
+    # Nothing is set up before the Terms of Use are accepted, whatever asks
+    # (gui/app.py _terms_first). The page then presses I understand with the
+    # version it was given, and so does this.
+    status, _, _ = http("POST", "/api/create", cookie=cookie,
+                        body={"root": "/somewhere/else", "providers": [PROVIDER]})
+    report("terms", status == 409, "a set-up before the terms answers %d" % status)
+    status, _, page = http("GET", "/", cookie=cookie)
+    found = re.search(r"const TERMS_VERSION = '([^']+)'", page)
+    version = found.group(1) if found else ""
+    status, _, _ = http("POST", "/api/terms", cookie=cookie, body={"accepted": version})
+    report("accepted", status == 200 and bool(version),
+           "I understand answers %d for the terms of %s" % (status, version or "no version"))
     # The page may name any folder. On the server every provider goes in
     # the shared folder all the same.
     status, _, text = http("POST", "/api/create", cookie=cookie,
