@@ -10,6 +10,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
+- **Wealthfront never calls its list whole with a kind of statement left
+  out.** The Documents page shows statements through a dropdown, and a kind
+  it would not choose was logged and passed over, so the list was still
+  noted as read whole, and a run that read no statements at all could finish
+  clean. Now Statements not read, or Quarterly Statements offered and not
+  taken, stops the run at its end the way a tax year passed over does, with
+  a failure file. An account whose dropdown has no Quarterly Statements has
+  none to read and finishes as before, a minute sooner, since asking for
+  that option no longer waits for it twice.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On
