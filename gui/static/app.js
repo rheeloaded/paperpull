@@ -606,7 +606,7 @@ function toCheckList(r) {
   const key = esc(keyOf(r)), canChange = !inSample();
   const line = i => {
     const id = ' data-key="' + key + '" data-id="' + esc(i.id) + '"';
-    const why = i.file ? i.why : i.saved ? 'The file is no longer where PaperPull left it.'
+    const why = i.file ? i.why : i.saved ? "Its file is not in this account's own folder now, so it does not open from here."
       : 'PaperPull could not save this one, so there is no file to open. Get new documents can try it again.';
     return '<li' + (i.checked ? ' class="checked"' : '') + '><span style="flex:1"><b>' + esc(i.label) + '</b>' +
       (i.date ? ' · ' + esc(when(i.date)) : '') + '<span class="hint" style="display:block">' + esc(why) + '</span></span>' +

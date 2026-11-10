@@ -1743,50 +1743,111 @@ TO_CHECK_STATE = "Needs Manual Review"
 CHECKED_FILE = "panel-checked.json"
 OPENS_FROM_THE_PANEL = (".pdf", ".png", ".jpg", ".jpeg")
 # What a run left that a person's look at the documents does not answer.
-NOT_ANSWERED_BY_CHECKING = ("failed", "wrong_document", "alike")
+# Documents alike are never a reason to look (run_result.SAID_ONLY), so they
+# are no reason to keep one either.
+NOT_ANSWERED_BY_CHECKING = ("failed", "wrong_document")
 
 
 def _checked_items(root: Path) -> dict:
-    data = _read_json(root / CHECKED_FILE)
+    """The set-aside records a person has said are checked, each id with
+    when. On PaperPull Server a note that is a link is read as none, since
+    what was read through it would be written back into the shared folder."""
+    path = root / CHECKED_FILE
+    if not server_mode.own_file(path):
+        return {}
+    data = _read_json(path)
     return data if isinstance(data, dict) else {}
 
 
-def _set_aside_file(root: Path, record: dict):
+def _still_checked(when, record: dict) -> str:
+    """When a person said a set-aside record was checked, or "" when they
+    have not, or when a run has written the record since (updated_at), so a
+    document set aside again by a later run is looked at again."""
+    said, since = _when(when), _when(record.get("updated_at"))
+    if said is None or (since is not None and since > said):
+        return ""
+    return str(when)
+
+
+def _named_inside(path: Path, root: Path) -> bool:
+    """Whether a path's own words put it inside root, judged before the
+    disk is asked, so a record naming a share on another computer is never
+    reached for."""
+    try:
+        here, home = _same(str(path)), _same(str(root))
+        return os.path.commonpath([here, home]) == home
+    except ValueError:
+        return False
+
+
+def _set_aside_file(root: Path, record: dict, kept_out=(), base=None):
     """The file a set-aside record names, or None. Only a plain document
-    inside the account's own folder, since a record can have come from
-    another computer. There its full path means nothing, so the file's name
-    is looked for in Manual Review too."""
+    inside the account's own folder and in none of `kept_out`, another
+    person's folder or a browser profile a config put inside it
+    (_not_for_documents), since a record can have come from another
+    computer. There its full path means nothing, so the file's name is
+    looked for in Manual Review too. A path a run wrote as relative is read
+    from the install's own folder, `base`, where every run starts."""
     raw, named = str(record.get("pdf_path") or ""), str(record.get("pdf_filename") or "")
-    tries = [Path(raw) if Path(raw).is_absolute() else root / raw] if raw else []
+    tries = [Path(raw) if Path(raw).is_absolute() else (base or root) / raw] if raw else []
     tries += [root / "Manual Review" / Path(n).name for n in (raw, named) if n]
+    # A folder that holds this account's own, the first person's install
+    # folder around a second person's say, keeps nothing out of it.
+    kept_out = [other for other in kept_out if not _within(root, other)]
     for path in tries:
+        if not _named_inside(path, root):
+            continue
         try:
             inside = path.resolve(strict=True).is_relative_to(root.resolve())
-        except OSError:
+        except (OSError, RuntimeError, ValueError):
             continue
-        if inside and path.is_file() and not path.is_symlink() and path.suffix.lower() in OPENS_FROM_THE_PANEL:
+        if (inside and path.is_file() and not path.is_symlink()
+                and path.suffix.lower() in OPENS_FROM_THE_PANEL
+                and not any(_within(path, other) for other in kept_out)):
             return path
     return None
 
 
-def _to_check(root: Path) -> list:
-    """What this account has set aside, newest first, for its page to list."""
-    records, checked = _read_json(root / "progress.json"), _checked_items(root)
+def _to_check(root: Path, meta: dict, account: str) -> list:
+    """What this account has set aside, newest first, for its page to list.
+    A receipt's record names it by its summary and purchase date."""
+    records = _read_json(root / "progress.json")
     if not isinstance(records, dict):
         return []
-    items = [{"id": key, "label": str(rec.get("title") or rec.get("category") or "Document"),
-              "date": str(rec.get("date") or ""), "why": str(rec.get("notes") or ""),
-              "file": _set_aside_file(root, rec) is not None, "saved": bool(rec.get("pdf_path")),
-              "checked": str(checked.get(key) or "")}
-             for key, rec in records.items() if isinstance(rec, dict) and rec.get("state") == TO_CHECK_STATE]
+    aside = {key: rec for key, rec in records.items()
+             if isinstance(rec, dict) and rec.get("state") == TO_CHECK_STATE}
+    if not aside:
+        return []
+    checked, kept_out, base = _checked_items(root), _not_for_documents(meta, account), Path(meta["dir"])
+    items = [{"id": key,
+              "label": str(rec.get("title") or rec.get("summary") or rec.get("category")
+                           or rec.get("document_type") or "Document"),
+              "date": str(rec.get("date") or rec.get("purchase_date") or ""),
+              "why": str(rec.get("notes") or ""),
+              "file": _set_aside_file(root, rec, kept_out, base) is not None,
+              "saved": bool(rec.get("pdf_path")),
+              "set_aside_at": str(rec.get("updated_at") or ""),
+              "checked": _still_checked(checked.get(key), rec)}
+             for key, rec in aside.items()]
     return sorted(items, key=lambda item: item["date"], reverse=True)
 
 
 def _all_checked(last, items: list) -> bool:
-    """Whether a person has been through all that the last run left them."""
+    """Whether a person has been through all that the last run left them.
+    Never when the run counted more set aside than the records it wrote in
+    that state, since the rest have no record to list, a card or a plan left
+    unread (American Express, NetBenefits) or a receipt that never showed
+    (core not_shown). Nor when it left what checking does not answer."""
     result = last.get("result") if isinstance(last, dict) else None
-    return (bool(items) and all(item["checked"] for item in items) and isinstance(result, dict)
-            and not any(result.get(k) for k in NOT_ANSWERED_BY_CHECKING))
+    if not (items and isinstance(result, dict) and all(item["checked"] for item in items)):
+        return False
+    if any(result.get(k) for k in NOT_ANSWERED_BY_CHECKING):
+        return False
+    started, counted = _when(last.get("started")), result.get("manual_review")
+    if started is None or type(counted) is not int:
+        return False
+    at = [_when(item["set_aside_at"]) for item in items]
+    return counted <= sum(1 for when in at if when is not None and when >= started)
 
 
 def _owner_of(meta: dict, account: str) -> str:
@@ -1819,7 +1880,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     log = _read_run_log(root)
     last = next((e for e in log if e.get("action") in DOWNLOAD_ACTIONS), None)
     outcome = _last_outcome(last)
-    to_check = _to_check(root) if outcome == "attention" else []
+    to_check = _to_check(root, meta, account) if outcome == "attention" else []
     if _all_checked(last, to_check):
         outcome = ""
     running = _RUNS.get((name, account))
@@ -3276,13 +3337,18 @@ def _write_account_note(root: Path, name: str, data: dict) -> None:
 
 
 def _set_aside_record(body: dict):
-    """(the account's folder, the item's id, its record) from what the page
-    sent, the id checked against the account's own records."""
+    """(the app, the account, its folder, the item's id, its record) from
+    what the page sent, the id checked against the account's own records.
+    Refused while a run, a Rename or a Move goes on that account, since
+    each writes its records and moves its files, and a file open in a
+    viewer is one a Rename or a Move on Windows cannot move."""
     name = str(body.get("app") or "")
     apps = discover_apps()
     if name not in apps:
         raise HTTPException(404, "That account is no longer here. Reload the page.")
     account = _account_named(apps[name], body.get("account"))
+    if (name, account) in _RUNS:
+        raise HTTPException(409, "Wait for the run on %s to finish first." % _who(name, account))
     try:
         root = _account_root(apps[name], account)
     except ValueError:
@@ -3292,7 +3358,7 @@ def _set_aside_record(body: dict):
     record = records.get(key) if isinstance(records, dict) else None
     if not isinstance(record, dict) or record.get("state") != TO_CHECK_STATE:
         raise HTTPException(404, "That document is no longer set aside. Reload the page.")
-    return root, key, record
+    return apps[name], account, root, key, record
 
 
 @app.post("/api/account/check", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
@@ -3308,7 +3374,7 @@ async def api_account_check(request: Request):
 
 
 def _save_checked(body: dict) -> dict:
-    root, key, _record = _set_aside_record(body)
+    _meta, _account, root, key, _record = _set_aside_record(body)
     checked = _checked_items(root)
     if body.get("checked"):
         checked[key] = datetime.now().isoformat(timespec="seconds")
@@ -3331,10 +3397,11 @@ async def api_account_check_open(request: Request):
 
 
 def _open_set_aside(body: dict) -> dict:
-    root, _key, record = _set_aside_record(body)
-    path = _set_aside_file(root, record)
+    meta, account, root, _key, record = _set_aside_record(body)
+    path = _set_aside_file(root, record, _not_for_documents(meta, account), Path(meta["dir"]))
     if path is None:
-        raise HTTPException(404, "That file is no longer where PaperPull left it.")
+        raise HTTPException(404, "That file is not in this account's own folder now, so it does not "
+                                 "open from here. Reload the page.")
     try:
         if sys.platform == "win32":
             os.startfile(str(path))  # noqa: S606
