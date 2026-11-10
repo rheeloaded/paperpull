@@ -9,6 +9,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **FedEx and Stripe read their list on a computer just started.** Each
+  keeps its list with the time it was read and reads it again once it is
+  four minutes old, and a list never read was judged by that age alone. On
+  Windows the clock it is measured by starts with the computer, so in the
+  first four minutes after a restart a download took the list it had never
+  read for a fresh one. FedEx then sent the invoice to Manual Review, and
+  Stripe fetched the address saved with the record, which can have expired.
+  A list never read is now always read first, and a census holds every
+  app's list to it. Both apps are still waiting for someone with an account
+  to test them.
+
+## [0.62.0] - 2026-11-09
+
+DKB, Discover Bank, Ziply Fiber and Cetera are the 82nd to 85th apps, and
+Verizon Mobile downloads wireless bills from a real account. The control
+panel looks and reads like a Mac app, puts what needs you first, and says
+why a run stopped and whose it is to fix. Get new pressed before signing in
+offers the sign-in and then the same run, a support report takes three
+steps, and a run started outside its app's folder keeps to that folder.
+
 ### Added
 - **DKB, the 82nd app, the Postfach and its archive (#164).** It saves
   every PDF in a DKB (Deutsche Kreditbank) Postfach and in its older
@@ -111,17 +132,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   new pressed before signing in now says Sign in first, and a sign-in
   window that did not open or a recording with nothing in it now says so,
   as every other app does.
-- **Make a request, from the main page.** A button on Accounts opens one
+- **Make a request, from the main page (#163).** A button on Accounts opens one
   sheet for asking for a provider or a feature, with the questions a request
   needs answered, and says so when PaperPull already reads the provider
   asked for. The answers start the matching form on GitHub in the person's
   own browser, for them to read and send, so PaperPull still sends nothing
   itself. Of where you sign in, only the site goes, never the page's path
   or what follows it, which can hold a username. Settings and the list of
-  providers open the same sheet.
+  providers open the same sheet. Contributed by @JasperDale420.
 
 ### Changed
-- **The control panel looks and reads like a Mac app.** It is set in the
+- **The control panel looks and reads like a Mac app (#154).** It is set in the
   computer's own font, San Francisco on a Mac and Segoe UI on Windows, so
   the two bundled Atkinson Hyperlegible files are gone. Accounts,
   Spreadsheets, File names and Settings sit in a sidebar, a bar along the
@@ -129,8 +150,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   mode, and every text color is checked to 4.5:1 against what it sits on.
   A status is a colored dot and its words, each provider has the symbol of
   its kind, a bank's building or a shop's bag, instead of a letter, and
-  Settings is drawn in groups the way System Settings draws them.
-- **Accounts puts what needs you first.** The page has one blue button, the
+  Settings is drawn in groups the way System Settings draws them. Contributed by @JasperDale420.
+- **Accounts puts what needs you first (#154).** The page has one blue button, the
   one for the next step, and each row's own is gray. Once anything has run,
   the providers never run fold under one Not started line, except one
   whose first run is going, that needs setting up or that shares a
@@ -138,7 +159,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a search box. Overdue reads in amber, as a new document that is likely
   waiting, instead of a failure's red. Escape gives focus back to the More
   button, and Settings names each provider and person as Accounts does,
-  instead of by folder.
+  instead of by folder. Contributed by @JasperDale420.
 
 ### Fixed
 - **A run started outside its app's folder keeps to that folder (#165).** An
@@ -173,10 +194,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   once instead of sending every bill to Manual Review. Each bill reads the
   history once, where it used to read it twice. Records the earlier build
   wrote are not carried over, so a bill it saved downloads once more under
-  its new name. Contributed by @crazyhorse90210, who ran it on his own
+  its new name. Contributed by @crazyhorse90210, who ran it on their own
   account and saved all 24 bills. Before merging, the list stops, the sign-out,
   the account and the history read once a bill were done on our side.
-- **A support report takes three steps, not fifteen.** Its dialog said to
+- **A support report takes three steps, not fifteen (#162).** Its dialog said to
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
@@ -190,8 +211,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   whose sign-in window is docked in the page itself, the dialog still says
   to sign in first. When the sign-in the dialog started ends, the dialog
   says whether its window opened, and when none did, the app's own words
-  for why are under it.
-- **Moving to another computer says what comes with you.** The Move card
+  for why are under it. Contributed by @JasperDale420.
+- **Moving to another computer says what comes with you (#161).** The Move card
   offered only a history file, which brings no PDF and marks every document
   it lists as downloaded, so Get new never fetched them, and nothing said
   so. Somebody who moved had an empty archive PaperPull believed complete.
@@ -203,8 +224,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   to the same place and choose it again. The history
   file follows as the way when the folders cannot be copied, and its
   import, on the welcome and in Settings, says the PDFs stay on the other
-  computer and to copy them over or use Restore deleted files.
-- **The welcome's folder step says what it thinks of the folder.** A
+  computer and to copy them over or use Restore deleted files. Contributed by @JasperDale420.
+- **The welcome's folder step says what it thinks of the folder (#160).** A
   folder that could not be used was refused only at Set up, two steps on
   and away from its field. One already holding PaperPull providers, the
   obvious one to type for somebody who has them, was not noticed. They were
@@ -216,8 +237,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   sync service it is in before going on. Already have PaperPull folders, in
   Settings, goes on to Accounts once it finds them. A folder slow to
   answer, on a network share that is offline, say, holds up only its own
-  check and never the panel's other tabs.
-- **The panel calls each thing by one name, and says what to do next.**
+  check and never the panel's other tabs. Contributed by @JasperDale420.
+- **The panel calls each thing by one name, and says what to do next (#159).**
   The same thing went by several names from page to page, and some were
   the command line's. The panel now says provider, account, PaperPull
   folder, Documents folder, download history and Technical details, each
@@ -225,8 +246,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Scope or Download again, or a folder slug where a provider's name
   belongs. Messages from PaperPull itself start with a capital, end with a
   period and say what to do next, such as "That folder does not exist.
-  Check the path, or create the folder first."
-- **A run says where its documents went, and Open folder opens them.** A
+  Check the path, or create the folder first." Contributed by @JasperDale420.
+- **A run says where its documents went, and Open folder opens them (#158).** A
   run's page listed the names it saved and never where, and Open folder
   opened the account's own folder, among its script, config and records,
   with the PDFs a folder down, or, once a documents folder was set in
@@ -240,8 +261,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   documents folder no run would use. Open what was set aside opens Manual
   Review, as the page says it is there, and when there is no Manual Review
   folder it opens nothing and says so. Accounts names the documents
-  folder once one is set.
-- **Sign in, then get new documents, in one go.** Get new pressed before
+  folder once one is set. Contributed by @JasperDale420.
+- **Sign in, then get new documents, in one go (#157).** Get new pressed before
   signing in, the likeliest first-run slip, read as a crash ("It exited with
   code 1", "Run login.bat first"), said "Sign in again" to somebody who never
   had, and offered Continue for a run that never started. Each app now ends
@@ -260,8 +281,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   row not started yet offers Sign in, which opens the window, where it
   offered Start, which only opened the account's page, and that page leads
   with signing in while the account has not started or its last run found
-  nobody signed in.
-- **A run that stops says why, and whose it is to fix.** Every stop read
+  nobody signed in. Contributed by @JasperDale420.
+- **A run that stops says why, and whose it is to fix (#156).** Every stop read
   "may have signed you out partway … Sign in again, then continue",
   whatever had stopped it. The run's result now carries why it stopped,
   worked out in the core from what the run is leaving on. The provider
@@ -274,8 +295,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   to make a support report, it has a Make a support report button for it,
   since that page has no More menu. Only a stop a sign-in can
   fix offers one, and a stop with no reason sends you to the technical
-  details instead of guessing a sign-out.
-- **The panel never says something happened that did not.** Open sign-in
+  details instead of guessing a sign-out. Contributed by @JasperDale420.
+- **The panel never says something happened that did not (#155).** Open sign-in
   window said "Sign-in window opened" in green when no browser could open
   at all, and Record said "Recording saved", ready to attach, when the
   recorder refused on a sign-in page or nothing was clicked. Each app now
@@ -289,7 +310,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   these offers an earlier run's failure file as one it wrote. Recent runs
   says "no sign-in window opened", "nothing was recorded" or, for a run
   that found nobody signed in, "nobody was signed in", never "ended with a
-  problem".
+  problem". Contributed by @JasperDale420.
 
 ## [0.61.1] - 2026-11-08
 
