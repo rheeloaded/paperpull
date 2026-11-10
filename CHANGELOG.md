@@ -159,7 +159,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   **Undo** on each. Once all are done, Needs a look goes. A document set
   aside again by a later run brings it back, and a run that also failed,
   refused a wrong document, or counted more set aside than its records name,
-  a card or a plan left unread or a receipt that never showed, keeps it.
+  a card or a plan left unread, a receipt that never showed or an invoice
+  that failed its check, keeps it.
   Done writes only the account's own note and never moves or deletes a
   document or a record, and neither Done nor Open is taken while a run, a
   Rename or a Move goes on that account. Contributed by @JasperDale420 (#193).

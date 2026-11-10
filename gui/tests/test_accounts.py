@@ -2276,7 +2276,8 @@ def _set_aside(bank, **pdf):
         record["updated_at"] = SET_ASIDE_AT
     (bank / "progress.json").write_text(json.dumps(records), encoding="utf-8")
     _log(bank, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
-                "result": {"stopped": 0, "attention": True, "manual_review": len(records) - 1}})
+                "result": {"stopped": 0, "attention": True, "manual_review": len(records) - 1,
+                           "validation_failures": 0}})
 
 
 def _row():
@@ -2319,7 +2320,8 @@ def test_what_checking_does_not_answer_keeps_it_on_the_list(root, other, stays):
     bank = root / "Bank Statements"
     _set_aside(bank)
     _log(bank, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
-                "result": {"stopped": 0, "attention": True, "manual_review": 2, other: 1}})
+                "result": {"stopped": 0, "attention": True, "manual_review": 2, "validation_failures": 0,
+                           other: 1}})
     for key in "ab":
         app_module._save_checked({"app": "Bank Statements", "id": key, "checked": True})
     assert (_row()["state"] == "attention") is stays
@@ -2338,12 +2340,12 @@ def test_what_a_run_set_aside_with_no_record_keeps_it_on_the_list(root):
                         "updated_at": "2026-06-01T10:00:00"}
     (bank / "progress.json").write_text(json.dumps(records), encoding="utf-8")
     _log(bank, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
-                "result": {"stopped": 0, "attention": True, "manual_review": 3}})
+                "result": {"stopped": 0, "attention": True, "manual_review": 3, "validation_failures": 0}})
     for key in ("a", "b", "older"):
         app_module._save_checked({"app": "Bank Statements", "id": key, "checked": True})
     assert _row()["state"] == "attention"
     _log(bank, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
-                "result": {"stopped": 0, "attention": True, "manual_review": 2}})
+                "result": {"stopped": 0, "attention": True, "manual_review": 2, "validation_failures": 0}})
     assert _row()["state"] != "attention"
 
 
@@ -2525,9 +2527,41 @@ def test_a_receipt_set_aside_is_named_by_its_summary_and_purchase_date(root):
         "document_type": "Receipt", "notes": "Low classification confidence", "updated_at": SET_ASIDE_AT}}),
         encoding="utf-8")
     _log(shop, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
-                "result": {"stopped": 0, "attention": True, "manual_review": 1}})
+                "result": {"stopped": 0, "attention": True, "manual_review": 1, "validation_failures": 0}})
     item = _rows()[("Shop Receipts", "primary")]["to_check"][0]
     assert (item["label"], item["date"]) == ("Kitchen towels", "2026-10-12")
+
+
+def test_an_invoice_that_failed_its_check_keeps_it_on_the_list(root):
+    """Target puts an invoice that failed its check in Manual Review and
+    counts it in validation_failures, while its order's record stays saved,
+    so the list has no record of it to name. Checking a receipt an earlier
+    run set aside leaves Needs a look. A receipt that failed its check and
+    was set aside with a record, counted in both, is answered by its Done."""
+    shop = root / "Shop Receipts"
+    (shop / "Manual Review").mkdir()
+    (shop / "Manual Review" / "2026-10-20 Invoice 2 of 2.pdf").write_bytes(b"%PDF-1.4")
+    records = {
+        "Online:1": {"state": "Needs Manual Review", "purchase_date": "2026-09-12", "summary": "Kitchen towels",
+                     "notes": "Low classification confidence", "updated_at": "2026-10-01T09:00:00"},
+        "Online:2": {"state": "PDF Saved", "purchase_date": "2026-10-20", "summary": "Garden hose",
+                     "updated_at": SET_ASIDE_AT,
+                     "invoices": [{"file": "Receipts/2026-10-20 Invoice 1 of 2.pdf", "kept": True},
+                                  {"file": "Manual Review/2026-10-20 Invoice 2 of 2.pdf", "kept": False}]}}
+    (shop / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    _log(shop, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
+                "result": {"stopped": 0, "attention": True, "manual_review": 0, "validation_failures": 1}})
+    assert [i["id"] for i in _rows()[("Shop Receipts", "primary")]["to_check"]] == ["Online:1"]
+    app_module._save_checked({"app": "Shop Receipts", "id": "Online:1", "checked": True})
+    assert _rows()[("Shop Receipts", "primary")]["state"] == "attention"
+
+    records["Online:2"].update(state="Needs Manual Review", notes="PDF validation failed: too small")
+    (shop / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    _log(shop, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
+                "result": {"stopped": 0, "attention": True, "manual_review": 1, "validation_failures": 1}})
+    assert _rows()[("Shop Receipts", "primary")]["state"] == "attention", "Online:2 is not checked yet"
+    app_module._save_checked({"app": "Shop Receipts", "id": "Online:2", "checked": True})
+    assert _rows()[("Shop Receipts", "primary")]["state"] != "attention"
 
 
 def test_the_page_lists_them_with_open_only_where_there_is_a_file(panel):
