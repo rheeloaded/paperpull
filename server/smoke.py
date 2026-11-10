@@ -247,6 +247,16 @@ def set_up_provider(cookie: str) -> None:
            and answer.get("suggested_root") == "/data",
            "signed in, the API answers %d, server %s, folder %s"
            % (status, answer.get("server"), answer.get("suggested_root")))
+    # Setting a provider up waits for the terms of use, as every route that
+    # changes the archive does (_terms_first). They are accepted as the page's
+    # I understand does, with the version the page itself is given.
+    _, _, page = http("GET", "/", cookie=cookie)
+    version = re.search(r"const TERMS_VERSION = '([^']+)'", page)
+    status, _, _ = http("POST", "/api/terms", cookie=cookie,
+                        body={"accepted": version.group(1) if version else ""})
+    report("terms", status == 200,
+           "the terms of use accepted, %d, version %s"
+           % (status, version.group(1) if version else "not on the page"))
     # The page may name any folder. On the server every provider goes in
     # the shared folder all the same.
     status, _, text = http("POST", "/api/create", cookie=cookie,
