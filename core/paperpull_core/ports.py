@@ -15,8 +15,9 @@ worse than the clash. Login says so before it opens the sign-in window,
 and the control panel says so on the account's row and page, each naming
 the other install and account and the cdp_url to change. Only a person's
 own config counts, config.json and each config.<label>.json. An install's
-config.example.json is a template no run reads, and a config that names
-no port opens a browser of its own when it runs.
+config.example.json is a template no run reads, and so is a copy of it a
+sync service or Finder made that nobody filled in (is_example). A config
+that names no port opens a browser of its own when it runs.
 """
 from __future__ import annotations
 
@@ -37,6 +38,15 @@ from .run_reporting import one_line
 # reads the ports beside an app from the same folders.
 ENTRY_RE = re.compile(r"[^.].*_(receipts|docs)\.py$")
 EXAMPLE = "config.example.json"
+# The names a sync service or Finder gives a copy of the example,
+# "config.example 2.json" from iCloud or "config.example copy.json". A copy
+# under one of them is no one's config only while nobody has filled it in
+# (is_example), and the control panel lists accounts by the same test.
+_EXAMPLE_COPY_RE = re.compile(r"config\.example(?: \d+| copy(?: \d+)?)?\.json", re.I)
+# The settings that say where a config's runs sign in and save. A copy
+# without one the example names runs somewhere of its own, since a config
+# with no cdp_url opens a browser of its own.
+_WHERE_KEYS = ("cdp_url", "output_dir", "profile_dir")
 # Where a moved config goes, the range tools/add_account.py gives each person
 # after the first (its PEOPLE_PORTS, which a test holds to this), above
 # every port an app comes with.
@@ -123,12 +133,56 @@ def shipped_folders() -> List[Path]:
 
 def configs_of(install: Path) -> List[Path]:
     """Every person's config in an install, config.json first, never the
-    example."""
+    example or a copy of it nobody filled in (is_example)."""
     own = [install / "config.json"] if (install / "config.json").is_file() else []
     try:
-        return own + [p for p in sorted(install.glob("config.*.json")) if p.name != EXAMPLE]
+        return own + [p for p in sorted(install.glob("config.*.json")) if not is_example(p)]
     except OSError:
         return own
+
+
+def _settings_in(path: Path) -> Optional[dict]:
+    """A config's settings, or None when it is not a plain file of a few
+    hundred bytes holding one JSON object."""
+    try:
+        st = path.stat()
+        if not stat.S_ISREG(st.st_mode) or st.st_size > _MOST_BYTES:
+            return None
+        cfg = whole_json(json.loads(path.read_text(encoding="utf-8-sig")))
+    except (OSError, ValueError, RecursionError):
+        return None
+    return cfg if isinstance(cfg, dict) else None
+
+
+def holds_only_the_example(copy: dict, example: dict) -> bool:
+    """Whether a copy's settings are the example's, as nobody filled in.
+    Every setting in it, comments aside, is one the example has, with the
+    example's value, so a value changed or a setting added is somebody's.
+    A setting the example gained since the copy was made is not counted,
+    since an update adds those to the example and never to a copy, but a
+    copy without the cdp_url, output_dir or profile_dir the example names
+    runs somewhere of its own and is somebody's too."""
+    own = {k: v for k, v in copy.items() if not str(k).startswith("//")}
+    if any(k not in example or example[k] != v for k, v in own.items()):
+        return False
+    return all(k in own for k in _WHERE_KEYS if k in example)
+
+
+def is_example(config) -> bool:
+    """Whether a config beside an app is its example, config.example.json,
+    or a copy of it a sync service or Finder made (_EXAMPLE_COPY_RE) that
+    still holds only the example's settings (holds_only_the_example). None
+    of those is a person's. A copy somebody filled in is theirs, and so is
+    one that cannot be read, or whose example cannot, since a person's
+    account hidden is never run and nothing says so."""
+    config = Path(config)
+    if config.name == EXAMPLE:
+        return True
+    if not _EXAMPLE_COPY_RE.fullmatch(config.name):
+        return False
+    copy = _settings_in(config)
+    example = _settings_in(config.parent / EXAMPLE)
+    return copy is not None and example is not None and holds_only_the_example(copy, example)
 
 
 def account_of(config: Path) -> str:

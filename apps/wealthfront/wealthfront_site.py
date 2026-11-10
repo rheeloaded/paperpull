@@ -480,18 +480,43 @@ def select_tax_year(page, year: str) -> bool:
 _DOC_TYPE_SELECT = r"select:has(option:text-matches('all\\s+document\\s+types', 'i'))"
 
 
-def document_types_offered(page) -> Optional[frozenset]:
-    """The kinds of document the 'All Document Types' dropdown offers, in
-    lower case, turned-off ones left out. None when no such dropdown could
-    be read, which says nothing about what the account holds."""
+def _words(text: str) -> str:
+    """An option's words as they are compared, lower case, white space
+    between them made one space."""
+    return " ".join(text.split()).lower()
+
+
+def _doc_type_options(page, options: str) -> Optional[frozenset]:
+    """The words of the 'All Document Types' dropdown's options that match
+    `options`, read in one go, or None when no such dropdown could be read."""
     try:
         sel = page.locator(FALLBACK["select_doc_type"] + ", " + _DOC_TYPE_SELECT)
         if sel.count() == 0:
             return None
-        options = sel.first.locator("option:not([disabled])").all_inner_texts()
+        texts = sel.first.locator(options).all_inner_texts()
     except Exception:
         return None
-    return frozenset(" ".join(o.split()).lower() for o in options)
+    return frozenset(_words(o) for o in texts)
+
+
+def document_types_offered(page) -> Optional[frozenset]:
+    """The kinds of document the 'All Document Types' dropdown offers, in
+    lower case, turned-off ones left out. None when no such dropdown could
+    be read, which says nothing about what the account holds."""
+    return _doc_type_options(page, "option:not([disabled])")
+
+
+def has_no_kind(page, label: str) -> bool:
+    """Whether the 'All Document Types' dropdown says this account has no
+    document of the kind `label`. Only a dropdown read whole says so, one
+    that lists some kind besides All Document Types and no option of this
+    kind at all, turned off or not. A dropdown that could not be read, one
+    that lists no kind yet, as one still drawing does, and one that lists
+    the kind and would not take it say nothing of the sort."""
+    listed = _doc_type_options(page, "option")
+    if listed is None:
+        return False
+    return _words(label) not in listed and bool(listed - {"all document types"})
 
 
 def set_document_type(page, label: str) -> bool:
@@ -510,6 +535,13 @@ def set_document_type(page, label: str) -> bool:
     try:
         sel = page.locator(FALLBACK["select_doc_type"])
         if sel.count() > 0:
+            # a type the filter does not list is not on this account, so
+            # it is not waited for, and the text of the select's own hidden
+            # <option> is no custom dropdown to open either. Its words are
+            # read as document_types_offered reads them.
+            options = sel.first.locator("option").all_inner_texts()
+            if _words(label) not in {_words(o) for o in options}:
+                return False
             sel.first.select_option(label=label)
             page.wait_for_timeout(2500)
             return True

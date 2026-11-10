@@ -218,7 +218,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   else looks like too, since every account has statements. An account
   whose dropdown has no Quarterly Statements has none to read and finishes
   as before, a minute sooner, since asking for that option no longer waits
-  for it twice. Contributed by @JasperDale420.
+  for it twice (#197). Contributed by @JasperDale420. Before merging #197,
+  only a dropdown read whole that lists other kinds and no Quarterly
+  Statements at all says the account has none. A Quarterly Statements
+  listed and turned off, or a dropdown that lists no kind yet or cannot be
+  read by then, still leaves the list not whole.
 - **Spectrum takes both statements two accounts share a date on (#190).** After a
   transfer the current and the prior account can each have a statement of
   one date, and their rows on Statements read alike, so both were refused
@@ -228,6 +232,29 @@ All notable changes to PaperPull are recorded here. Versioning follows
   saved only from its own page, whose address and the PDF it asks for name
   its account and date, and never as the same file as the other. Anything
   else after a press still stops the run. Not yet run on a live account. Contributed by @JasperDale420.
+- **Spectrum reads its Mobile statements again (#194).** Billing's Mobile
+  Account Number link and each Mobile statement row now carry
+  `unsafe:javascript:void(0)` as their address, the way Angular writes a
+  script address it will not follow, so they still lead nowhere. The app
+  took that for an address of its own and stopped every Get new on Billing
+  after the Internet statements were listed. That one form now passes,
+  and nothing else after `unsafe:` does. Contributed by @JasperDale420 and
+  run on the contributor's own account. Before merging, the check reads
+  its letters as plain ASCII letters only, so an address spelled with a
+  look-alike letter, which a browser follows as a path on the site, is
+  refused.
+- **A copy of a provider's example config is no account (#196).** iCloud
+  keeps both sides of a clash as `config.example 2.json`, and Finder's
+  Duplicate makes `config.example copy.json`. The control panel listed
+  each as an account, "example 2", which then said it shared a browser
+  with the real account and asked for a port to be changed in the copy. A
+  copy that holds only the example's settings is now passed over by the
+  panel, by the port check Login makes, by the naming page and by Export
+  history. Contributed by @JasperDale420. Before merging, a copy somebody
+  filled in, with any setting changed or added, or without the example's
+  `cdp_url`, `output_dir` or `profile_dir`, stays their account and is still
+  checked for a shared port, and a copy is listed whenever it or the
+  example beside it cannot be read.
 
 ## [0.62.0] - 2026-11-09
 

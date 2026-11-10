@@ -407,12 +407,13 @@ class App:
                 if not site.set_document_type(page, label):
                     log.info("Could not set document-type filter to %r", label)
                     # Quarterly Statements is on the dropdown only for an
-                    # account that has them, so its absence from a dropdown
-                    # read whole leaves nothing out. Any other refusal is a
-                    # part of the list not read.
-                    offered = site.document_types_offered(page)
-                    if (label != "Quarterly Statements" or offered is None
-                            or label.lower() in offered):
+                    # account that has them, so a dropdown read whole that
+                    # lists other kinds and not that one leaves nothing out
+                    # (site.has_no_kind). A dropdown not read, one that
+                    # lists no kind yet, the kind listed and turned off,
+                    # and any other refusal are a part of the list not read.
+                    if not (label == "Quarterly Statements"
+                            and site.has_no_kind(page, label)):
                         passed_over = True
                     continue
                 log.info("Document type filter set to %r", label)
