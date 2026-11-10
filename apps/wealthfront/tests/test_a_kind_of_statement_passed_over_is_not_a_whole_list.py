@@ -71,8 +71,22 @@ def make_app(tmp_path, monkeypatch, page):
         return app
 
     monkeypatch.setattr(site, "goto_documents", lambda pg: True)
-    monkeypatch.setattr(site, "collect_documents", lambda pg: [])
+    monkeypatch.setattr(site, "collect_documents", statement_rows)
     return build
+
+
+# An invented statement of each kind, the one the dropdown shows.
+SHOWN = {"Statements": "Monthly Statement", "Quarterly Statements": "Quarterly Statement"}
+
+
+def statement_rows(pg):
+    """The rows the list shows for the kind the dropdown is on, one
+    statement of that kind, and none for any other or with no dropdown."""
+    sel = pg.locator("select")
+    title = SHOWN.get(sel.input_value()) if sel.count() else None
+    return [site.RawDoc(title=title, date_text="06/30/2031", kind="dated",
+                        href="https://www.wealthfront.com/documents/invented",
+                        text="06/30/2031 %s" % title)] if title else []
 
 
 def failures(tmp_path):
@@ -167,3 +181,35 @@ def test_no_dropdown_at_all_is_not_whole(make_app, page):
     with pytest.raises(SystemExit):
         app.cmd_discover()
     assert listing.last(app) == listing.STOPPED
+
+
+@pytest.mark.parametrize("empty", ["Statements", "Quarterly Statements"])
+def test_a_kind_chosen_that_shows_no_statement_is_not_whole(make_app, page, monkeypatch, tmp_path,
+                                                            capsys, empty):
+    """The dropdown took the kind and the list showed nothing of it, which
+    a page still drawing, or a press that chose something else, looks like
+    too. Every account has statements, and quarterly ones are offered only
+    to an account that has them."""
+    page.set_content(PAGE % (STATEMENTS + QUARTERLY))
+    monkeypatch.setattr(site, "collect_documents", lambda pg: [] if (
+        pg.locator("select").input_value() == empty) else statement_rows(pg))
+    app = make_app("--discover")
+    with pytest.raises(SystemExit):
+        app.cmd_discover()
+    assert listing.last(app) == listing.STOPPED
+    assert "showed no statement once chosen" in " ".join(capsys.readouterr().out.split())
+    assert len(failures(tmp_path)) == 1
+
+
+def test_a_first_page_drawn_late_is_still_read_whole(make_app, page, monkeypatch, tmp_path):
+    page.set_content(PAGE % STATEMENTS)
+    asked = []
+
+    def late(pg):
+        asked.append(1)
+        return [] if len(asked) == 1 else statement_rows(pg)
+    monkeypatch.setattr(site, "collect_documents", late)
+    app = make_app("--discover")
+    app.cmd_discover()
+    assert listing.last(app) == listing.COMPLETE and failures(tmp_path) == []
+    assert [d["summary"] for d in app.discovery.data.values()]

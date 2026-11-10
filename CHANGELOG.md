@@ -28,9 +28,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   noted as read whole, and a run that read no statements at all could finish
   clean. Now Statements not read, or Quarterly Statements offered and not
   taken, stops the run at its end the way a tax year passed over does, with
-  a failure file. An account whose dropdown has no Quarterly Statements has
-  none to read and finishes as before, a minute sooner, since asking for
-  that option no longer waits for it twice.
+  a failure file. So does a kind chosen that shows no statement after a few
+  seconds more, which a page still drawing or a press that chose something
+  else looks like too, since every account has statements. An account
+  whose dropdown has no Quarterly Statements has none to read and finishes
+  as before, a minute sooner, since asking for that option no longer waits
+  for it twice.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On
