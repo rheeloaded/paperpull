@@ -2019,3 +2019,29 @@ def test_every_state_an_app_writes_is_judged_taken_or_left():
     assert written <= set(_TAKEN_OR_GONE) | _LEFT_TO_TAKE, written
     assert set(_TAKEN_OR_GONE) <= written
     assert set(app_module._NOTHING_TO_TAKE) == set(_TAKEN_OR_GONE.values())
+
+
+def test_the_sample_can_be_opened_before_the_terms_and_nothing_else_can(panel):
+    """The sample is invented and runs nothing. Leaving it brings the terms
+    back, and only I understand ends them for good."""
+    got = panel.evaluate("""async () => {
+        const out = {};
+        let asked = null;
+        const real = setSample;
+        setSample = async on => { asked = on; };
+        TERMS_OK = false;
+        const d = $('dlg-terms');
+        openTerms();
+        META = {apps: {}, root_source: 'default', fresh_checkout: false};
+        await tmSample();
+        out.asked = asked; out.closedForSample = !d.open;
+        setSample = real;
+        TERMS_WAITING = false;
+        d.showModal();
+        d.close();                     // anything but I understand, while not waiting
+        await new Promise(f => setTimeout(f, 50));
+        out.reopened = d.open;
+        return out;
+    }""")
+    assert got["asked"] is True and got["closedForSample"]
+    assert got["reopened"], "without the sample open, the dialog stands"

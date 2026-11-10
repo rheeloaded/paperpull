@@ -2501,6 +2501,7 @@ async function setSample(on) {
   XL_LOADED = false;
   await load();
   location.hash = '#/';
+  if (!on && TERMS_DUE && !TERMS_OK) { TERMS_WAITING = false; $('dlg-terms').showModal(); }
 }
 function applyTheme() {
   const t = store.get('theme') || 'system';
@@ -2572,6 +2573,7 @@ const DO = {
   'rn-preview': () => rnRun(false),
   'rn-apply': () => rnRun(true),
   'rv-go': () => rvGo(),
+  'tm-sample': () => tmSample(),
   'sp-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'diagnose'); },
   // The report reads a signed-in page, so the dialog that says to sign in
   // first opens the sign-in window itself, and stays open for the report.
@@ -2705,11 +2707,27 @@ function serverPage() {
 // closes it, brings it straight back. Once pressed the page goes on, and an
 // answer that could not be saved is said, so the terms come back next time.
 let TERMS_OK = !TERMS_DUE;
+// The sample is invented data and runs nothing, so somebody only looking
+// can open it before the terms. Only I understand reaches a real account:
+// the dialog waits only while the sample is open, and is back on leaving it.
+let TERMS_WAITING = false;
 function openTerms() {
   const d = $('dlg-terms');
   d.addEventListener('cancel', e => e.preventDefault());
-  d.addEventListener('close', () => { if (!TERMS_OK) d.showModal(); });
+  d.addEventListener('close', () => { if (!TERMS_OK && !TERMS_WAITING) d.showModal(); });
   d.showModal();
+}
+// Once the accounts are read: offered only to somebody with none yet, and
+// a page reloaded in the sample stays in it.
+function termsAfterLoad() {
+  if (!TERMS_DUE || TERMS_OK || !META) return;
+  $('tm-sample').hidden = Boolean(Object.keys(META.apps).length) && !META.fresh_checkout && !inSample();
+  if (inSample() && $('dlg-terms').open) { TERMS_WAITING = true; $('dlg-terms').close(); }
+}
+async function tmSample() {
+  TERMS_WAITING = true;
+  $('dlg-terms').close();
+  await setSample(true);
 }
 async function tmGo() {
   TERMS_OK = true;
@@ -2720,5 +2738,5 @@ async function tmGo() {
 applyTheme();
 serverPage();
 placeMove(false);
-load();
+load().then(termsAfterLoad);
 if (TERMS_DUE) openTerms();
