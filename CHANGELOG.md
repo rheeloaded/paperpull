@@ -110,6 +110,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   time it reads the accounts. Contributed by @JasperDale420.
 
 ### Fixed
+- **On a Mac, an account's documents folder is never another's in other
+  letter case.** A Mac tells folder names apart without case, so
+  `target receipts/Chase` is inside Target Receipts' folder. The check
+  that a folder is no other account's compared the paths as spelled, which
+  Windows does without case and a Mac did not, so the panel saved such a
+  folder there and two accounts' documents would have shared it. The
+  suites run on Windows in CI, where it held, and the test that says so
+  failed only on a Mac.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On

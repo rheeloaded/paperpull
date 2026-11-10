@@ -1055,3 +1055,20 @@ def test_every_writer_of_a_config_holds_the_one_lock(apps, tmp_path, monkeypatch
         ("kept-profile", "Dana Example", 1, "bundled")
     assert held == [True] * 5, held
     assert not app_module._CONFIG_WRITES.locked()
+
+
+def test_a_folder_spelled_in_other_letter_case_is_judged_as_the_disk_holds_it(tmp_path):
+    """On a Mac resolve() keeps the spelling given, so "target receipts" was
+    never inside "Target Receipts" there, though the two are one folder. A
+    Mac's and Windows' names are told apart without case, and elsewhere as
+    the disk holds them, as Linux's tells "target receipts" apart."""
+    (tmp_path / "Target Receipts").mkdir()
+    # A Mac and Windows tell names apart without case, as the panel does
+    # (app._in_root_name). Elsewhere it is as the disk holds them.
+    one_folder = sys.platform in ("darwin", "win32") or (tmp_path / "target receipts").exists()
+    inside = tmp_path / "target receipts" / "Chase"
+    assert app_module._within(inside, tmp_path / "Target Receipts") is one_folder
+    assert app_module._within(tmp_path / "target receipts", tmp_path / "Target Receipts") is one_folder
+    assert app_module._within(tmp_path / "Target Receipts" / "Chase", tmp_path / "Target Receipts")
+    assert not app_module._within(tmp_path / "Target Receiptsx" / "Chase", tmp_path / "Target Receipts")
+    assert not app_module._within(tmp_path / "Target Receipts", tmp_path / "Target Receipts" / "Chase")
