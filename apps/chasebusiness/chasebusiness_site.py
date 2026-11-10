@@ -93,10 +93,13 @@ KNOWN CEILINGS (ponytail: left until a live run shows otherwise)
   * Two statements of one account on one date stop the list, on every run,
     since nothing on a row tells them apart.
   * Rows do not name their account, so a saved PDF is kept only when the
-    account number on its "Account Number" label's line, or otherwise the
-    first account number its text prints, ends in the account's last four
-    (names_tail). The owner's ten saved checking statements and one card
-    statement were read by this rule in November 2026.
+    account number its "Account Number" label stands for ends in the
+    account's last four (names_tail). That is the number on the label's
+    own line or on the next line that prints anything, or else the number
+    printed alone on the text's first line. A PDF with no label is judged
+    by the first account number it prints. The owner's ten saved checking
+    statements and one card statement, read in November 2026, print it
+    alone at the top and on the label's line.
   * Tax documents, notices, ATM receipts, check images and branch documents
     are never opened. The business card is listed like any account, and its
     rows are saved by their Saves document link. A card statement is kept
@@ -2126,16 +2129,19 @@ def names_tail(text: str, tail: str) -> bool:
     more that a space or a dash may part, ending in four digits, as in
     "000000123451234" or "XXXX XXXX XXXX 1234" (_account_number).
 
-    When the "Account Number" label's own line prints an account number,
-    as a card statement's does, that number is judged. Otherwise the first
-    account number in the whole text is judged: a Business Checking
-    statement's text has the label's line empty, Chase's site and phone
-    number after it, and its account number first of all, at the top of
-    the page, as every saved one read (November 2026). The first number
-    after such a label was a transaction number, so every real checking
-    statement was refused. Either way only one number is judged,
-    so another account's statement that names this account in a transfer
-    line, or a long transaction number ending in the same four, is not
+    With an "Account Number" label, the number judged is the label's
+    (_labeled_number). It is the first account number on the label's own
+    line, as a card statement prints it, or else on the next line that
+    prints anything. Failing both, it is the text's first line when that
+    line holds an account number and nothing else, as a Business Checking
+    statement prints it: its text leaves the label's line empty, has
+    Chase's site and phone number after it, and prints its account number
+    alone at the very top, as every saved one read (November 2026). With
+    a label and none of these, nothing is kept, since a number further on
+    is a transaction's. With no label, the first account number in the
+    whole text is judged. Either way only one number is judged, so another
+    account's statement that names this account in a transfer line, or
+    prints a long number ending in the same four before its label, is not
     kept. A ZIP+4, a mail sort number, a run of zeros, a phone number, a
     check number or a date printed before the number is no account number
     and is passed over (_account_number). Four digits are needed.
@@ -2146,18 +2152,46 @@ def names_tail(text: str, tail: str) -> bool:
     if not re.fullmatch(r"\d{4}", tail or ""):
         return False
     text = text or ""
-    start = 0
     label = _ACCOUNT_LABEL_RE.search(text)
-    if label:
-        end = text.find("\n", label.end())
-        end = len(text) if end < 0 else end
-        if any(_account_number(run.group(0)) for run in _NUMBER_RUN_RE.finditer(text, label.end(), end)):
-            start = label.end()
-    for run in _NUMBER_RUN_RE.finditer(text, start):
+    last = _labeled_number(text, label.end()) if label else _first_number(text, 0, len(text))
+    return bool(last) and last.endswith(tail)
+
+
+def _first_number(text: str, start: int, end: int) -> str:
+    """The last group of the first account number between start and end,
+    or "" for none (_account_number)."""
+    for run in _NUMBER_RUN_RE.finditer(text, start, end):
         last = _account_number(run.group(0))
         if last:
-            return last.endswith(tail)
-    return False
+            return last
+    return ""
+
+
+def _line_end(text: str, start: int) -> int:
+    end = text.find("\n", start)
+    return len(text) if end < 0 else end
+
+
+def _labeled_number(text: str, after: int) -> str:
+    """The last group of the account number an "Account Number" label
+    ending at `after` stands for, or "" when none can be told (names_tail).
+    The label's own line, then the next line that prints anything, then
+    the text's first line, only when it is an account number alone. A
+    number anywhere else is not the label's."""
+    end = _line_end(text, after)
+    last = _first_number(text, after, end)
+    if last:
+        return last
+    while end < len(text):
+        start, end = end + 1, _line_end(text, end + 1)
+        if text[start:end].strip():
+            last = _first_number(text, start, end)
+            if last:
+                return last
+            break
+    top = re.search(r"\S[^\n]*", text)
+    line = top.group(0).rstrip() if top else ""
+    return _account_number(line) if _NUMBER_RUN_RE.fullmatch(line) else ""
 
 
 def _account_number(run: str) -> str:

@@ -1736,6 +1736,34 @@ def test_a_number_on_the_labels_own_line_is_still_the_one_judged():
     assert site.names_tail("000000123998877\nAccount Number: XXXX XXXX XXXX 4321\n", "4321")
 
 
+@pytest.mark.parametrize("text", [
+    # The label's number on the line after it, and a long number of
+    # another kind printed before the label.
+    "Ref 000000554321\nAccount Number:\n \n000000998877\nChase.com\n",
+    # A number alone at the top, and the label's own on the line after it.
+    "000000554321\nAccount Number:\n000000998877\nChase.com\n",
+])
+def test_a_number_before_the_label_does_not_stand_for_the_labels_own(text):
+    """Only a number alone at the very top, with nothing printed beside the
+    label or on the line after it, is read as the account's. Any other
+    number before the label is not, so a statement of the account ending
+    8877 is not kept for the one ending 4321."""
+    assert not site.names_tail(text, "4321")
+    assert site.names_tail(text, "8877")
+
+
+@pytest.mark.parametrize("text", [
+    # The label's lines and the top print no number, and a transaction
+    # number further on ends in the four.
+    "Business Complete Checking\nAccount Number:\nChase.com\n1-800-555-0199\n"
+    "Online Transfer To Chk ...1111 Transaction#: 9876554321\n",
+    # The top line prints more than a number.
+    "Ref 000000554321\n CUSTOMER SERVICE INFORMATION\nAccount Number:    \nChase.com\n",
+])
+def test_a_label_whose_number_cannot_be_told_keeps_nothing(text):
+    assert not site.names_tail(text, "4321")
+
+
 def test_another_accounts_statement_naming_this_account_is_not_kept(tmp_path):
     from paperpull_core import testkit
     page = center()
