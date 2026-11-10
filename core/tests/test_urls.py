@@ -127,3 +127,34 @@ def test_a_refusal_says_where_the_address_leads_and_nothing_an_account_is_in():
     assert where_it_leads("https://[::1") == "an address that could not be read"
     for said in (where_it_leads("https://user:secret@evil.example/12345?acct=9876"),):
         assert "secret" not in said and "12345" not in said and "9876" not in said
+
+
+def test_a_host_that_carries_words_an_id_or_a_token_leaves_as_its_shape():
+    """A host is read from the page too. One that is no host name but a
+    page's words, or one whose label reads like an account's number or a
+    token, leaves as its shape, every letter as a and every digit as 9, and
+    a plain host name as it is."""
+    from paperpull_core.urls import where_it_leads
+    said = where_it_leads("https://Statement for Zorvex 0400/x")
+    assert said == "https://aaaaaaaaa_aaa_aaaaaa_9999"
+    assert where_it_leads("https://acct-123456789.example/x") == "https://aaaa-999999999.example"
+    assert where_it_leads("https://d3fgh8kl2mn4op.cloudfront.example/x") == "https://a9aaa9aa9aa9aa.cloudfront.example"
+    assert where_it_leads("https://jo.doe%40mail.example/x") == "https://aa.aaa_99aaaa.aaaaaaa"
+    assert where_it_leads("https://secure07a.chase.com./x") == "https://secure07a.chase.com"
+    assert where_it_leads("https://s3-us-west-2.amazonaws.com/b") == "https://s3-us-west-2.amazonaws.com"
+    assert where_it_leads("https://[2001:db8::1]:8443/x") == "https://[2001:db8::1]:8443"
+    assert where_it_leads("https://[fe80::1%25Zorvex]/x") == "https://[fe80::1]"
+    assert where_it_leads("https://203.0.113.5/x") == "https://203.0.113.5"
+
+
+def test_naming_where_an_address_leads_never_asks_anything_of_it(monkeypatch):
+    import socket
+    from paperpull_core.urls import where_it_leads
+
+    def asked(*a, **k):
+        raise AssertionError("the address was asked for")
+
+    for name in ("socket", "create_connection", "getaddrinfo", "gethostbyname"):
+        monkeypatch.setattr(socket, name, asked)
+    assert where_it_leads("https://elsewhere.example/statement.pdf") == "https://elsewhere.example"
+    assert where_it_leads("https://xn--bnk-sna.example/") == "https://xn--bnk-sna.example"

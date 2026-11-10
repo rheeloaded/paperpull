@@ -25,6 +25,8 @@ safe, and an empty allowlist matches nothing.
 """
 from __future__ import annotations
 
+import ipaddress
+import re
 from typing import Iterable
 from urllib.parse import urlsplit
 
@@ -73,12 +75,35 @@ def is_safe_url(url: str, allowed_hosts: Iterable[str], *, subdomains: bool = Tr
     return False
 
 
+# A host's label as a refusal line names it, letters, digits and hyphens.
+_PLAIN_LABEL = re.compile(r"[a-z0-9-]{1,63}")
+# A label that reads like an account's number or a token, a run of six
+# digits, as paperpull_core.redact reads an id, or ten letters and digits
+# mixed, which leaves as its shape.
+_ID_IN_LABEL = re.compile(r"\d{6,}|(?=[a-z0-9]{10})(?=[a-z]*\d)(?=\d*[a-z])[a-z0-9]{10,}")
+
+
+def _label_said(label: str, keep: bool = True) -> str:
+    """One label of a host as a refusal line says it. A plain label is kept,
+    and any other leaves as its shape, every letter as a and every digit as
+    9 (paperpull_core.words), so a page's words or an id in a host leave
+    nothing of themselves but their length. A host with any label that is
+    not plain is no host name but words, and each of its labels leaves as
+    its shape (keep False)."""
+    if keep and _PLAIN_LABEL.fullmatch(label) and not _ID_IN_LABEL.search(label):
+        return label
+    return "".join("9" if ch.isdigit() else "a" if ch.isalpha() else "-" if ch == "-" else "_"
+                   for ch in label[:63])
+
+
 def where_it_leads(url: str) -> str:
-    """Where an address leads, for the line that says one was refused: its
+    """Where an address leads, for the line that says one was refused, its
     scheme, host and any port, and never its path, query or fragment, which
-    can carry an account's ids, nor a user or password in it. A refusal that
-    said nothing of where left nothing to tell a guard working from a page
-    gone wrong."""
+    can carry an account's ids, nor a user or password in it. A label of the
+    host that is not a plain name, or that carries an id or a token, leaves
+    as its shape. Nothing is asked of the address, it is only read. A
+    refusal that said nothing of where left nothing to tell a guard working
+    from a page gone wrong."""
     try:
         parts = urlsplit(url or "")
     except ValueError:
@@ -92,4 +117,14 @@ def where_it_leads(url: str) -> str:
         host, port = parts.hostname, None
     if not host:
         return "an address with no host (%s:)" % scheme[:20]
-    return "%s://%s%s" % (scheme[:20], host[:100], ":%d" % port if port else "")
+    if ":" in host:
+        try:
+            # Its zone, after %, is any text at all, and is left out.
+            said = "[%s]" % ipaddress.IPv6Address(host.split("%", 1)[0]).compressed
+        except ValueError:
+            said = _label_said(host, keep=False)
+    else:
+        labels = _host(host).split(".")[:10]
+        keep = all(_PLAIN_LABEL.fullmatch(label) for label in labels)
+        said = ".".join(_label_said(label, keep) for label in labels)
+    return "%s://%s%s" % (scheme[:20], said[:120], ":%d" % port if port else "")
