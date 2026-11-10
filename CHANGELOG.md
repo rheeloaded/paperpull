@@ -36,6 +36,74 @@ All notable changes to PaperPull are recorded here. Versioning follows
   when nobody is signed in, and says when no sign-in window opened or
   nothing was recorded.
 
+### Changed
+- **One Get help under More (#181).** Make a support report and Record steps for
+  support were two items and two dialogs, and the file a failed run had
+  just written was a third place to look. Get help opens one dialog that
+  offers a recent failure file first, then the support report with its
+  sign-in button, then recording as the next step. What each file holds
+  moved under What's in the file?, every word of it kept. Contributed by
+  @JasperDale420. Before merging, Record steps waits while the sign-in the
+  dialog started is going, as Make the report does, and the failure file
+  is offered as one written in the last hour, with what the Run page says
+  of it, rather than as the last run's, which may have gone well since. Contributed by @JasperDale420.
+- **A run can be followed from the tab, and a round leaves you where you
+  are (#180).** The browser tab's title shows a run's progress and how it ended,
+  so somebody working in the provider's window can see it. A run that ends
+  while you are on another page of PaperPull says so with a link to the
+  outcome. Get new for all no longer pulls you back to the Run page at each
+  account, and its last line lists each account with what it came to, so
+  one that saved documents and set one aside no longer reads as a failure.
+  Contributed by @JasperDale420. Before merging, a run that did not finish
+  is named in the title by its outcome's own words, such as You stopped
+  this run or This run did not start, where it read "stopped" for a run
+  that never started and for one the page had lost touch with.
+- **The name on an account can be changed (#183).** The welcome asked once, for
+  every provider at the same time, and skipping it was for good unless you
+  edited a settings file. More now has Name on the account, for the first
+  person and anyone added, kept in that account's own settings with a copy
+  in Backups first. It cannot be changed while that account is running,
+  a Rename or a Move of its documents included, and files already saved
+  keep their names until a Rename. Contributed by @JasperDale420.
+- **Providers go by their names, and a run's lines by the names on the
+  buttons (#184).** The File names picker, the Updated notice and File names'
+  Stopped at line said the folder's name instead of the provider's. The
+  example path in Settings fits the computer. Under the control panel the
+  lines every provider shares, when a run stops or has nothing left to
+  continue, name Get new documents, Try the newest few, Check what's there
+  and Continue, and in a terminal they still name Pilot, Run All, Discover
+  and Resume. Review names and the line about refused documents count
+  "1 receipt" rather than "1 receipt(s)", and the providers' lists read
+  alike. Contributed by @JasperDale420.
+- **A sign-in window comes to the front, and goes when it is done (#186).** Opening
+  one, or reusing one already open, now brings it forward. When Get new
+  documents or Continue finishes on a Mac, PaperPull closes that account's
+  sign-in window, unless you are in it. A run that stops leaves the window
+  open, and so does one whose port another account names too, since that
+  browser may be the other account's. Only a browser PaperPull opened on
+  the account's own port and profile folder is ever closed, never an
+  everyday one, and `"close_signin_window": false` in settings.json turns
+  closing off. Contributed by @JasperDale420 (#186).
+- **An account just checked comes off the list, and can be marked done (#187).**
+  "Due" came only from the age of the newest document, so a run that found
+  nothing new left the account due until its provider sent something. A Get
+  new that read the whole list and finished clean now counts as a check for
+  as long as that provider usually takes, between 3 and 14 days. A Continue
+  reads no list, so it is no check, and an account with gaps still shows
+  them. **Mark as done** under the three dots takes an account off the list
+  until its next run, or for that time at most, and can be undone.
+  Contributed by @JasperDale420 (#187).
+- **The sample can be looked at before the terms (#188).** Somebody only looking
+  had to accept the Terms of Use to see invented data. With no accounts yet,
+  the dialog offers Just look at the sample, which sets the dialog aside
+  only once the sample is open and says why when it cannot be opened.
+  Leaving the sample brings the dialog back. Until I understand is pressed
+  the panel itself refuses a run, a sign-in, a folder shown, a file handed
+  over, a spreadsheet or a setting saved anywhere but in the sample, so a
+  tab still showing the sample after another tab left it, or after the
+  panel started again, does nothing real, and has the dialog back the next
+  time it reads the accounts. Contributed by @JasperDale420.
+
 ### Fixed
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
@@ -47,65 +115,53 @@ All notable changes to PaperPull are recorded here. Versioning follows
   A list never read is now always read first, and a census holds every
   app's list to it. Both apps are still waiting for someone with an account
   to test them.
-- **An account just checked comes off the list.** "Due" came only from the
-  age of the newest document, so a run that found nothing new left it due
-  until its provider sent something. A whole clean run now counts as a check
-  for as long as that provider usually takes, between 3 and 14 days. **Mark as done** under the three dots takes
-  any account off the list for that time, and can be undone.
-- **A sign-in window comes to the front, and goes when it is done.** Opening
-  one, or reusing one already open, now brings it forward. When Get new
-  documents or Continue finishes, PaperPull closes that account's sign-in
-  browser, and returns you to PaperPull if you were in it. A run that stops
-  leaves the window open. It is known by its port and its profile folder, so
-  an everyday browser is never closed, and `"close_signin_window": false` in
-  settings.json turns it off. Mac and Linux for now.
-- **What a real run on a real account showed.** A list that stopped partway
-  is said as a page PaperPull did not expect, not as a sign-out with
-  Continue, for each of the providers that can stop that way. The last line
-  after "Sign in first" no longer offers Continue. After a sign-in the log
-  names the panel's button under the panel.
-- **Providers go by their names, and a run's lines by the names on the
-  buttons.** The File names picker, the Updated notice and File names'
-  Stopped at line said the folder's name instead of the provider's. The
-  example path in Settings fits the computer. Under the control panel the
-  lines every provider shares, when a run stops or has nothing left to
-  continue, name Get new documents, Try the newest few, Check what's there
-  and Continue, and in a terminal they still name Pilot, Run All, Discover
-  and Resume. Review names and the line about refused documents count
-  "1 receipt" rather than "1 receipt(s)", and the providers' lists read
-  alike.
-- **The name on an account can be changed.** The welcome asked once, for
-  every provider at the same time, and skipping it was for good unless you
-  edited a settings file. More now has Name on the account, for the first
-  person and anyone added, kept in that account's own settings with a copy
-  in Backups first. It cannot be changed while that account is running,
-  a Rename or a Move of its documents included, and files already saved
-  keep their names until a Rename.
-- **A support report that read nothing says so.** Made with the window on a
+- **A checkout nobody has set up shows the welcome (#179).** Its `apps/` holds the
+  provider templates, which looked like installs, so the README's quick
+  start landed on every provider "Not started" with no welcome, and a run
+  there wrote its log into the git tree. A checkout with no chosen folder
+  and no `config.json` in `apps/` now shows the welcome, and somebody
+  already running from `apps/` carries on as before. Contributed by
+  @JasperDale420. Before merging, the welcome, Settings and Import history
+  refuse that `apps/` folder, or one inside it, as the PaperPull folder
+  until one of its apps has a `config.json`, and Settings no longer names
+  it as the folder, fills it in, or lists its templates as accounts. Contributed by @JasperDale420.
+- **A support report that read nothing says so (#182).** Made with the window on a
   sign-in page or a security check, it still read "Support report saved",
   and people attached it. It now ends as Nothing was read, says to sign in
   and leave the window on the documents page, and offers the sign-in window
   and the report again. A report from a signed-in page PaperPull cannot make
-  sense of still reads as saved, since that is the one a repair needs.
-- **One Get help under More.** Make a support report and Record steps for
-  support were two items and two dialogs, and the file a failed run had
-  just written was a third place to look. Get help opens one dialog that
-  offers a recent failure file first, then the support report with its
-  sign-in button, then recording as the next step. What each file holds
-  moved under What's in the file?, every word of it kept.
-- **A run can be followed from the tab, and a round leaves you where you
-  are.** The browser tab's title shows a run's progress and how it ended,
-  so somebody working in the provider's window can see it. A run that ends
-  while you are on another page of PaperPull says so with a link to the
-  outcome. Get new for all no longer pulls you back to the Run page at each
-  account, and its last line lists each account with what it came to, so
-  one that saved documents and set one aside no longer reads as a failure.
-- **A checkout nobody has set up shows the welcome.** Its `apps/` holds the
-  provider templates, which looked like installs, so the README's quick
-  start landed on every provider "Not started" with no welcome, and a run
-  would have written PDFs and sign-ins into the git tree. A checkout with no
-  chosen folder and no `config.json` in `apps/` now shows the welcome, and
-  somebody already running from `apps/` carries on as before.
+  sense of still reads as saved, since that is the one a repair needs. Contributed by @JasperDale420.
+- **A list that stopped partway no longer asks you to sign in again
+  (#185).** The run ended as "This run ended with a problem", with signing
+  in again as its first step, which could not help. It now says the
+  provider's page was not what PaperPull expected, as a stop at a page
+  does, and offers Continue, which takes what was listed before the stop
+  and then offers Get new documents. Charles Schwab's list, stopped by an
+  answer refused as signed out, still offers the sign-in first. A run that
+  found nobody signed in no longer ends its log saying Continue carries on,
+  and the log of Open sign-in window names Try the newest few first under
+  the control panel, for every provider. Contributed by @JasperDale420.
+- **Wealthfront never calls its list whole with a kind of statement left
+  out (#189).** The Documents page shows statements through a dropdown, and a kind
+  it would not choose was logged and passed over, so the list was still
+  noted as read whole, and a run that read no statements at all could finish
+  clean. Now Statements not read, or Quarterly Statements offered and not
+  taken, stops the run at its end the way a tax year passed over does, with
+  a failure file. So does a kind chosen that shows no statement after a few
+  seconds more, which a page still drawing or a press that chose something
+  else looks like too, since every account has statements. An account
+  whose dropdown has no Quarterly Statements has none to read and finishes
+  as before, a minute sooner, since asking for that option no longer waits
+  for it twice. Contributed by @JasperDale420.
+- **Spectrum takes both statements two accounts share a date on (#190).** After a
+  transfer the current and the prior account can each have a statement of
+  one date, and their rows on Statements read alike, so both were refused
+  before any press and every run failed them. The app now presses the
+  first of the two rows, and when the page it opens is the other account's
+  statement it reads Statements again and presses the second, once. Each is
+  saved only from its own page, whose address and the PDF it asks for name
+  its account and date, and never as the same file as the other. Anything
+  else after a press still stops the run. Not yet run on a live account. Contributed by @JasperDale420.
 
 ## [0.62.0] - 2026-11-09
 
