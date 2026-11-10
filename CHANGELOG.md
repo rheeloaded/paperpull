@@ -20,6 +20,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   A list never read is now always read first, and a census holds every
   app's list to it. Both apps are still waiting for someone with an account
   to test them.
+- **A list that stopped partway no longer asks you to sign in again
+  (#185).** The run ended as "This run ended with a problem", with signing
+  in again as its first step, which could not help. It now says the
+  provider's page was not what PaperPull expected, as a stop at a page
+  does, and offers Continue, which takes what was listed before the stop
+  and then offers Get new documents. Charles Schwab's list, stopped by an
+  answer refused as signed out, still offers the sign-in first. A run that
+  found nobody signed in no longer ends its log saying Continue carries on,
+  and the log of Open sign-in window names Try the newest few first under
+  the control panel, for every provider.
 
 ## [0.62.0] - 2026-11-09
 
@@ -213,11 +223,6 @@ steps, and a run started outside its app's folder keeps to that folder.
   leaves the window open. It is known by its port and its profile folder, so
   an everyday browser is never closed, and `"close_signin_window": false` in
   settings.json turns it off. Mac and Linux for now.
-- **What a real run on a real account showed.** A list that stopped partway
-  is said as a page PaperPull did not expect, not as a sign-out with
-  Continue, for each of the providers that can stop that way. The last line
-  after "Sign in first" no longer offers Continue. After a sign-in the log
-  names the panel's button under the panel.
 - **Providers go by their names, and a run's lines by the names on the
   buttons.** The File names picker, the Updated notice and File names'
   Stopped at line said the folder's name instead of the provider's. The
