@@ -131,6 +131,14 @@ selectors => {
     for (let i = layers.length - 1; i >= 0; i--) b = over(layers[i], b);
     return b;
   }
+  // When no frame is drawn between a dialog closing under one theme and
+  // opening under the other, each button's color transition starts here,
+  // and read at its start a button still has the colors of the theme
+  // before, on the background of the theme after (1.79:1 on CI, 2026-11-10).
+  // The colors a person reads are the ones it ends on, so every transition
+  // is finished first, once a layout has started them.
+  document.body.getBoundingClientRect();
+  for (const a of document.getAnimations()) a.finish();
   const out = {};
   for (const sel of selectors) {
     const el = document.querySelector(sel);

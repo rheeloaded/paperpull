@@ -1662,18 +1662,21 @@ DONE_FILE = "panel-done.json"
 
 
 def _checked_by(entry) -> bool:
-    """Whether a logged run read the whole list and finished: Get new or
-    Continue, every date, with nothing stopped, failed or left unread."""
-    result = entry.get("result") if isinstance(entry, dict) else None
-    return (isinstance(result, dict) and entry.get("action") in ("all", "resume") and entry.get("exit_code") == 0
-            and not entry.get("closed") and not entry.get("scope") and not entry.get("redownload")
-            and not any(result.get(k) for k in ("stopped", "failed", "validation_failures", "list_not_read")))
+    """Whether a logged run read the provider's whole list and finished, a
+    Get new with every date and nothing stopped, failed or set aside
+    (_whole_clean_run). A Continue reads no list of its own, so it is no
+    check, as the card's "checked" never counts one (#148)."""
+    return _whole_clean_run(entry)
 
 
 def _when(text):
+    """A time a record keeps, as this computer's clock reads it, or None. One
+    written with its offset, by hand say, is taken to this computer's time,
+    since it could not be compared with one written without."""
     try:
-        return datetime.fromisoformat(str(text))
-    except (TypeError, ValueError):
+        when = datetime.fromisoformat(str(text))
+        return when.astimezone().replace(tzinfo=None) if when.tzinfo is not None else when
+    except (TypeError, ValueError, OverflowError, OSError):
         return None
 
 
@@ -1684,14 +1687,16 @@ def _done_at(root: Path) -> str:
     return value if isinstance(value, str) else ""
 
 
-def _quieted(state: str, last, done_at: str, cadence, now=None) -> dict:
+def _quieted(state: str, last, done_at: str, cadence, now=None, gaps=()) -> dict:
     """What a check, or Mark as done, does to an account's place on the list.
     "Due" is worked out from the age of the newest document, and a run that
     finds nothing new leaves that age alone, so an account just checked
     stayed due until its provider sent something. Marked done, it is off the
     list until a run after that, or the time runs out. Checked by a whole
     clean run, a due account is up to date for that time. A gap is left to
-    _settled, since one run saying it could not fill a gap proves little."""
+    _settled, since one run saying it could not fill a gap proves little,
+    and a due account with gaps, which _account_state calls due first, is
+    shown as the gap it still has rather than up to date."""
     now = now or datetime.now()
     days = max(QUIET_DAYS[0], min(QUIET_DAYS[1], cadence if isinstance(cadence, (int, float)) else QUIET_DAYS[1]))
     within = lambda when: when is not None and timedelta(0) <= now - when < timedelta(days=days)  # noqa: E731
@@ -1701,6 +1706,8 @@ def _quieted(state: str, last, done_at: str, cadence, now=None) -> dict:
             and (ended is None or marked > ended):
         return {"state": "current", "marked_done": done_at, "checked_quiet": ""}
     if state in ("due", "overdue") and _checked_by(last) and within(ended):
+        if gaps:
+            return {"state": "gap", "marked_done": "", "checked_quiet": ""}
         return {"state": "current", "marked_done": "", "checked_quiet": last["ended"]}
     return {"state": state, "marked_done": "", "checked_quiet": ""}
 
@@ -1737,7 +1744,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     outcome = _last_outcome(last)
     running = _RUNS.get((name, account))
     state = _account_state(row, outcome, gaps, known)
-    quiet = _quieted(state, last, _done_at(root), (row or {}).get("cadence_days"))
+    quiet = _quieted(state, last, _done_at(root), (row or {}).get("cadence_days"), gaps=gaps)
     return {
         "app": name, "account": account, "provider": provider,
         "owner": _owner_of(meta, account),
@@ -1752,7 +1759,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "checked_quiet": quiet["checked_quiet"],
         # A gap a whole, clean run could not fill, left out of "may have
         # something new" on the home page (#149).
-        "settled": _settled(state, (row or {}).get("gaps"), log),
+        "settled": _settled(quiet["state"], (row or {}).get("gaps"), log),
         "documents": (row or {}).get("documents") or 0,
         "newest": _jsonable((row or {}).get("newest")),
         # When the app last read the provider's whole list, from the note
@@ -3173,10 +3180,10 @@ def _save_done(body: dict) -> dict:
                                  "or remove the provider and add it again.")
     done_at = datetime.now().isoformat(timespec="seconds") if body.get("done") else ""
     try:
-        fd, temp = tempfile.mkstemp(dir=str(root), prefix=".panel-done-", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"done_at": done_at}, f)
-        os.replace(temp, root / DONE_FILE)
+        # As the panel's other notes in an account's folder are written, so
+        # on PaperPull Server a folder that leads out of the data folder
+        # through a link is refused rather than written into.
+        _replace_text(root / DONE_FILE, json.dumps({"done_at": done_at}))
     except OSError as e:
         raise HTTPException(500, "Could not save that (%s). Check that its folder can be written to, then try again." % e)
     return {"app": name, "account": account, "done_at": done_at}
@@ -4321,35 +4328,57 @@ def _closes_its_window(action, code, result) -> bool:
     went all the way: one that stopped leaves the window open, since the
     next thing the person needs is that page. Never on PaperPull Server,
     whose windows live on its own screen, and never with
-    "close_signin_window": false in the settings."""
+    "close_signin_window": false in the settings. Which window, and whether
+    it is safe to close now, is _close_sign_in_window's to say."""
     return (action in CLOSE_WINDOW_AFTER and code == 0 and isinstance(result, dict) and not result.get("stopped")
             and not server_mode.enabled() and _read_settings().get("close_signin_window") is not False)
 
 
+def _port_is_only_its_own(meta: dict, account: str) -> bool:
+    """Whether no other config under the root names this account's port, as
+    paperpull_core.ports reads them. A browser on a port two configs name is
+    the one a run of either attaches to and a sign-in of either joins, so
+    it may be another account's, mid run or mid sign-in. False too when
+    that cannot be read."""
+    mod = _ports()
+    if mod is None:
+        return False
+    try:
+        return mod.key_of(_account_config(meta, account)) not in mod.findings(mod.installs_in(apps_root()))
+    except Exception:
+        return False
+
+
 def _close_sign_in_window(meta: dict, account: str) -> list:
-    """Close the account's sign-in browser, and put PaperPull's own window in
-    front if the person was in that browser. Somebody who has gone to
-    another program is left there."""
-    from paperpull_core import browser
+    """Close the account's sign-in browser once its run is done, unless the
+    person is in it, or its port is another account's too. Whatever goes
+    wrong here leaves the window open and never the run's own end."""
+    try:
+        return _close_own_window(meta, account)
+    except Exception:
+        return []
+
+
+def _close_own_window(meta: dict, account: str) -> list:
     cfg = _config_of(meta, account)
     try:
         port = urllib.parse.urlsplit(str(cfg.get("cdp_url") or "")).port
-        profile = Path(str(cfg.get("profile_dir") or ""))
-    except ValueError:
+        # As the browser was opened on it (browser._launch), "~" and all.
+        profile = Path(str(cfg.get("profile_dir") or "")).expanduser()
+    except (ValueError, RuntimeError):
         return []
     if not port or not str(profile) or str(profile) == ".":
         return []
+    if not _port_is_only_its_own(meta, account):
+        return []
+    from paperpull_core import browser
     if not profile.is_absolute():
         profile = Path(meta["dir"]) / profile
     closed = browser.close_signin_browser(profile, port)
-    if not closed["closed"]:
+    if closed.get("in_use"):
+        return ["Left the sign-in window open, since you are using it."]
+    if not closed.get("closed"):
         return []
-    app_path = os.environ.get("PAPERPULL_APP_PATH")
-    if closed["was_front"] and app_path and sys.platform == "darwin":
-        try:
-            subprocess.Popen(["open", app_path])
-        except OSError:
-            pass
     return ["Closed the sign-in window, since this run finished."]
 
 
