@@ -324,3 +324,57 @@ def test_the_page_never_starts_a_second_wait_after_a_wrong_sign_in(panel):
         Object.assign(RUN, {state: 'running', action: 'all', sink: null, onDone: null, queue: false, then: null});
         finishRun('7'); }""")
     assert panel.evaluate("() => opened.length") == 1 and panel.evaluate("() => SIGNIN_WAIT") is None
+
+
+ROUND_AT = """([key, finished]) => {
+    window.item = {key, provider: 'Bank', action: 'resume', scope: {year: '', start: '', end: ''}, said: 'held'};
+    QUEUE = {items: [window.item], i: 0, held: !finished, finished, started: true};
+    window.rounds = 0;
+    queueRun = () => { window.rounds++; };
+}"""
+
+
+def test_a_sign_in_after_a_run_found_nobody_signed_in_starts_that_run(panel):
+    panel.evaluate("""() => {
+        VIEW = 'run';
+        loginDone();
+        endSignInWait();
+        Object.assign(RUN, {state: 'running', action: 'all', result: null, then: null});
+        finishRun('7');
+        const then = signinThen(RUN);
+        opened.length = 0;
+        asked.length = 0;
+        loginDone({then});
+        opened[0].fire('ended', 'signed_in');
+    }""")
+    assert panel.evaluate("() => asked[0][0]") == "all"
+
+
+def test_a_sign_in_at_the_account_a_round_stopped_at_carries_the_round_on(panel):
+    panel.evaluate("() => { VIEW = 'run'; }")
+    panel.evaluate(ROUND_AT, [panel.evaluate("() => keyOf(ROWS[0])"), False])
+    panel.evaluate("() => loginDone()")
+    assert panel.evaluate("() => SIGNIN_WAIT !== null")
+    assert "Continue starts by itself" in panel.evaluate("() => { renderRun(); return $('r-waiting').textContent; }")
+    panel.evaluate("() => opened[0].fire('ended', 'signed_in')")
+    assert panel.evaluate("() => rounds") == 1, "the round tries the account again"
+    assert panel.evaluate("() => asked") == [], "and starts no run of its own beside the round"
+
+
+def test_a_round_that_moved_on_is_not_started_again_by_a_late_sign_in(panel):
+    panel.evaluate(ROUND_AT, [panel.evaluate("() => keyOf(ROWS[0])"), False])
+    panel.evaluate("() => { loginDone(); QUEUE.i = 1; QUEUE.items.push({key: 'x'}); opened[0].fire('ended', 'signed_in'); }")
+    assert panel.evaluate("() => rounds") == 0 and panel.evaluate("() => asked") == []
+
+
+def test_a_round_stopped_at_another_account_does_not_wait(panel):
+    panel.evaluate(ROUND_AT, ["another", False])
+    panel.evaluate("() => loginDone()")
+    assert panel.evaluate("() => SIGNIN_WAIT") is None
+
+
+def test_a_round_that_is_over_does_not_stop_a_later_sign_in_from_waiting(panel):
+    panel.evaluate(ROUND_AT, [panel.evaluate("() => keyOf(ROWS[0])"), True])
+    panel.evaluate("() => { loginDone(); opened[0].fire('ended', 'signed_in'); }")
+    assert panel.evaluate("() => rounds") == 0
+    assert panel.evaluate("() => asked[0][0]") == "all"

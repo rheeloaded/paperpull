@@ -1019,7 +1019,13 @@ function signinThen(run) {
 // the person in that dialog, not one in a round, which has its own Try it
 // again, and not a restore or a report, each of which opens its own dialog.
 function signinNext(run) {
-  if (SERVER || inSample() || QUEUE || run.sink || run.action !== 'login' || !(run.outcome || {}).opened) return null;
+  if (SERVER || inSample() || run.sink || run.action !== 'login' || !(run.outcome || {}).opened) return null;
+  // A round paused at this account goes on from there. One paused elsewhere
+  // waits for the person, and one that is over has no say in this sign-in.
+  const it = QUEUE && QUEUE.held && !QUEUE.finished ? QUEUE.items[QUEUE.i] : null;
+  const held = it ? rowByKey(it.key) : null;
+  if (held && held.app === run.app && held.account === run.account) return {action: it.action, scope: it.scope, again: false, round: it};
+  if (QUEUE && !QUEUE.finished) return null;
   const src = run.then || {action: 'all', scope: {}, again: false};
   return src.again || !RERUN[src.action] || RERUN[src.action][2] ? null : src;
 }
@@ -1050,7 +1056,10 @@ function signInWaitEnded(wait, how) {
   const words = (RERUN[wait.then.action] || ['Get new documents'])[0];
   if (how === 'signed_in') {
     const r = rowFor(wait.app, wait.account);
-    if (r && RUN.state !== 'running') {
+    if (wait.then.round) {
+      // Only the stop this sign-in was for: the person may have skipped it.
+      if (QUEUE && QUEUE.held && QUEUE.items[QUEUE.i] === wait.then.round && RUN.state !== 'running') { queueRun(); return; }
+    } else if (r && RUN.state !== 'running') {
       const s = wait.then.scope || {};
       // Started from wherever the person is, as a run of a round is.
       startRun(r, wait.then.action, {scope: {year: s.year || '', start: s.start || '', end: s.end || ''},
