@@ -45,13 +45,13 @@ if listing:
          "date": "2026-05-14", "confidence": "Low", "status": "Review Needed",
          "file": "2026-05-14 Unsure Receipt.pdf", "summary": "Unsure",
          "items": ["Invented Hose"]}]}), encoding="utf-8")
-    print("1 row(s) marked for review have no receipt PDF in this app's folders "
-          "to rename, so they are left out.")
-    print("1 receipt(s) need review.")
+    print("1 row marked for review has no receipt PDF in this app's folders "
+          "to rename, so it is left out.")
+    print("1 receipt needs review.")
 if answers:
     seen["answers_at"] = answers
     seen["answers"] = json.loads(Path(answers).read_text(encoding="utf-8"))
-    print("Renaming 1 receipt(s) given a new name.")
+    print("Renaming 1 receipt given a new name.")
     print("    Renamed -> 2026-05-14 Garden Hose Receipt.pdf")
 Path("seen.json").write_text(json.dumps(seen), encoding="utf-8")
 """

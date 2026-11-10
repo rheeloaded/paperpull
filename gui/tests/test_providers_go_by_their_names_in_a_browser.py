@@ -6,6 +6,7 @@ provider's. These run the page's own script, in Playwright's own headless
 Chromium, against the real panel on a free local port. Every setting is
 under a temp folder, and no browser of the person's is started.
 """
+import json
 import socket
 import sys
 import threading
@@ -120,3 +121,21 @@ def test_a_stopped_rename_says_the_providers_name(tab):
 def test_the_folder_field_gives_an_example_for_this_computer(tab, root, example):
     tab.evaluate("r => { META.apps_root = r; renderSettings(); }", root)
     assert tab.get_attribute("#rootinput", "placeholder") == example
+
+
+@pytest.mark.parametrize("count", ["1 receipt needs review.", "2 receipts need review."])
+def test_review_names_says_its_count_once(tab, count):
+    """The app's own count line, "1 receipt needs review." for one since
+    counts read alike, is left out of what Review names says, which counts
+    the receipts itself. A line about rows left out is kept."""
+    receipts = [{"id": "C:/out/2026-05-14 Unsure Receipt.pdf", "number": "ORDER-0001", "date": "2026-05-14",
+                 "file": "2026-05-14 Unsure Receipt.pdf", "summary": "Unsure", "items": ["Invented Hose"]}]
+    left_out = "1 row marked for review has no receipt PDF in this app's folders to rename, so it is left out."
+    tab.route("**/api/review-names", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"receipts": receipts, "said": [left_out, count]})))
+    tab.evaluate("openReview({app: 'Shop Docs', account: 'primary', provider: 'Shop & Co', kind: 'receipts'})")
+    tab.wait_for_function("() => $('rv-state').textContent.includes('waiting for a better name')")
+    said = tab.inner_text("#rv-state")
+    assert said.startswith("1 receipt waiting for a better name.")
+    assert "left out" in said and "review." not in said

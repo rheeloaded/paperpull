@@ -1597,8 +1597,9 @@ async function rvLoad(before) {
   catch (e) { if (RV === rv) $('rv-state').textContent = before + e.message; return; }
   if (RV !== rv) return;
   rv.receipts = Array.isArray(d.receipts) ? d.receipts : [];
-  // What the app said about rows it left out, without its own count line.
-  const said = (d.said || []).filter(t => !/need review\.$|need name review\.$/.test(t)).join(' ');
+  // What the app said about rows it left out, without its own count line,
+  // which reads "1 receipt needs review." for one (core renaming.review_names).
+  const said = (d.said || []).filter(t => !/needs? review\.$|need name review\.$/.test(t)).join(' ');
   const n = rv.receipts.length;
   $('rv-state').textContent = before + (n ? many(n, 'receipt') + ' waiting for a better name.'
     : 'No receipts are waiting for a better name.') + (said ? ' ' + said : '');
