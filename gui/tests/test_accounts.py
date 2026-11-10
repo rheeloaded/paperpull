@@ -2192,7 +2192,10 @@ def test_a_file_set_aside_opens_in_the_computers_viewer(root, monkeypatch):
     _set_aside(bank, pdf_path=str(path))
     assert _row()["to_check"][0]["file"] is True
     opened = []
+    # Windows opens it with os.startfile, the rest with a command, and
+    # neither may really open a viewer on the computer running the tests.
     monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd, **k: opened.append(cmd))
+    monkeypatch.setattr(app_module.os, "startfile", lambda p, *a, **k: opened.append([p]), raising=False)
     app_module._open_set_aside({"app": "Bank Statements", "id": "d"})
     assert opened and opened[0][-1] == str(path)
 
