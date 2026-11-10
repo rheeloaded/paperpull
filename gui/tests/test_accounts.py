@@ -23,7 +23,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -2252,3 +2252,297 @@ def test_an_account_checked_is_not_counted_on_the_page(panel):
         return [queueTargets().map(r => r.provider), ROWS.map(groupOf)];
     }""")
     assert got == [["B", "C"], ["ok", "needs", "needs"]]
+
+
+# -- what a run set aside, on the account's page ------------------------------
+
+RUN_STARTED, SET_ASIDE_AT = "2026-11-06T15:00:00", "2026-11-06T15:30:00"
+
+
+def _set_aside(bank, **pdf):
+    """Spectrum's case: two records to check, neither with a file. `pdf` adds
+    what a third one, with a file, names. Each is written by the run, as a
+    run writes every record (updated_at), and the run's log says when it
+    started."""
+    records = {"a": {"state": "Needs Manual Review", "title": "Statement", "date": "2026-09-01",
+                     "notes": "Could not capture the document PDF", "pdf_path": ""},
+               "b": {"state": "Needs Manual Review", "title": "Statement", "date": "2026-10-01",
+                     "notes": "Could not capture the document PDF", "pdf_path": ""},
+               "c": {"state": "Completed", "downloaded_ok": True}}
+    if pdf:
+        records["d"] = dict({"state": "Needs Manual Review", "title": "Bill", "date": "2026-11-01",
+                             "notes": "PDF validation failed: too small"}, **pdf)
+    for record in records.values():
+        record["updated_at"] = SET_ASIDE_AT
+    (bank / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    _log(bank, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
+                "result": {"stopped": 0, "attention": True, "manual_review": len(records) - 1}})
+
+
+def _row():
+    return _rows()[("Bank Statements", "primary")]
+
+
+def test_what_was_set_aside_is_named_even_with_no_file_newest_first(root):
+    _set_aside(root / "Bank Statements")
+    row = _row()
+    assert row["state"] == "attention"
+    assert [i["id"] for i in row["to_check"]] == ["b", "a"], "Completed is not listed"
+    assert row["to_check"][0]["why"] == "Could not capture the document PDF"
+    assert row["to_check"][0]["file"] is False and row["to_check"][0]["saved"] is False
+
+
+def test_checking_every_one_clears_needs_a_look_and_undo_brings_it_back(root):
+    _set_aside(root / "Bank Statements")
+    app_module._save_checked({"app": "Bank Statements", "id": "a", "checked": True})
+    assert _row()["state"] == "attention", "one is still left"
+    app_module._save_checked({"app": "Bank Statements", "id": "b", "checked": True})
+    row = _row()
+    assert row["state"] != "attention" and all(i["checked"] for i in row["to_check"])
+    app_module._save_checked({"app": "Bank Statements", "id": "b", "checked": False})
+    assert _row()["state"] == "attention"
+
+
+def test_a_new_document_set_aside_later_needs_a_look_again(root):
+    bank = root / "Bank Statements"
+    _set_aside(bank)
+    for key in "ab":
+        app_module._save_checked({"app": "Bank Statements", "id": key, "checked": True})
+    _set_aside(bank, pdf_path="")
+    assert _row()["state"] == "attention"
+
+
+@pytest.mark.parametrize("other, stays", [("failed", True), ("wrong_document", True), ("alike", False)])
+def test_what_checking_does_not_answer_keeps_it_on_the_list(root, other, stays):
+    """Documents alike are never a reason to look (run_result.SAID_ONLY), so
+    they keep no account on the list once all it set aside is checked."""
+    bank = root / "Bank Statements"
+    _set_aside(bank)
+    _log(bank, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
+                "result": {"stopped": 0, "attention": True, "manual_review": 2, other: 1}})
+    for key in "ab":
+        app_module._save_checked({"app": "Bank Statements", "id": key, "checked": True})
+    assert (_row()["state"] == "attention") is stays
+
+
+def test_what_a_run_set_aside_with_no_record_keeps_it_on_the_list(root):
+    """American Express counts a card it could not read as set aside, and
+    a receipt that never showed is set aside as no receipt (core not_shown),
+    neither with a record in that state, so the list cannot name them.
+    Checking every record listed leaves Needs a look while the run counted
+    more, records an earlier run set aside included."""
+    bank = root / "Bank Statements"
+    _set_aside(bank)
+    records = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
+    records["older"] = {"state": "Needs Manual Review", "title": "Statement", "date": "2026-05-01",
+                        "updated_at": "2026-06-01T10:00:00"}
+    (bank / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    _log(bank, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
+                "result": {"stopped": 0, "attention": True, "manual_review": 3}})
+    for key in ("a", "b", "older"):
+        app_module._save_checked({"app": "Bank Statements", "id": key, "checked": True})
+    assert _row()["state"] == "attention"
+    _log(bank, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
+                "result": {"stopped": 0, "attention": True, "manual_review": 2}})
+    assert _row()["state"] != "attention"
+
+
+def test_a_document_set_aside_again_by_a_later_run_needs_a_look_again(root):
+    bank = root / "Bank Statements"
+    _set_aside(bank)
+    for key in "ab":
+        app_module._save_checked({"app": "Bank Statements", "id": key, "checked": True})
+    assert _row()["state"] != "attention"
+    records = json.loads((bank / "progress.json").read_text(encoding="utf-8"))
+    records["a"]["updated_at"] = (datetime.now() + timedelta(minutes=5)).isoformat(timespec="seconds")
+    (bank / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    row = _row()
+    assert row["state"] == "attention"
+    assert [i["id"] for i in row["to_check"] if not i["checked"]] == ["a"]
+
+
+@pytest.mark.parametrize("opening", [False, True])
+def test_nothing_set_aside_is_checked_or_opened_while_a_run_goes(root, monkeypatch, opening):
+    """A run, a Rename and a Move each hold the account in _RUNS while they
+    write its records and move its files."""
+    bank = root / "Bank Statements"
+    _set_aside(bank, pdf_path=str(_aside_file(bank)))
+    opened = []
+    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd, **k: opened.append(cmd))
+    monkeypatch.setattr(app_module.os, "startfile", lambda p, *a, **k: opened.append([p]), raising=False)
+    for action in ("all", "rename_apply", "move_documents_apply"):
+        app_module._RUNS[("Bank Statements", "primary")] = {"action": action, "started": RUN_STARTED}
+        with pytest.raises(app_module.HTTPException) as refused:
+            if opening:
+                app_module._open_set_aside({"app": "Bank Statements", "id": "d"})
+            else:
+                app_module._save_checked({"app": "Bank Statements", "id": "d", "checked": True})
+        assert refused.value.status_code == 409 and "finish" in refused.value.detail
+    assert opened == [] and not (bank / app_module.CHECKED_FILE).exists()
+    app_module._RUNS.clear()
+    if opening:
+        app_module._open_set_aside({"app": "Bank Statements", "id": "d"})
+        assert opened
+    else:
+        app_module._save_checked({"app": "Bank Statements", "id": "d", "checked": True})
+        assert (bank / app_module.CHECKED_FILE).exists()
+
+
+def test_a_note_that_is_a_link_on_the_server_is_read_as_none(root, tmp_path, monkeypatch):
+    """What was read through a link would be written back into the shared
+    folder with the next Done. A second name of another file, a hard link,
+    needs no privilege on Windows."""
+    bank = root / "Bank Statements"
+    elsewhere = tmp_path / "config"
+    elsewhere.mkdir()
+    secret = elsewhere / "settings.json"
+    secret.write_text(json.dumps({"session_secret": "an-invented-secret"}), encoding="utf-8")
+    os.link(secret, bank / app_module.CHECKED_FILE)
+    assert app_module._checked_items(bank) == {"session_secret": "an-invented-secret"}, "off the server, as before"
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    assert app_module._checked_items(bank) == {}
+    (bank / app_module.CHECKED_FILE).unlink()
+    (bank / app_module.CHECKED_FILE).write_text(json.dumps({"a": SET_ASIDE_AT}), encoding="utf-8")
+    assert app_module._checked_items(bank) == {"a": SET_ASIDE_AT}, "a note of its own is read"
+
+
+def test_only_a_record_still_set_aside_can_be_checked(root):
+    _set_aside(root / "Bank Statements")
+    for key in ("c", "nothing"):
+        with pytest.raises(app_module.HTTPException) as refused:
+            app_module._save_checked({"app": "Bank Statements", "id": key, "checked": True})
+        assert refused.value.status_code == 404
+
+
+def _aside_file(bank, name="a bill.pdf"):
+    (bank / "Manual Review").mkdir(exist_ok=True)
+    path = bank / "Manual Review" / name
+    path.write_bytes(b"%PDF-1.4")
+    return path
+
+
+def test_a_file_set_aside_opens_in_the_computers_viewer(root, monkeypatch):
+    bank = root / "Bank Statements"
+    path = _aside_file(bank)
+    _set_aside(bank, pdf_path=str(path))
+    assert _row()["to_check"][0]["file"] is True
+    opened = []
+    # Windows opens it with os.startfile, the rest with a command, and
+    # neither may really open a viewer on the computer running the tests.
+    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd, **k: opened.append(cmd))
+    monkeypatch.setattr(app_module.os, "startfile", lambda p, *a, **k: opened.append([p]), raising=False)
+    app_module._open_set_aside({"app": "Bank Statements", "id": "d"})
+    assert opened and opened[0][-1] == str(path)
+
+
+def test_a_path_from_another_computer_finds_the_file_by_its_name(root):
+    bank = root / "Bank Statements"
+    path = _aside_file(bank)
+    _set_aside(bank, pdf_path="/Users/somebody/elsewhere/a bill.pdf")
+    assert app_module._set_aside_file(bank, {"pdf_path": "/Users/somebody/elsewhere/a bill.pdf"}) == path
+    assert _row()["to_check"][0]["file"] is True
+
+
+@pytest.mark.parametrize("name", ["run.command", "page.html", "app.sh"])
+def test_only_a_document_opens_from_the_panel(root, name):
+    bank = root / "Bank Statements"
+    path = _aside_file(bank, name)
+    assert app_module._set_aside_file(bank, {"pdf_path": str(path)}) is None
+
+
+def test_a_file_outside_the_account_never_opens(root, tmp_path):
+    bank = root / "Bank Statements"
+    outside = tmp_path / "secret.pdf"
+    outside.write_bytes(b"%PDF-1.4")
+    assert app_module._set_aside_file(bank, {"pdf_path": str(outside), "pdf_filename": ""}) is None
+    assert app_module._set_aside_file(bank, {"pdf_path": "../../secret.pdf", "pdf_filename": ""}) is None
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="links need privileges on Windows")
+def test_a_link_to_a_file_outside_the_account_never_opens(root, tmp_path):
+    bank = root / "Bank Statements"
+    outside = tmp_path / "secret.pdf"
+    outside.write_bytes(b"%PDF-1.4")
+    (bank / "Manual Review").mkdir(exist_ok=True)
+    link = bank / "Manual Review" / "link.pdf"
+    link.symlink_to(outside)
+    assert app_module._set_aside_file(bank, {"pdf_path": str(link)}) is None
+
+
+def test_a_path_on_another_computer_is_never_reached_for(root, monkeypatch):
+    """A record from another computer can name a share there. Its words put
+    it outside the account's folder, so the disk is never asked, which on
+    Windows would reach out to that computer."""
+    bank = root / "Bank Statements"
+    asked = []
+    real = app_module.Path.resolve
+    monkeypatch.setattr(app_module.Path, "resolve",
+                        lambda self, *a, **k: asked.append(str(self)) or real(self, *a, **k))
+    far = r"\\far-away.example\share\Manual Review\a bill.pdf" if sys.platform == "win32" \
+        else "/Volumes/far-away/Manual Review/a bill.pdf"
+    assert app_module._set_aside_file(bank, {"pdf_path": far}) is None
+    assert not any("far-away" in path for path in asked), asked
+
+
+def test_another_persons_folder_or_a_profile_inside_the_account_never_opens(root, monkeypatch):
+    """A config can put a second person's folder inside the first one's, and
+    a browser profile is there too (_not_for_documents). A record of the
+    first person's naming a file in either opens nothing, and the second
+    person's own file still opens for them, a path the run wrote relative
+    to the install's folder."""
+    bank = root / "Bank Statements"
+    config = json.loads((bank / "config.json").read_text(encoding="utf-8"))
+    (bank / "config.json").write_text(json.dumps(dict(config, profile_dir="browser-profile")), encoding="utf-8")
+    (bank / "config.third.json").write_text(json.dumps({"output_dir": "people/third"}), encoding="utf-8")
+    theirs = bank / "people" / "third" / "Statements" / "their bill.pdf"
+    profile = bank / "browser-profile" / "a bill.pdf"
+    for path in (theirs, profile):
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"%PDF-1.4")
+    meta = app_module.discover_apps()["Bank Statements"]
+    assert "third" in meta["accounts"]
+    first = app_module._not_for_documents(meta, "primary")
+    for path in (theirs, profile):
+        assert app_module._set_aside_file(bank, {"pdf_path": str(path)}, first, bank) is None, path
+    third = bank / "people" / "third"
+    found = app_module._set_aside_file(third, {"pdf_path": "people/third/Statements/their bill.pdf"},
+                                       app_module._not_for_documents(meta, "third"), bank)
+    assert found == bank / "people/third/Statements/their bill.pdf"
+    _set_aside(bank, pdf_path=str(theirs))
+    assert _row()["to_check"][0]["file"] is False
+    opened = []
+    monkeypatch.setattr(app_module.subprocess, "Popen", lambda cmd, **k: opened.append(cmd))
+    monkeypatch.setattr(app_module.os, "startfile", lambda p, *a, **k: opened.append([p]), raising=False)
+    with pytest.raises(app_module.HTTPException) as refused:
+        app_module._open_set_aside({"app": "Bank Statements", "id": "d"})
+    assert refused.value.status_code == 404 and opened == []
+
+
+def test_a_receipt_set_aside_is_named_by_its_summary_and_purchase_date(root):
+    shop = root / "Shop Receipts"
+    (shop / "progress.json").write_text(json.dumps({"Online:1": {
+        "state": "Needs Manual Review", "purchase_date": "2026-10-12", "summary": "Kitchen towels",
+        "document_type": "Receipt", "notes": "Low classification confidence", "updated_at": SET_ASIDE_AT}}),
+        encoding="utf-8")
+    _log(shop, {"action": "all", "exit_code": 0, "started": RUN_STARTED, "ended": "2026-11-06T16:00:00",
+                "result": {"stopped": 0, "attention": True, "manual_review": 1}})
+    item = _rows()[("Shop Receipts", "primary")]["to_check"][0]
+    assert (item["label"], item["date"]) == ("Kitchen towels", "2026-10-12")
+
+
+def test_the_page_lists_them_with_open_only_where_there_is_a_file(panel):
+    got = panel.evaluate("""() => {
+        const html = toCheckList({app: 'A', account: 'primary', provider: 'A', to_check: [
+            {id: 'x', label: 'Bill', date: '2026-11-01', why: 'too small', file: true, saved: true, checked: ''},
+            {id: 'y', label: 'Statement', date: '2026-10-01', why: 'could not', file: false, saved: false, checked: ''},
+            {id: 'z', label: 'Statement', date: '2026-09-01', why: 'too small', file: false, saved: true, checked: ''}]});
+        const box = document.createElement('div');
+        box.innerHTML = html;
+        return {opens: box.querySelectorAll('[data-do=check-open]').length, done: box.querySelectorAll('[data-do=check-done]').length,
+                text: box.textContent};
+    }""")
+    assert got["opens"] == 1 and got["done"] == 3
+    assert "3 documents to check" in got["text"] and "no file to open" in got["text"]
+    # Saved, and not openable from here, which is so whether it was moved
+    # or sits outside the account's own folder, a documents folder say.
+    assert "not in this account's own folder now" in got["text"]

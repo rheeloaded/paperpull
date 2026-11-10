@@ -72,7 +72,7 @@ from typing import List, Optional, Tuple
 
 from paperpull_core import intake
 from paperpull_core import controls as _controls
-from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.urls import is_safe_url as _host_allows, where_it_leads
 from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.controls import escape_for_locator
 from paperpull_core.dates import last_day as _last_day
@@ -990,7 +990,7 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
             # signed-in session, so the address is host-checked first. A blob: URL
             # is minted by the page itself and has no host to check.
             if not url.startswith("blob:") and not is_safe_url(url):
-                log.error("refusing to fetch a document from outside Chase")
+                log.error("refusing to fetch a document from outside Chase, at %s", where_it_leads(url))
                 return False
             b64 = _fetch_as_b64(page, url) if url.startswith("blob:") \
                 else _fetch_as_b64(new_page, url)
