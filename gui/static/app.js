@@ -865,8 +865,14 @@ function runStateText() {
   if (RUN.connected) return 'Connected to the browser';
   return 'Starting';
 }
+// A Rename, a Move or Review Names applying its changes goes on when its page
+// goes, as the panel's FINISHED_WHEN_LEFT has it, so a Stop could only say
+// it had stopped something that had not.
+function finishesOnItsOwn(action) {
+  return ((META && META.finished_when_left) || []).includes(action);
+}
 function stopRun() {
-  if (!es) return;
+  if (!es || finishesOnItsOwn(RUN.action)) return;
   RUN.stopped = true;
   // Closing the stream ends the run on the panel's side, the same as
   // closing the tab. Nothing already saved is lost.
@@ -1332,10 +1338,14 @@ function renderRun() {
       '<div class="live"><div class="now"><b id="r-state" role="status">' + esc(runStateText()) + '</b>' +
       '<span class="bar wide' + (RUN.total ? '' : ' indeterminate') + '" id="r-bar"><span style="width:' + runPercent() + '%"></span></span></div>' +
       '<p class="hint mono" id="r-now">' + esc(RUN.now) + '</p></div>' +
-      '<div class="keepopen"><p>Keep this tab open, since closing it stops the run. Anything already saved stays saved. ' +
-      'You can move to other pages of PaperPull meanwhile.</p>' +
-      (RUN.action === 'record' ? '<button type="button" class="btn btn-p" id="stoprec" data-do="stop-recording">' + STOP + 'Stop recording</button>'
-        : '<button type="button" class="btn btn-s" data-do="stop-run">' + STOP + 'Stop</button>') + '</div>' +
+      (finishesOnItsOwn(RUN.action)
+        // Closing the stream would not stop it (FINISHED_WHEN_LEFT in app.py), so there is no Stop to offer.
+        ? '<div class="keepopen"><p>This goes on to its end even if this tab closes, since stopping it partway ' +
+          'would leave its records naming files that have moved. You can move to other pages of PaperPull meanwhile.</p></div>'
+        : '<div class="keepopen"><p>Keep this tab open, since closing it stops the run. Anything already saved stays saved. ' +
+          'You can move to other pages of PaperPull meanwhile.</p>' +
+          (RUN.action === 'record' ? '<button type="button" class="btn btn-p" id="stoprec" data-do="stop-recording">' + STOP + 'Stop recording</button>'
+            : '<button type="button" class="btn btn-s" data-do="stop-run">' + STOP + 'Stop</button>') + '</div>') +
       techDetails(false) + '</section>';
   } else {
     const o = RUN.outcome || {tone: 'info', title: '', say: ''};

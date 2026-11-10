@@ -172,6 +172,24 @@ def test_a_run_you_stopped_is_said_as_that(panel, apps):
     release(apps[0])
 
 
+@pytest.mark.parametrize("action", ["rename_apply", "move_documents_apply"])
+def test_a_run_that_goes_on_when_its_page_goes_offers_no_stop(panel, apps, action):
+    """Closing the stream does not stop a Rename, a Move or Review Names
+    applying its changes (FINISHED_WHEN_LEFT), so a Stop would have said
+    "You stopped this run" of a run still renaming files."""
+    tab = panel.tab
+    assert sorted(tab.evaluate("META.finished_when_left")) == sorted(app_module.FINISHED_WHEN_LEFT)
+    tab.evaluate("a => startRun(ROWS.find(r => r.app === 'Shop Docs'), a, {})", action)
+    title_is(tab, "(1/2) %s · PaperPull" % panel.name)
+    tab.wait_for_selector("#view-run:not([hidden]) .keepopen")
+    assert tab.locator("#view-run [data-do=stop-run]").count() == 0
+    assert "goes on to its end even if this tab closes" in tab.inner_text("#view-run .keepopen")
+    tab.evaluate("stopRun()")
+    assert tab.evaluate("RUN.state") == "running", "and nothing else can say it stopped"
+    release(apps[0])
+    tab.wait_for_function("() => RUN.state === 'done'", timeout=60000)
+
+
 def test_a_run_the_page_lost_touch_with_is_not_said_to_have_stopped(panel, apps):
     """It read "stopped", for a run that may still be going."""
     tab = panel.tab

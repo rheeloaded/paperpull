@@ -73,8 +73,8 @@ def test_nothing_under_way_is_an_empty_answer(host, port, runs):
     assert host.finishing(port) == []
 
 
-@pytest.mark.parametrize("action", ["rename_apply", "move_documents_apply"])
-def test_a_rename_or_a_move_applying_is_named(host, port, runs, action):
+@pytest.mark.parametrize("action", ["rename_apply", "move_documents_apply", "review_names"])
+def test_a_rename_a_move_or_review_names_applying_is_named(host, port, runs, action):
     runs[("Shop Docs", "primary")] = {"action": action, "started": ""}
     assert host.finishing(port) == [action]
 
@@ -97,15 +97,18 @@ def test_a_history_import_is_named(host, port, runs):
 
 def test_only_what_moves_files_and_then_writes_its_records_is_named(runs):
     """A download, a Login or a preview may be stopped by a quit, since it
-    resumes or is simply run again, and no account is named."""
+    resumes or is simply run again, and so may Review Names listing what it
+    would ask about, which renames nothing. No account is named."""
     for n, action in enumerate(("pilot", "all", "resume", "login", "rename", "move_documents",
                                 "verify", "diagnose", "record", "review_names_list")):
         runs[("Shop Docs", "person %d" % n)] = {"action": action, "started": ""}
     assert asyncio.run(app_module.api_finishing()) == {"finishing": []}
     runs[("Shop Docs", "second")] = {"action": "move_documents_apply", "started": ""}
     runs[("Bank Docs", "primary")] = {"action": "rename_apply", "started": ""}
-    assert asyncio.run(app_module.api_finishing()) == {"finishing": ["move_documents_apply", "rename_apply"]}
-    assert set(app_module.FINISHED_WHEN_LEFT) == {"move_documents_apply", "rename_apply"}
+    runs[("Shop Receipts", "primary")] = {"action": "review_names", "started": ""}
+    assert asyncio.run(app_module.api_finishing()) == {
+        "finishing": ["move_documents_apply", "rename_apply", "review_names"]}
+    assert set(app_module.FINISHED_WHEN_LEFT) == {"move_documents_apply", "rename_apply", "review_names"}
 
 
 def test_before_the_terms_the_panel_has_started_nothing(host, port, runs, monkeypatch, tmp_path):
@@ -291,6 +294,28 @@ def test_the_panel_is_stopped_only_after_nothing_is_named(host, monkeypatch):
     assert did == [("told", "READY 8765"),
                    ("asked", ["rename_apply"]), ("told", "FINISHING"),
                    ("asked", ["rename_apply"]), ("asked", []), ("stopped", 4321)]
+
+
+def test_the_host_waits_for_review_names_as_the_real_panel_names_it(host, port, runs, monkeypatch):
+    """Review Names writes each new name into the ledgers just after it
+    renames that file, so the quit waits for it as for a Rename."""
+    runs[("Shop Receipts", "primary")] = {"action": "review_names", "started": ""}
+    asked, stopped = [], []
+    stop = threading.Event()
+    real = host.finishing
+
+    def finishing(p):
+        names = real(p)
+        asked.append(names)
+        if len(asked) == 3:
+            runs.pop(("Shop Receipts", "primary"))  # it has come to its end
+        return names
+    monkeypatch.setattr(host, "finishing", finishing)
+    monkeypatch.setattr(host, "answers", lambda p: True)
+    monkeypatch.setattr(host, "write_line", lambda line: stop.set())
+    monkeypatch.setattr(host, "stop_group", lambda panel: stopped.append(list(asked)))
+    assert host.run_panel(Panel(), port, stop) == 0
+    assert stopped == [[["review_names"]] * 3 + [[]]]
 
 
 def test_a_panel_that_never_answered_is_stopped_without_asking(host, monkeypatch):

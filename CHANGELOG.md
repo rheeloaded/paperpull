@@ -70,14 +70,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the default browser. The panel's output goes to
   ~/Library/Logs/PaperPull/panel.log, and Resources/paperpull-panel.sh
   still runs the panel in a terminal. Contributed by @JasperDale420.
-  Before merging, a quit was made to wait for a Rename, a Move, the move
-  into the documents folder that ends a download run, or a history import
-  that is applying its changes, since one stopped partway would leave the
-  index and progress.json naming files that had moved, and the window and
-  the log say why it waits. When this person's own panel, one started from
-  a terminal for instance, already holds port 8765, the window shows that
-  panel rather than start a second one on the same records, and closing
-  the window leaves it running. panel.log keeps no line per request, which
+  Before merging, a quit was made to wait for a Rename, a Move, Review
+  Names, the move into the documents folder that ends a download run, or a
+  history import that is applying its changes, since one stopped partway
+  would leave the index and progress.json naming files that had moved, and
+  the window and the log say why it waits. Review Names applying its new
+  names now goes on to its end when its page closes, as a Rename and a Move
+  already did, and the Run page offers no Stop for any of the three, where
+  its Stop said a run had stopped that went on. When this person's own
+  panel, one started from a terminal for instance, already holds port 8765,
+  the window shows that panel rather than start a second one on the same
+  records, and closing the window leaves it running. panel.log keeps no
+  line per request, which
   named every provider and person, the window looks up no site in WebKit's
   list of fraudulent ones, and the release workflow removes its signing key
   before it runs the bundle.
