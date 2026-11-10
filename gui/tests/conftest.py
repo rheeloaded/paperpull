@@ -111,14 +111,15 @@ def _own_home(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _terms_not_yet_taken(monkeypatch):
-    """The panel remembers I understand for as long as it runs, saved or
-    not, so a test that pressed it would open the API for every test after
-    it. Each test starts as a panel that has not been answered, and the
-    settings file it reads says the rest."""
+def _terms_accepted(monkeypatch):
+    """Before the terms of use are accepted the panel does nothing real, so
+    every test is a panel whose terms were accepted in this run, as though I
+    understand had been pressed, and gui/tests/test_terms.py takes that
+    away to ask about the terms themselves. Put back after each test, so a
+    test that presses I understand leaves nothing for the next."""
     panel = sys.modules.get("app")
     if panel is not None and hasattr(panel, "_TERMS_TAKEN"):
-        monkeypatch.setattr(panel, "_TERMS_TAKEN", False)
+        monkeypatch.setattr(panel, "_TERMS_TAKEN", True)
 
 
 # -- the guard -----------------------------------------------------------------

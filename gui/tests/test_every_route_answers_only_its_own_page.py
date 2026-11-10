@@ -424,9 +424,7 @@ def box(tmp_path, monkeypatch):
     (tmp_path / "novnc").mkdir()
     (tmp_path / "novnc" / "vnc.html").write_text("<title>noVNC</title>", encoding="utf-8")
     (tmp_path / "plugins").mkdir()
-    # Somebody who has accepted the terms, since before that the panel does
-    # nothing real at all (gui/tests/test_terms.py).
-    app_module._write_settings({"apps_root": str(b.root), "terms_accepted": app_module.TERMS_VERSION})
+    app_module._write_settings({"apps_root": str(b.root)})
 
     def serve():
         monkeypatch.setenv("PAPERPULL_SERVER", "1")

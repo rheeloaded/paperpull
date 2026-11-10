@@ -44,6 +44,9 @@ def settings(tmp_path, monkeypatch):
     p = tmp_path / "settings" / "settings.json"
     monkeypatch.setattr(app_module, "_settings_path", lambda: p)
     monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
+    # Not pressed in this run either (conftest.py has every other test
+    # press it).
+    monkeypatch.setattr(app_module, "_TERMS_TAKEN", False)
     return p
 
 
@@ -227,6 +230,7 @@ def panel(tmp_path, monkeypatch, browser, port):
     for name in ("PAPERPULL_SERVER", "PAPERPULL_PASSWORD", "PAPERPULL_HOSTS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(app_module, "_SAMPLE", None)
+    monkeypatch.setattr(app_module, "_TERMS_TAKEN", False)
     context = browser.new_context()
     tab = context.new_page()
     tab.base = "http://127.0.0.1:%d/" % port
@@ -380,6 +384,27 @@ def test_a_sample_that_cannot_be_opened_leaves_the_dialog_standing(panel, tmp_pa
     assert _open(panel)
     assert app_module._SAMPLE is None
     _nothing_real_happened(tmp_path)
+
+
+def test_after_i_understand_the_page_reads_everything_again(panel, tmp_path):
+    """Behind the dialog the panel refused what the page asked for beyond
+    drawing itself, so the page asks again once the terms are accepted."""
+    panel.goto(panel.base)
+    panel.wait_for_selector("#dlg-terms[open]")
+    _wait_for_accounts(panel)
+    asked = []
+    panel.on("request", lambda request: asked.append(request.url))
+    panel.get_by_role("button", name="I understand").click()
+    _until(panel, "!document.getElementById('dlg-terms').open")
+    for _ in range(200):
+        if any(url.endswith("/api/apps") for url in asked):
+            break
+        panel.wait_for_timeout(50)
+    terms = [i for i, url in enumerate(asked) if url.endswith("/api/terms")]
+    again = [i for i, url in enumerate(asked) if url.endswith("/api/apps")]
+    assert terms and again and terms[0] < again[-1], asked
+    said = _ask(panel, "POST", "/api/root", {"root": str(tmp_path / "apps")})
+    assert "Accept the Terms of Use first" not in said["detail"], said
 
 
 def test_somebody_with_accounts_is_not_offered_the_sample(panel, tmp_path):
