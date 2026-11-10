@@ -19,8 +19,9 @@ statement's, then presses "View Printable Statement" once. The page builds the P
 and the app keeps it only when the PDF the page received was asked for that statement, the PDF it
 built holds the same bytes, its text prints the statement's date, it is not the same file as a
 statement already saved, and no tab opened and no download began. Anything else stops the run. Two
-statements of one date (one for each account, after a transfer) are left for you to save by hand,
-since nothing on the page tells their rows apart before a press.
+statements of one date (one for each account, after a transfer) have rows nothing on the page tells
+apart before a press, so the app presses the first, and if that opens the other account's statement
+it goes back to Statements and presses the second, which must open the one it wants.
 
 For Mobile the app opens Billing, presses "Mobile Account Number", presses the finished statement's
 own row ("Statement August 13, 2026"), presses "Expand All", checks the page reads that date and
@@ -50,9 +51,9 @@ two statements of one day get two names.
 ## Status
 
 Internet statements were run on the account owner's own account. Discover listed 13 statements of
-two accounts, Pilot saved the newest, and Run All saved 10 more and left the two of one date for a
-manual save. For Mobile a live run listed all 12 statements and opened each one's own page, and a
-whole Mobile run is still to come.
+two accounts, Pilot saved the newest, and Run All saved 10 more and refused the two of one date,
+which are now chosen row by row but have not yet been run live. For Mobile a live run listed all 12
+statements and opened each one's own page, and a whole Mobile run is still to come.
 
 ## Tests
 

@@ -318,6 +318,7 @@ async function load() {
   }
   try { META = await getJSON('/api/apps'); }
   catch (e) { notice('PaperPull is not answering (' + e.message + '). Check that it is still running, then reload this page.', 'warn'); return; }
+  termsStand();
   $('samplebar').hidden = !inSample();
   $('serverbadge').hidden = !SERVER;
   if (SERVER && $('paperlesspill')) $('paperlesspill').hidden = !(META.server && META.server.paperless);
@@ -2622,12 +2623,16 @@ async function saveRoot() {
   await load();
   if (first && d.apps) location.hash = '#/';
 }
+// Answers "" once the page is in the sample, or out of it, as asked, and
+// otherwise what went wrong, which it also says at the top of the page.
 async function setSample(on) {
+  const failed = 'Could not open or leave the sample. Reload the page and try again.';
   try { await postJSON('/api/sample', {on}); }
-  catch (e) { notice(e.message || 'Could not open or leave the sample. Reload the page and try again.', 'warn'); return; }
+  catch (e) { notice(e.message || failed, 'warn'); return e.message || failed; }
   XL_LOADED = false;
   await load();
   location.hash = '#/';
+  return inSample() === on ? '' : failed;
 }
 function applyTheme() {
   const t = store.get('theme') || 'system';
@@ -2712,6 +2717,7 @@ const DO = {
   'rn-preview': () => rnRun(false),
   'rn-apply': () => rnRun(true),
   'rv-go': () => rvGo(),
+  'tm-sample': () => tmSample(),
   'sp-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'diagnose'); },
   // The report reads a signed-in page, so the dialog that says to sign in
   // first opens the sign-in window itself, and stays open for the report.
@@ -2842,21 +2848,52 @@ function serverPage() {
   });
 }
 // The terms of use, the first time the panel opens and again when they
-// change. Only I understand ends the dialog. Escape, or anything else that
-// closes it, brings it straight back. Once pressed the page goes on, and an
+// change. Only I understand ends the dialog, and only the sample sets it
+// aside. Escape, or anything else that closes it, brings it straight back.
+// Once I understand is pressed the page goes on, and an
 // answer that could not be saved is said, so the terms come back next time.
 let TERMS_OK = !TERMS_DUE;
+// The sample is invented data and runs nothing, so somebody only looking
+// can open it before the terms. Only I understand reaches a real account.
+// The dialog waits only while the panel itself says it is looking at the
+// sample, and the panel refuses everything else until then (_terms_first).
+let TERMS_WAITING = false;
 function openTerms() {
   const d = $('dlg-terms');
   d.addEventListener('cancel', e => e.preventDefault());
-  d.addEventListener('close', () => { if (!TERMS_OK) d.showModal(); });
+  d.addEventListener('close', () => { if (!TERMS_OK && !TERMS_WAITING) d.showModal(); });
   d.showModal();
+}
+// Each time the accounts are read. The sample is offered only to somebody
+// with none yet. A page in the sample goes on without the dialog, and a
+// page that is not, having left it here, in another tab or by the panel
+// starting again, has the dialog back.
+function termsStand() {
+  if (!TERMS_DUE || TERMS_OK || !META) return;
+  const d = $('dlg-terms');
+  $('tm-sample').hidden = Boolean(Object.keys(META.apps).length) && !META.fresh_checkout && !inSample();
+  TERMS_WAITING = inSample();
+  if (TERMS_WAITING && d.open) d.close();
+  else if (!TERMS_WAITING && !d.open) d.showModal();
+}
+// The dialog closes only once the sample is open, and says why when it
+// could not be.
+async function tmSample() {
+  const say = $('tm-say');
+  say.hidden = true;
+  const why = await setSample(true);
+  if (why && $('dlg-terms').open) { say.textContent = why; say.hidden = false; }
 }
 async function tmGo() {
   TERMS_OK = true;
   $('dlg-terms').close();
+  let unsaved = null;
   try { await postJSON('/api/terms', {accepted: TERMS_VERSION}); }
-  catch (e) { notice('Your answer to the terms could not be saved, so they will be shown again next time. ' + e.message, 'warn'); }
+  catch (e) { unsaved = e; }
+  // Until now the panel answered only what the page needed to draw itself
+  // behind the dialog, so the page reads everything again.
+  await load();
+  if (unsaved) notice('Your answer to the terms could not be saved, so they will be shown again next time. ' + unsaved.message, 'warn');
 }
 applyTheme();
 serverPage();

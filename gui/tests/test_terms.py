@@ -44,6 +44,9 @@ def settings(tmp_path, monkeypatch):
     p = tmp_path / "settings" / "settings.json"
     monkeypatch.setattr(app_module, "_settings_path", lambda: p)
     monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
+    # Not pressed in this run either (conftest.py has every other test
+    # press it).
+    monkeypatch.setattr(app_module, "_TERMS_TAKEN", False)
     return p
 
 
@@ -119,6 +122,62 @@ def test_every_package_carries_the_terms():
     assert copy and "TERMS.md" in copy[0].split()
 
 
+# --- what the panel answers before the terms ------------------------------------
+#
+# The sample can be looked at before the terms, so the dialog is no longer
+# all that stands before a run. The panel itself refuses everything real
+# until I understand, whatever its page shows, and lets the sample through,
+# where nothing can be changed or run.
+
+def test_every_route_of_the_api_waits_for_the_terms_but_the_few_the_dialog_needs():
+    """A route added later waits too, unless it is named as one the page
+    needs to draw itself behind the dialog or to open the sample."""
+    seen, wrong = set(), []
+    for route in app_module.app.routes:
+        path = getattr(route, "path", "")
+        if not path.startswith("/api/"):
+            continue
+        waits = app_module._terms_first in {d.call for d in route.dependant.dependencies}
+        for method in route.methods:
+            seen.add((method, path))
+            if waits == ((method, path) in app_module.BEFORE_THE_TERMS):
+                wrong.append((method, path))
+    assert not wrong, "not as BEFORE_THE_TERMS says, %s" % wrong
+    assert app_module.BEFORE_THE_TERMS <= seen
+
+
+def test_before_the_terms_only_the_sample_is_let_through(settings, monkeypatch):
+    monkeypatch.setattr(app_module, "_SAMPLE", None)
+    with pytest.raises(fastapi.HTTPException) as e:
+        app_module._terms_first()
+    assert e.value.status_code == 409 and "Accept the Terms of Use first" in e.value.detail
+    monkeypatch.setattr(app_module, "_SAMPLE", settings.parent / "sample")
+    app_module._terms_first()
+    monkeypatch.setattr(app_module, "_SAMPLE", None)
+    _accept({"accepted": app_module.TERMS_VERSION})
+    app_module._terms_first()
+
+
+def test_terms_of_another_version_let_nothing_through(settings):
+    with pytest.raises(fastapi.HTTPException):
+        _accept({"accepted": "2000-01-01"})
+    with pytest.raises(fastapi.HTTPException):
+        app_module._terms_first()
+
+
+def test_an_answer_that_could_not_be_saved_lets_the_page_go_on(settings, monkeypatch):
+    """The page goes on once I understand is pressed, so the panel does
+    too, and the terms are asked again the next time the page opens."""
+    def full(data):
+        raise OSError("the disk is full")
+    monkeypatch.setattr(app_module, "_write_settings", full)
+    with pytest.raises(fastapi.HTTPException) as e:
+        _accept({"accepted": app_module.TERMS_VERSION})
+    assert e.value.status_code == 500
+    assert app_module.terms_due()
+    app_module._terms_first()
+
+
 # --- the dialog, in a browser ---------------------------------------------------
 
 sync_api = pytest.importorskip("playwright.sync_api")
@@ -171,6 +230,7 @@ def panel(tmp_path, monkeypatch, browser, port):
     for name in ("PAPERPULL_SERVER", "PAPERPULL_PASSWORD", "PAPERPULL_HOSTS"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(app_module, "_SAMPLE", None)
+    monkeypatch.setattr(app_module, "_TERMS_TAKEN", False)
     context = browser.new_context()
     tab = context.new_page()
     tab.base = "http://127.0.0.1:%d/" % port
@@ -218,3 +278,140 @@ def test_a_page_that_cannot_save_the_answer_goes_on_and_asks_next_time(panel):
     panel.unroute("**/api/terms")
     panel.reload()
     panel.wait_for_selector("#dlg-terms[open]")
+
+
+def _ask(tab, method: str, path: str, body=None) -> dict:
+    """What the panel answers a request of its own page's."""
+    return tab.evaluate("""async ([method, path, body]) => {
+        const r = await fetch(path, method === 'GET' ? {} : {
+            method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body || {})});
+        let detail = '';
+        try { detail = (await r.json()).detail || ''; } catch (e) { /* not JSON */ }
+        return {status: r.status, detail: String(detail)};
+    }""", [method, path, body])
+
+
+def _real_requests(tmp_path) -> list:
+    """A request for each kind of real use. Adding a provider, which writes
+    its install and the folder to the settings, a sign-in, choosing the
+    folder, a spreadsheet and the one documents folder."""
+    return [("POST", "/api/create", {"root": str(tmp_path / "apps"), "providers": ["kroger"]}),
+            ("GET", "/api/run?app=Kroger%20Receipts&action=login", None),
+            ("POST", "/api/root", {"root": str(tmp_path / "apps")}),
+            ("POST", "/api/export", {}),
+            ("POST", "/api/documents/root", {"folder": str(tmp_path / "Documents")})]
+
+
+def _nothing_real_happened(tmp_path):
+    assert list((tmp_path / "apps").iterdir()) == []
+    assert not (tmp_path / "Documents").exists()
+    settings = app_module._settings_path()
+    assert not settings.exists() or "apps_root" not in json.loads(settings.read_text(encoding="utf-8"))
+    assert app_module.terms_due()
+
+
+def _sample_button(tab):
+    return tab.get_by_role("button", name="Just look at the sample")
+
+
+def _until(tab, script: str, seconds: float = 60) -> None:
+    """Wait for the page to say yes, asked from outside it, since the
+    panel's policy for scripts refuses the one wait_for_function polls with."""
+    end = time.monotonic() + seconds
+    while not tab.evaluate(script):
+        assert time.monotonic() < end, "the page never said %s" % script
+        time.sleep(0.1)
+
+
+def _wait_for_accounts(tab):
+    _until(tab, "typeof META !== 'undefined' && META !== null")
+
+
+def test_the_sample_opens_before_the_terms_and_nothing_real_does(panel, tmp_path):
+    panel.goto(panel.base)
+    panel.wait_for_selector("#dlg-terms[open]")
+    _wait_for_accounts(panel)
+    for method, path, body in _real_requests(tmp_path):
+        said = _ask(panel, method, path, body)
+        assert said["status"] == 409 and "Accept the Terms of Use first" in said["detail"], (path, said)
+    _nothing_real_happened(tmp_path)
+
+    _sample_button(panel).click()
+    _until(panel, "!document.getElementById('dlg-terms').open")
+    assert app_module._SAMPLE is not None
+    assert panel.locator("#samplebar").is_visible()
+    # In the sample the terms let things through, and the sample refuses
+    # every change.
+    said = _ask(panel, *_real_requests(tmp_path)[0])
+    assert said["status"] == 409 and "sample archive" in said["detail"], said
+    _nothing_real_happened(tmp_path)
+
+    panel.locator("#samplebar").get_by_role("button", name="Leave the sample").click()
+    panel.wait_for_selector("#dlg-terms[open]")
+    assert app_module._SAMPLE is None
+    _nothing_real_happened(tmp_path)
+
+
+def test_a_page_left_on_the_sample_has_the_dialog_back(panel, tmp_path):
+    """Another tab left the sample, or the panel started again, while this
+    page still shows it with no dialog. The panel refuses its requests, and
+    the next time it reads the accounts the dialog is back."""
+    panel.goto(panel.base)
+    panel.wait_for_selector("#dlg-terms[open]")
+    _sample_button(panel).click()
+    _until(panel, "!document.getElementById('dlg-terms').open")
+    app_module._SAMPLE = None
+    for method, path, body in _real_requests(tmp_path):
+        said = _ask(panel, method, path, body)
+        assert said["status"] == 409 and "Accept the Terms of Use first" in said["detail"], (path, said)
+    _nothing_real_happened(tmp_path)
+    panel.evaluate("load()")
+    panel.wait_for_selector("#dlg-terms[open]")
+    panel.wait_for_timeout(300)
+    assert _open(panel)
+
+
+def test_a_sample_that_cannot_be_opened_leaves_the_dialog_standing(panel, tmp_path):
+    why = "This copy of PaperPull has no sample archive. Download PaperPull again to repair it."
+    panel.route("**/api/sample", lambda route: route.fulfill(
+        status=500, content_type="application/json", body=json.dumps({"detail": why})))
+    panel.goto(panel.base)
+    panel.wait_for_selector("#dlg-terms[open]")
+    _wait_for_accounts(panel)
+    _sample_button(panel).click()
+    panel.locator("#tm-say").get_by_text(why).wait_for()
+    panel.wait_for_timeout(300)
+    assert _open(panel)
+    assert app_module._SAMPLE is None
+    _nothing_real_happened(tmp_path)
+
+
+def test_after_i_understand_the_page_reads_everything_again(panel, tmp_path):
+    """Behind the dialog the panel refused what the page asked for beyond
+    drawing itself, so the page asks again once the terms are accepted."""
+    panel.goto(panel.base)
+    panel.wait_for_selector("#dlg-terms[open]")
+    _wait_for_accounts(panel)
+    asked = []
+    panel.on("request", lambda request: asked.append(request.url))
+    panel.get_by_role("button", name="I understand").click()
+    _until(panel, "!document.getElementById('dlg-terms').open")
+    for _ in range(200):
+        if any(url.endswith("/api/apps") for url in asked):
+            break
+        panel.wait_for_timeout(50)
+    terms = [i for i, url in enumerate(asked) if url.endswith("/api/terms")]
+    again = [i for i, url in enumerate(asked) if url.endswith("/api/apps")]
+    assert terms and again and terms[0] < again[-1], asked
+    said = _ask(panel, "POST", "/api/root", {"root": str(tmp_path / "apps")})
+    assert "Accept the Terms of Use first" not in said["detail"], said
+
+
+def test_somebody_with_accounts_is_not_offered_the_sample(panel, tmp_path):
+    app_module.create_install(tmp_path / "apps", "kroger")
+    panel.goto(panel.base)
+    panel.wait_for_selector("#dlg-terms[open]")
+    _wait_for_accounts(panel)
+    panel.wait_for_timeout(300)
+    assert not _sample_button(panel).is_visible()
+    assert panel.get_by_role("button", name="I understand").is_visible()

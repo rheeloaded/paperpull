@@ -324,7 +324,9 @@ These steps are for the desktop app. The server's are
 [above](#paperpull-server).
 
 **Want to see it first?** The panel's welcome screen offers **Open the
-sample**, a folder of invented statements and receipts. The Accounts page
+sample**, a folder of invented statements and receipts, and before you
+have accepted the Terms of Use their dialog offers it as **Just look at
+the sample**. The Accounts page
 fills in and both spreadsheets build from it, so you can see exactly what
 PaperPull produces before you sign in to anything. Nothing downloads while
 you are in it, and *Leave the sample* puts you back. Every document in it
