@@ -3156,10 +3156,10 @@ def _save_done(body: dict) -> dict:
                                  "or remove the provider and add it again.")
     done_at = datetime.now().isoformat(timespec="seconds") if body.get("done") else ""
     try:
-        fd, temp = tempfile.mkstemp(dir=str(root), prefix=".panel-done-", suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"done_at": done_at}, f)
-        os.replace(temp, root / DONE_FILE)
+        # As the panel's other notes in an account's folder are written, so
+        # on PaperPull Server a folder that leads out of the data folder
+        # through a link is refused rather than written into.
+        _replace_text(root / DONE_FILE, json.dumps({"done_at": done_at}))
     except OSError as e:
         raise HTTPException(500, "Could not save that (%s). Check that its folder can be written to, then try again." % e)
     return {"app": name, "account": account, "done_at": done_at}

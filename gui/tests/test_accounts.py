@@ -2213,6 +2213,19 @@ def test_mark_as_done_is_saved_and_undone(root):
     assert app_module._done_at(own) == ""
 
 
+def test_mark_as_done_writes_only_that_accounts_own_note(root, monkeypatch):
+    """Through the panel's own writer, which on PaperPull Server refuses a
+    folder that leads out of the data folder through a link, into the one
+    account's folder and nobody else's."""
+    wrote = []
+    monkeypatch.setattr(app_module, "_replace_text", lambda path, text: wrote.append((Path(path), json.loads(text))))
+    app_module._save_done({"app": "Bank Statements", "account": "second", "done": True})
+    assert [p for p, _ in wrote] == [root / "Bank Statements - second" / app_module.DONE_FILE]
+    with pytest.raises(app_module.HTTPException):
+        app_module._save_done({"app": "Bank Statements", "account": "nobody", "done": True})
+    assert len(wrote) == 1
+
+
 def test_an_account_checked_is_not_counted_on_the_page(panel):
     """The row's state alone says where it is counted. The server says
     current for an account just checked, and a gap for one that still has
