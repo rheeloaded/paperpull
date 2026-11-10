@@ -8,6 +8,12 @@ Only the window is here. gui/mac_host.py chooses the port, runs the panel, keeps
 its log and stops it. This program starts that with the bundled Python, shows
 the panel once it says READY, and closes its stdin to stop it.
 
+A quit first takes the window off the panel's page, so nothing new is started
+from it, and then closes that stdin. The host stops the panel only once nothing
+is applying its changes, since a Rename or a Move stopped partway would leave its
+records naming files that have moved. While one is, the host says FINISHING, and
+the window says why it waits and stays until the host has ended.
+
 The web view shows only the panel. Anything else goes to the default browser,
 and only when it is http, https or mailto, so nothing the page links to can
 turn the panel's own window into somebody else's page.
@@ -37,7 +43,7 @@ static void OnMain(dispatch_block_t work) {
 @property (strong) NSWindow *window;
 @property (strong) WKWebView *web;
 @property int port, exitCode;
-@property BOOL quitting;
+@property BOOL quitting, finishing;
 @end
 
 @implementation PPApp
@@ -60,6 +66,7 @@ static void OnMain(dispatch_block_t work) {
         NSString *line = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
         int port = 0;
         if (sscanf(line.UTF8String ?: "", "READY %d", &port) == 1) OnMain(^{ [weak panelReady:port]; });
+        else if ([line hasPrefix:@"FINISHING"]) OnMain(^{ [weak panelFinishing]; });
     };
     task.terminationHandler = ^(NSTask *ended) { OnMain(^{ [weak hostEnded:ended]; }); };
     NSError *err = nil;
@@ -69,6 +76,7 @@ static void OnMain(dispatch_block_t work) {
 }
 
 - (void)panelReady:(int)port {
+    if (self.quitting) return;  // the window has already left the panel's page
     self.port = port;
     if ([self.selfTest isEqualToString:@"ready"]) {
         printf("READY http://127.0.0.1:%d\n", port);
@@ -76,6 +84,15 @@ static void OnMain(dispatch_block_t work) {
     } else {
         [self showPanel];
     }
+}
+
+// After a quit, while the host waits for a Rename or a Move applying its changes.
+- (void)panelFinishing {
+    if (!self.quitting) return;
+    self.finishing = YES;
+    [self.window makeKeyAndOrderFront:nil];
+    [self showMessage:@"A Rename or a Move is applying its changes. PaperPull quits as soon as it has "
+                      @"finished, since stopping it partway would leave its records naming files that have moved."];
 }
 
 - (void)hostEnded:(NSTask *)ended {
@@ -120,15 +137,19 @@ static void OnMain(dispatch_block_t work) {
     [self startHost];
 }
 
-// Closing the host's stdin stops the panel and everything it started. The host
-// ends once they are gone, and that is the reply, or 10 seconds if it never is.
+// Closing the host's stdin stops the panel and everything it started, once
+// nothing is applying its changes. The host ends once they are gone, and that
+// is the reply, or 10 seconds if it never is and it has not said FINISHING. A
+// host that has said it goes on to its end with or without the window.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)app {
     if (!self.host.running) return NSTerminateNow;
     if (self.quitting) return NSTerminateLater;
     self.quitting = YES;
+    [self showMessage:@"Quitting PaperPull…"];  // off the panel's page first
     [self.hostInput closeFile];
+    __weak PPApp *weak = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_global_queue(0, 0), ^{
-        OnMain(^{ [NSApp replyToApplicationShouldTerminate:YES]; });
+        OnMain(^{ if (!weak.finishing) [NSApp replyToApplicationShouldTerminate:YES]; });
     });
     return NSTerminateLater;
 }
@@ -168,7 +189,11 @@ static void OnMain(dispatch_block_t work) {
     w.tabbingMode = NSWindowTabbingModeDisallowed;
     if (![w setFrameUsingName:@"PaperPull"]) [w center];
     w.frameAutosaveName = @"PaperPull";
-    WKWebView *web = [[WKWebView alloc] initWithFrame:frame configuration:[WKWebViewConfiguration new]];
+    WKWebViewConfiguration *cfg = [WKWebViewConfiguration new];
+    // The window only ever shows the panel at 127.0.0.1, so WebKit has no
+    // site to look up in its list of fraudulent ones, and none is looked up.
+    cfg.preferences.fraudulentWebsiteWarningEnabled = NO;
+    WKWebView *web = [[WKWebView alloc] initWithFrame:frame configuration:cfg];
     web.navigationDelegate = self;
     web.UIDelegate = self;
     w.contentView = web;
@@ -226,7 +251,7 @@ static NSMenu *Submenu(NSMenu *bar, NSString *title) {
 
 - (void)openGuide:(id)sender { [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:kGuideURL]]; }
 - (void)showLog:(id)sender { [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:self.logPath]]; }
-- (void)reload:(id)sender { if (self.port) [self showPanel]; else NSBeep(); }
+- (void)reload:(id)sender { if (self.port && !self.quitting) [self showPanel]; else NSBeep(); }
 - (void)zoomReset:(id)sender { self.web.pageZoom = 1; }
 - (void)zoomIn:(id)sender { self.web.pageZoom = MIN(3.0, self.web.pageZoom * 1.1); }
 - (void)zoomOut:(id)sender { self.web.pageZoom = MAX(0.5, self.web.pageZoom / 1.1); }
@@ -280,7 +305,7 @@ static NSMenu *Submenu(NSMenu *bar, NSString *title) {
     else [self showMessage:@"The control panel could not be reached. Choose View, Reload to try again."];
 }
 
-- (void)webViewWebContentProcessDidTerminate:(WKWebView *)wv { if (self.port) [self showPanel]; }
+- (void)webViewWebContentProcessDidTerminate:(WKWebView *)wv { if (self.port && !self.quitting) [self showPanel]; }
 
 #pragma mark Files
 

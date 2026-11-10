@@ -4,12 +4,14 @@ Run for real, against a stand-in uvicorn on the listening socket it is handed.
 The stand-in also starts a child in the panel's group, as the panel starts runs
 and they start browsers, so "everything it started stops" is what is tested.
 """
+import http.server
 import importlib.util
 import os
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -26,6 +28,7 @@ if os.environ.get("STAND_IN") == "dies":
     sys.exit(3)
 out = os.environ["NOTES"]
 open(out + "/env", "w").write("\\n".join(k + "=" + v for k, v in os.environ.items()))
+open(out + "/argv", "w").write("\\n".join(sys.argv))
 child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
 open(out + "/child", "w").write(str(child.pid))
 if os.environ.get("STAND_IN") == "ends-cleanly":
@@ -35,8 +38,15 @@ if os.environ.get("STAND_IN") == "ends-cleanly":
 sock = socket.socket(fileno=int(sys.argv[sys.argv.index("--fd") + 1]))
 while True:
     conn, _ = sock.accept()
-    conn.recv(1024)
-    conn.sendall(b"HTTP/1.1 200 OK\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n")
+    asked = conn.recv(1024)
+    body = b""
+    if asked.startswith(b"GET /api/finishing "):
+        # What is applying its changes, as the test last wrote it.
+        try:
+            body = open(out + "/finishing", "rb").read()
+        except OSError:
+            body = b'{"finishing": []}'
+    conn.sendall(b"HTTP/1.1 200 OK\\r\\nContent-Length: %d\\r\\nConnection: close\\r\\n\\r\\n" % len(body) + body)
     conn.close()
 """
 
@@ -165,15 +175,102 @@ def module(monkeypatch):
     return mod
 
 
-def test_the_usual_port_taken_means_another_one(module, monkeypatch):
-    with socket.socket() as other:
-        other.bind(("127.0.0.1", 0))
-        other.listen()
-        taken = other.getsockname()[1]
-        monkeypatch.setattr(module, "USUAL_PORT", taken)
-        sock = module.choose_socket()
-        assert sock.getsockname()[0] == "127.0.0.1" and sock.getsockname()[1] != taken
-        sock.close()
+@pytest.fixture()
+def page():
+    """A program of this person's own, served from this process, answering
+    every GET with the page it is given."""
+    servers = []
+
+    def serve(body):
+        class Page(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Page)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return server.server_address[1]
+    yield serve
+    for server in servers:
+        server.shutdown()
+        server.server_close()
+
+
+def _lsof():
+    for path in ("/usr/sbin/lsof", shutil.which("lsof")):
+        if path and os.path.exists(path):
+            return path
+    pytest.skip("no lsof here")
+
+
+def test_the_usual_port_taken_by_another_program_means_another_one(module, monkeypatch, page):
+    taken = page(b"<html><title>Something else</title></html>")
+    monkeypatch.setattr(module, "USUAL_PORT", taken)
+    sock, port = module.choose_socket()
+    assert sock.getsockname() == ("127.0.0.1", port) and port != taken
+    sock.close()
+
+
+def test_lsof_finds_this_persons_own_listener_and_nothing_once_it_is_gone(module, monkeypatch):
+    monkeypatch.setattr(module, "LSOF", _lsof())
+    with socket.socket() as mine:
+        mine.bind(("127.0.0.1", 0))
+        mine.listen()
+        port = mine.getsockname()[1]
+        assert module.own_listener(port) == os.getpid()
+    assert module.own_listener(port) is None
+
+
+def test_this_persons_own_panel_on_the_usual_port_is_shown_not_doubled(module, monkeypatch, page):
+    """A panel started from a terminal, say. A second one would write one
+    account's records beside it."""
+    monkeypatch.setattr(module, "LSOF", _lsof())
+    held = page(b"<title>PaperPull</title><script>const SERVER = false;</script>")
+    monkeypatch.setattr(module, "USUAL_PORT", held)
+    assert module.choose_socket() == (None, held)
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout
+    return bool(state.strip()) and not state.strip().startswith("Z")
+
+
+def test_a_quit_waits_for_what_is_applying_and_then_stops_all_of_it(bundle):
+    """A Rename or a Move stopped partway leaves its records naming files that
+    have moved, so the panel and its runs go on while the panel names one."""
+    host, env, notes = bundle
+    (notes / "finishing").write_text('{"finishing": ["rename_apply"]}', encoding="utf-8")
+    process = _start(host, env)
+    _ready(process)
+    child = int((notes / "child").read_text())
+    process.stdin.close()
+    assert process.stdout.readline() == "FINISHING\n", "the window is told why it waits"
+    time.sleep(2)
+    assert process.poll() is None and _alive(child), "nothing is stopped while it applies"
+    (notes / "finishing").write_text('{"finishing": []}', encoding="utf-8")
+    assert process.wait(15) == 0
+    assert _gone(child), "and then everything the panel started stops"
+    log = (Path(env["HOME"]) / "Library" / "Logs" / "PaperPull" / "panel.log").read_text(encoding="utf-8")
+    assert "once rename_apply has finished" in log
+
+
+def test_the_panel_keeps_no_access_log(bundle):
+    host, env, notes = bundle
+    process = _start(host, env)
+    _ready(process)
+    argv = (notes / "argv").read_text().splitlines()
+    process.stdin.close()
+    process.wait(15)
+    assert "--no-access-log" in argv and "--fd" in argv
 
 
 def test_the_log_starts_afresh_only_past_its_limit(module, monkeypatch, tmp_path):
