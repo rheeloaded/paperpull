@@ -47,6 +47,65 @@ All notable changes to PaperPull are recorded here. Versioning follows
   A list never read is now always read first, and a census holds every
   app's list to it. Both apps are still waiting for someone with an account
   to test them.
+- **An account just checked comes off the list.** "Due" came only from the
+  age of the newest document, so a run that found nothing new left it due
+  until its provider sent something. A whole clean run now counts as a check
+  for as long as that provider usually takes, between 3 and 14 days. **Mark as done** under the three dots takes
+  any account off the list for that time, and can be undone.
+- **A sign-in window comes to the front, and goes when it is done.** Opening
+  one, or reusing one already open, now brings it forward. When Get new
+  documents or Continue finishes, PaperPull closes that account's sign-in
+  browser, and returns you to PaperPull if you were in it. A run that stops
+  leaves the window open. It is known by its port and its profile folder, so
+  an everyday browser is never closed, and `"close_signin_window": false` in
+  settings.json turns it off. Mac and Linux for now.
+- **What a real run on a real account showed.** A list that stopped partway
+  is said as a page PaperPull did not expect, not as a sign-out with
+  Continue, for each of the providers that can stop that way. The last line
+  after "Sign in first" no longer offers Continue. After a sign-in the log
+  names the panel's button under the panel.
+- **Providers go by their names, and a run's lines by the names on the
+  buttons.** The File names picker, the Updated notice and File names'
+  Stopped at line said the folder's name instead of the provider's. The
+  example path in Settings fits the computer. Under the control panel the
+  lines every provider shares, when a run stops or has nothing left to
+  continue, name Get new documents, Try the newest few, Check what's there
+  and Continue, and in a terminal they still name Pilot, Run All, Discover
+  and Resume. Review names and the line about refused documents count
+  "1 receipt" rather than "1 receipt(s)", and the providers' lists read
+  alike.
+- **The name on an account can be changed.** The welcome asked once, for
+  every provider at the same time, and skipping it was for good unless you
+  edited a settings file. More now has Name on the account, for the first
+  person and anyone added, kept in that account's own settings with a copy
+  in Backups first. It cannot be changed while that account is running,
+  a Rename or a Move of its documents included, and files already saved
+  keep their names until a Rename.
+- **A support report that read nothing says so.** Made with the window on a
+  sign-in page or a security check, it still read "Support report saved",
+  and people attached it. It now ends as Nothing was read, says to sign in
+  and leave the window on the documents page, and offers the sign-in window
+  and the report again. A report from a signed-in page PaperPull cannot make
+  sense of still reads as saved, since that is the one a repair needs.
+- **One Get help under More.** Make a support report and Record steps for
+  support were two items and two dialogs, and the file a failed run had
+  just written was a third place to look. Get help opens one dialog that
+  offers a recent failure file first, then the support report with its
+  sign-in button, then recording as the next step. What each file holds
+  moved under What's in the file?, every word of it kept.
+- **A run can be followed from the tab, and a round leaves you where you
+  are.** The browser tab's title shows a run's progress and how it ended,
+  so somebody working in the provider's window can see it. A run that ends
+  while you are on another page of PaperPull says so with a link to the
+  outcome. Get new for all no longer pulls you back to the Run page at each
+  account, and its last line lists each account with what it came to, so
+  one that saved documents and set one aside no longer reads as a failure.
+- **A checkout nobody has set up shows the welcome.** Its `apps/` holds the
+  provider templates, which looked like installs, so the README's quick
+  start landed on every provider "Not started" with no welcome, and a run
+  would have written PDFs and sign-ins into the git tree. A checkout with no
+  chosen folder and no `config.json` in `apps/` now shows the welcome, and
+  somebody already running from `apps/` carries on as before.
 
 ## [0.62.0] - 2026-11-09
 

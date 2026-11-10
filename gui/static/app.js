@@ -869,10 +869,12 @@ function finishRun(code, refused, streamed) {
   if (RUN.again && !RUN.outcome.clean && RUN.sink) RUN.sink.textContent += AGAIN_LEFT + '.\n';
   const done = RUN.onDone;
   RUN.onDone = null;
-  // A sign-in with no window, a recording with nothing in it and a run
-  // that did not start write no failure file, so none is asked for, or an
-  // earlier run's from the last hour would read as this run's.
-  const wroteNone = Boolean(RUN.refused) || [NOTHING_OPENED, NOTHING_RECORDED, NOT_SIGNED_IN].includes(RUN.code);
+  // A sign-in with no window, a recording with nothing in it, a support
+  // report that read nothing and a run that did not start write no failure
+  // file, so none is asked for, or an earlier run's from the last hour would
+  // read as this run's. A report that read nothing offers its own survey.
+  const wroteNone = Boolean(RUN.refused) ||
+    [NOTHING_OPENED, NOTHING_RECORDED, NOT_SIGNED_IN, NOTHING_READ].includes(RUN.code);
   if (!wroteNone && (RUN.code !== '0' || (RUN.result && RUN.result.attention))) checkFailure(RUN.app, RUN.account);
   if (savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(RUN.app, RUN.account);
   if (done) done(RUN.code);
@@ -1599,8 +1601,9 @@ async function rvLoad(before) {
   catch (e) { if (RV === rv) $('rv-state').textContent = before + e.message; return; }
   if (RV !== rv) return;
   rv.receipts = Array.isArray(d.receipts) ? d.receipts : [];
-  // What the app said about rows it left out, without its own count line.
-  const said = (d.said || []).filter(t => !/need review\.$|need name review\.$/.test(t)).join(' ');
+  // What the app said about rows it left out, without its own count line,
+  // which reads "1 receipt needs review." for one (core renaming.review_names).
+  const said = (d.said || []).filter(t => !/needs? review\.$|need name review\.$/.test(t)).join(' ');
   const n = rv.receipts.length;
   $('rv-state').textContent = before + (n ? many(n, 'receipt') + ' waiting for a better name.'
     : 'No receipts are waiting for a better name.') + (said ? ' ' + said : '');

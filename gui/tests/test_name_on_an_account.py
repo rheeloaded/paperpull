@@ -94,11 +94,46 @@ def test_the_same_name_writes_nothing(chase):
     assert not (chase / "Backups").exists()
 
 
-def test_refused_while_that_account_runs(chase):
-    app_module._RUNS[(APP, "primary")] = {"action": "all"}
+@pytest.mark.parametrize("action", ["all", "resume", "rename_apply", "move_documents_apply", "review_names",
+                                    "review_names_list"])
+def test_refused_while_that_account_runs(chase, action):
+    """A run, a Rename, a Move or Review names, since the name can be part
+    of the names those give files."""
+    app_module._RUNS[(APP, "primary")] = {"action": action}
     assert "finish first" in refused(409, app=APP, account="primary", owner="Sam")
     assert config(chase)["owner"] == "Pat Example"
+    assert not (chase / "Backups").exists()
     save(app=APP, account="spouse", owner="Alex"), "another person's run is another account"
+
+
+def _every_file(folder):
+    return {str(p.relative_to(folder)): p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+
+
+def test_nothing_saved_is_renamed_moved_or_forgotten(chase):
+    """The name can be part of a file's name ({owner} or owner_in_filename),
+    so changing it touches only the one config, and its copy in Backups.
+    Every document, record, ledger and the other person's config stay as
+    they were, byte for byte, and no file is made beside them."""
+    cfg = config(chase)
+    cfg.update(owner_in_filename=True, filename_pattern="{owner}/{date:yyyy-mm-dd} {provider} {summary}")
+    (chase / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    saved = chase / "Statements" / "Pat Example"
+    saved.mkdir(parents=True)
+    (saved / "2026-01-31 Pat Example Chase Statement.pdf").write_bytes(b"%PDF-1.4 invented")
+    (chase / "progress.json").write_text(json.dumps({"doc-1": {
+        "downloaded_ok": True, "pdf_path": str(saved / "2026-01-31 Pat Example Chase Statement.pdf")}}), encoding="utf-8")
+    (chase / "Chase Statements Index.csv").write_text("Account Holder,PDF Full Path\nPat Example,x.pdf\n",
+                                                      encoding="utf-8")
+    before = _every_file(chase)
+    save(app=APP, account="primary", owner="Sam Example")
+    after = _every_file(chase)
+    changed = {k for k in before.keys() & after.keys() if before[k] != after[k]}
+    assert changed == {"config.json"}
+    assert after.keys() - before.keys() == {str(Path("Backups") / next(
+        p.name for p in (chase / "Backups").iterdir()) / "config.json")}
+    assert before.keys() <= after.keys()
+    assert config(chase)["filename_pattern"] == cfg["filename_pattern"] and config(chase)["owner_in_filename"]
 
 
 def test_a_run_that_started_since_it_was_asked_stops_the_write(chase, monkeypatch):

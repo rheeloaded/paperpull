@@ -160,7 +160,7 @@ the rest are under **More**, and every one says what it does.
 | **Rename existing files** | A preview of new names (`--rename`), then the rename (`--rename --apply`) |
 | **Check saved files** | Re-checks every saved PDF (`--verify`) |
 | **Get help** | One dialog: a recent failure file if there is one, a support report for an issue (`--diagnose`), then recording your clicks to a document (`--record`) with Stop recording |
-| **Name on the account** | The account holder's name, kept in this account's own `config.json` |
+| **Name on the account** | The account holder's name, kept in this account's own config file (`config.json` for the first person, `config.<name>.json` for anyone added), a copy in Backups first. Refused while that account runs, a Rename or a Move included. Files already saved keep their names until a Rename |
 | **Add another person** | A second account on the same provider, with its own folder, sign-in window and history |
 | **Remove from PaperPull** | Moves the provider's folder into Removed. Nothing is deleted |
 | **Open folder** | Shows the folder holding the account's newest document, its documents folder once they go there, never its browser profile |

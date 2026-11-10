@@ -60,7 +60,10 @@ def test_nothing_left_says_continue_under_the_panel(tmp_path, capsys, panel):
     listing.read_whole(app)
     listing.resume(app, [], Process())
     said = _said(capsys)
-    assert "Nothing to continue. Everything in these dates is saved." in said
+    assert "Nothing to continue, since nothing listed is left to download." in said
+    # A document done with may be one set aside for a look or one the
+    # provider had no file for, so it is never said to be saved.
+    assert "saved" not in said
     assert "resume" not in said.lower() and "scope" not in said
 
 
