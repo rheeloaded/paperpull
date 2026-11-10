@@ -1746,6 +1746,12 @@ OPENS_FROM_THE_PANEL = (".pdf", ".png", ".jpg", ".jpeg")
 # Documents alike are never a reason to look (run_result.SAID_ONLY), so they
 # are no reason to keep one either.
 NOT_ANSWERED_BY_CHECKING = ("failed", "wrong_document")
+# The counts of what a run set aside, each of which the records it wrote in
+# that state have to cover before Needs a look goes. Target, Walmart and
+# Meijer count a document that failed its check in validation_failures with
+# no record in that state, an invoice put aside in Manual Review while its
+# order's record stays saved, say.
+SET_ASIDE_COUNTS = ("manual_review", "validation_failures")
 
 
 def _checked_items(root: Path) -> dict:
@@ -1834,20 +1840,22 @@ def _to_check(root: Path, meta: dict, account: str) -> list:
 
 def _all_checked(last, items: list) -> bool:
     """Whether a person has been through all that the last run left them.
-    Never when the run counted more set aside than the records it wrote in
-    that state, since the rest have no record to list, a card or a plan left
-    unread (American Express, NetBenefits) or a receipt that never showed
-    (core not_shown). Nor when it left what checking does not answer."""
+    Never when any count of SET_ASIDE_COUNTS is more than the records the
+    run wrote in that state, since the rest have no record to list, a card
+    or a plan left unread (American Express, NetBenefits), a receipt that
+    never showed (core not_shown) or an invoice that failed its check
+    (Target). Nor when it left what checking does not answer."""
     result = last.get("result") if isinstance(last, dict) else None
     if not (items and isinstance(result, dict) and all(item["checked"] for item in items)):
         return False
     if any(result.get(k) for k in NOT_ANSWERED_BY_CHECKING):
         return False
-    started, counted = _when(last.get("started")), result.get("manual_review")
-    if started is None or type(counted) is not int:
+    started, counts = _when(last.get("started")), [result.get(k) for k in SET_ASIDE_COUNTS]
+    if started is None or any(type(count) is not int for count in counts):
         return False
     at = [_when(item["set_aside_at"]) for item in items]
-    return counted <= sum(1 for when in at if when is not None and when >= started)
+    this_run = sum(1 for when in at if when is not None and when >= started)
+    return all(count <= this_run for count in counts)
 
 
 def _owner_of(meta: dict, account: str) -> str:
