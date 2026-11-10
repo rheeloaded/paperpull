@@ -10,7 +10,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
-- **A sign-in starts its run by itself once it is done.** Open sign-in
+- **A sign-in starts its run by itself once it is done (#200).** Open sign-in
   window used to end with the person coming back to the panel to press
   Get new. Now the panel watches the sign-in window's tabs, their address
   and title only, read from its own debugging port on this computer
@@ -25,7 +25,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account's config names too is not watched, since a sign-in there may be
   that account's. Not on PaperPull Server, whose sign-in is in the page.
   Contributed by @JasperDale420.
-- **A panel run from a git checkout says which one.** A small badge beside
+- **A panel run from a git checkout says which one (#202).** A small badge beside
   the version names the checkout's branch, with a `*` when it has changes,
   and its card and Settings, About PaperPull, add the commit. It never names
   the folder, and git is never run on PaperPull Server, in the built
@@ -161,7 +161,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Rename or a Move goes on that account. Contributed by @JasperDale420 (#193).
 
 ### Fixed
-- **Chase no longer tries, on every run, statements it can never take.**
+- **Chase no longer tries, on every run, statements it can never take (#191).**
   When its document API answered nothing, the fallback read a business
   account's documents off the page, with no card and no document id, and
   recorded each row by its "Opens document menu" control. Such a record
@@ -192,7 +192,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and every digit as 9. Nothing is asked of the address to name it.
   Contributed by @JasperDale420 (#199).
 - **On a Mac, an account's documents folder is never another's in other
-  letter case.** A Mac tells folder names apart without case, so
+  letter case (#198).** A Mac tells folder names apart without case, so
   `target receipts/Chase` is inside Target Receipts' folder. The check
   that a folder is no other account's compared the paths as spelled, which
   Windows does without case and a Mac did not, so the panel saved such a
@@ -240,7 +240,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and the log of Open sign-in window names Try the newest few first under
   the control panel, for every provider. Contributed by @JasperDale420.
 - **Wealthfront never calls its list whole with a kind of statement left
-  out (#189).** The Documents page shows statements through a dropdown, and a kind
+  out (#189, #197).** The Documents page shows statements through a dropdown, and a kind
   it would not choose was logged and passed over, so the list was still
   noted as read whole, and a run that read no statements at all could finish
   clean. Now Statements not read, or Quarterly Statements offered and not
