@@ -76,6 +76,8 @@ MONTHS = ["January", "February", "March", "April", "May", "June", "July", "Augus
           "September", "October", "November", "December"]
 CUR_DATES = ["2026-09-26", "2026-08-26", "2026-02-26"]
 PRI_DATES = ["2026-02-26", "2026-01-26"]
+# Invented: a date the two accounts both have a statement of.
+TWIN_DAY = "2026-06-17"
 
 
 def sid(account, day, kind="PDF_DOCUMENT", code="1"):
@@ -132,6 +134,14 @@ def good_press(page):
     """What the page does on the press: asks for the PDF of the statement
     it shows and makes one Blob of it."""
     data = spectrum_pdf(day_of(page.detail_sid))
+    page.emit("response", Resp(site.PDF_OPERATION, {"statementId": page.detail_sid, "otpCheck": True},
+                               answer=pdf_answer(data)))
+    page.blob = blob_result(data)
+
+
+def own_copy(page):
+    """As good_press, with a file of its own for each account's statement."""
+    data = spectrum_pdf(day_of(page.detail_sid), "transfer" if "Transfer=true" in page.url else "own")
     page.emit("response", Resp(site.PDF_OPERATION, {"statementId": page.detail_sid, "otpCheck": True},
                                answer=pdf_answer(data)))
     page.blob = blob_result(data)
@@ -1053,16 +1063,73 @@ class InPage(WithFakeClick):
         self.assertEqual(page.row_presses, [0])
         self.assertIsNone(site.newest([site.Entry("prior", "2026-02-26", sid(PRI, "2026-02-26"))]))
 
-    def test_two_statements_of_one_date_are_left_unpressed(self):
-        for rows in (None, [row_text(d) for d in ["2026-09-26", "2026-08-26", "2026-02-26", "2026-02-26",
-                                                   "2026-01-26"]]):
-            for family in ("current", "prior"):
-                page = Page(rows=rows)
-                ok, out, trace = self.take(page, family, "2026-02-26")
-                self.assertFalse(ok)
-                self.assertEqual(page.clicks, [], family)
-                self.assertFalse(out.exists())
-                self.assertIn("another statement carries the same date", json.dumps(trace))
+    def twins(self, **kw):
+        """Two accounts with a statement each on one date, two rows of it
+        drawn at 1 and 2, the current account's first."""
+        answer = list_answer(cur=["2026-09-17", TWIN_DAY], prior=[TWIN_DAY, "2026-05-17"])
+        return Page(answer=answer, **kw)
+
+    def statement_reads(self, page):
+        return page.gotos.count(site.STATEMENTS_URL)
+
+    def test_the_first_row_of_a_shared_date_is_kept_when_it_is_this_statements(self):
+        page = self.twins()
+        ok, out, trace = self.take(page, "current", TWIN_DAY)
+        self.assertTrue(ok, trace)
+        self.assertEqual(page.row_presses, [1])
+        self.assertEqual(self.statement_reads(page), 1)
+        self.assertIn("isAccountTransfer=false", page.url)
+        self.assertEqual(page.presses, 1)
+
+    def test_the_other_accounts_page_sends_it_back_for_the_second_row(self):
+        page = self.twins()
+        ok, out, trace = self.take(page, "prior", TWIN_DAY)
+        self.assertTrue(ok, trace)
+        self.assertEqual(page.row_presses, [1, 2])
+        self.assertEqual(self.statement_reads(page), 2, "Statements is read again before the second press")
+        self.assertIn("isAccountTransfer=true", page.url)
+        self.assertEqual(page.presses, 1, "View Printable Statement is pressed only on its own page")
+        self.assertEqual(out.read_bytes()[:5], b"%PDF-")
+
+    def test_rows_drawn_the_other_way_round_still_reach_each_statement(self):
+        def swapped(page, index):
+            lands(page, {1: 2, 2: 1}.get(index, index))
+        for family, presses in (("current", [1, 2]), ("prior", [1])):
+            page = self.twins(on_row=swapped, on_press=own_copy)
+            ok, out, trace = self.take(page, family, TWIN_DAY)
+            self.assertTrue(ok, trace)
+            self.assertEqual(page.row_presses, presses, family)
+            self.assertIn("isAccountTransfer=%s" % ("true" if family == "prior" else "false"), page.url)
+
+    def test_both_statements_of_a_date_are_saved_in_one_run(self):
+        page = self.twins(on_press=own_copy)
+        current, prior = self.take(page, "current", TWIN_DAY), self.take(page, "prior", TWIN_DAY)
+        self.assertTrue(current[0], current[2])
+        self.assertTrue(prior[0], prior[2])
+        self.assertNotEqual(current[1].read_bytes(), prior[1].read_bytes())
+
+    def test_a_second_press_that_opens_the_other_statement_again_stops_the_run(self):
+        page = self.twins(on_row=lambda page, index: lands(page, 2))
+        with self.assertRaises(pressing.Stop):
+            self.take(page, "current", TWIN_DAY)
+        self.assertEqual(page.row_presses, [1, 2])
+        self.assertEqual(page.presses, 0)
+        self.assertFalse((self.tmp / ("current-%s.pdf" % TWIN_DAY)).exists())
+
+    def test_a_shared_date_row_that_opens_a_third_statement_stops_the_run(self):
+        page = self.twins(on_row=lambda page, index: lands(page, 3))
+        with self.assertRaises(pressing.Stop):
+            self.take(page, "prior", TWIN_DAY)
+        self.assertEqual(page.row_presses, [1])
+        self.assertEqual(page.presses, 0)
+
+    def test_a_shared_date_needs_a_row_for_each_statement(self):
+        page = self.twins(rows=[row_text("2026-09-17"), row_text(TWIN_DAY), row_text("2026-05-17")])
+        entries = [site.Entry(*e) for e in (("current", TWIN_DAY, sid(CUR, TWIN_DAY)),
+                                            ("prior", TWIN_DAY, sid(PRI, TWIN_DAY)))]
+        index, _, why = site.row_for(page, entries[0], entries)
+        self.assertEqual(index, -1)
+        self.assertIn("1 rows carry the statement's date, not 2", why)
 
     def test_the_row_guard(self):
         day = "2026-08-26"
