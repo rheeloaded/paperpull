@@ -592,6 +592,11 @@ _ROW_JS = r"""() => {
 
 _DOCUMENT_MENU_RE = re.compile(r"\bopens document menu\b", re.I)
 
+# What passed_over names when the page's text reading met a row whose only
+# control opens a menu. Its statement is on the list and is not taken here,
+# so the list is not whole.
+DOCUMENT_MENU = "document menu"
+
 
 def is_document_menu_row(title: str) -> bool:
     """True for a row read from the page whose only control opens a menu of
@@ -764,7 +769,9 @@ def chase_collect(page) -> Listed:
 
     A year or an account whose choice did not take was not read, and is
     named in passed_over, where it used to be passed over and the list
-    noted whole without it. One the guard refuses is never chosen.
+    noted whole without it. One the guard refuses is never chosen. A row
+    whose only control opens a menu is not listed, and passed_over names
+    DOCUMENT_MENU, since its statement is on the list and is not taken.
     """
     docs: List[dict] = []
     seen = set()
@@ -778,7 +785,10 @@ def chase_collect(page) -> Listed:
             if not date:
                 continue
             if is_document_menu_row(r.title):
+                # Its statement is on the list and this app never presses
+                # the menu, so the list read here is not the whole list.
                 log.info("passing over a row whose only control opens a menu")
+                passed_over.add(DOCUMENT_MENU)
                 continue
             key = (acct, date, r.title)
             if key in seen:

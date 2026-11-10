@@ -516,13 +516,23 @@ class App:
             # A year or a card the pickers offered and the walk could not
             # read is a part of the list missing, so the list is not noted
             # whole, and the run goes on with what it read and stops at its
-            # end rather than finish.
+            # end rather than finish. So is a row the page's text reading
+            # passed over because its only control opens a menu, since its
+            # statement is on the list and this app does not take it.
             self._list_cut_short = True
+            chosen = [p for p in passed_over if p != site.DOCUMENT_MENU]
             log.info("Chase: the list was not read through the %s", " and the ".join(passed_over))
-            print("\n  Chase's statement list was not read whole, since a year, a card or an")
-            print("  account on it could not be chosen. What was read is kept, and this run")
-            print("  stops at its end rather than finish. The next run reads the list again.")
-            self.write_failure("read the statement list", "some of the list could not be chosen")
+            print("\n  Chase's statement list was not read whole.")
+            if chosen:
+                print("  A year, a card or an account on it could not be chosen.")
+            if site.DOCUMENT_MENU in passed_over:
+                print("  A statement on it is saved only through a menu, which this app never")
+                print("  presses. The Chase Business app takes a business account's statements.")
+            print("  What was read is kept, and this run stops at its end rather than finish.")
+            print("  The next run reads the list again.")
+            self.write_failure("read the statement list",
+                               "some of the list could not be chosen" if chosen
+                               else "a statement on the list is saved only through a menu")
         n_new = 0
         for d in raw:
             n_new += self._record_chase_doc(d)
