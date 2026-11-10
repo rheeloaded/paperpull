@@ -25,6 +25,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account's config names too is not watched, since a sign-in there may be
   that account's. Not on PaperPull Server, whose sign-in is in the page.
   Contributed by @JasperDale420.
+- **A panel run from a git checkout says which one.** A small badge beside
+  the version names the checkout's branch, with a `*` when it has changes,
+  and its card and Settings, About PaperPull, add the commit. It never names
+  the folder, and git is never run on PaperPull Server, in the built
+  package, or in a folder with no `.git`. Contributed by @appchamp.
 - **American Express Banking, the 86th app, Business Checking statements
   and tax forms (#168).** `amexbanking` reads American Express National
   Bank deposit accounts, apart from the `amex` card app. It saves every

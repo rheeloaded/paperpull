@@ -138,7 +138,7 @@ code, .mono { font-family: var(--mono); font-size: .93em; }
 .badge { font-size: 12px; font-weight: 600; padding: 1px 7px; border-radius: 6px; background: var(--fill); color: var(--ink-2); }
 .dev-badge { background: var(--accent-soft); color: var(--accent); cursor: help; }
 /* The dev badge's details, shown at once on hover or keyboard focus. Anchored to
-   the brand so the card is the sidebar's width and a long folder wraps rather
+   the brand so the card is the sidebar's width and a long branch wraps rather
    than being cut off by the sidebar's scroll. */
 .dev-card { display: none; position: absolute; left: 0; right: 0; top: calc(100% - var(--s4)); z-index: 30;
             padding: 8px 10px; border-radius: 8px; background: var(--raised); border: 1px solid var(--line-2);

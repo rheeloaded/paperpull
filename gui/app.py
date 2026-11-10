@@ -69,9 +69,9 @@ try:
 except Exception:
     VERSION = "0.1.0"
 
-# The branch, commit and folder of the checkout the panel runs from, for a
-# developer with several worktrees to see which one this page is. Nothing in
-# PaperPull Server or the built package, which run no checkout of their own.
+# The branch and commit of the checkout the panel runs from, for a developer
+# with several worktrees to see which one this page is. Nothing in PaperPull
+# Server or the built package, which run no checkout of their own.
 _DEV_INFO_CACHE: Optional[tuple[float, Optional[dict]]] = None
 
 
@@ -81,8 +81,11 @@ def _git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def _dev_info(force_refresh: bool = False) -> Optional[dict]:
-    """Development branch, commit, root folder, and unedited status when running
-    from a git checkout. None in server mode, packaged mode, or outside git."""
+    """The branch and commit of the git checkout the panel runs from, and
+    whether it has changes, or None on PaperPull Server, in the built
+    package, outside a checkout, and whenever git is missing or fails. Never
+    its folder, since a path names whose computer it is, and the page is
+    what a screenshot in an issue shows."""
     global _DEV_INFO_CACHE
     if server_mode.enabled() or _is_packaged():
         return None
@@ -98,17 +101,24 @@ def _dev_info(force_refresh: bool = False) -> Optional[dict]:
         return None
 
     try:
-        branch = (_git(repo_dir, "branch", "--show-current").stdout.strip()
-                  or _git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-                  or "HEAD")
-        commit = _git(repo_dir, "rev-parse", "--short", "HEAD").stdout.strip() or "unknown"
-        status = _git(repo_dir, "status", "--porcelain")
-        info = {
-            "branch": branch,
-            "commit": commit,
-            "root": str(repo_dir),
-            "clean": status.returncode == 0 and not status.stdout.strip(),
-        }
+        # A .git that git cannot read, a worktree's copied without its
+        # repository say, is no checkout to name.
+        head = _git(repo_dir, "rev-parse", "--short", "HEAD")
+        commit = head.stdout.strip() if head.returncode == 0 else ""
+        if not commit:
+            info = None
+        else:
+            branch = (_git(repo_dir, "branch", "--show-current").stdout.strip()
+                      or _git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+                      or "HEAD")
+            # Without the index's lock, which a git working in this checkout
+            # at that moment would otherwise find taken.
+            status = _git(repo_dir, "--no-optional-locks", "status", "--porcelain")
+            info = {
+                "branch": branch,
+                "commit": commit,
+                "clean": status.returncode == 0 and not status.stdout.strip(),
+            }
     except Exception:
         info = None
 
@@ -5994,7 +6004,6 @@ def index() -> str:
         # macOS), so it took several tries to read.
         rows = "".join("<dt>%s</dt><dd>%s</dd>" % (label, html.escape(value, quote=False))
                        for label, value in (("Branch", dev["branch"]), ("Commit", dev["commit"]),
-                                            ("Folder", dev["root"]),
                                             ("Status", "clean" if dev.get("clean") else "modified")))
         dev_badge_html = (f'<span id="devbadge" class="badge dev-badge">'
                           f'{html.escape(badge_text, quote=False)}'
@@ -6005,7 +6014,6 @@ def index() -> str:
             f'<p class="muted small" id="g-dev-info" style="margin-top: 8px;">'
             f'<b>Development branch:</b> {html.escape(dev["branch"], quote=False)} '
             f'({html.escape("clean" if dev.get("clean") else "modified", quote=False)})<br>'
-            f'<b>Root folder:</b> <code>{html.escape(dev["root"], quote=False)}</code><br>'
             f'<b>Commit:</b> <code>{html.escape(dev["commit"], quote=False)}</code></p>'
         )
         page = page.replace('<p class="muted small" id="g-dev-info" hidden style="margin-top: 8px;"></p>', about_text, 1)
