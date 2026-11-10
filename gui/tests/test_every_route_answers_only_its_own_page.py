@@ -254,6 +254,7 @@ ROUTES = {
     ("POST", "/api/export/reveal"): dict(body={}, desktop="changes", server="reads"),
     ("GET", "/api/export/download"): dict(desktop="reads", server="reads"),
     ("GET", "/api/status"): dict(desktop="reads", server="reads"),
+    ("GET", "/api/finishing"): dict(desktop="reads", server="reads"),
     ("GET", "/api/accounts"): dict(desktop="reads", server="reads"),
     ("POST", "/api/reveal"): dict(body={"app": SHOP, "account": "primary"},
                                   desktop="changes", server="reads"),
