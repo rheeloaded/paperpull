@@ -182,7 +182,10 @@ def stop_reason() -> str:
     while link is not None and id(link) not in seen:
         # A list that stopped partway is its provider's page not reading as
         # expected too. Each app that has one keeps its own class, in its own
-        # site file, so it is known here by name.
+        # site file, so it is known here by name. Only that name is, so a
+        # class an app puts under it for a stop a sign-in may cure, as
+        # Charles Schwab's for an answer refused, gives no reason, and the
+        # panel offers the sign-in first.
         if isinstance(link, Stop) or type(link).__name__ == "ListStopped":
             return "page"
         seen.add(id(link))

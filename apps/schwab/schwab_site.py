@@ -428,6 +428,26 @@ class ListStopped(Exception):
     ended clean with no documents at all (#137)."""
 
 
+class AnswerRefused(ListStopped):
+    """The gateway gave no token, or refused an answer with 401 or 403 even
+    with a fresh token. That is how it answers once a sign-in has ended on
+    Charles Schwab's side while the window still shows the account. It stops
+    the list as any other ListStopped does. Only a class named ListStopped
+    is said to the panel as a page that changed (run_reporting.stop_reason),
+    so this one is not, and the panel still offers a sign-in first."""
+
+
+# The answers a session that has ended gets. _gateway_call gives 0 when the
+# token endpoint gave no token.
+REFUSED = (0, 401, 403)
+
+
+def _answer_stopped(what: str, status) -> ListStopped:
+    """The stop for an answer that came back as anything but 200."""
+    refused = type(status) is int and status in REFUSED
+    return (AnswerRefused if refused else ListStopped)(f"the {what} answer came back as {status}")
+
+
 def list_accounts(page) -> List[dict]:
     """Every account of this sign-in, from the two lists Charles Schwab has
     been seen to keep them in. A sign-in with accounts has rows in one of
@@ -438,7 +458,7 @@ def list_accounts(page) -> List[dict]:
     if res.get("status") != 200 or not isinstance(body, dict):
         log.info("accounts API answered %s %r", res.get("status"),
                  (res.get("text") or "")[:120])
-        raise ListStopped(f"the accounts answer came back as {res.get('status')}")
+        raise _answer_stopped("accounts", res.get("status"))
     selector = body.get("accountSelectorData")
     brokerage = selector.get("brokerageAccountList") if isinstance(selector, dict) else None
     if not isinstance(brokerage, dict):
@@ -505,7 +525,7 @@ def list_documents(page, accounts: List[dict],
     if res.get("status") != 200 or not isinstance(body, dict):
         log.info("documents API answered %s %r", res.get("status"),
                  (res.get("text") or "")[:120])
-        raise ListStopped(f"the documents answer came back as {res.get('status')}")
+        raise _answer_stopped("documents", res.get("status"))
     if body.get("nonCharitableSuccess") is False:
         log.warning("documents API: nonCharitableSuccess=false (brokerage list may be partial)")
     if body.get("charitableSuccess") is False:
