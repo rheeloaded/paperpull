@@ -5232,14 +5232,45 @@ def _within(path, folder) -> bool:
         return False
     if where == home or home in where.parents:
         return True
-    # A Mac tells names apart without case, as _in_root_name has it, so
-    # "target receipts" is the folder "Target Receipts", made yet or not.
-    # Windows paths already compare so, and resolve() on a Mac keeps the
-    # spelling it was given.
+    # A Mac's disk most often tells names apart without case, as
+    # _in_root_name has it, so "target receipts" can be the folder "Target
+    # Receipts", and resolve() there keeps the spelling it was given.
+    # Windows paths already compare so. Whether it is, the disk says.
     if sys.platform == "darwin":
         home_name = str(home).casefold()
-        return any(str(step).casefold() == home_name for step in (where, *where.parents))
+        return any(str(step).casefold() == home_name and _one_folder(step, home)
+                   for step in (where, *where.parents))
     return False
+
+
+def _one_folder(spelled: Path, home: Path) -> bool:
+    """Whether spelled, the path home in other letter case, is that folder
+    on this disk. A Mac's disk can be formatted to tell case apart, and then
+    the two are two folders. The nearest folder made of home's is asked. A
+    disk without case finds it in either spelling, and finds a name not yet
+    made in it as it finds the names already there. A disk that cannot say
+    has the two taken as one, which refuses more than it has to."""
+    try:
+        made = home
+        while not made.exists():
+            if made.parent == made:
+                return True
+            made = made.parent
+        above = len(home.parts) - len(made.parts)
+        twin = spelled.parents[above - 1] if above else spelled
+        if not (twin.exists() and os.path.samefile(twin, made)):
+            return False
+        if not above:
+            return True
+        with os.scandir(made) as names:
+            for entry in names:
+                other = entry.name.swapcase()
+                if other != entry.name and other.swapcase() == entry.name:
+                    other = os.path.join(made, other)
+                    return os.path.exists(other) and os.path.samefile(other, entry.path)
+        return True
+    except (OSError, ValueError, IndexError):
+        return True
 
 
 def _profiles_known(apps: dict) -> list:
@@ -5300,12 +5331,16 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
                         "Choose a folder of its own." % who)
             if (name, other) == (app_name, account) and _within(target, root):
                 # Inside its own folder it may be, but not where a document
-                # that failed its check or a run's own records are kept.
+                # that failed its check or a run's own records are kept, in
+                # any letter case, as a run tells them (core storage
+                # _in_a_kept_folder). The folder in it is counted, not
+                # matched, since on a Mac its spelling can be another.
                 try:
-                    first = target.resolve().relative_to(root.resolve()).parts[:1]
+                    first = target.resolve().parts[len(root.resolve().parts):][:1]
                 except (ValueError, OSError, RuntimeError):
                     first = ()
-                if first and (first[0] in KEPT_FOLDERS or first[0].startswith(".")):
+                kept = {f.casefold() for f in KEPT_FOLDERS}
+                if first and (first[0].casefold() in kept or first[0].startswith(".")):
                     return ("That folder is inside %s, where documents that failed their "
                             "check or a run's own logs and backups are kept. Choose a folder of their "
                             "own." % first[0])

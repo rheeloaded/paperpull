@@ -128,7 +128,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Windows does without case and a Mac did not, so the panel saved such a
   folder there and two accounts' documents would have shared it. The
   suites run on Windows in CI, where it held, and the test that says so
-  failed only on a Mac.
+  failed only on a Mac. A Mac disk formatted to tell case apart is asked,
+  and there the two spellings stay two folders. A folder inside an
+  account's own Manual Review, Logs, Diagnostics or Backups is refused in
+  any letter case, as a run already refused it. Contributed by
+  @JasperDale420.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On
