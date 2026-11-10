@@ -182,6 +182,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its letters as plain ASCII letters only, so an address spelled with a
   look-alike letter, which a browser follows as a path on the site, is
   refused.
+- **A copy of a provider's example config is no account (#196).** iCloud
+  keeps both sides of a clash as `config.example 2.json`, and Finder's
+  Duplicate makes `config.example copy.json`. The control panel listed
+  each as an account, "example 2", which then said it shared a browser
+  with the real account and asked for a port to be changed in the copy. A
+  copy that holds only the example's settings is now passed over by the
+  panel, by the port check Login makes, by the naming page and by Export
+  history. Contributed by @JasperDale420. Before merging, a copy somebody
+  filled in, with any setting changed or added, or without the example's
+  `cdp_url`, `output_dir` or `profile_dir`, stays their account and is still
+  checked for a shared port, and a copy is listed whenever it or the
+  example beside it cannot be read.
 
 ## [0.62.0] - 2026-11-09
 

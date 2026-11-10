@@ -839,17 +839,27 @@ def _login_flag(script: Path) -> str:
     return "--open-browser" if "--open-browser" in text else "--login"
 
 
-# The example config and the copies a sync service or Finder makes of it,
-# "config.example 2.json" from iCloud or "config.example copy.json". None is
-# an account: the panel names an account only in lowercase letters, digits,
-# - or _ (_LABEL_RE), so no account it made has a space in its name.
-_EXAMPLE_CONFIG_RE = re.compile(r"config\.example(?: \d+| copy(?: \d+)?)?\.json", re.I)
+def _is_example(cfg: Path) -> bool:
+    """Whether a config beside a provider is its example, or a copy a sync
+    service or Finder made of it, "config.example 2.json" from iCloud or
+    "config.example copy.json", that nobody filled in. None of those is an
+    account. The test is paperpull_core.ports.is_example, which Login's
+    port check reads by too, so a copy somebody filled in is an account in
+    both. Without the core only the example itself is passed over, and a
+    copy is listed, since an account hidden is never run."""
+    mod = _ports()
+    try:
+        if mod is not None:
+            return bool(mod.is_example(cfg))
+    except Exception:
+        pass
+    return cfg.name == "config.example.json"
 
 
 def _accounts(app_dir: Path):
     accts = ["primary"]
     for cfg in sorted(app_dir.glob("config.*.json")):
-        if _EXAMPLE_CONFIG_RE.fullmatch(cfg.name):
+        if _is_example(cfg):
             continue
         name = cfg.name[len("config."):-len(".json")]
         # Linux and macOS take a line break in a file name, and the panel
@@ -4787,9 +4797,11 @@ def _read_json(p: Path):
 
 
 def _config_files(d: Path) -> list:
-    """Every account's config in an install, the first person's first."""
+    """Every account's config in an install, the first person's first, the
+    ones _accounts lists. A copy of the example nobody filled in is not
+    written to, since a pattern written into it would make it an account."""
     out = [d / "config.json"] if (d / "config.json").is_file() else []
-    out += [p for p in sorted(d.glob("config.*.json")) if p.name != "config.example.json"]
+    out += [p for p in sorted(d.glob("config.*.json")) if not _is_example(p)]
     return out
 
 

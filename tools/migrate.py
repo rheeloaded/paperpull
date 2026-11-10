@@ -141,6 +141,7 @@ if (_CORE / "paperpull_core").is_dir():
     sys.path.insert(0, str(_CORE))
 from paperpull_core.keys import account_component  # noqa: E402
 from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
+from paperpull_core.ports import is_example  # noqa: E402
 from paperpull_core.storage import json_text, sanitize_component  # noqa: E402
 
 # The file this writes. Version 1 had one entry per folder and no people or
@@ -383,10 +384,12 @@ def _records(path: Path):
 
 def account_configs(install: Path) -> list:
     """(label, config file) for every person on an install, the first one,
-    "primary", first."""
+    "primary", first. The example and a copy of it nobody filled in are no
+    person's (paperpull_core.ports.is_example), as the control panel lists
+    them."""
     out = [("primary", install / "config.json")]
     for p in sorted(install.glob("config.*.json")):
-        if p.name != "config.example.json":
+        if not is_example(p):
             out.append((p.name[len("config."):-len(".json")], p))
     return out
 
