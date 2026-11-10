@@ -167,6 +167,9 @@ class RawDoc:
     tag: str = ""
     document_id: str = ""
     account_token: str = ""
+    # The last four digits the page's account switcher showed when this
+    # document's list answered, "" when they could not be read.
+    account_digits: str = ""
     document_size: str = ""
     row_index: int = 0
     kind: str = "doc"
@@ -187,13 +190,18 @@ class RawDoc:
 
 class Listed(list):
     """The documents a list held. passed_over names each part of it that
-    was not read, so the list is not whole when it names any."""
+    was not read, so the list is not whole when it names any. token is the
+    account token the list was asked with and digits the last four the
+    account switcher showed, each "" when there is none to read."""
     passed_over: tuple = ()
+    token: str = ""
+    digits: str = ""
 
 
-def _listed(items, passed_over=()) -> Listed:
+def _listed(items, passed_over=(), token: str = "", digits: str = "") -> Listed:
     out = Listed(items)
     out.passed_over = tuple(sorted(set(passed_over)))
+    out.token, out.digits = token, digits
     return out
 
 
@@ -228,6 +236,7 @@ SESSION = BankingSession()
 EMPTY_LIST = "list that answered with no documents"
 NOT_A_LIST = "answer that is not a list of documents"
 SHORT_OF_COUNT = "list shorter or longer than its own count"
+NO_COUNT = "list that says no count of its own"
 NO_ID = "document with no id"
 NO_DATE = "document whose date could not be read"
 UNKNOWN_KIND = "document of a kind this app does not know"
@@ -284,7 +293,9 @@ def parse_banking_document_list(data: dict, account_label: str = "Business Check
     its tax year. A document whose id, month or year cannot be read, or of
     a kind this app does not know, is left out and named in passed_over, so
     the list is not whole, and nothing is filed under a date or an id that
-    was guessed. So is an answer holding a count its list disagrees with."""
+    was guessed. So is an answer holding a count its list disagrees with,
+    and an answer holding no count, since nothing else says the page asked
+    for all of it in one answer."""
     docs: List[RawDoc] = []
     passed_over = set()
     if not isinstance(data, dict) or not isinstance(data.get("statements"), list):
@@ -295,7 +306,10 @@ def parse_banking_document_list(data: dict, account_label: str = "Business Check
     if not statements:
         passed_over.add(EMPTY_LIST)
     count = _count_of(data)
-    if count is not None and count != len(statements):
+    if count is None:
+        log.warning("The documents list says no count of its own, so it is not read as whole")
+        passed_over.add(NO_COUNT)
+    elif count != len(statements):
         log.warning("The documents list says it holds %d and holds %d", count, len(statements))
         passed_over.add(SHORT_OF_COUNT)
 
@@ -437,11 +451,10 @@ def clean_account_name(raw: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def detect_account_label(page) -> str:
-    """The account the page's account switcher shows, its name and the last
-    four of its number, or "" when the switcher cannot be read. The page's
-    other text is not read for it, since a name and four digits there may
-    be anything."""
+def read_switcher(page):
+    """The name and the last four digits of the account the page's account
+    switcher shows, each "" when it cannot be read. The page's other text is
+    not read for them, since a name and four digits there may be anything."""
     try:
         for sel in (_SWITCHER_SELECTED_DISPLAY_SEL, _SWITCHER_COMBOBOX_SEL):
             loc = page.locator(sel)
@@ -452,15 +465,19 @@ def detect_account_label(page) -> str:
                 name = clean_account_name(name_el.first.inner_text()) if name_el.count() and name_el.first.is_visible() else ""
                 num = num_el.first.inner_text() if num_el.count() and num_el.first.is_visible() else ""
                 digits = re.sub(r"\D", "", num)
-                if digits and len(digits) >= 4:
-                    digits = digits[-4:]
-                if name and digits:
-                    return f"{name} {digits}"
-                if name:
-                    return name
+                digits = digits[-4:] if len(digits) >= 4 else ""
+                if name or digits:
+                    return name, digits
     except Exception:
         pass
-    return ""
+    return "", ""
+
+
+def detect_account_label(page) -> str:
+    """The account the page's account switcher shows, its name and the last
+    four of its number, or "" when the switcher cannot be read."""
+    name, digits = read_switcher(page)
+    return f"{name} {digits}" if name and digits else name
 
 
 def on_documents_page(page) -> bool:
@@ -554,11 +571,16 @@ def collect_documents(page, session: Optional[BankingSession] = None) -> Optiona
     if len(tokens) > 1:
         log.warning("The page asked for the documents lists of %d accounts", len(tokens))
         return _listed([], passed_over | {SEVERAL_ACCOUNTS})
+    token = next(iter(tokens), "")
 
+    # The switcher is read even when the config names the account, since its
+    # digits are what says which account the page shows.
+    name, digits = read_switcher(page)
     if session.label_configured and session.account_label:
         label = session.account_label
     else:
-        label = detect_account_label(page) or account_kind_from_url(page.url or "")
+        label = ((f"{name} {digits}" if name and digits else name)
+                 or account_kind_from_url(page.url or ""))
 
     docs, seen = [], set()
     for a in good:
@@ -567,9 +589,10 @@ def collect_documents(page, session: Optional[BankingSession] = None) -> Optiona
         for d in listed:
             if d.document_id not in seen:
                 seen.add(d.document_id)
+                d.account_digits = digits
                 docs.append(d)
     log.info("collect_documents found %d documents", len(docs))
-    return _listed(docs, passed_over)
+    return _listed(docs, passed_over, token=token, digits=digits)
 
 
 # ---------------------------------------------------------------------------
