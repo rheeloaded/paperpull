@@ -170,6 +170,26 @@ def fresh_checkout() -> bool:
         return False
 
 
+# Said when a fresh checkout's apps/ is chosen as the PaperPull folder, from
+# the welcome, Settings or a history import (_in_fresh_checkout_apps).
+CHECKOUT_APPS = ("PaperPull's own apps folder holds each provider's template, not your documents, so "
+                 "neither it nor a folder inside it can be your PaperPull folder. Choose another "
+                 "folder, such as one in Documents.")
+
+
+def _in_fresh_checkout_apps(root) -> bool:
+    """Whether `root` is a fresh checkout's apps/ (fresh_checkout) or a folder
+    inside it. Chosen as the PaperPull folder, its templates would read as
+    providers already set up, and each sign-in and document would go into
+    the git tree."""
+    if not fresh_checkout():
+        return False
+    try:
+        return Path(root).expanduser().resolve().is_relative_to(_DEFAULT_ROOT.resolve())
+    except (OSError, ValueError):
+        return False
+
+
 # -- the sample archive -------------------------------------------------------
 #
 # A folder of invented statements and receipts, written on request rather
@@ -2186,6 +2206,8 @@ def _root_problem(raw: str):
         return None, "Give the full path, starting from the drive (C:\\) or from /."
     if root.exists() and not root.is_dir():
         return None, "That is a file, not a folder. Choose a folder."
+    if _in_fresh_checkout_apps(root):
+        return None, CHECKOUT_APPS
     above = root
     while not above.exists() and above.parent != above:
         above = above.parent
@@ -2333,6 +2355,8 @@ async def api_root_set(request: Request):
                                  "(C:\\) or from /.")
     if not root.is_dir():
         raise HTTPException(400, "That folder does not exist. Check the path, or create the folder first.")
+    if _in_fresh_checkout_apps(root):
+        raise HTTPException(400, CHECKOUT_APPS)
     data = _read_settings()
     data["apps_root"] = str(root.resolve())
     try:
@@ -3355,6 +3379,9 @@ def _history_root(raw: str):
     root the panel is on. (root, whether it was chosen here)."""
     if server_mode.enabled():
         return server_mode.data_root(), False
+    # A fresh checkout's apps/ is its templates, so nothing is imported there.
+    if _in_fresh_checkout_apps(Path(raw).expanduser() if raw else apps_root()):
+        raise HTTPException(400, CHECKOUT_APPS)
     if not raw:
         return apps_root(), False
     root = Path(raw).expanduser()

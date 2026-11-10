@@ -2432,13 +2432,18 @@ function nmRename(apply) {
 
 // -- settings -----------------------------------------------------------------------
 function renderSettings() {
-  $('root').textContent = META.apps_root || '';
+  // A fresh checkout's apps folder holds the templates (gui/app.py
+  // fresh_checkout), so it is not named as the folder or offered as one.
+  const fresh = Boolean(META.fresh_checkout);
+  $('root').textContent = fresh ? 'None chosen yet' : META.apps_root || '';
   $('rootwhy').textContent = inSample() ? 'This is the sample archive. Leave it to see your own.'
     : SERVER ? 'The data folder beside compose.yaml on your server, named /data inside the container.'
     : META.root_source === 'environment' ? 'Set by the APPS_ROOT setting PaperPull was started with.'
+    : fresh ? "This copy of PaperPull is its source, and its apps folder holds each provider's template, not your " +
+      'documents. Set up from the welcome, or use a folder that already holds your providers.'
     : 'Each provider has a folder of its own in here, holding its documents and its download history.';
   $('existing').hidden = SERVER || inSample() || META.root_source === 'environment';
-  $('rootinput').value = $('rootinput').value || META.apps_root || '';
+  $('rootinput').value = $('rootinput').value || (fresh ? '' : META.apps_root) || '';
   $('rootinput').placeholder = (META.apps_root || '').startsWith('/') ? '/Users/you/Documents/PaperPull' : 'C:\\Users\\you\\Documents\\PaperPull';
   $('stmove').hidden = inSample();
   if (!hxWelcome()) placeMove(false);
@@ -2463,7 +2468,7 @@ function dcPick() {
   return app ? {app, account: account || 'primary'} : null;
 }
 function openDocuments() {
-  $('g-docscard').hidden = inSample() || !Object.keys(META.apps || {}).length;
+  $('g-docscard').hidden = inSample() || Boolean(META.fresh_checkout) || !Object.keys(META.apps || {}).length;
   if ($('g-docscard').hidden) return;
   const sel = $('dcpick'), was = sel.value;
   const opts = [];
@@ -2606,7 +2611,7 @@ async function saveRoot() {
   XL_LOADED = false;
   // Somebody sent here from the welcome, with no providers before, goes on
   // to the ones just found, since Settings has nothing more for them.
-  const first = !Object.keys((META && META.apps) || {}).length;
+  const first = !Object.keys((META && META.apps) || {}).length || Boolean(META && META.fresh_checkout);
   await load();
   if (first && d.apps) location.hash = '#/';
 }

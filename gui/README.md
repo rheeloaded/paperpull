@@ -69,7 +69,11 @@ Versions before 0.19.1 kept the Windows file at
 and none in Roaming AppData, it moves it across. If the move fails, the panel
 goes on using the file where it is.
 
-Running from a checkout of the repo, it uses `../apps` unless told otherwise.
+Running from a checkout of the repo, it uses `../apps` unless told otherwise,
+but only once one of the apps there has a `config.json`, which running an
+app from the terminal needs. Until then each folder in `../apps` is only a
+provider's template, so the welcome shows, and the welcome, Settings and
+Import history refuse `../apps` as the PaperPull folder.
 The `APPS_ROOT` environment variable overrides both of the above, which is
 handy for development:
 

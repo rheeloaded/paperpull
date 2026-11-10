@@ -858,3 +858,97 @@ def test_an_environment_folder_a_package_and_a_server_are_never_one(checkout, mo
         m.setattr(app_module.server_mode, "enabled", lambda: True)
         assert app_module.fresh_checkout() is False
     assert app_module.fresh_checkout() is True
+
+
+def test_its_apps_folder_is_never_taken_for_the_paperpull_folder(checkout, settings, tmp_path):
+    """Typed in the welcome, used from Settings, where it was filled in
+    already, or where a history file goes, its templates read as providers
+    set up, and each sign-in and document went into the git tree."""
+    for root in (checkout, checkout / "App 0", checkout / "Mine"):
+        assert app_module._root_check(str(root)) == {"ok": False, "problem": app_module.CHECKOUT_APPS}
+        with pytest.raises(fastapi.HTTPException) as e:
+            asyncio.run(app_module.api_create(_Req({"root": str(root), "providers": ["github"]})))
+        assert e.value.status_code == 400 and e.value.detail == app_module.CHECKOUT_APPS
+    for root in (checkout, checkout / "App 0"):
+        with pytest.raises(fastapi.HTTPException) as e:
+            _post({"root": str(root)})
+        assert e.value.status_code == 400 and e.value.detail == app_module.CHECKOUT_APPS
+    for raw in ("", str(checkout)):
+        with pytest.raises(fastapi.HTTPException) as e:
+            app_module._history_root(raw)
+        assert e.value.status_code == 400 and e.value.detail == app_module.CHECKOUT_APPS
+    assert not settings.exists(), "nothing was remembered"
+    assert sorted(p.name for p in checkout.rglob("*")) == ["App 0", "App 1", "app0_docs.py", "app1_docs.py"]
+    assert app_module.fresh_checkout() is True
+    assert app_module._root_check(str(tmp_path / "PaperPull"))["ok"] is True
+
+
+def test_once_somebody_runs_from_it_it_can_be_chosen(checkout):
+    (checkout / "App 1" / "config.json").write_text("{}", encoding="utf-8")
+    assert app_module._root_check(str(checkout))["ok"] is True
+    assert _post({"root": str(checkout)})["apps"] == 2
+
+
+def _in_the_page(script, arg):
+    """`script` run in the panel's own page, in Playwright's own Chromium,
+    from an invented address with nothing else answered, with META the
+    /api/apps answer of a checkout whose apps/ holds one template."""
+    sync_api = pytest.importorskip("playwright.sync_api")
+    html = (app_module.HTML.replace("__FOOTER__", "").replace("__VERSION__", "0.0.0")
+            .replace("__SERVER_BAR__", "").replace("__SERVER__", "false"))
+    with sync_api.sync_playwright() as pw:
+        try:
+            chromium = pw.chromium.launch()
+        except sync_api.Error as e:
+            pytest.skip("Playwright's own Chromium is not installed here, %s"
+                        % str(e).strip().splitlines()[0])
+        try:
+            tab = chromium.new_page()
+
+            def answer(route):
+                if route.request.url == "http://panel.test/":
+                    route.fulfill(status=200, content_type="text/html", body=html)
+                else:
+                    route.abort()
+            tab.route("**/*", answer)
+            tab.goto("http://panel.test/")
+            tab.evaluate("""(fresh) => {
+                META = {apps: {'Chase Statements': {accounts: ['primary']}}, apps_root: '/repo/apps',
+                        root_source: 'default', fresh_checkout: fresh};
+            }""", arg)
+            return tab.evaluate(script)
+        finally:
+            chromium.close()
+
+
+@pytest.mark.parametrize("fresh", [True, False], ids=["fresh checkout", "set up"])
+def test_settings_names_no_folder_for_a_fresh_checkout(fresh):
+    """Settings named its apps folder as the PaperPull folder, said each
+    provider kept its documents and history in it, filled it in to be used,
+    and listed its templates as accounts to give a documents folder."""
+    root, why, typed, docs_hidden = _in_the_page("""() => {
+        $('rootinput').value = '';
+        renderSettings();
+        return [$('root').textContent, $('rootwhy').textContent, $('rootinput').value,
+                $('g-docscard').hidden];
+    }""", fresh)
+    if fresh:
+        assert root == "None chosen yet" and typed == "" and docs_hidden
+        assert "template" in why and "holding its documents" not in why
+    else:
+        assert root == typed == "/repo/apps" and not docs_hidden
+        assert "holding its documents" in why
+
+
+def test_a_folder_chosen_in_settings_from_a_fresh_checkout_opens_its_accounts():
+    """Sent to Settings by the welcome, as somebody with no providers is, and
+    so on to the ones just found, though the templates were in the list."""
+    went = _in_the_page("""async () => {
+        postJSON = async () => ({apps: 2});
+        load = async () => {};
+        location.hash = '#/settings';
+        $('rootinput').value = '/home/pat/PaperPull';
+        await saveRoot();
+        return location.hash;
+    }""", True)
+    assert went == "#/"
