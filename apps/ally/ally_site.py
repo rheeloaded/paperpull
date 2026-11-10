@@ -84,7 +84,7 @@ from urllib.parse import urlsplit
 from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core import controls as _controls
-from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.urls import is_safe_url as _host_allows, where_it_leads
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 from paperpull_core.capture import is_document as _is_document
@@ -1394,7 +1394,7 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
         # The href comes off the page, so it can be anything. Without this the
         # next line fetched it with the live banking session attached.
         if not is_safe_url(url):
-            log.error("refusing an href that is not on Ally's host")
+            log.error("refusing an href that is not on Ally's host, at %s", where_it_leads(url))
             return False
         try:
             b64 = _fetch_as_b64(page, url)
@@ -1444,7 +1444,7 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
             # is minted by the page itself and has no host to check. A tab turned
             # away is never read, and is closed below like any other.
             if not url.startswith("blob:") and not is_safe_url(url):
-                log.error("refusing to fetch a document from outside Ally")
+                log.error("refusing to fetch a document from outside Ally, at %s", where_it_leads(url))
                 b64 = None
             else:
                 b64 = _fetch_as_b64(page, url) if url.startswith("blob:") else \

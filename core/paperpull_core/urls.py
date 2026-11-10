@@ -71,3 +71,25 @@ def is_safe_url(url: str, allowed_hosts: Iterable[str], *, subdomains: bool = Tr
         if host == a or (subdomains and host.endswith("." + a)):
             return True
     return False
+
+
+def where_it_leads(url: str) -> str:
+    """Where an address leads, for the line that says one was refused: its
+    scheme, host and any port, and never its path, query or fragment, which
+    can carry an account's ids, nor a user or password in it. A refusal that
+    said nothing of where left nothing to tell a guard working from a page
+    gone wrong."""
+    try:
+        parts = urlsplit(url or "")
+    except ValueError:
+        return "an address that could not be read"
+    scheme = (parts.scheme or "").lower()
+    if not scheme:
+        return "an address with no scheme"
+    try:
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        host, port = parts.hostname, None
+    if not host:
+        return "an address with no host (%s:)" % scheme[:20]
+    return "%s://%s%s" % (scheme[:20], host[:100], ":%d" % port if port else "")

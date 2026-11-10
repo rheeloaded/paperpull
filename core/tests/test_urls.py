@@ -110,3 +110,20 @@ def test_subdomains_off_lists_the_subdomains_it_wants():
     hosts = {"chase.com", "secure.chase.com"}
     assert is_safe_url("https://secure.chase.com/x", hosts, subdomains=False)
     assert not is_safe_url("https://other.chase.com/x", hosts, subdomains=False)
+
+
+# -- where a refused address leads ---------------------------------------------
+
+def test_a_refusal_says_where_the_address_leads_and_nothing_an_account_is_in():
+    from paperpull_core.urls import where_it_leads
+    assert where_it_leads("https://evil.example/statements/12345?acct=9876#x") == "https://evil.example"
+    assert where_it_leads("https://user:secret@evil.example:8443/a") == "https://evil.example:8443"
+    assert where_it_leads("HTTP://Evil.Example/a") == "http://evil.example"
+    assert where_it_leads("about:blank") == "an address with no host (about:)"
+    assert where_it_leads("javascript:alert(1)") == "an address with no host (javascript:)"
+    assert where_it_leads("/statements/12345") == "an address with no scheme"
+    assert where_it_leads("") == "an address with no scheme"
+    assert where_it_leads(None) == "an address with no scheme"
+    assert where_it_leads("https://[::1") == "an address that could not be read"
+    for said in (where_it_leads("https://user:secret@evil.example/12345?acct=9876"),):
+        assert "secret" not in said and "12345" not in said and "9876" not in said

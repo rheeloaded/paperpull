@@ -160,8 +160,9 @@ def test_a_tab_off_allys_hosts_is_never_fetched_or_saved(ally, tmp_path, caplog,
     assert len(ally.heard) == 1, "the press opened its one tab"
     assert ally.asked[ELSEWHERE] == ["document"], "the tab loaded and the app never fetched it"
     assert ally.fetched == []
-    assert any("refusing to fetch a document from outside Ally" in r.getMessage()
-               for r in caplog.records), caplog.text
+    assert any("refusing to fetch a document from outside Ally, at https://elsewhere.example"
+               == r.getMessage() for r in caplog.records), caplog.text
+    assert "statement.pdf" not in caplog.text, "where it leads, never what it asks for there"
     assert all(p.is_closed() for p in ally.heard), "the tab turned away is closed, as every tab read is"
     assert ally.ctx.pages == [page]
 
