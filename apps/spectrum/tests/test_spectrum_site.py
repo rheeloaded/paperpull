@@ -1102,11 +1102,49 @@ class InPage(WithFakeClick):
             self.assertIn("isAccountTransfer=%s" % ("true" if family == "prior" else "false"), page.url)
 
     def test_both_statements_of_a_date_are_saved_in_one_run(self):
-        page = self.twins(on_press=own_copy)
-        current, prior = self.take(page, "current", TWIN_DAY), self.take(page, "prior", TWIN_DAY)
-        self.assertTrue(current[0], current[2])
-        self.assertTrue(prior[0], prior[2])
-        self.assertNotEqual(current[1].read_bytes(), prior[1].read_bytes())
+        """Each under its own account, in either order, whichever row each
+        account's statement is drawn on."""
+        def swapped(page, index):
+            lands(page, {1: 2, 2: 1}.get(index, index))
+        for on_row in (lands, swapped):
+            for first, second in (("current", "prior"), ("prior", "current")):
+                site._KEPT.clear()
+                for leftover in self.tmp.glob("*.pdf"):
+                    leftover.unlink()
+                page = self.twins(on_press=own_copy, on_row=on_row)
+                taken = {family: self.take(page, family, TWIN_DAY) for family in (first, second)}
+                for family, own in (("current", "own"), ("prior", "transfer")):
+                    ok, out, trace = taken[family]
+                    self.assertTrue(ok, trace)
+                    self.assertEqual(out.read_bytes(), spectrum_pdf(TWIN_DAY, own), (family, first))
+
+    def test_the_other_accounts_statement_printed_on_a_page_is_never_kept(self):
+        """The page a row opens names its account, and so must the PDF the
+        page asks for. One that answers with the other account's statement
+        of that date stops the run and saves nothing, whichever is taken."""
+        def other(page):
+            prior = "isAccountTransfer=true" in page.url
+            data = spectrum_pdf(TWIN_DAY, "own" if prior else "transfer")
+            page.emit("response", Resp(site.PDF_OPERATION,
+                                       {"statementId": sid(CUR if prior else PRI, TWIN_DAY), "otpCheck": True},
+                                       answer=pdf_answer(data)))
+            page.blob = blob_result(data)
+        for family in ("current", "prior"):
+            page = self.twins(on_press=other)
+            with self.assertRaises(pressing.Stop):
+                self.take(page, family, TWIN_DAY)
+            self.assertEqual(page.presses, 1)
+            self.assertEqual(list(self.tmp.glob("*.pdf")), [], family)
+
+    def test_one_file_printed_for_both_accounts_is_kept_once(self):
+        """The two statements of a date are two files. The same bytes for the
+        second stop the run rather than save the first account's twice."""
+        page = self.twins()
+        ok, out, trace = self.take(page, "current", TWIN_DAY)
+        self.assertTrue(ok, trace)
+        with self.assertRaises(pressing.Stop):
+            self.take(page, "prior", TWIN_DAY)
+        self.assertFalse((self.tmp / ("prior-%s.pdf" % TWIN_DAY)).exists())
 
     def test_a_second_press_that_opens_the_other_statement_again_stops_the_run(self):
         page = self.twins(on_row=lambda page, index: lands(page, 2))

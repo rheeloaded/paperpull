@@ -22,6 +22,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   time it reads the accounts.
 
 ### Fixed
+- **Spectrum takes both statements two accounts share a date on.** After a
+  transfer the current and the prior account can each have a statement of
+  one date, and their rows on Statements read alike, so both were refused
+  before any press and every run failed them. The app now presses the
+  first of the two rows, and when the page it opens is the other account's
+  statement it reads Statements again and presses the second, once. Each is
+  saved only from its own page, whose address and the PDF it asks for name
+  its account and date, and never as the same file as the other. Anything
+  else after a press still stops the run. Not yet run on a live account.
 - **Wealthfront never calls its list whole with a kind of statement left
   out.** The Documents page shows statements through a dropdown, and a kind
   it would not choose was logged and passed over, so the list was still
