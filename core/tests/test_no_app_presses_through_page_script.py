@@ -146,10 +146,11 @@ def sources(ends=(".py",)):
     for root in ROOTS:
         for folder, dirs, files in os.walk(REPO / root):
             # Pruned as the walk goes, so a linked environment is never
-            # entered, which was most of the census's time, and a copy a
-            # build made is never read as source.
+            # entered, which was most of the census's time, and neither a
+            # build copy nor a signed-in browser profile is read as source.
             dirs[:] = sorted(d for d in dirs if d != "tests" and d not in MADE_FOLDERS
-                             and not d.startswith((".", "__")) and not d.endswith(".egg-info"))
+                             and not d.startswith((".", "__")) and not d.endswith(".egg-info")
+                             and "browser-profile" not in d.lower())
             out.extend(Path(folder) / f for f in files
                        if f.endswith(ends) and not f.startswith("test_") and f != "conftest.py")
     return sorted(p for p in out if not is_test(p))
@@ -756,6 +757,22 @@ def test_a_copy_a_build_made_is_not_read_as_source(tmp_path, monkeypatch):
         (tmp_path / rel).write_text("", encoding="utf-8")
     monkeypatch.setitem(globals(), "REPO", tmp_path)
     assert [p.relative_to(tmp_path).as_posix() for p in sources()] == sorted(kept)
+
+
+def test_a_browser_profile_is_not_read_as_source(tmp_path, monkeypatch):
+    profile_scripts = [
+        "apps/sample/sample-browser-profile/Default/Extensions/addon/content.js",
+        "apps/sample/browser-profile/Default/extension.py",
+        "apps/sample/SAMPLE-BROWSER-PROFILE/Default/addon.js",
+    ]
+    source_scripts = ["apps/sample/sample_site.py", "gui/static/app.js"]
+    for rel in profile_scripts + source_scripts:
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("button.click()", encoding="utf-8")
+    monkeypatch.setitem(globals(), "REPO", tmp_path)
+    assert [p.relative_to(tmp_path).as_posix() for p in sources()] == source_scripts[:1]
+    assert [p.relative_to(tmp_path).as_posix() for p in page_scripts()] == source_scripts[1:]
 
 
 def test_every_press_made_through_page_script_was_reviewed(counted):

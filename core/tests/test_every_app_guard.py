@@ -414,7 +414,7 @@ _ALLOWLIST_NAMES = {"is_safe_control", "SAFE_DOC_CONTROL_RE", "SAFE_DOC_CONTROL_
 # document allowlist.
 CLICK_NOTHING = {
     "affirm", "anthem", "apple", "cetera", "citi", "dkb", "ezpassva", "fedex", "fidelity",
-    "gap", "github", "homedepot", "invest529", "irs", "kroger", "lowes", "myecp", "mypay",
+    "gap", "github", "homedepot", "ing", "invest529", "irs", "kroger", "lowes", "myecp", "mypay",
     "netbenefits", "nwnatural", "optum", "paylocity", "portlandgeneral", "sdge", "stripe",
     "tsp", "tualatin", "uber", "ukg", "ups", "verizonmobile", "ziply",
 }

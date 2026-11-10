@@ -80,6 +80,8 @@ def test_the_welcome_list_shows_the_card_never_the_github_table():
         assert "@" not in p["documents"] and "#" not in p["documents"]
     assert got["att"]["documents"] == "Monthly bills for wireless, fiber and internet"
     assert got["fedex"]["tested"] is False and got["chase"]["tested"] is True
+    assert got["ing"]["tested"] is True
+    assert got["ing"]["note"] == "Tested on one account so far, a populated archive not yet"
 
 
 @pytest.mark.parametrize("content", ["{not json", '{"groups": {}}', "[]", '{"groups": [], "providers": []}'])

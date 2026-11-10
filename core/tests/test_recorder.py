@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 import pytest
+import paperpull_core.recorder as recorder
 from paperpull_core.recorder import (REDACTED, Recorder, _CAPTURE_JS,
                                     concerns, page_to_watch,
                                     record_session)
@@ -276,6 +277,111 @@ def test_a_request_is_described_by_names_and_shapes_not_values():
     blob = json.dumps(r.report())
     for value in ("1234.56", "X1", "99887766"):
         assert value not in blob, value
+
+
+def test_html_responses_are_not_recorded_by_default():
+    r, page = rec()
+    response = FakeResponse("https://bank.example/postbox", ctype="text/html")
+    response.request.resource_type = "document"
+    page.emit("response", response)
+    assert r.requests == []
+
+
+def test_opted_in_html_records_metadata_but_does_not_read_request_or_response_bodies():
+    r, page = rec(include_html=True)
+    accessed = []
+
+    class Request:
+        method = "POST"
+        resource_type = "document"
+
+        @property
+        def post_data(self):
+            accessed.append("post_data")
+            return "owner=QxSecret"
+
+    response = FakeResponse("https://bank.example/postbox?account=QxToken123456&filter=income",
+                            ctype="text/html")
+    response.request = Request()
+
+    def body():
+        accessed.append("response body")
+        return {"owner": "QxSecret"}
+
+    response.json = body
+    page.emit("response", response)
+    assert len(r.requests) == 1
+    assert r.requests[0]["type"] == "html" and r.requests[0]["method"] == "POST"
+    assert r.requests[0]["query_keys"] == ["account", "filter"]
+    assert accessed == []
+    assert "QxSecret" not in json.dumps(r.report())
+    assert "QxToken123456" not in json.dumps(r.report())
+    assert "income" not in json.dumps(r.report())
+
+
+def test_opted_in_html_only_records_document_or_fetch_responses_on_the_provider():
+    r, page = rec(include_html=True)
+    for resource_type in ("document", "xhr", "fetch", "image"):
+        response = FakeResponse("https://bank.example/postbox", ctype="text/html")
+        response.request.resource_type = resource_type
+        page.emit("response", response)
+    external = FakeResponse("https://other.example/postbox", ctype="text/html")
+    external.request.resource_type = "document"
+    page.emit("response", external)
+    assert [entry["type"] for entry in r.requests] == ["html", "html", "html"]
+    assert r.dropped["off_host_request"] == 1
+
+
+def test_opted_in_html_omits_query_values_from_navigation_effects():
+    r, page = rec(include_html=True)
+    page.fire({"action": "click", "locator": {"how": "role", "role": "link",
+                                              "name": "Documents"},
+               "label": "Documents", "at": 1})
+    page.main_frame.url = "https://bank.example/postbox?filter=income"
+    page.emit("framenavigated", page.main_frame)
+    assert r.steps[0]["effect"]["navigated"] is True
+    assert "?" not in r.steps[0]["effect"]["landed_on"]
+    assert "income" not in json.dumps(r.report())
+
+
+def test_opted_in_html_reports_when_eligible_responses_exceed_the_limit(monkeypatch):
+    monkeypatch.setattr(recorder, "_MAX_REQUESTS", 1)
+    r, page = rec(include_html=True)
+    html = FakeResponse("https://bank.example/postbox", ctype="text/html")
+    html.request.resource_type = "document"
+    ignored = FakeResponse("https://bank.example/image", ctype="image/png")
+    page.emit("response", html)
+    page.emit("response", ignored)
+    page.emit("response", html)
+    assert len(r.requests) == 1
+    assert r.report()["dropped"]["request_limit"] == 1
+    assert "request limit reached" in r.summary()
+
+
+@pytest.mark.parametrize("attribute", ["resource_type", "method"])
+def test_a_response_recording_failure_is_reported_without_exposing_its_error(attribute):
+    r, page = rec(include_html=True)
+
+    class BrokenRequest:
+        @property
+        def resource_type(self):
+            if attribute == "resource_type":
+                raise RuntimeError("private response details")
+            return "document"
+
+        @property
+        def method(self):
+            if attribute == "method":
+                raise RuntimeError("private response details")
+            return "GET"
+
+    response = FakeResponse("https://bank.example/postbox", ctype="text/html")
+    response.request = BrokenRequest()
+    page.emit("response", response)
+    report = r.report()
+    assert report["dropped"]["unreadable_response"] == 1
+    assert "1 response(s) could not be recorded" in r.summary()
+    assert "private response details" not in json.dumps(report)
 
 
 def test_a_request_to_anywhere_but_the_provider_is_counted_not_described():
