@@ -40,7 +40,8 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
-from paperpull_core.run_reporting import NEW_LIST_NOTE, lists_what_it_saved, report_run_result
+from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
+                                          lists_what_it_saved, not_signed_in, report_run_result)
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import amexbanking_site as site
@@ -157,7 +158,7 @@ class App:
         # switcher, the URL, each list request's own token). The first record
         # discovered is not used: after a switch, or with a second config
         # sharing this folder, it names a different account.
-        configured_account = self.config.get("account_name") or self.config.get("account_label")
+        configured_account = self.config.get("account_name")
         if configured_account:
             site.SESSION.account_label = configured_account
             site.SESSION.label_configured = True
@@ -207,9 +208,7 @@ class App:
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
-                raise SystemExit(
-                    f"Could not connect to your signed-in browser at {cdp_url}.\n"
-                    f"Run login.bat first and keep that browser window OPEN.\n({e})")
+                raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
                 raise SystemExit("Connected browser has no context; open a tab and retry.")
             self._context = self._browser.contexts[0]
@@ -253,14 +252,28 @@ class App:
             pass
 
     def check_session(self, page) -> None:
-        if site.looks_signed_out(page):
-            self.write_failure("check the session", "the session has expired")
-            raise SystemExit("Signed-out screen detected. Please log in again via login.bat and retry.")
+        # Under the panel there is nobody to answer a prompt, so with no
+        # console the run stops on its own terms and says what to do. Progress
+        # is saved either way (#48).
         challenge = site.detect_security_challenge(page)
         if challenge:
+            self.progress.save(backup=True)
             print(f"\n!! {challenge}")
-            self.write_failure("check the session", challenge)
-            ask("Complete the challenge in your browser, then press Enter here to continue... ")
+            print("Stopped. Please resolve it yourself in the browser window.")
+            print("I will NOT attempt to bypass any security check.")
+            if browser_launcher.ask_or_none(
+                    "Press Enter once the page looks normal (or Ctrl+C to quit)... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
+        if site.looks_signed_out(page):
+            self.progress.save(backup=True)
+            print("\n!! American Express appears to have signed you out.")
+            print("Please sign in again in the open browser window.")
+            if browser_launcher.ask_or_none(
+                    "Press Enter after you are signed in... ") is None:
+                print("Then press Resume here to carry on from where this stopped.")
+                raise SystemExit(0)
+            site.ensure_statements(page)
 
     def cmd_open_browser(self):
         profile = Path(self.config["profile_dir"]).resolve()
@@ -270,6 +283,8 @@ class App:
         name = browser_launcher.open_signin_browser(profile, port, url,
                                                     mode=self.config.get("browser", "auto"),
                                                     prefer_real=True)
+        if not name:
+            raise SystemExit(NOTHING_OPENED)
         print(f"Opened {name} with your profile.")
         print("Sign in to American Express Business, open Statements, then leave that window open.")
 
@@ -289,7 +304,7 @@ class App:
         if not doc_types.wanted(doc.category, self.config):
             return False
         floor = self.args.start_date or self.config.get("default_start_date")
-        if floor and doc.date and doc.date < floor:
+        if floor and (not doc.date or doc.date < floor):
             return False
         if self.args.end_date and doc.date and doc.date > self.args.end_date:
             return False
@@ -344,19 +359,20 @@ class App:
 
         self.check_session(page)
         raw = site.collect_documents(page)
+        if not raw:
+            # Nothing captured: the list request timed out, was missed, or the
+            # page was not the account's. That is a listing that stopped, not
+            # an account with no documents, so it stays as started() noted it.
+            log.info("no documents were captured from the documents list")
+            print("\n!! No documents came back from the Documents and Statements list.")
+            print("   Discovery was not completed. Open the account's Statements page and run again.")
+            raise SystemExit(0)
         n_new = 0
         for d in raw:
             n_new += self._record_discover_doc(d)
 
         self.discovery.save()
-        if raw:
-            listing.read_whole(self)
-        else:
-            # Nothing captured: the list request timed out, was missed, or the
-            # page was not the account's. That is a listing that stopped, not
-            # an account with no documents, so it stays as started() noted it.
-            log.warning("No documents were captured from the documents list; "
-                        "this listing is not counted as whole.")
+        listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
@@ -395,13 +411,14 @@ class App:
             if rec.get("downloaded_ok"):
                 return True
             state = rec.get("state")
-            if state in (State.COMPLETED.value, State.PDF_VERIFIED.value, State.NO_RECEIPT_AVAILABLE.value):
+            if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
+                         State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
                 return True
             p = rec.get("pdf_path", "")
             if p and Path(p).exists():
                 if receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok:
                     rec["downloaded_ok"] = True
-                    rec["state"] = State.PDF_VERIFIED.value
+                    rec["state"] = State.COMPLETED.value
                     self.progress.update(doc.key, rec)
                     return True
         found = self._file_on_disk_for(doc)
@@ -412,7 +429,7 @@ class App:
         doc.pdf_path = str(found)
         doc.pdf_filename = found.name
         doc.downloaded_ok = True
-        doc.state = State.PDF_VERIFIED.value
+        doc.state = State.COMPLETED.value
         self.progress.update(doc.key, doc.to_dict())
         return True
 
@@ -435,7 +452,7 @@ class App:
                  for k, r in self.progress.data.items()
                  if k != doc.key and r.get("pdf_path")}
         min_bytes = self.config["min_pdf_bytes"]
-        candidates = [f for f in folder.glob(f"**/{doc.date}*.pdf")
+        candidates = [f for f in sorted(folder.glob(f"**/{doc.date}*.pdf"))
                       if f.is_file() and _path_key(f, self.paths.root) not in owned]
         suffix = (doc.document_id or "")[-6:]
         if suffix:
@@ -451,31 +468,38 @@ class App:
         return None
 
     def _on_its_site(self):
-        return tabs.on_its_site(self, site.is_safe_url, "American Express Business",
-                                self._open_documents)
-
-    def _open_documents(self, page):
-        if not site.ensure_statements(page):
-            self.check_session(page)
-            site.ensure_statements(page)
+        """The tab the next document is taken in, on American Express's own
+        site and never a tab of another site. As with the card app, the tab
+        the person signed in with is the one known to hold the session, so
+        with none of theirs on the site the run stops here and says so
+        (tabs.on_its_site)."""
+        return tabs.on_its_site(self, site.is_safe_url, "American Express Banking")
 
     def process(self, docs: List[Document], dry_run: bool = False):
-        to_process = [d for d in docs if not self._already_done(d)]
-        if self.args.max_docs:
-            to_process = to_process[:int(self.args.max_docs)]
-
-        print(f"\nDocuments to download: {len(to_process)} (of {len(docs)} in scope)")
-        if not to_process:
-            return
-
-        for i, doc in enumerate(to_process, 1):
+        limit = int(self.args.max_docs) if getattr(self.args, "max_docs", None) else 0
+        taken = 0
+        for i, doc in enumerate(docs, 1):
+            print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  {doc.category}  {doc.summary}")
+            if self._already_done(doc):
+                print("  Already downloaded and verified - skipping.")
+                self.stats["skipped_completed"] += 1
+                continue
+            if limit and taken >= limit:
+                print(f"  Not taken: --max-docs {limit} reached.")
+                break
+            taken += 1
             filename = build_pdf_filename(doc.date, doc.summary, "", record=doc,
                                           owner=self.config.get("owner", "") if self.config.get("owner_in_filename") else None)
-            print(f"[{i}/{len(to_process)}] {doc.date} - {doc.summary}")
             if dry_run:
-                print(f"  Plan: {filename}")
+                print(f"  DRY RUN - would save: {filename}")
                 continue
-
+            # Which document the run is on, so a failure file says how far
+            # it got and whether it ever reached a second one.
+            try:
+                self.journal.op("next_item" if i > 1 else "open_item",
+                                "take a document", ordinal=i)
+            except Exception:
+                pass
             try:
                 page = self._on_its_site()
                 self.download_one(page, doc, filename)
@@ -516,27 +540,29 @@ class App:
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         self._record(doc, State.PDF_SAVED)
         valid = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"])
-        if valid.ok:
-            doc.pdf_size, doc.pdf_pages = str(valid.size_bytes), str(valid.page_count)
-            doc.downloaded_ok = True
-            self._record(doc, State.PDF_VERIFIED)
-            self._write_row(doc, "Success", "Verified")
-            self.stats["new_files"].append(str(out_path))
-            bucket = {"Statement": "statements", "Tax Document": "tax_documents"}
-            self.stats[bucket.get(doc.category, "other")] += 1
-            self.stats["dates"].append(doc.date)
-            print(f"  Saved: {out_path.name} ({valid.size_bytes:,} bytes, {valid.page_count} pages)")
-        else:
+        if not valid.ok:
             self.stats["validation_failures"] += 1
             self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=valid.reason)
             self._write_row(doc, valid.reason, "Needs Manual Review")
             print(f"  !! PDF failed validation: {valid.reason}")
+            return
+
+        doc.pdf_size, doc.pdf_pages = str(valid.size_bytes), str(valid.page_count)
+        doc.downloaded_ok = True   # done for good, even if the file is deleted later
+        self._record(doc, State.COMPLETED)
+        self.journal.checkpoint('a document is saved')
+        self._write_row(doc, "Success", "Completed")
+        self.stats["new_files"].append(str(out_path))
+        bucket = {"Statement": "statements", "Tax Document": "tax_documents"}
+        self.stats[bucket.get(doc.category, "other")] += 1
+        self.stats["dates"].append(doc.date)
+        print(f"  Saved: {out_path.name} ({valid.size_bytes:,} bytes, {valid.page_count} pages)")
 
     def _record(self, doc: Document, state: State, notes: str = ""):
         doc.state = state.value
         if notes:
             doc.notes = notes
-        if state == State.PDF_VERIFIED:
+        if state == State.COMPLETED:
             doc.downloaded_ok = True
         rec = doc.to_dict()
         # A document saved before keeps its record while a Download again
@@ -610,11 +636,9 @@ class App:
     def cmd_run(self, mode_name: str):
         self.stats["mode"] = mode_name
         # A full run reads the list every time, or a statement that appeared
-        # since the last run would never be seen. Resume carries on from the
-        # list already read, and reads one only when there is none.
-        if mode_name != "resume" or not self.discovery.data:
-            print("Reading the documents list first...")
-            self.cmd_discover(quiet=True, finish=False)
+        # since the last run would never be seen.
+        print("Reading the documents list first...")
+        self.cmd_discover(quiet=True, finish=False)
         docs = self._select()
         if not docs:
             print("No documents in scope to download.")
@@ -622,7 +646,13 @@ class App:
         self.process(docs, dry_run=self.args.dry_run)
 
     def cmd_resume(self):
-        self.cmd_run("resume")
+        self.stats["mode"] = "resume"
+        # Resume reads no list of its own. With nothing listed, or after a
+        # run that stopped before it had the whole list, it says so and stops
+        # as a run that stopped, rather than call the run finished
+        # (paperpull_core.listing).
+        docs = [d for d in self._select() if not self._already_done(d)]
+        listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run))
 
     def _reconcile_index(self):
         """Ensure all verified documents on disk are present in index_csv so renaming can find them."""
@@ -632,10 +662,15 @@ class App:
         # and as a cwd-relative path, and a rename then made the pair
         # identical, so rows are compared by the file they name, and any
         # repeats already in the index are taken out (with a backup).
+        # Only a PDF in the output folder is taken out as a repeat. A row that
+        # names a folder, another file or somewhere else is left for Rename
+        # to report as it reads it.
+        inside = _path_key(root, root) + os.sep
         kept, known_paths = [], set()
         for r in rows:
             key = _path_key(r.get("PDF Full Path"), root)
-            if key and key in known_paths:
+            ours = key.endswith(".pdf") and key.startswith(inside)
+            if ours and key in known_paths:
                 continue
             if key:
                 known_paths.add(key)
@@ -698,22 +733,64 @@ class App:
 
     @property
     def requests(self):
+        """Which of the provider's own calls happened, and what came back.
+        Started at once, since it only sees what arrives after it listens."""
         if self._requests is None:
-            self._requests = Requests(self.browser(), is_safe_url=site.is_safe_url)
+            self._requests = Requests(getattr(self, "_work_page", None),
+                                      getattr(site, "is_safe_url", None))
+            self._requests.start()
         return self._requests
 
     @property
     def journal(self):
+        """The run's journal, made the first time anything writes to it."""
         if self._journal is None:
-            self._journal = Journal(self.paths.logs, "amexbanking")
+            self._journal = Journal(getattr(self, "_work_page", None),
+                                    getattr(site, "FALLBACK", None))
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      details: Optional[dict] = None) -> None:
-        failure.write_failure(self.paths.diagnostics, "amexbanking",
-                              self.stats.get("mode", ""), step, reason,
-                              text=text, details=details,
-                              owner=self.config.get("owner", ""))
+                      postmortem: dict = None, extra: dict = None) -> None:
+        """What the page looked like when this went wrong, to a file. One per
+        run, taken while the page still shows what broke. `extra` holds only
+        our own words, counts, yes or no, and words from the word list."""
+        if self.stats.get("failure_files"):
+            return
+        extra = dict(extra or {})
+        if postmortem:
+            extra["postmortem"] = postmortem
+        extra = extra or None
+        # A checkpoint at the moment it gave up, which also makes the journal
+        # when nothing had written to it yet.
+        try:
+            if getattr(self, "_work_page", None) is not None:
+                self.journal.checkpoint("when the run gave up")
+        except Exception:
+            pass
+        path = failure.write_failure(
+            self.paths.diagnostics,
+            command=self.stats.get("mode") or "run",
+            step=step, reason=reason,
+            page=getattr(self, "_work_page", None),
+            selectors=getattr(site, "FALLBACK", None),
+            journal=self._journal,
+            requests=self._requests,
+            provider='American Express Banking', text=text, extra=extra)
+        if not path:
+            return
+        self.stats["failure_files"] = 1
+        try:
+            import json as _failure_json
+            said = failure.summarize(_failure_json.loads(
+                Path(path).read_text(encoding="utf-8")))
+        except Exception:
+            said = []
+        if said:
+            print("  What it noticed:")
+            for line in said[:6]:
+                print("    - %s" % line)
+        print("  Read it through, then attach it to this provider's issue on")
+        print("  GitHub. It is the one thing that saves a round of guessing.")
 
     def write_survey(self) -> None:
         """The survey Diagnose is safe to send, written beside the detailed
@@ -783,9 +860,10 @@ class App:
         captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
-        record_session(self.page(), site, self.paths.diagnostics,
-                       provider='American Express Banking',
-                       owner=self.config.get("owner", ""))
+        if record_session(self.page(), site, self.paths.diagnostics,
+                          provider='American Express Banking',
+                          owner=self.config.get("owner", "")) is None:
+            raise SystemExit(NOTHING_RECORDED)
 
     def write_run_summary(self):
         s = self.stats

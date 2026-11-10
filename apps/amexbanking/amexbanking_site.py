@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from paperpull_core import intake
+from paperpull_core.characters import whole_json
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import MONTH_NAMES
 from paperpull_core.words import words_for as _words_for
@@ -48,7 +49,7 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"(pay\b|pay\s+bill|payments?\b|autopay|auto\s*pay|"
     r"transfer|wire\b|withdraw|deposit|move\s+money|send\s+money|"
     r"apply|apply\s+now|open\s+(a\s+)?(new\s+)?account|new\s+account|"
-    r"link\s+(bank|account)|order\b|give\b|gift|rewards?\b|line\s+of\s+credit|"
+    r"link\s+(bank|account)|order\b|give\b|gift|redeem|line\s+of\s+credit|"
     r"download\s+(the\s+)?app|"
     r"close\s+account|lock\b|freeze\b|dispute|report\s+fraud|"
     r"change\s+password|edit\s+profile|update\s+address|manage\b|"
@@ -284,7 +285,7 @@ def _token_of(request) -> str:
     try:
         post_data = request.post_data
         if post_data:
-            tok = json.loads(post_data).get("accountToken")
+            tok = whole_json(json.loads(post_data)).get("accountToken")
             if tok:
                 return str(tok)
     except Exception:
@@ -332,7 +333,7 @@ def attach_banking_listener(page, session: BankingSession = SESSION) -> None:
             session.list_url = url
             try:
                 if response.status == 200:
-                    data = response.json()
+                    data = whole_json(response.json())
                     label = session.account_label or account_kind_from_url(page.url or "")
                     # The token this list was asked for, not the session's,
                     # which another account's request may have changed since.

@@ -39,7 +39,7 @@ def app_env(tmp_path):
     storage.bind(SPEC)
     cfg_path = tmp_path / "config.json"
     cfg_path.write_text(json.dumps({
-        "owner": "biz", "output_dir": ".", "min_pdf_bytes": 10,
+        "owner": "biz", "output_dir": str(tmp_path), "min_pdf_bytes": 10,
         "max_path_length": 240,
     }), encoding="utf-8")
     return App(DummyArgs(config=str(cfg_path))), tmp_path
@@ -121,15 +121,23 @@ def test_a_document_without_a_date_matches_no_file(app_env):
 
 # --- every run reads the list ------------------------------------------------
 
-@pytest.mark.parametrize("mode, listed", [("all", True), ("resume", False)])
-def test_a_full_run_lists_again_and_a_resume_does_not(app_env, mode, listed):
+def test_a_full_run_lists_again(app_env):
     app, _ = app_env
     app.discovery.data["id:x"] = _doc().to_dict()
     app.cmd_discover = MagicMock(return_value=0)
     app.process = MagicMock()
-    app.write_run_summary = MagicMock()
-    app.cmd_run(mode)
-    assert app.cmd_discover.called is listed
+    app.cmd_run("all")
+    assert app.cmd_discover.called
+
+
+def test_a_resume_does_not_list(app_env, monkeypatch):
+    app, _ = app_env
+    app.discovery.data["id:x"] = _doc().to_dict()
+    app.cmd_discover = MagicMock(return_value=0)
+    import amexbanking_docs
+    monkeypatch.setattr(amexbanking_docs.listing, "resume", lambda *a, **k: None)
+    app.cmd_resume()
+    assert not app.cmd_discover.called
 
 
 def test_pilot_lists_again(app_env):
@@ -146,6 +154,7 @@ def test_pilot_lists_again(app_env):
 
 @pytest.mark.parametrize("captured, whole", [([], False), (["one"], True)])
 def test_only_a_listing_that_captured_something_is_whole(app_env, monkeypatch, captured, whole):
+    """An empty listing stops the run before it is noted whole."""
     app, _ = app_env
     raw = [site.RawDoc(title="Business Checking Statement", date_text="2026-10-31",
                        document_id="URN:DOC:BS:1")] if captured else []
@@ -156,7 +165,11 @@ def test_only_a_listing_that_captured_something_is_whole(app_env, monkeypatch, c
     called = []
     import amexbanking_docs
     monkeypatch.setattr(amexbanking_docs.listing, "read_whole", lambda a: called.append(a))
-    app.cmd_discover(quiet=True)
+    if whole:
+        app.cmd_discover(quiet=True)
+    else:
+        with pytest.raises(SystemExit):
+            app.cmd_discover(quiet=True)
     assert bool(called) is whole
 
 
@@ -213,7 +226,7 @@ def test_the_first_record_discovered_does_not_choose_the_account(tmp_path):
     from paperpull_core import storage
     storage.bind(SPEC)
     cfg = tmp_path / "config.json"
-    cfg.write_text(json.dumps({"output_dir": ".", "owner": "biz"}), encoding="utf-8")
+    cfg.write_text(json.dumps({"output_dir": str(tmp_path), "owner": "biz"}), encoding="utf-8")
     (tmp_path / "discovery.json").write_text(json.dumps(
         {"id:old": dict(_doc().to_dict(), account_token="tok-old", account="Old 0000")}),
         encoding="utf-8")
@@ -228,13 +241,14 @@ def test_the_first_record_discovered_does_not_choose_the_account(tmp_path):
     # Every control the 2026-11-08 survey marked safe that is not a document
     "Open New Account", "View All Account Details", "View All Gift Cards",
     "Download the App", "Order Checks", "Give Feedback", "Go to Business Line of Credit",
-    "Send a Payment", "Make a Payment", "Scheduled Payments",
+    "Send a Payment", "Make a Payment", "Scheduled Payments", "Redeem Rewards",
 ])
 def test_controls_that_are_not_documents_are_not_safe(name):
     assert site.is_safe_control(name) is False
 
 
 @pytest.mark.parametrize("name", ["Documents and Statements", "Download Statement (PDF)",
-                                  "View 1099 Tax Form", "Print Statement"])
+                                  "View 1099 Tax Form", "Print Statement",
+                                  "Rewards Checking Statement"])
 def test_document_controls_stay_safe(name):
     assert site.is_safe_control(name) is True

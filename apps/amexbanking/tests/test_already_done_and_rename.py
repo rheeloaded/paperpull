@@ -33,7 +33,7 @@ def app_env(tmp_path):
     cfg_path = tmp_path / "config.json"
     cfg = {
         "owner": "biz",
-        "output_dir": ".",
+        "output_dir": str(tmp_path),
         "min_pdf_bytes": 10,
         "max_path_length": 240,
         "filename_pattern": "{account}/{year}/{date:yyyy-mm-dd}[ {kind}][ ({part})]",
@@ -98,7 +98,7 @@ def test_already_done_self_heals_from_existing_file_on_disk(app_env):
     assert app._already_done(doc) is True
     rec = app.progress.get(doc.key)
     assert rec["downloaded_ok"] is True
-    assert rec["state"] == State.PDF_VERIFIED.value
+    assert rec["state"] == State.COMPLETED.value
     assert rec["pdf_filename"] == "2026-09-30 Old Name Receipt.pdf"
 
 

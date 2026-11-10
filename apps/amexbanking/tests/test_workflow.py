@@ -32,7 +32,7 @@ def app_instance(tmp_path):
     cfg_path = tmp_path / "config.json"
     cfg = {
         "owner": "biz",
-        "output_dir": ".",
+        "output_dir": str(tmp_path),
         "min_pdf_bytes": 10,
         "max_path_length": 240,
         "pilot_count": 3,
