@@ -475,12 +475,37 @@ def select_tax_year(page, year: str) -> bool:
     return False
 
 
+# The document-type dropdown under any name it may be given, known by the
+# option that undoes it.
+_DOC_TYPE_SELECT = r"select:has(option:text-matches('all\\s+document\\s+types', 'i'))"
+
+
+def document_types_offered(page) -> Optional[frozenset]:
+    """The kinds of document the 'All Document Types' dropdown offers, in
+    lower case, turned-off ones left out. None when no such dropdown could
+    be read, which says nothing about what the account holds."""
+    try:
+        sel = page.locator(FALLBACK["select_doc_type"] + ", " + _DOC_TYPE_SELECT)
+        if sel.count() == 0:
+            return None
+        options = sel.first.locator("option:not([disabled])").all_inner_texts()
+    except Exception:
+        return None
+    return frozenset(" ".join(o.split()).lower() for o in options)
+
+
 def set_document_type(page, label: str) -> bool:
     """Set the 'All Document Types' filter (e.g. 'Statements').
 
     This is what makes statement discovery practical: without it the list is
-    dominated by trade confirmations.
+    dominated by trade confirmations. False when it could not be set. A kind
+    the dropdown does not offer is known at once, where choosing it would
+    wait out Playwright's time twice and find nothing to choose.
     """
+    offered = document_types_offered(page)
+    if offered is not None and label.lower() not in offered:
+        log.info("the document-type dropdown does not offer %s", label)
+        return False
     # the dedicated document-type <select> first
     try:
         sel = page.locator(FALLBACK["select_doc_type"])
@@ -508,7 +533,9 @@ def set_document_type(page, label: str) -> bool:
             r"(all\s+document\s+types|document\s+type)", re.I))
         if opener.count() == 0:
             opener = page.get_by_text(re.compile(r"all\s+document\s+types", re.I))
-        if opener.count() > 0:
+        # The words can be a native <select>'s own option, which never shows
+        # and takes no press.
+        if opener.count() > 0 and opener.first.is_visible():
             opener.first.click()
             page.wait_for_timeout(1200)
             for role in ("option", "menuitem", "menuitemradio", "button", "link"):
