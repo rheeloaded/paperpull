@@ -599,3 +599,7 @@ body.docked .dock { display: flex; }
   footer.foot { padding: var(--s4); }
   .finder { max-width: none; }
 }
+
+/* What a run set aside, on the account's page. */
+.tocheck li { align-items: center; gap: var(--s2); }
+.tocheck li.checked b, .tocheck li.checked .hint { opacity: .55; }
