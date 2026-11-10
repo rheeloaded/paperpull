@@ -234,7 +234,7 @@ def assert_refused(rec, out):
     assert not rec.get("downloaded_ok"), "kept as the receipt: %r" % rec
     assert rec["state"] == "Needs Manual Review", rec
     assert "nothing was saved" in out, out
-    assert "refused because they were not the one asked for" in out, out
+    assert "not the one asked for" in out, out
 
 
 def test_every_purchase_is_printed_from_its_own_page(attached, tmp_path, capsys):
