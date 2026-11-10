@@ -139,7 +139,7 @@ const ACTION_DOING = {login: 'Opening the sign-in window for %s', discover: 'Che
 // says an account is signed in, since nothing short of a run knows that.
 const NEEDS = ['stopped', 'signin', 'attention', 'unreadable', 'overdue', 'due', 'gap'];
 const FRESH = ['never', 'not_started'];
-function groupOf(r) { return NEEDS.includes(r.state) && !r.checked_quiet ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
+function groupOf(r) { return NEEDS.includes(r.state) ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
 // Whether a stopped account is carried on with Continue. Not after a Resume
 // that stopped because no run read the list to its end, since only a run
 // that lists carries on from that, and Continue would stop there again (#124).
@@ -161,7 +161,7 @@ function present(r) {
   if (!r.runnable) return {chip: {cls: 'bad', text: "Can't run"}, say: 'PaperPull does not recognize this folder. Open it to see what to do.', act: {label: 'Open', nav: true}};
   if (r.needs_setup) return {chip: {cls: 'bad', text: 'Needs setup'}, say: 'Run setup-all (setup-all.command on a Mac, setup-all.bat on Windows) in the PaperPull folder, then reload this page.', act: {label: 'Open', nav: true}};
   if (r.marked_done) return {chip: {cls: 'ok', text: 'Marked done'},
-    say: 'Marked done on ' + when(r.marked_done) + '. It comes back after a while, or if a run needs a look.',
+    say: 'Marked done on ' + when(r.marked_done) + '. That ends with its next run, or within two weeks.',
     act: {label: 'Get new', run: 'all'}};
   if (r.checked_quiet && r.state === 'current') return {chip: {cls: 'ok', text: 'Up to date'},
     say: 'Checked ' + when(r.checked_quiet) + ', nothing new yet.' + (latest ? ' Newest ' + n + ' is ' + latest + '.' : ''),
@@ -318,6 +318,7 @@ async function load() {
   }
   try { META = await getJSON('/api/apps'); }
   catch (e) { notice('PaperPull is not answering (' + e.message + '). Check that it is still running, then reload this page.', 'warn'); return; }
+  termsStand();
   $('samplebar').hidden = !inSample();
   $('serverbadge').hidden = !SERVER;
   if (SERVER && $('paperlesspill')) $('paperlesspill').hidden = !(META.server && META.server.paperless);
@@ -353,7 +354,7 @@ function queueTargets() {
   // still offers Look for them.
   return (ROWS || []).filter(r => r.runnable && !r.needs_setup && !r.running && !r.settled && (
     (r.state === 'stopped' && !(r.last_run && r.last_run.redownload)) ||
-    ['overdue', 'due', 'gap', 'never'].includes(r.state) && !r.checked_quiet));
+    ['overdue', 'due', 'gap', 'never'].includes(r.state)));
 }
 // Where a row stands on Accounts. A provider never run stands with what
 // needs a look, never folded away under Not started, while its first run
@@ -889,10 +890,12 @@ function finishRun(code, refused, streamed) {
   if (RUN.again && !RUN.outcome.clean && RUN.sink) RUN.sink.textContent += AGAIN_LEFT + '.\n';
   const done = RUN.onDone;
   RUN.onDone = null;
-  // A sign-in with no window, a recording with nothing in it and a run
-  // that did not start write no failure file, so none is asked for, or an
-  // earlier run's from the last hour would read as this run's.
-  const wroteNone = Boolean(RUN.refused) || [NOTHING_OPENED, NOTHING_RECORDED, NOT_SIGNED_IN].includes(RUN.code);
+  // A sign-in with no window, a recording with nothing in it, a support
+  // report that read nothing and a run that did not start write no failure
+  // file, so none is asked for, or an earlier run's from the last hour would
+  // read as this run's. A report that read nothing offers its own survey.
+  const wroteNone = Boolean(RUN.refused) ||
+    [NOTHING_OPENED, NOTHING_RECORDED, NOT_SIGNED_IN, NOTHING_READ].includes(RUN.code);
   if (!wroteNone && (RUN.code !== '0' || (RUN.result && RUN.result.attention))) checkFailure(RUN.app, RUN.account);
   if (savedCount(RUN.result, RUN.saved || []) && !SERVER && !inSample()) whereSaved(RUN.app, RUN.account);
   if (done) done(RUN.code);
@@ -914,11 +917,15 @@ function paintTitle() {
   if (document.title !== title) document.title = title;
 }
 // A sign-in window that opened leaves the person to work in it, so there
-// is no end of anything to announce.
+// is no end of anything to announce. A run that did not finish is said in
+// its outcome's own title, the words its page has. "Stopped" was said of a
+// run that never started too, and of one the page lost touch with, which
+// may still be going.
 function endedInWords(run) {
   const o = run.outcome || {};
-  if (run.action === 'login' && o.clean) return '';
-  return run.provider + (o.attention ? ' needs a look' : o.clean ? ' done' : ' stopped');
+  if ((run.action === 'login' && o.clean) || !o.title) return '';
+  if (o.clean) return run.provider + (o.attention ? ' needs a look' : ' done');
+  return o.title.startsWith(run.provider) ? o.title : run.provider + ': ' + o.title;
 }
 // A run that ends while the person is on another page of PaperPull only
 // loses its bar at the bottom, so it says so, with the way to its outcome.
@@ -1615,8 +1622,9 @@ async function rvLoad(before) {
   catch (e) { if (RV === rv) $('rv-state').textContent = before + e.message; return; }
   if (RV !== rv) return;
   rv.receipts = Array.isArray(d.receipts) ? d.receipts : [];
-  // What the app said about rows it left out, without its own count line.
-  const said = (d.said || []).filter(t => !/need review\.$|need name review\.$/.test(t)).join(' ');
+  // What the app said about rows it left out, without its own count line,
+  // which reads "1 receipt needs review." for one (core renaming.review_names).
+  const said = (d.said || []).filter(t => !/needs? review\.$|need name review\.$/.test(t)).join(' ');
   const n = rv.receipts.length;
   $('rv-state').textContent = before + (n ? many(n, 'receipt') + ' waiting for a better name.'
     : 'No receipts are waiting for a better name.') + (said ? ' ' + said : '');
@@ -2452,13 +2460,18 @@ function nmRename(apply) {
 
 // -- settings -----------------------------------------------------------------------
 function renderSettings() {
-  $('root').textContent = META.apps_root || '';
+  // A fresh checkout's apps folder holds the templates (gui/app.py
+  // fresh_checkout), so it is not named as the folder or offered as one.
+  const fresh = Boolean(META.fresh_checkout);
+  $('root').textContent = fresh ? 'None chosen yet' : META.apps_root || '';
   $('rootwhy').textContent = inSample() ? 'This is the sample archive. Leave it to see your own.'
     : SERVER ? 'The data folder beside compose.yaml on your server, named /data inside the container.'
     : META.root_source === 'environment' ? 'Set by the APPS_ROOT setting PaperPull was started with.'
+    : fresh ? "This copy of PaperPull is its source, and its apps folder holds each provider's template, not your " +
+      'documents. Set up from the welcome, or use a folder that already holds your providers.'
     : 'Each provider has a folder of its own in here, holding its documents and its download history.';
   $('existing').hidden = SERVER || inSample() || META.root_source === 'environment';
-  $('rootinput').value = $('rootinput').value || META.apps_root || '';
+  $('rootinput').value = $('rootinput').value || (fresh ? '' : META.apps_root) || '';
   $('rootinput').placeholder = (META.apps_root || '').startsWith('/') ? '/Users/you/Documents/PaperPull' : 'C:\\Users\\you\\Documents\\PaperPull';
   $('stmove').hidden = inSample();
   if (!hxWelcome()) placeMove(false);
@@ -2483,7 +2496,7 @@ function dcPick() {
   return app ? {app, account: account || 'primary'} : null;
 }
 function openDocuments() {
-  $('g-docscard').hidden = inSample() || !Object.keys(META.apps || {}).length;
+  $('g-docscard').hidden = inSample() || Boolean(META.fresh_checkout) || !Object.keys(META.apps || {}).length;
   if ($('g-docscard').hidden) return;
   const sel = $('dcpick'), was = sel.value;
   const opts = [];
@@ -2626,16 +2639,20 @@ async function saveRoot() {
   XL_LOADED = false;
   // Somebody sent here from the welcome, with no providers before, goes on
   // to the ones just found, since Settings has nothing more for them.
-  const first = !Object.keys((META && META.apps) || {}).length;
+  const first = !Object.keys((META && META.apps) || {}).length || Boolean(META && META.fresh_checkout);
   await load();
   if (first && d.apps) location.hash = '#/';
 }
+// Answers "" once the page is in the sample, or out of it, as asked, and
+// otherwise what went wrong, which it also says at the top of the page.
 async function setSample(on) {
+  const failed = 'Could not open or leave the sample. Reload the page and try again.';
   try { await postJSON('/api/sample', {on}); }
-  catch (e) { notice(e.message || 'Could not open or leave the sample. Reload the page and try again.', 'warn'); return; }
+  catch (e) { notice(e.message || failed, 'warn'); return e.message || failed; }
   XL_LOADED = false;
   await load();
   location.hash = '#/';
+  return inSample() === on ? '' : failed;
 }
 function applyTheme() {
   const t = store.get('theme') || 'system';
@@ -2734,6 +2751,7 @@ const DO = {
   'rn-preview': () => rnRun(false),
   'rn-apply': () => rnRun(true),
   'rv-go': () => rvGo(),
+  'tm-sample': () => tmSample(),
   'sp-go': () => { $('dlg-support').close(); startRun(DLG_ROW, 'diagnose'); },
   // The report reads a signed-in page, so the dialog that says to sign in
   // first opens the sign-in window itself, and stays open for the report.
@@ -2864,21 +2882,52 @@ function serverPage() {
   });
 }
 // The terms of use, the first time the panel opens and again when they
-// change. Only I understand ends the dialog. Escape, or anything else that
-// closes it, brings it straight back. Once pressed the page goes on, and an
+// change. Only I understand ends the dialog, and only the sample sets it
+// aside. Escape, or anything else that closes it, brings it straight back.
+// Once I understand is pressed the page goes on, and an
 // answer that could not be saved is said, so the terms come back next time.
 let TERMS_OK = !TERMS_DUE;
+// The sample is invented data and runs nothing, so somebody only looking
+// can open it before the terms. Only I understand reaches a real account.
+// The dialog waits only while the panel itself says it is looking at the
+// sample, and the panel refuses everything else until then (_terms_first).
+let TERMS_WAITING = false;
 function openTerms() {
   const d = $('dlg-terms');
   d.addEventListener('cancel', e => e.preventDefault());
-  d.addEventListener('close', () => { if (!TERMS_OK) d.showModal(); });
+  d.addEventListener('close', () => { if (!TERMS_OK && !TERMS_WAITING) d.showModal(); });
   d.showModal();
+}
+// Each time the accounts are read. The sample is offered only to somebody
+// with none yet. A page in the sample goes on without the dialog, and a
+// page that is not, having left it here, in another tab or by the panel
+// starting again, has the dialog back.
+function termsStand() {
+  if (!TERMS_DUE || TERMS_OK || !META) return;
+  const d = $('dlg-terms');
+  $('tm-sample').hidden = Boolean(Object.keys(META.apps).length) && !META.fresh_checkout && !inSample();
+  TERMS_WAITING = inSample();
+  if (TERMS_WAITING && d.open) d.close();
+  else if (!TERMS_WAITING && !d.open) d.showModal();
+}
+// The dialog closes only once the sample is open, and says why when it
+// could not be.
+async function tmSample() {
+  const say = $('tm-say');
+  say.hidden = true;
+  const why = await setSample(true);
+  if (why && $('dlg-terms').open) { say.textContent = why; say.hidden = false; }
 }
 async function tmGo() {
   TERMS_OK = true;
   $('dlg-terms').close();
+  let unsaved = null;
   try { await postJSON('/api/terms', {accepted: TERMS_VERSION}); }
-  catch (e) { notice('Your answer to the terms could not be saved, so they will be shown again next time. ' + e.message, 'warn'); }
+  catch (e) { unsaved = e; }
+  // Until now the panel answered only what the page needed to draw itself
+  // behind the dialog, so the page reads everything again.
+  await load();
+  if (unsaved) notice('Your answer to the terms could not be saved, so they will be shown again next time. ' + unsaved.message, 'warn');
 }
 applyTheme();
 serverPage();

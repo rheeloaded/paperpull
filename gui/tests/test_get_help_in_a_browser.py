@@ -141,6 +141,12 @@ def test_a_recent_failure_file_is_offered_before_the_report(panel, shop):
     assert order == sorted(order), "failure file, then report, then recording"
     assert tab.get_attribute("#sp-failacts a", "href").startswith(
         "https://github.com/rheeloaded/paperpull/issues")
+    # Any file from the last hour is offered, so it is not called the last
+    # run's, which may have gone well since. And it says what the Run page
+    # says of it before it is attached.
+    said = tab.inner_text("#sp-failure")
+    assert "last run" not in said.lower() and "in the last hour" in said
+    assert "never text from your account" in said and "Read it" in said
 
     asked = []
 
@@ -204,6 +210,23 @@ def test_a_report_that_read_nothing_says_so_and_offers_the_way_on(panel, shop):
     tab.click("[data-do=sp-go]")
     tab.wait_for_function("() => RUN.state === 'done' && $('r-title').textContent === 'Support report saved'",
                           timeout=60000)
+
+
+def test_a_report_that_read_nothing_never_offers_an_earlier_failure_as_its_own(panel, shop):
+    """It writes a survey and no failure file, so a failure file from a run
+    earlier in the hour is never put under it as "This run wrote a file
+    about what went wrong"."""
+    left_a_failure(shop)
+    (shop / "signed-out").write_text("", encoding="utf-8")
+    tab = panel.tab
+    open_get_help(tab)
+    tab.click("[data-do=sp-go]")
+    tab.wait_for_function("() => RUN.state === 'done'", timeout=60000)
+    tab.wait_for_load_state("networkidle")
+    tab.wait_for_timeout(300)
+    assert tab.inner_text("#r-title") == "Nothing was read"
+    assert not tab.evaluate("RUN.failure"), "no failure file was asked for"
+    assert tab.locator("#failnote").count() == 0
 
 
 def test_record_steps_starts_a_recording_from_the_same_dialog(panel, shop):

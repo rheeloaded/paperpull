@@ -69,7 +69,11 @@ Versions before 0.19.1 kept the Windows file at
 and none in Roaming AppData, it moves it across. If the move fails, the panel
 goes on using the file where it is.
 
-Running from a checkout of the repo, it uses `../apps` unless told otherwise.
+Running from a checkout of the repo, it uses `../apps` unless told otherwise,
+but only once one of the apps there has a `config.json`, which running an
+app from the terminal needs. Until then each folder in `../apps` is only a
+provider's template, so the welcome shows, and the welcome, Settings and
+Import history refuse `../apps` as the PaperPull folder.
 The `APPS_ROOT` environment variable overrides both of the above, which is
 handy for development:
 
@@ -156,7 +160,7 @@ the rest are under **More**, and every one says what it does.
 | **Rename existing files** | A preview of new names (`--rename`), then the rename (`--rename --apply`) |
 | **Check saved files** | Re-checks every saved PDF (`--verify`) |
 | **Get help** | One dialog: a recent failure file if there is one, a support report for an issue (`--diagnose`), then recording your clicks to a document (`--record`) with Stop recording |
-| **Name on the account** | The account holder's name, kept in this account's own `config.json` |
+| **Name on the account** | The account holder's name, kept in this account's own config file (`config.json` for the first person, `config.<name>.json` for anyone added), a copy in Backups first. Refused while that account runs, a Rename or a Move included. Files already saved keep their names until a Rename |
 | **Add another person** | A second account on the same provider, with its own folder, sign-in window and history |
 | **Remove from PaperPull** | Moves the provider's folder into Removed. Nothing is deleted |
 | **Open folder** | Shows the folder holding the account's newest document, its documents folder once they go there, never its browser profile |

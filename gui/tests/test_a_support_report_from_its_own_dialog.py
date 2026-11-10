@@ -86,10 +86,12 @@ def test_the_dialog_offers_its_own_sign_in_only_where_it_can_be_used(server):
         pw.stop()
 
 
-def test_make_the_report_waits_while_the_sign_in_it_started_is_going():
+@pytest.mark.parametrize("button", ["sp-go", "rc-go"], ids=["report", "record steps"])
+def test_make_the_report_waits_while_the_sign_in_it_started_is_going(button):
+    """And so does Record steps, in the same dialog since Get help."""
     pw, chromium, tab = _open(False)
     try:
-        go = tab.locator("#dlg-support [data-do=sp-go]")
+        go = tab.locator("#dlg-support [data-do=%s]" % button)
         assert go.is_enabled()
         tab.evaluate("() => { RUN.state = 'running'; lockStarts(); }")
         assert go.is_disabled(), "pressed now, it closed the dialog and the report was refused"

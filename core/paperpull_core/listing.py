@@ -269,7 +269,9 @@ def resume(app, remaining, process, noun: str = "documents") -> None:
     last lists hold and that are not done, by handing them to `process`."""
     cut_short = before_resume(app, noun)
     if not remaining and not cut_short:
-        print("Nothing to continue. Everything in these dates is saved." if under_panel()
+        # Not "saved", since a document done with may be one set aside for a
+        # look or one the provider had no file for.
+        print("Nothing to continue, since nothing listed is left to download." if under_panel()
               else "Nothing to resume - everything in scope is complete.")
         return
     if remaining:

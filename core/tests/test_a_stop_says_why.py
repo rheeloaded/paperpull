@@ -220,3 +220,21 @@ def test_a_list_that_stopped_partway_is_a_page_not_a_sign_out():
         except ListStopped:
             raise SystemExit(1)
     assert _why_leaving_on(stop_then_leave) == "page"
+
+
+def test_a_class_an_app_puts_under_its_list_stop_gives_no_reason():
+    """Charles Schwab's gateway answers a sign-in that has ended with no
+    token, which stops its list too. Said as a page, the panel left out the
+    sign-in, so a class an app keeps under ListStopped is not one."""
+    class ListStopped(Exception):
+        pass
+
+    class AnswerRefused(ListStopped):
+        pass
+
+    def stop_then_leave():
+        try:
+            raise AnswerRefused("the accounts answer came back as 0")
+        except ListStopped:
+            raise SystemExit(1)
+    assert _why_leaving_on(stop_then_leave) == ""

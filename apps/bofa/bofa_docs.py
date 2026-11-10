@@ -383,7 +383,7 @@ class App:
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
         print("Sign in, open Statements & Documents, keep the window OPEN, then")
-        print("run the pilot.")
+        print(f"{after_sign_in()}.")
 
     def _look_at_the_list(self, page):
         """How many accounts the statements list answered with, or why it

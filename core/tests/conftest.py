@@ -40,11 +40,13 @@ def _no_real_browser_on_a_port(monkeypatch):
     holding, so the question would reach that browser and open a tab in it.
     Every test is told nothing answers on the port and nothing holds it,
     and a test of either question puts the real one back against a port
-    of its own."""
+    of its own. Bringing the window forward asks that browser for its tabs
+    and shows one, so no test does that either."""
     from paperpull_core import browser
     monkeypatch.setattr(browser, "debug_port_holder", lambda port, timeout=1.5: None)
     monkeypatch.setattr(browser, "_open_tab_in", lambda port, url: False)
     monkeypatch.setattr(browser, "_port_taken", lambda port: False)
+    monkeypatch.setattr(browser, "bring_forward", lambda port: False)
 
 
 @pytest.fixture(scope="session")

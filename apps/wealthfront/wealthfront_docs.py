@@ -406,14 +406,33 @@ class App:
             for label in ("Statements", "Quarterly Statements"):
                 if not site.set_document_type(page, label):
                     log.info("Could not set document-type filter to %r", label)
+                    # Quarterly Statements is on the dropdown only for an
+                    # account that has them, so its absence from a dropdown
+                    # read whole leaves nothing out. Any other refusal is a
+                    # part of the list not read.
+                    offered = site.document_types_offered(page)
+                    if (label != "Quarterly Statements" or offered is None
+                            or label.lower() in offered):
+                        passed_over = True
                     continue
                 log.info("Document type filter set to %r", label)
+                shown = 0
                 for _ in range(200):  # generous page cap
                     site.scroll_full_page(page, rounds=2)
                     rows = [r for r in site.collect_documents(page)
                             if r.kind == "dated"]
+                    # A kind chosen shows its first page some time after,
+                    # so an empty first page is asked again before it is
+                    # taken for none.
+                    for _ in range(0 if shown else 3):
+                        if rows:
+                            break
+                        page.wait_for_timeout(2000)
+                        rows = [r for r in site.collect_documents(page)
+                                if r.kind == "dated"]
                     if not rows:
                         break
+                    shown += len(rows)
                     before = n_new
                     for r in rows:
                         n_new += self._record_raw(r)
@@ -423,17 +442,24 @@ class App:
                     if not site.go_older(page):
                         break
                     self._delay(0.4)
+                if not shown:
+                    # Every account has statements, and Quarterly Statements
+                    # is offered only to one that has them, so a kind chosen
+                    # that shows none was not read, whatever the dropdown
+                    # said. A run that read no statements never ends clean.
+                    log.info("Document type %r showed no statement once chosen", label)
+                    passed_over = True
 
         if passed_over:
-            # A tax year the dropdown offered and would not take is a part
-            # of the list missing, so the list is not noted whole, and the
-            # run goes on with what it read and stops at its end rather than
-            # finish.
+            # A tax year or a kind of statement passed over, or a kind that
+            # showed nothing once chosen, is a part of the list missing, so
+            # the list is not noted whole, and the run goes on with what it
+            # read and stops at its end rather than finish.
             self._list_cut_short = True
-            print("\n  Wealthfront's document list was not read whole, since a tax year its")
-            print("  dropdown offered could not be chosen. What was read is kept, and this")
-            print("  run stops at its end rather than finish. The next run reads the list")
-            print("  again.")
+            print("\n  Wealthfront's document list was not read whole, since a tax year or a")
+            print("  kind of statement could not be chosen in its dropdown, or showed no")
+            print("  statement once chosen. What was read is kept, and this run stops at its")
+            print("  end rather than finish. The next run reads the list again.")
             self.write_failure("read the document list", "some of the list could not be chosen")
         self.discovery.save()
         # The whole list is in, and only now may a Resume that carries on

@@ -2048,6 +2048,90 @@ def test_a_window_stays_on_the_server_or_if_asked(monkeypatch):
     assert app_module._closes_its_window(*good) is False
 
 
+def _window(root, config, port):
+    """Give an account of Bank Statements a debugging port and a profile."""
+    path = root / "Bank Statements" / config
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(cdp_url="http://127.0.0.1:%d" % port, profile_dir="browser-profile-" + config.split(".")[-2])
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _closing(monkeypatch, answer):
+    """What close_signin_browser was asked to close, answering `answer`."""
+    assert app_module._ports() is not None
+    from paperpull_core import browser
+    asked = []
+
+    def close(profile, port):
+        asked.append((Path(profile).name, port))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    monkeypatch.setattr(browser, "close_signin_browser", close)
+    return asked
+
+
+def test_a_finished_run_closes_only_its_own_window(root, monkeypatch):
+    _window(root, "config.json", 9481)
+    _window(root, "config.second.json", 9482)
+    asked = _closing(monkeypatch, {"closed": True, "in_use": False})
+    said = app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary")
+    assert asked == [("browser-profile-config", 9481)]
+    assert said == ["Closed the sign-in window, since this run finished."]
+
+
+def test_a_profile_under_the_home_folder_is_the_one_the_browser_opened(root, monkeypatch):
+    """A sign-in opens "~/..." as the home folder (browser._launch), so the
+    window to close is found there, never under the install."""
+    config = root / "Bank Statements" / "config.json"
+    config.write_text(json.dumps({"output_dir": ".", "cdp_url": "http://127.0.0.1:9481",
+                                  "profile_dir": "~/an-invented-profile"}), encoding="utf-8")
+    assert app_module._ports() is not None
+    from paperpull_core import browser
+    asked = []
+    monkeypatch.setattr(browser, "close_signin_browser",
+                        lambda profile, port: asked.append(Path(profile)) or {"closed": False, "in_use": False})
+    app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary")
+    assert asked == [Path("~/an-invented-profile").expanduser()]
+
+
+@pytest.mark.parametrize("other", ["config.second.json", "Shop Receipts"])
+def test_a_window_on_a_port_another_account_names_is_left_open(root, monkeypatch, other):
+    """A browser on a port two configs name is the one a run of either
+    attaches to and a sign-in of either joins, so it may be the other
+    account's, mid run or mid sign-in. It is never closed, whichever
+    provider or person the other one is."""
+    _window(root, "config.json", 9481)
+    if other == "Shop Receipts":
+        (root / other / "config.json").write_text(json.dumps({"cdp_url": "http://127.0.0.1:9481"}), encoding="utf-8")
+    else:
+        _window(root, other, 9481)
+    asked = _closing(monkeypatch, {"closed": True, "in_use": False})
+    assert app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary") == []
+    assert asked == []
+
+
+def test_a_window_is_left_open_when_ports_cannot_be_read(root, monkeypatch):
+    _window(root, "config.json", 9481)
+    asked = _closing(monkeypatch, {"closed": True, "in_use": False})
+    monkeypatch.setattr(app_module, "_ports", lambda: None)
+    assert app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary") == []
+    assert asked == []
+
+
+def test_a_window_somebody_is_in_is_said_to_stay(root, monkeypatch):
+    _window(root, "config.json", 9481)
+    _closing(monkeypatch, {"closed": False, "in_use": True})
+    said = app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary")
+    assert said == ["Left the sign-in window open, since you are using it."]
+
+
+def test_a_window_that_will_not_close_never_ends_the_run(root, monkeypatch):
+    _window(root, "config.json", 9481)
+    _closing(monkeypatch, RuntimeError("anything"))
+    assert app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary") == []
+
+
 _CLEAN = {"action": "all", "exit_code": 0, "closed": False, "scope": [], "redownload": False, "ended": "2026-11-08T11:32:00",
           "result": {"new_files": 0, "stopped": 0, "failed": 0, "validation_failures": 0, "list_not_read": 0}}
 _NOW = app_module.datetime(2026, 11, 9, 12, 0)
@@ -2067,9 +2151,53 @@ def test_a_gap_is_left_to_the_rule_that_settles_gaps():
 
 
 @pytest.mark.parametrize("change", [{"exit_code": 1}, {"action": "pilot"}, {"closed": True}, {"scope": ["--year", "2025"]},
-                                    {"redownload": True}, {"result": {"stopped": 1}}, {"result": {"failed": 2}}, {"result": None}])
+                                    {"redownload": True}, {"result": {"stopped": 1}}, {"result": {"failed": 2}}, {"result": None},
+                                    {"action": "resume"}, {"result": {"wrong_document": 1}}])
 def test_only_a_whole_clean_run_counts_as_a_check(change):
+    """A Continue reads no list of its own, so a clean one is no check, as
+    the card's "checked" never counts one (#148)."""
     assert app_module._quieted("due", dict(_CLEAN, **change), "", 26, now=_NOW)["state"] == "due"
+
+
+@pytest.mark.parametrize("state", ["due", "overdue"])
+def test_a_check_never_hides_the_gaps_a_due_account_has(state):
+    """Due is said before a gap, so a check that took a due account off the
+    list said Up to date over the gaps it still had."""
+    gaps = [{"after": "2026-03-01", "before": "2026-05-01", "missing": 1}]
+    q = app_module._quieted(state, _CLEAN, "", 26, now=_NOW, gaps=gaps)
+    assert q == {"state": "gap", "marked_done": "", "checked_quiet": ""}
+
+
+def test_a_checked_due_account_with_gaps_is_a_gap_row(root):
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped(newest_days_ago=45)), encoding="utf-8")
+    _log(bank, dict(_CLEAN, ended=app_module.datetime.now().isoformat(timespec="seconds")))
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] == "gap" and row["gaps"] and not row["checked_quiet"]
+    assert row["settled"] is False
+
+
+def test_a_checked_due_account_with_gaps_settles_as_any_gap_row_does(root):
+    """Shown as a gap, its gaps are held to #149's rule like every other
+    gap row's, by the state the row shows."""
+    bank = root / "Bank Statements"
+    (bank / "progress.json").write_text(json.dumps(_gapped(newest_days_ago=45)), encoding="utf-8")
+    keys, _ = _gap_keys_now(bank)
+    now = app_module.datetime.now()
+    _log(bank, _clean_all(gaps_left=keys, ended=now.isoformat(timespec="seconds")),
+         _clean_all(gaps_left=keys, ended=(now - timedelta(days=2)).isoformat(timespec="seconds")))
+    row = _rows()[("Bank Statements", "primary")]
+    assert row["state"] == "gap" and row["settled"] is True
+
+
+@pytest.mark.parametrize("written", ["2026-11-08T12:00:00+00:00", "2026-11-08T12:00:00Z", "2026-11-08T12:00:00-08:00"])
+def test_a_time_written_with_its_offset_is_read(written):
+    """Compared with a time written without one, it raised, and that
+    account's row read as status not read."""
+    q = app_module._quieted("due", dict(_CLEAN, ended=written), written, 26, now=_NOW)
+    assert q["state"] == "current"
+    q = app_module._quieted("due", dict(_CLEAN, ended="2026-11-01T00:00:00"), written, 26, now=_NOW)
+    assert q["state"] == "current" and q["marked_done"] == written
 
 
 @pytest.mark.parametrize("cadence, days, state", [(26, 13, "current"), (26, 15, "due"), (1, 2, "current"), (1, 4, "due"), (None, 13, "current")])
@@ -2100,13 +2228,30 @@ def test_mark_as_done_is_saved_and_undone(root):
     assert app_module._done_at(own) == ""
 
 
+def test_mark_as_done_writes_only_that_accounts_own_note(root, monkeypatch):
+    """Through the panel's own writer, which on PaperPull Server refuses a
+    folder that leads out of the data folder through a link, into the one
+    account's folder and nobody else's."""
+    wrote = []
+    monkeypatch.setattr(app_module, "_replace_text", lambda path, text: wrote.append((Path(path), json.loads(text))))
+    app_module._save_done({"app": "Bank Statements", "account": "second", "done": True})
+    assert [p for p, _ in wrote] == [root / "Bank Statements - second" / app_module.DONE_FILE]
+    with pytest.raises(app_module.HTTPException):
+        app_module._save_done({"app": "Bank Statements", "account": "nobody", "done": True})
+    assert len(wrote) == 1
+
+
 def test_an_account_checked_is_not_counted_on_the_page(panel):
+    """The row's state alone says where it is counted. The server says
+    current for an account just checked, and a gap for one that still has
+    gaps, which the page counts whatever else the row carries."""
     got = panel.evaluate("""() => {
-        ROWS = [{state: 'gap', checked_quiet: '2026-11-08T11:32:00', runnable: true, provider: 'A', gaps: []},
-                {state: 'due', checked_quiet: '', runnable: true, provider: 'B', gaps: []}];
-        return [queueTargets().map(r => r.provider), groupOf(ROWS[0]), groupOf(ROWS[1])];
+        ROWS = [{state: 'current', checked_quiet: '2026-11-08T11:32:00', runnable: true, provider: 'A', gaps: []},
+                {state: 'due', checked_quiet: '', runnable: true, provider: 'B', gaps: []},
+                {state: 'gap', checked_quiet: '2026-11-08T11:32:00', runnable: true, provider: 'C', gaps: []}];
+        return [queueTargets().map(r => r.provider), ROWS.map(groupOf)];
     }""")
-    assert got == [["B"], "ok", "needs"]
+    assert got == [["B", "C"], ["ok", "needs", "needs"]]
 
 
 # -- what a run set aside, on the account's page ------------------------------
