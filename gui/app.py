@@ -3179,7 +3179,8 @@ async def api_account(request: Request):
             "owner": cfg.get("owner", "")}
 
 
-@app.post("/api/account/done", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/account/done", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                             Depends(_not_in_sample)])
 async def api_account_done(request: Request):
     """Take an account off the list until its next run or the time runs out,
     or put it back. Writes only this account's own note of it."""
@@ -3213,7 +3214,8 @@ def _save_done(body: dict) -> dict:
     return {"app": name, "account": account, "done_at": done_at}
 
 
-@app.post("/api/account/owner", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/account/owner", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                              Depends(_not_in_sample)])
 async def api_account_owner(request: Request):
     """Set the name on one account, the first person's or another's, in
     that account's own config, a copy kept in Backups first. An empty name
