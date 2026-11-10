@@ -642,6 +642,7 @@ ANSWERS = {
     ("apps/ally/ally_site.py", "on_resp"): PAGE_ANSWER,
     ("apps/alpaca/alpaca_site.py", "read_list"): PAGE_ANSWER,
     ("apps/alpaca/alpaca_site.py", "_link_of"): PAGE_ANSWER,
+    ("apps/amexbanking/amexbanking_site.py", "on_response"): PAGE_ANSWER,
     ("apps/amfam/amfam_site.py", "on_response"): PAGE_ANSWER,
     ("apps/applecard/applecard_site.py", "on_response"): PAGE_ANSWER,
     ("apps/att/att_site.py", "on_response"): PAGE_ANSWER,

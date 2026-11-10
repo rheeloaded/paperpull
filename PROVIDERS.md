@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (80, plus five built and waiting for a tester)
+## Supported (81, plus five built and waiting for a tester)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -25,6 +25,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements and any tax form listed with them. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #45. Being tested by @jpfieber | Insurance |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
+| [`amexbanking`](apps/amexbanking) | American Express Banking (deposits) | Business Checking statements and 1099-INT tax forms, every document the list the Documents and Statements page asks for itself names, heard as it answers, each PDF asked for by its own id from inside the page with nothing clicked. One account a run, the one the page shows. Contributed by @appchamp. Built and run on a contributor's own Business Checking account, 61 documents saved (#168). Personal Checking and Savings are untested. American Express cards are the `amex` app | Bank |
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, member/plan documents (all coverage years), digital ID cards, secure-message letters; tRPC API, nothing clicked. Contributed by @riordan | Health insurance (PHI) |
 | [`apple`](apps/apple) | Apple (App Store and Apple Store) | Receipts for everything paid for, App Store subscriptions such as Apple One and iCloud+, in-app purchases anywhere in Family Sharing and paid apps, each saved from Apple's own emailed receipt with free downloads skipped, and Apple Store orders, each order's invoice saved and a canceled one recorded without a receipt. Built and run on the maintainer's own account | Retail |
 | [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms. Confirmed by @watling777, whose Pilot and full run saved every statement and the 1099-INT forms (#52) | Card / savings |

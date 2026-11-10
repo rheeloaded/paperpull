@@ -1,0 +1,22 @@
+# amexbanking commands
+
+# 1. Connect and verify login
+paperpull amexbanking login
+
+# 2. Diagnose / read available documents without downloading
+paperpull amexbanking diagnose
+
+# 3. Pilot test: download newest 5 documents
+paperpull amexbanking pilot
+
+# 4. Download all available documents
+paperpull amexbanking all
+
+# 5. Resume an interrupted run
+paperpull amexbanking resume
+
+# 6. Verify downloaded PDFs
+paperpull amexbanking verify
+
+# 7. Rename existing PDFs to standard convention
+paperpull amexbanking rename

@@ -94,8 +94,9 @@ The `.gitignore` already blocks all of the following. Do not override it.
     list's Next, the items toggle) and check every receipt control against
     the blocklist inline, since a document allowlist would refuse the paging
     they need.
-  - **Apps that click nothing at all during a run** (Affirm, Amazon, Anthem,
-    Apple, Cetera, Citi, DKB, E-ZPass Virginia, FedEx, Fidelity, Gap, GitHub,
+  - **Apps that click nothing at all during a run** (Affirm, Amazon,
+    American Express Banking, Anthem, Apple, Cetera, Citi, DKB, E-ZPass
+    Virginia, FedEx, Fidelity, Gap, GitHub,
     Home Depot, Invest529, IRS, Kroger, Lowe's, MILITARY STAR, myPay,
     NetBenefits, NW Natural, Optum Bank, Paylocity, Portland General Electric,
     SDG&E, Stripe, TSP, Tualatin Water, Uber, UKG, UPS, Verizon Mobile and
