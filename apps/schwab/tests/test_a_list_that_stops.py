@@ -18,6 +18,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from paperpull_core import run_reporting
 from paperpull_core import storage as core_storage
 import schwab_docs as docs
 import schwab_site as site
@@ -166,6 +167,53 @@ def test_discover_stops_with_nothing_recorded_and_the_list_not_whole(
     assert note_of(out)["complete"] is False
     assert list((out / "Diagnostics").glob("failure-*.json"))
     assert "12345678" not in said and "11112222" not in said
+
+
+REFUSED = {
+    "no token": ACCOUNTS_THAT_STOP["no token"],
+    "401": {"status": 401, "body": None, "text": ""},
+    "403": {"status": 403, "body": None, "text": ""},
+}
+
+
+@pytest.mark.parametrize("answer", REFUSED.values(), ids=REFUSED.keys())
+@pytest.mark.parametrize("which", ["accounts", "documents"])
+def test_an_answer_refused_as_signed_out_is_a_stop_of_its_own(monkeypatch, which, answer):
+    monkeypatch.setattr(site, "_gateway_call", gateway(answer, ONE_DOCUMENT) if which == "accounts"
+                        else gateway(ONE_ACCOUNT, answer))
+    with pytest.raises(site.AnswerRefused):
+        site.collect_documents(PAGE)
+
+
+def the_result(said: str) -> dict:
+    line = [s for s in said.splitlines() if s.startswith(run_reporting.PREFIX)][-1]
+    return json.loads(line[len(run_reporting.PREFIX):])
+
+
+@pytest.mark.parametrize("accounts, documents, why", [
+    *((answer, ONE_DOCUMENT, None) for answer in REFUSED.values()),
+    (ONE_ACCOUNT, REFUSED["401"], None),
+    (ACCOUNTS_THAT_STOP["refused"], ONE_DOCUMENT, "page"),
+    (ACCOUNTS_THAT_STOP["both lists empty"], ONE_DOCUMENT, "page"),
+    (ONE_ACCOUNT, DOCUMENTS_THAT_STOP["not a list"], "page"),
+], ids=[*(f"accounts {name}" for name in REFUSED), "documents 401", "accounts 500",
+        "no account", "documents not a list"])
+def test_only_a_stop_a_sign_in_cannot_cure_is_said_as_a_page(
+        tmp_path, monkeypatch, capsys, accounts, documents, why):
+    """A list stopped by a refused answer is said with no reason, so the
+    panel offers the sign-in first, and any other stop of the list is said
+    as a page that was not what the app expected."""
+    cfg, out = setup_app(tmp_path, monkeypatch)
+    monkeypatch.setattr(site, "_gateway_call", gateway(accounts, documents))
+
+    with pytest.raises(SystemExit) as stopped:
+        docs.main(["--config", str(cfg), "--discover"])
+
+    assert stopped.value.code == 1
+    result = the_result(capsys.readouterr().out)
+    assert result["stopped"] == 1
+    assert result.get("stop") == why
+    assert note_of(out)["complete"] is False
 
 
 def test_a_stopped_discover_keeps_what_an_earlier_one_found(tmp_path, monkeypatch):
