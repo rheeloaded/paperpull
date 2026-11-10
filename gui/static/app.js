@@ -1030,16 +1030,21 @@ function signinNext(run) {
   return src.again || !RERUN[src.action] || RERUN[src.action][2] ? null : src;
 }
 function endSignInWait() {
-  if (!SIGNIN_WAIT) return;
-  SIGNIN_WAIT.es.close();
+  const wait = SIGNIN_WAIT;
+  if (!wait) return;
+  wait.es.close();
   SIGNIN_WAIT = null;
+  // The sign-in's page says again what to press once signed in, as it did
+  // before the wait, which the person now has to do.
+  if (wait.started === RUN.startedAt && RUN.outcome) RUN.outcome.say = wait.say;
   paintTitle();
 }
 function waitForSignIn() {
   const then = signinNext(RUN);
   if (!then) return;
   const es = new EventSource('/api/sign-in/wait?' + new URLSearchParams({app: RUN.app, account: RUN.account}));
-  const wait = {app: RUN.app, account: RUN.account, provider: RUN.provider, who: RUN.who, then, es};
+  const wait = {app: RUN.app, account: RUN.account, provider: RUN.provider, who: RUN.who, then, es,
+                started: RUN.startedAt, say: RUN.outcome.say};
   SIGNIN_WAIT = wait;
   RUN.outcome.say = 'Sign in to ' + RUN.provider + ' in the window that opened and leave it open.';
   es.addEventListener('ended', e => {

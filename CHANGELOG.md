@@ -19,8 +19,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   stopped at an account for its sign-in goes on with the round from there.
   One stopped at another account still waits for Continue, and one that is
   over has no say. The wait ends after ten minutes, when the window is
-  closed, or when a run for the account is started some other way. Not on
-  PaperPull Server, whose sign-in is in the page.
+  closed, or when a run for the account is started some other way. A later
+  sign-in of the account, in another tab say, ends an earlier one's wait,
+  so only one page starts a run, once. A window on a port another
+  account's config names too is not watched, since a sign-in there may be
+  that account's. Not on PaperPull Server, whose sign-in is in the page.
+  Contributed by @JasperDale420.
 - **American Express Banking, the 86th app, Business Checking statements
   and tax forms (#168).** `amexbanking` reads American Express National
   Bank deposit accounts, apart from the `amex` card app. It saves every

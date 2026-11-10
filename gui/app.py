@@ -4443,6 +4443,9 @@ def _sign_in_port(meta: dict, account: str) -> Optional[int]:
 # What to watch comes from the sign-in itself, kept here per account until the
 # wait has used it. A wrong "signed in" costs one run, which finds nobody
 # signed in and says so, and another wait needs another press of the button.
+# Each sign-in's plan is its own. A sign-in starting drops the one before it,
+# so a wait is only ever for the latest sign-in of its account, and only
+# that wait's page starts a run, once.
 
 # Long enough for a code by text or email, short enough that the panel does
 # not go on watching a window nobody came back to.
@@ -4454,21 +4457,27 @@ _SIGN_IN_PLANS: dict = {}
 @app.get("/api/sign-in/wait", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_sign_in_wait(app: str, account: str = "primary"):
     """A stream that ends by saying how the wait for this account's sign-in
-    came out: signed_in, timed_out, no_window, run_started, or cannot_tell
-    for a sign-in the panel has no way to watch."""
+    came out, as signed_in, timed_out, no_window, run_started, replaced by
+    another sign-in of the account since, or cannot_tell for a sign-in the
+    panel has no way to watch."""
     apps = discover_apps()
     if app not in apps:
         raise HTTPException(404, "That account is no longer here. Reload the page.")
     if account not in apps[app]["accounts"]:
         raise HTTPException(400, "That account is no longer here. Reload the page.")
     meta = apps[app]
+    key = (app, account)
 
     async def stream():
         from paperpull_core import signin_watch
-        plan = _SIGN_IN_PLANS.get((app, account))
+        plan = _SIGN_IN_PLANS.get(key)
         port = await to_thread.run_sync(_sign_in_port, meta, account)
-        # Not on PaperPull Server, whose sign-in is docked in the page.
-        if server_mode.enabled() or plan is None or not port:
+        # Not on PaperPull Server, whose sign-in is docked in the page. Nor
+        # on a port another config names too, whose window may be another
+        # account's sign-in, and whose run would then save that account's
+        # documents as this one's.
+        if server_mode.enabled() or plan is None or not port or \
+                not await to_thread.run_sync(_port_is_only_its_own, meta, account):
             yield _event("cannot_tell", "ended")
             return
         yield _event("", "waiting")
@@ -4479,8 +4488,13 @@ def api_sign_in_wait(app: str, account: str = "primary"):
             # Somebody pressed a run for this account, here or in another
             # tab, and it is that run's window now. The sign-in that opened
             # this wait may still be on its way out as it starts.
-            if _RUNS.get((app, account), {}).get("action") not in (None, "login"):
+            if _RUNS.get(key, {}).get("action") not in (None, "login"):
                 yield _event("run_started", "ended")
+                return
+            # Another sign-in of this account started since, in another tab
+            # most often, and the run is for that one's page to start.
+            if _SIGN_IN_PLANS.get(key) is not plan:
+                yield _event("replaced", "ended")
                 return
             tabs = await to_thread.run_sync(signin_watch.read_tabs, port)
             if tabs is None:
@@ -4490,12 +4504,21 @@ def api_sign_in_wait(app: str, account: str = "primary"):
                 if silent >= 3:
                     yield _event("no_window", "ended")
                     return
+            elif watch.look(tabs):
+                silent = 0
+                # Taken with nothing awaited since it was asked, so of two
+                # waits for one sign-in only one is told.
+                if _SIGN_IN_PLANS.get(key) is not plan:
+                    yield _event("replaced", "ended")
+                    return
+                _SIGN_IN_PLANS.pop(key, None)
+                yield _event("signed_in", "ended")
+                return
             else:
                 silent = 0
-                if watch.look(tabs):
-                    _SIGN_IN_PLANS.pop((app, account), None)
-                    yield _event("signed_in", "ended")
-                    return
+            # Said each look, so a page that went away, Stop waiting pressed
+            # or the tab closed, ends this too, not ten minutes later.
+            yield _event("", "waiting")
             await async_sleep(SIGN_IN_LOOK_EVERY)
         yield _event("timed_out", "ended")
 
@@ -4666,6 +4689,10 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             root = None
         _RUNS[(app, account)] = {"action": action,
                                  "started": datetime.now().isoformat(timespec="seconds")}
+        if action == "login":
+            # What to watch is this sign-in's from now, or nothing, and a
+            # wait for an earlier one ends (api_sign_in_wait).
+            _SIGN_IN_PLANS.pop((app, account), None)
         noted = False
         handed = None
         # What the run saved, read once its process has ended (below).
@@ -4758,11 +4785,14 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                     read_all = True
                     break
                 parsed = run_result.parse(line.rstrip("\r\n"), mark)
-                plan = run_result.sign_in_plan(line.rstrip("\r\n"), mark) if action == "login" else None
+                plan = run_result.sign_in_plan(line.rstrip("\r\n"), mark)
                 if parsed is not None:
                     result = parsed
                 elif plan is not None:
-                    _SIGN_IN_PLANS[(app, account)] = plan
+                    # Kept for a sign-in alone. Any run that opens a window
+                    # says it, and none shows it among its lines.
+                    if action == "login":
+                        _SIGN_IN_PLANS[(app, account)] = plan
                 else:
                     yield _event(line.rstrip())
             code = await to_thread.run_sync(proc.wait)

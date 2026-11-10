@@ -69,6 +69,8 @@ def install(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "setup_needed", lambda meta: "")
     monkeypatch.setattr(app_module, "_account_config", lambda meta, account: folder / "config.json")
     monkeypatch.setattr(app_module, "SIGN_IN_LOOK_EVERY", 0)
+    # No other config here names its port (test_a_port_another_config_names_is_not_watched).
+    monkeypatch.setattr(app_module, "_port_is_only_its_own", lambda meta, account: True)
     app_module._RUNS.clear()
     app_module._SIGN_IN_PLANS.clear()
     yield folder
@@ -86,7 +88,12 @@ def tabs(monkeypatch):
 
 
 def _wait():
-    return _events(_collect(app_module.api_sign_in_wait(APP, "primary")))
+    """How the wait went, the "waiting" said at each look said once."""
+    out = []
+    for event in _events(_collect(app_module.api_sign_in_wait(APP, "primary"))):
+        if not out or event != out[-1] or event != ("waiting", ""):
+            out.append(event)
+    return out
 
 
 def _on(url, title="Your account"):
@@ -104,7 +111,20 @@ def test_a_run_that_opens_a_window_says_what_to_watch_to_the_panel_alone(install
 
 def test_the_run_of_another_action_cannot_set_what_to_watch(install):
     stream = app_module._start_run(APP, "primary", "pilot", ())
-    _collect(stream)
+    events = _events(_collect(stream))
+    assert (APP, "primary") not in app_module._SIGN_IN_PLANS
+    # Nor is the line it says shown among its own, with its mark.
+    assert not [d for kind, d in events if "PAPERPULL_SIGN_IN_PLAN" in d], events
+    assert ("message", "Opened a sign-in browser.") in events
+
+
+def test_a_sign_in_starting_drops_what_an_earlier_one_said_to_watch(install):
+    """A sign-in whose window says nothing to watch is waited for by nobody,
+    never by what an earlier sign-in of the account said."""
+    app_module._SIGN_IN_PLANS[(APP, "primary")] = dict(PLAN)
+    (install / "bank_docs.py").write_text('print("Opened a sign-in browser.", flush=True)\n', encoding="utf-8")
+    events = _events(_collect(app_module._start_run(APP, "primary", "login", ())))
+    assert ("done", "0") in events
     assert (APP, "primary") not in app_module._SIGN_IN_PLANS
 
 
@@ -168,6 +188,64 @@ def test_a_gone_account_is_refused(install):
     with pytest.raises(app_module.HTTPException) as e:
         app_module.api_sign_in_wait("Nobody", "primary")
     assert e.value.status_code == 404
+
+
+def test_a_port_another_config_names_is_not_watched(install, tabs, monkeypatch):
+    """Its window may be another account's sign-in, and this account's run
+    would then save that account's documents as its own."""
+    app_module._SIGN_IN_PLANS[(APP, "primary")] = dict(PLAN)
+    tabs.append(_on("https://bank.example/accounts"))
+    monkeypatch.setattr(app_module, "_port_is_only_its_own", lambda meta, account: False)
+    assert _wait() == [("ended", "cannot_tell")]
+
+
+def test_a_later_sign_in_of_the_account_ends_the_wait_for_the_earlier(install, monkeypatch):
+    """Another tab's sign-in of the account is waited for there, and this
+    page starts nothing for it, even when the window is signed in by then."""
+    from paperpull_core import signin_watch
+    key = (APP, "primary")
+    app_module._SIGN_IN_PLANS[key] = dict(PLAN)
+    looks = []
+
+    def read(port):
+        looks.append(port)
+        if len(looks) == 2:
+            app_module._SIGN_IN_PLANS[key] = dict(PLAN)
+        return _on("https://bank.example/accounts")
+    monkeypatch.setattr(signin_watch, "read_tabs", read)
+    monkeypatch.setattr(signin_watch, "SETTLED_LOOKS", 2)
+    assert _wait() == [("waiting", ""), ("ended", "replaced")]
+    assert app_module._SIGN_IN_PLANS[key] == PLAN, "the later sign-in's own wait is still to come"
+    # And one dropped as a sign-in starts, before it says what to watch.
+    app_module._SIGN_IN_PLANS[key] = dict(PLAN)
+    monkeypatch.setattr(app_module, "SIGN_IN_WAIT_SECONDS", 1)
+
+    def starting(port):
+        app_module._SIGN_IN_PLANS.pop(key, None)
+        return _on("https://bank.example/login", "Sign in")
+    monkeypatch.setattr(signin_watch, "read_tabs", starting)
+    assert _wait() == [("waiting", ""), ("ended", "replaced")]
+
+
+def test_of_two_waits_for_one_sign_in_one_is_told(install, tabs):
+    app_module._SIGN_IN_PLANS[(APP, "primary")] = dict(PLAN)
+    tabs.append(_on("https://bank.example/accounts"))
+
+    async def both():
+        async def one():
+            stream = app_module.api_sign_in_wait(APP, "primary")
+            return _events("".join([chunk async for chunk in stream.body_iterator]))[-1]
+        return await asyncio.gather(one(), one())
+    assert sorted(asyncio.run(both())) == [("ended", "replaced"), ("ended", "signed_in")]
+
+
+def test_each_look_says_it_is_still_waiting(install, tabs):
+    """So a page that went away, Stop waiting pressed or its tab closed,
+    ends the wait at the next look rather than ten minutes later."""
+    app_module._SIGN_IN_PLANS[(APP, "primary")] = dict(PLAN)
+    tabs.extend([_on("https://bank.example/login", "Sign in")] * 4 + [None, None, None])
+    events = _events(_collect(app_module.api_sign_in_wait(APP, "primary")))
+    assert events.count(("waiting", "")) >= 6 and events[-1] == ("ended", "no_window")
 
 
 # -- the page ---------------------------------------------------------------------
@@ -291,10 +369,25 @@ def test_a_watch_that_cannot_tell_is_a_sign_in_as_it_always_was(panel):
 
 
 def test_stop_waiting_stops_and_leaves_the_step(panel):
-    panel.evaluate("() => { VIEW = 'run'; loginDone(); renderRun(); DO['stop-sign-in-wait'](); }")
+    during, said = panel.evaluate(
+        "() => { VIEW = 'run'; loginDone(); const was = RUN.outcome.say; endSignInWait(); return [was, RUN.outcome.say]; }")
+    assert during == "Sign in to Bank in the window that opened and leave it open."
+    assert said == "Sign in to Bank in the window that opened and leave it open, then get new documents."
+    panel.evaluate("() => { opened.length = 0; loginDone(); renderRun(); DO['stop-sign-in-wait'](); }")
     assert panel.evaluate("() => SIGNIN_WAIT") is None and panel.evaluate("() => opened[0].closed")
     assert panel.evaluate("() => asked.length") == 0 and panel.evaluate("() => $('r-waiting')") is None
     assert panel.evaluate("() => $('r-body').textContent.includes('Get new documents')")
+    # The page says again what to press once signed in, which is the
+    # person's to do now.
+    assert panel.evaluate("() => RUN.outcome.say") == said
+
+
+@pytest.mark.parametrize("how", ["replaced", "run_started"])
+def test_a_wait_another_sign_in_or_run_took_over_starts_nothing(panel, how):
+    panel.evaluate("() => { VIEW = 'run'; loginDone(); opened[0].fire('ended', '%s'); }" % how)
+    assert panel.evaluate("() => SIGNIN_WAIT") is None and panel.evaluate("() => asked.length") == 0
+    said = panel.evaluate("() => $('noticetext').textContent")
+    assert "waiting" not in said and "sign-in" not in said, said
 
 
 def test_pressing_a_run_by_hand_ends_the_wait_and_runs(panel):
