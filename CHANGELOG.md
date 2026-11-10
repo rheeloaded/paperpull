@@ -108,14 +108,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
   tab still showing the sample after another tab left it, or after the
   panel started again, does nothing real, and has the dialog back the next
   time it reads the accounts. Contributed by @JasperDale420.
+- **An account's page names what a run set aside (#193).** Needs a look said
+  a run had set documents aside and named none of them, and one that could
+  not be captured has no file to find. The account's page now lists each
+  from its records, by name, date and why, with **Open** for a PDF or image
+  in the account's own folder, on the desktop only, and **Done** with
+  **Undo** on each. Once all are done, Needs a look goes. A document set
+  aside again by a later run brings it back, and a run that also failed,
+  refused a wrong document, or counted more set aside than its records name,
+  a card or a plan left unread or a receipt that never showed, keeps it.
+  Done writes only the account's own note and never moves or deletes a
+  document or a record, and neither Done nor Open is taken while a run, a
+  Rename or a Move goes on that account. Contributed by @JasperDale420 (#193).
 
 ### Fixed
-- **A refused address is named by where it leads.** Chase's and Ally's
+- **A refused address is named by where it leads (#199).** Chase's and Ally's
   "refusing to fetch a document from outside" and the same refusal in
   American Express, Dominion and Robinhood said nothing of the address, so a
   refusal seen in a real run could not be told from a guard gone wrong. Each
   now names its scheme and host, from `urls.where_it_leads`, and never its
   path, query or a user or password in it, which can carry an account's ids.
+  A host that is no host name but words, or a part of one that reads like an
+  account's number or a token, is written as its shape, every letter as a
+  and every digit as 9. Nothing is asked of the address to name it.
+  Contributed by @JasperDale420 (#199).
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On
