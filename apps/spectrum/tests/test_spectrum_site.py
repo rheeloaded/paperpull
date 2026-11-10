@@ -23,6 +23,11 @@ from paperpull_core import intake
 from paperpull_core import pressing  # noqa: E402
 
 HOST = "www.spectrum.net"
+# An href that leads nowhere written with a letter Python's IGNORECASE takes
+# for an ASCII one, the long s or a dotless or dotted i. A browser reads each
+# as a path on the site.
+LOOK_ALIKES = ("javaſcript:void(0)", "unſafe:javascript:void(0)",
+               "javascrıpt:void(0)", "unsafe:javascrİpt:void(0)")
 GRAPH = site.GRAPH_URL
 # Invented account details, which must never leave through a log, the
 # console, a record, a file name or a diagnostic. Short and patterned on
@@ -1216,6 +1221,11 @@ class InPage(WithFakeClick):
                      "unsafe:", "unsafe:/billing/autopay", f"unsafe:https://{HOST}/billing", "unsafe:javascript:pay()",
                      "unsafe:unsafe:javascript:void(0)", "unsafe: javascript:void(0)"):
             self.assertFalse(site.is_void_href(href), repr(href))
+        # Letters IGNORECASE alone takes for ASCII ones. A browser reads each
+        # of these as a path on the site, so none leads nowhere.
+        for href in LOOK_ALIKES:
+            self.assertFalse(site.is_void_href(href), ascii(href))
+            self.assertFalse(site.is_safe_href(href), ascii(href))
 
     def test_a_row_whose_address_is_refused_is_not_pressed(self):
         for href in ("/billing/autopay", "https://evil.test/statement", "#/billing/payment", OSError("gone")):
@@ -2037,7 +2047,7 @@ class MobileListing(WithFakeClick):
 
     def test_a_mobile_link_whose_address_is_refused_is_not_pressed(self):
         for href in ("/billing/auto-pay", f"https://{HOST}/billing/mobile-statements", "https://evil.test/x",
-                     ValueError("gone")):
+                     ValueError("gone"), *LOOK_ALIKES):
             page = Page(mobile=mobile_rows())
             page.hrefs = {("billing", 3): href}
             with self.assertRaises(site.ListStopped) as stop:
@@ -2139,9 +2149,23 @@ class MobileTaking(WithFakeClick):
         self.assertIn({"note": "the Mobile row is turned off"}, trace)
         self.assertEqual(page.live_listeners(), 0)
 
+    def test_a_link_and_a_row_written_with_angulars_unsafe_are_pressed(self):
+        """Billing's link and the Mobile rows as Spectrum writes them since
+        November 2026 (#194), which still lead nowhere."""
+        for href in ("unsafe:javascript:void(0)", "unsafe:javascript:void(0);"):
+            site._MOBILE_IDS.clear()
+            for leftover in self.tmp.glob("*.pdf"):
+                leftover.unlink()
+            page = Page(mobile=mobile_rows())
+            page.hrefs = {("billing", 3): href, ("mlist", 3): href}
+            ok, out, _ = self.take(page)
+            self.assertTrue(ok, href)
+            self.assertEqual((page.link_presses, page.mobile_row_presses, page.prints), (1, [3], 1), href)
+            self.assertEqual(out.read_bytes()[:5], b"%PDF-")
+
     def test_a_mobile_row_whose_address_is_refused_is_not_pressed(self):
         for href in ("/billing/autopay", "https://evil.test/x", "/mobile-billing/statement-history?statementId=Zq9",
-                     ValueError("gone")):
+                     ValueError("gone"), *LOOK_ALIKES):
             page = Page(mobile=mobile_rows())
             page.hrefs = {("mlist", 3): href}
             ok, out, trace = self.take(page)

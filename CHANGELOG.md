@@ -167,6 +167,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   saved only from its own page, whose address and the PDF it asks for name
   its account and date, and never as the same file as the other. Anything
   else after a press still stops the run. Not yet run on a live account. Contributed by @JasperDale420.
+- **Spectrum reads its Mobile statements again (#194).** Billing's Mobile
+  Account Number link and each Mobile statement row now carry
+  `unsafe:javascript:void(0)` as their address, the way Angular writes a
+  script address it will not follow, so they still lead nowhere. The app
+  took that for an address of its own and stopped every Get new on Billing
+  after the Internet statements were listed. That one form now passes,
+  and nothing else after `unsafe:` does. Contributed by @JasperDale420 and
+  run on the contributor's own account. Before merging, the check reads
+  its letters as plain ASCII letters only, so an address spelled with a
+  look-alike letter, which a browser follows as a path on the site, is
+  refused.
 
 ## [0.62.0] - 2026-11-09
 

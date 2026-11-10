@@ -1318,13 +1318,17 @@ def is_safe_row(text, day: str) -> bool:
 # href, as the survey saw it, with or without the closing semicolon. Since
 # November 2026 Spectrum's page writes it with Angular's "unsafe:" in front,
 # the mark Angular puts on a script address it will not run as a link, so
-# it still leads nowhere. Nothing else after "unsafe:" passes.
-_VOID_HREF_RE = re.compile(r"(?:unsafe:)?javascript:void\(0\);?", re.I)
+# it still leads nowhere. Nothing else after "unsafe:" passes. Its letters
+# are matched as ASCII letters only, since Python's IGNORECASE alone takes
+# "ſ" for "s" and a dotless or dotted i for "i", and a browser reads
+# "javaſcript:void(0)" as a path on the site, an address of its own.
+_VOID_HREF_RE = re.compile(r"(?:unsafe:)?javascript:void\(0\);?", re.I | re.A)
 
 
 def is_void_href(href) -> bool:
-    """Whether an anchor's own href leads nowhere. No href, an empty one and
-    "javascript:void(0)" do, and anything else does not."""
+    """Whether an anchor's own href leads nowhere. No href, an empty one,
+    "javascript:void(0)" and "unsafe:javascript:void(0)" do, each with or
+    without its closing semicolon, and anything else does not."""
     if href is None:
         return True
     if not isinstance(href, str):
