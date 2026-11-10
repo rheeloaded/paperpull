@@ -510,6 +510,12 @@ def set_document_type(page, label: str) -> bool:
     try:
         sel = page.locator(FALLBACK["select_doc_type"])
         if sel.count() > 0:
+            # a type the filter does not list is not on this account, so
+            # it is not waited for, and the text of the select's own hidden
+            # <option> is no custom dropdown to open either
+            options = [o.strip() for o in sel.first.locator("option").all_inner_texts()]
+            if not any(o.lower() == label.lower() for o in options):
+                return False
             sel.first.select_option(label=label)
             page.wait_for_timeout(2500)
             return True
