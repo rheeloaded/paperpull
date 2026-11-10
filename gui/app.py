@@ -1527,16 +1527,17 @@ _NOTHING_TO_TAKE = ("Completed", "No Longer Listed")
 # person. American Express leaves out a year-end row that stays at a card
 # switch, since whose it is cannot be told. Discover Bank passes over an
 # account its menu holds with no usable id, and that run stops at its end, so
-# it would settle nothing anyway. The others pass over a row they cannot date
-# or open.
+# it would settle nothing anyway. Chase leaves out a statement its page saves
+# only through a menu, which it never presses. The others pass over a row they
+# cannot date or open.
 # gui/tests/test_accounts.py finds these by a log line written out as one
 # string. An app can also pass over a document and say so some other way, or
 # leave no trace at all, as Citi does with a requested statement not ready yet
 # and PayPal with a report still being made, which is why _settled waits for
 # a second run on another day.
 _LISTS_LEAVE_OUT = frozenset({"aafmaa", "affirm", "ally", "amex", "amfam", "applecard",
-                              "discoverbank", "dkb", "golden1", "ibkr", "sba", "statefarm",
-                              "tsp", "wellsfargo"})
+                              "chase", "discoverbank", "dkb", "golden1", "ibkr", "sba",
+                              "statefarm", "tsp", "wellsfargo"})
 
 
 def _gap_keys(gaps) -> list:

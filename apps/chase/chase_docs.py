@@ -212,6 +212,10 @@ class App:
     # read, so the run goes on with what it read and stops at its end
     # rather than finish (_stop_if_cut_short).
     _list_cut_short = False
+    # Set when the page's text reading left out a statement saved only
+    # through a menu, so the list is not noted whole and the run still
+    # finishes, since no later run would read it either.
+    _menu_left_out = False
 
     def __init__(self, args):
         self.args = args
@@ -512,27 +516,31 @@ class App:
             raw = site.chase_collect(page)
             log.info("Chase: collected %d document rows", len(raw))
             passed_over += [p for p in getattr(raw, "passed_over", ()) if p not in passed_over]
+        if site.DOCUMENT_MENU in passed_over:
+            # A row the page's text reading passed over because its only
+            # control opens a menu. Its statement is on the list and no run
+            # of this app takes it, so the list is not noted whole. The run
+            # is not stopped for it, since a stop would stop every run of
+            # such an account, and the panel would offer a sign-in and a
+            # Continue that cannot change what the page draws (#124).
+            passed_over.remove(site.DOCUMENT_MENU)
+            self._menu_left_out = True
+            log.info("Chase: a statement saved only through a menu is left out of the list")
+            print("\n  Chase's statement list holds a statement saved only through a menu,")
+            print("  which this app never presses, so it is left out and the list is not")
+            print("  noted as read whole. The Chase Business app takes a business account's")
+            print("  statements. The rest of the list is read as usual.")
         if passed_over:
             # A year or a card the pickers offered and the walk could not
             # read is a part of the list missing, so the list is not noted
             # whole, and the run goes on with what it read and stops at its
-            # end rather than finish. So is a row the page's text reading
-            # passed over because its only control opens a menu, since its
-            # statement is on the list and this app does not take it.
+            # end rather than finish.
             self._list_cut_short = True
-            chosen = [p for p in passed_over if p != site.DOCUMENT_MENU]
             log.info("Chase: the list was not read through the %s", " and the ".join(passed_over))
-            print("\n  Chase's statement list was not read whole.")
-            if chosen:
-                print("  A year, a card or an account on it could not be chosen.")
-            if site.DOCUMENT_MENU in passed_over:
-                print("  A statement on it is saved only through a menu, which this app never")
-                print("  presses. The Chase Business app takes a business account's statements.")
-            print("  What was read is kept, and this run stops at its end rather than finish.")
-            print("  The next run reads the list again.")
-            self.write_failure("read the statement list",
-                               "some of the list could not be chosen" if chosen
-                               else "a statement on the list is saved only through a menu")
+            print("\n  Chase's statement list was not read whole, since a year, a card or an")
+            print("  account on it could not be chosen. What was read is kept, and this run")
+            print("  stops at its end rather than finish. The next run reads the list again.")
+            self.write_failure("read the statement list", "some of the list could not be chosen")
         n_new = 0
         for d in raw:
             n_new += self._record_chase_doc(d)
@@ -540,15 +548,18 @@ class App:
         self.discovery.save()
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing). A list read
-        # in part is not, and the listing stays one that stopped.
-        if not self._list_cut_short:
+        # in part is not, and the listing stays one that stopped. Nor is a
+        # list a statement was left out of, though the run goes on.
+        if not (self._list_cut_short or self._menu_left_out):
             listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
             print("\nDiscovery %s. Documents known: %d"
-                  % ("read part of the statement list" if self._list_cut_short else "complete",
+                  % ("read part of the statement list" if self._list_cut_short
+                     else "complete but for what is saved only through a menu"
+                     if self._menu_left_out else "complete",
                      len(docs)))
             by_cat = {}
             for d in docs:
