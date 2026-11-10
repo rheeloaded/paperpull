@@ -1105,9 +1105,11 @@ class InPage(WithFakeClick):
                      "mailto:someone@example.com", 7):
             self.assertFalse(site.is_safe_href(href), repr(href))
         # A Mobile link or row is pressed only with the address the survey saw.
-        for href in (None, "", "javascript:void(0)"):
+        for href in (None, "", "javascript:void(0)", "unsafe:javascript:void(0)", "UNSAFE:javascript:void(0);"):
             self.assertTrue(site.is_void_href(href), repr(href))
-        for href in ("/billing/statements", f"https://{HOST}/billing/mobile-statements", "#", "/billing/autopay"):
+        for href in ("/billing/statements", f"https://{HOST}/billing/mobile-statements", "#", "/billing/autopay",
+                     "unsafe:", "unsafe:/billing/autopay", f"unsafe:https://{HOST}/billing", "unsafe:javascript:pay()",
+                     "unsafe:unsafe:javascript:void(0)", "unsafe: javascript:void(0)"):
             self.assertFalse(site.is_void_href(href), repr(href))
 
     def test_a_row_whose_address_is_refused_is_not_pressed(self):

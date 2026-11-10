@@ -1311,8 +1311,11 @@ def is_safe_row(text, day: str) -> bool:
 
 
 # What a row or link that only runs the page's own script carries as its
-# href, as the survey saw it, with or without the closing semicolon.
-_VOID_HREF_RE = re.compile(r"javascript:void\(0\);?", re.I)
+# href, as the survey saw it, with or without the closing semicolon. Since
+# November 2026 Spectrum's page writes it with Angular's "unsafe:" in front,
+# the mark Angular puts on a script address it will not run as a link, so
+# it still leads nowhere. Nothing else after "unsafe:" passes.
+_VOID_HREF_RE = re.compile(r"(?:unsafe:)?javascript:void\(0\);?", re.I)
 
 
 def is_void_href(href) -> bool:
