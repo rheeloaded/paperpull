@@ -1716,6 +1716,54 @@ def test_a_short_group_beside_the_number_does_not_hide_it(text):
     assert site.names_tail(text, "4321")
 
 
+# A Business Checking statement's text as pypdf reads it, digits changed:
+# the account number first, at the top, and the label's own line empty,
+# with Chase's site, phone number and the transactions after it.
+CHECKING_TEXT = (" \n     \n 000000%s\n CUSTOMER SERVICE INFORMATION\n10232026 DRE 703 219 00000\n"
+                 "Account Number:    \nChase.com\n1-800-242-7338\nBeginning Balance $1.00\n"
+                 "10/02 Online Transfer To Chk ...1111 Transaction#: 98765%s\n")
+
+
+def test_a_checking_statement_whose_label_line_is_empty_is_read_by_its_first_number():
+    assert site.names_tail(CHECKING_TEXT % ("123454321", "000001"), "4321")
+    # Another account's: its own number first, and this account's four
+    # only at the end of a transaction number after the label.
+    assert not site.names_tail(CHECKING_TEXT % ("123998877", "054321"), "4321")
+
+
+def test_a_number_on_the_labels_own_line_is_still_the_one_judged():
+    assert not site.names_tail("000000123454321\nAccount Number: XXXX XXXX XXXX 8877\n", "4321")
+    assert site.names_tail("000000123998877\nAccount Number: XXXX XXXX XXXX 4321\n", "4321")
+
+
+@pytest.mark.parametrize("text", [
+    # The label's number on the line after it, and a long number of
+    # another kind printed before the label.
+    "Ref 000000554321\nAccount Number:\n \n000000998877\nChase.com\n",
+    # A number alone at the top, and the label's own on the line after it.
+    "000000554321\nAccount Number:\n000000998877\nChase.com\n",
+])
+def test_a_number_before_the_label_does_not_stand_for_the_labels_own(text):
+    """Only a number alone at the very top, with nothing printed beside the
+    label or on the line after it, is read as the account's. Any other
+    number before the label is not, so a statement of the account ending
+    8877 is not kept for the one ending 4321."""
+    assert not site.names_tail(text, "4321")
+    assert site.names_tail(text, "8877")
+
+
+@pytest.mark.parametrize("text", [
+    # The label's lines and the top print no number, and a transaction
+    # number further on ends in the four.
+    "Business Complete Checking\nAccount Number:\nChase.com\n1-800-555-0199\n"
+    "Online Transfer To Chk ...1111 Transaction#: 9876554321\n",
+    # The top line prints more than a number.
+    "Ref 000000554321\n CUSTOMER SERVICE INFORMATION\nAccount Number:    \nChase.com\n",
+])
+def test_a_label_whose_number_cannot_be_told_keeps_nothing(text):
+    assert not site.names_tail(text, "4321")
+
+
 def test_another_accounts_statement_naming_this_account_is_not_kept(tmp_path):
     from paperpull_core import testkit
     page = center()

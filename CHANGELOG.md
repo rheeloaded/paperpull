@@ -129,6 +129,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
   time it reads the accounts. Contributed by @JasperDale420.
 
 ### Fixed
+- **Chase no longer tries, on every run, statements it can never take.**
+  When its document API answered nothing, the fallback read a business
+  account's documents off the page, with no card and no document id, and
+  recorded each row by its "Opens document menu" control. Such a record
+  failed on every later run, and a press on that control never saved
+  anything. Those controls are no longer pressed or listed, and a record of
+  that shape left by an older version is set down as No Longer Listed.
+  Contributed by @JasperDale420 (#191). Before merging, a list with such a
+  row was made to read as not whole, since its statement is on the list and
+  is not taken, so the run keeps what it saved, says why and stops at its
+  end.
+- **Chase Business keeps a Business Checking statement (#195).** Every
+  real checking statement was refused and deleted once downloaded, since
+  its text leaves the "Account Number" label's line empty and the number
+  read after the label was a transaction's. A statement is now judged by
+  the number printed alone at the very top of its text when the label's
+  line and the line after it print none. Contributed by @JasperDale420.
+  Before merging, any other number printed before the label was made never
+  to stand for the label's, so another account's statement is not kept for
+  a long number that happens to end in the same four digits.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On

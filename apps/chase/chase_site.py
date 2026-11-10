@@ -590,6 +590,23 @@ _ROW_JS = r"""() => {
 }"""
 
 
+_DOCUMENT_MENU_RE = re.compile(r"\bopens document menu\b", re.I)
+
+# What passed_over names when the page's text reading met a row whose only
+# control opens a menu. Its statement is on the list and is not taken here,
+# so the list is not whole.
+DOCUMENT_MENU = "document menu"
+
+
+def is_document_menu_row(title: str) -> bool:
+    """True for a row read from the page whose only control opens a menu of
+    ways to take the document. No row control of this app's is a press on
+    such a menu (row_label_re), so the row can never be taken here. Chase
+    draws them on a business account's documents, which Chase Business
+    takes from that menu."""
+    return isinstance(title, str) and bool(_DOCUMENT_MENU_RE.search(title))
+
+
 def collect_documents(page) -> List[RawDoc]:
     """Rows currently rendered. Used by --diagnose (and as the generic
     fallback inside chase_collect)."""
@@ -676,8 +693,9 @@ _ENABLED_OPTION = "option:not([disabled])"
 class Listed(list):
     """The documents a walk of the list read. passed_over names each part
     of the list a picker offered and the walk could not read through,
-    "year picker", "card" or "account picker", so the list is not whole
-    however much was read."""
+    "year picker", "card" or "account picker", and DOCUMENT_MENU for a row
+    whose only control opens a menu, so the list is not whole however much
+    was read."""
     passed_over: tuple = ()
 
 
@@ -752,7 +770,9 @@ def chase_collect(page) -> Listed:
 
     A year or an account whose choice did not take was not read, and is
     named in passed_over, where it used to be passed over and the list
-    noted whole without it. One the guard refuses is never chosen.
+    noted whole without it. One the guard refuses is never chosen. A row
+    whose only control opens a menu is not listed, and passed_over names
+    DOCUMENT_MENU, since its statement is on the list and is not taken.
     """
     docs: List[dict] = []
     seen = set()
@@ -764,6 +784,12 @@ def chase_collect(page) -> Listed:
         for r in collect_documents(page):
             date, _ = parse_period_date(r.date_text or r.text)
             if not date:
+                continue
+            if is_document_menu_row(r.title):
+                # Its statement is on the list and this app never presses
+                # the menu, so the list read here is not the whole list.
+                log.info("passing over a row whose only control opens a menu")
+                passed_over.add(DOCUMENT_MENU)
                 continue
             key = (acct, date, r.title)
             if key in seen:
@@ -838,8 +864,12 @@ def row_label_re(date: str, account: str, action: str = "Saves document"):
     month = _MONTHS_ABBR[int(date[5:7]) - 1]
     day = date[8:10]
     day_pat = f"0?{int(day)}"                      # "Aug 9" or "Aug 09"
+    # "Opens document menu" names a control that only shows a menu. Pressed
+    # as the row's document it fires no download, and the press lands
+    # wherever the menu puts it.
     return re.compile(rf"{month}\s+{day_pat},\s*{date[:4]}.*"
-                      rf"{escape_for_locator(account)}.*{escape_for_locator(action)}", re.I | re.S)
+                      rf"{escape_for_locator(account)}.*{escape_for_locator(action)}(?!\s+menu)",
+                      re.I | re.S)
 
 
 def chase_download(page, ctx, account: str, date: str, out_path,

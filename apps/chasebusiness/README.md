@@ -70,9 +70,12 @@ A list the app cannot read whole stops rather than being called complete.
 The account menu is read twice and both readings must agree, and the
 year picker's oldest year must say it ends the menu. A statement is saved
 only when exactly one row matches it, and kept only when the account
-number its PDF prints after the "Account Number" label in its header
-ends in the account's last four, since the rows do not name their
-account. A PDF with no such label is judged by the first account number
+number its PDF prints for the "Account Number" label in its header ends
+in the account's last four, since the rows do not name their account.
+That number is the one on the label's own line or on the next line that
+prints anything, or else one printed alone at the very top of the text,
+where a checking statement prints it. A label with none of these keeps
+nothing. A PDF with no such label is judged by the first account number
 it prints, passing over a ZIP code, a mail sort number, a phone number
 or a date before it. A
 statement whose save menu or Save as PDF Chase has turned off is left
