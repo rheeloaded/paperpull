@@ -110,6 +110,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   time it reads the accounts. Contributed by @JasperDale420.
 
 ### Fixed
+- **A refused address is named by where it leads.** Chase's and Ally's
+  "refusing to fetch a document from outside" and the same refusal in
+  American Express, Dominion and Robinhood said nothing of the address, so a
+  refusal seen in a real run could not be told from a guard gone wrong. Each
+  now names its scheme and host, from `urls.where_it_leads`, and never its
+  path, query or a user or password in it, which can carry an account's ids.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On

@@ -538,7 +538,8 @@ def download_by_url(page, url: str, out_path) -> bool:
     # provider's own site. Before this check the value went straight to
     # page.goto in the signed-in tab.
     if not is_safe_url(full):
-        log.error("refusing a URL that is not on this provider's host")
+        from paperpull_core.urls import where_it_leads
+        log.error("refusing a URL that is not on this provider's host, at %s", where_it_leads(full))
         return False
     # try a genuine download first
     try:
