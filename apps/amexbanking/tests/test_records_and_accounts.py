@@ -240,7 +240,7 @@ def _answer(page, token="tok-checking", status=200, statements=None):
                    "documentIdentifier": "URN:DOC:1"}] if statements is None else statements
     page.handlers["response"](SimpleNamespace(
         url=site.LIST_URL, status=status, request=_request(token),
-        json=lambda: {"statements": statements}))
+        json=lambda: {"statements": statements, "totalCount": len(statements)}))
 
 
 def _heard(page):
@@ -353,11 +353,106 @@ def test_the_first_record_discovered_does_not_choose_the_account(tmp_path):
     assert site.SESSION.label_configured is False
 
 
-def test_a_document_named_again_takes_the_token_of_its_list_this_time(app_env):
+def test_a_document_known_already_keeps_its_account_and_token(app_env):
     app, _ = app_env
     app._record_discover_doc(_raw(token="tok-before"))
-    app._record_discover_doc(_raw(token="tok-now"))
-    assert app.discovery.data["id:URN:DOC:BS:1"]["account_token"] == "tok-now"
+    again = _raw(token="tok-now")
+    again.account = "Another Account"
+    app._record_discover_doc(again)
+    rec = app.discovery.data["id:URN:DOC:BS:1"]
+    assert rec["account_token"] == "tok-before"
+    assert rec["account"] == "Business Checking"
+
+
+# --- a config is tied to the account its records hold ------------------------
+
+def _held(app, token="tok-checking", digits="1234"):
+    rec = dict(_doc(doc_id="URN:DOC:TX:OLD", token=token).to_dict(), account_digits=digits)
+    app.discovery.data[_doc(doc_id="URN:DOC:TX:OLD").key] = rec
+    app.progress.data[_doc(doc_id="URN:DOC:TX:OLD").key] = dict(rec, downloaded_ok=True,
+                                                                  state=State.COMPLETED.value)
+
+
+def _another(token="tok-checking", digits="1234"):
+    raw = _raw(doc_id="URN:DOC:BS:NEW", token=token)
+    raw.account_digits = digits
+    return site._listed([raw], token=token, digits=digits)
+
+
+@pytest.mark.parametrize("token, digits", [("tok-other", "1234"), ("tok-checking", "9999"),
+                                           ("tok-other", "")])
+def test_a_list_of_another_account_stops_the_run_before_anything_is_taken(
+        app_env, monkeypatch, capsys, token, digits):
+    app, _ = app_env
+    _held(app)
+    called = _discover(app, monkeypatch, _another(token, digits))
+    app.args.yes = True
+    app.process = MagicMock()
+    with pytest.raises(SystemExit):
+        app.cmd_run("all")
+    out = " ".join(capsys.readouterr().out.split())
+    assert "shows another American Express Banking account" in out
+    assert "account switcher, then press Continue" in out
+    assert not app.process.called and not called
+    assert "id:URN:DOC:BS:NEW" not in app.discovery.data
+    assert app.discovery.data["id:URN:DOC:TX:OLD"]["account_token"] == "tok-checking"
+
+
+@pytest.mark.parametrize("token, digits", [("tok-checking", "1234"), ("tok-checking", ""),
+                                           ("", "1234")])
+def test_a_list_of_the_account_the_records_hold_is_taken(app_env, monkeypatch, token, digits):
+    app, _ = app_env
+    _held(app)
+    called = _discover(app, monkeypatch, _another(token, digits))
+    app.cmd_discover(quiet=True)
+    assert called
+    assert "id:URN:DOC:BS:NEW" in app.discovery.data
+
+
+def test_a_config_with_no_records_takes_the_account_shown_and_keeps_it(app_env, monkeypatch):
+    app, _ = app_env
+    _discover(app, monkeypatch, _another("tok-first", "4321"))
+    app.cmd_discover(quiet=True)
+    rec = app.discovery.data["id:URN:DOC:BS:NEW"]
+    assert (rec["account_token"], rec["account_digits"]) == ("tok-first", "4321")
+    assert app._held_accounts() == ({"tok-first"}, {"4321"})
+
+
+def test_the_switcher_is_read_when_the_config_names_the_account():
+    """A name set in the config goes on the documents, and the digits the
+    switcher shows still go with them, since they say which account it is."""
+    site.SESSION.account_label, site.SESSION.label_configured = "Ops", True
+    page = _heard(Page(name="Business Checking", number="•••• 9999"))
+    _answer(page)
+    listed = site.collect_documents(page)
+    (doc,) = listed
+    assert doc.account == "Ops"
+    assert (listed.token, listed.digits, doc.account_digits) == ("tok-checking", "9999", "9999")
+
+
+def test_a_second_config_on_the_first_accounts_page_stops(tmp_path, monkeypatch):
+    """The review's case. biz2, named Ops, saved its own account before,
+    and its window now shows the first account, whose list answers with the
+    first account's token while the switcher shows its digits."""
+    from paperpull_core import storage
+    storage.bind(SPEC)
+    cfg = tmp_path / "config.biz2.json"
+    cfg.write_text(json.dumps({"owner": "biz", "output_dir": str(tmp_path), "account_name": "Ops",
+                               "min_pdf_bytes": 10, "max_path_length": 240}), encoding="utf-8")
+    app = App(DummyArgs(config=str(cfg), yes=True))
+    _held(app, token="tok-ops", digits="5555")
+    page = _heard(Page(name="Business Checking", number="•••• 1111"))
+    page.wait_for_timeout = lambda ms: None
+    page.reload = lambda **kw: _answer(page, token="tok-first")
+    page.goto = lambda url, **kw: _answer(page, token="tok-first")
+    monkeypatch.setattr(app, "page", lambda: page)
+    monkeypatch.setattr(app, "check_session", lambda page: None)
+    monkeypatch.setattr(app, "write_failure", lambda *a, **k: None)
+    app.process = MagicMock()
+    with pytest.raises(SystemExit):
+        app.cmd_run("all")
+    assert not app.process.called
+    assert "id:URN:DOC:1" not in app.discovery.data
 
 
 # --- the loop over the documents ---------------------------------------------

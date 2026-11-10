@@ -22,19 +22,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   run on the contributor's own Business Checking account, 61 documents
   saved. Personal Checking and Savings are untested. Before merging, a
   list that answered in part, a document whose id, month or year could
-  not be read, a list its own count disagrees with, and lists of more
-  than one account were made to leave the list not whole, so the run
-  keeps what it saved and stops at its end. A list or a PDF refused as
-  signed out stops the run once. A document is no longer taken as saved
-  because a PDF of its date is in its folder, which may be another
-  account's statement, Rename no longer rewrites the document index
-  first, and a PDF that comes back with the bytes of another document
-  saved in the same run is not saved. The account a file is named for is
-  read from the page once its list has answered, never from the page the
-  tab was found on or from the page's text. Login says signed in only
-  once the list answers, and like every other app, it says Sign in first
-  when nobody is signed in, and says when no sign-in window opened or
-  nothing was recorded.
+  not be read, a list its own count disagrees with or that says no
+  count, and lists of more than one account were made to leave the list
+  not whole, so the run keeps what it saved and stops at its end. A
+  config is tied to the account its records hold, so a list of another
+  account, by its token or by the last four digits the account switcher
+  shows, stops the run before anything is listed or downloaded, and a
+  document known already keeps the account it was first listed under. A
+  list or a PDF refused as signed out stops the run once. A document is
+  no longer taken as saved because a PDF of its date is in its folder,
+  which may be another account's statement, Rename no longer rewrites
+  the document index first, and a PDF that comes back with the bytes of
+  another document saved in the same run is not saved. The account a
+  file is named for is read from the page once its list has answered,
+  never from the page the tab was found on or from the page's text, and
+  the switcher is read even when the config names the account. Login
+  says signed in only once the list answers, and like every other app,
+  it says Sign in first when nobody is signed in, and says when no
+  sign-in window opened or nothing was recorded.
 
 ### Changed
 - **One Get help under More (#181).** Make a support report and Record steps for

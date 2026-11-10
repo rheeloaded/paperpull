@@ -74,7 +74,7 @@ class Document:
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
                  date_text="", document_id="", occurrence=0, ambiguous=False,
-                 account_token="", **kw):
+                 account_token="", account_digits="", **kw):
         self.title = title
         self.account = account
         self.category = category
@@ -86,6 +86,9 @@ class Document:
         # for by, and the token of the account whose list named it.
         self.document_id = document_id
         self.account_token = account_token
+        # The last four digits the account switcher showed when the document
+        # was first listed, "" when they could not be read.
+        self.account_digits = account_digits
         self.occurrence = occurrence
         self.ambiguous = ambiguous
         # Sticky "was successfully downloaded at least once" marker. Once set,
@@ -368,21 +371,54 @@ class App:
         doc = Document(title=title, category=category, summary=summary,
                        date=date, href=d.href or "", confidence=confidence,
                        account=account, date_text=date, document_id=doc_id,
-                       account_token=d.account_token)
+                       account_token=d.account_token, account_digits=d.account_digits)
         existing = self.discovery.get(doc.key)
         if existing is None:
             rec = doc.to_dict()
             rec["state"] = State.DISCOVERED.value
             self.discovery.update(doc.key, rec, save=False)
             return 1
-        if (existing.get("account_token") != doc.account_token
-                or existing.get("account") != doc.account):
-            # The same document named again, with the token its list was
-            # asked with this time, which is the one its PDF is asked with.
-            existing["account_token"] = doc.account_token
-            existing["account"] = doc.account
-            self.discovery.update(doc.key, existing, save=False)
+        # A document known already keeps the account and the token it was
+        # first listed under. A list of another account stops the run before
+        # this (_stop_if_another_account).
         return 0
+
+    def _held_accounts(self):
+        """The account tokens and the last four digits this config's records
+        hold, each a set, empty for a config with no records yet."""
+        tokens, digits = set(), set()
+        for store in (self.discovery, self.progress):
+            for rec in store.data.values():
+                if not isinstance(rec, dict):
+                    continue
+                if rec.get("account_token"):
+                    tokens.add(str(rec["account_token"]))
+                if rec.get("account_digits"):
+                    digits.add(str(rec["account_digits"]))
+        return tokens, digits
+
+    def _stop_if_another_account(self, raw) -> None:
+        """A config is tied to the account its records hold. A list asked for
+        another account's token, or listed while the account switcher shows
+        other last four digits than the records hold, is another account's,
+        which a second config sharing one sign-in shows when nobody chose its
+        account in the window. Its documents would be filed in this config's
+        folder under this config's name, so the run stops before anything is
+        recorded or downloaded, as a run that stopped."""
+        tokens, digits = self._held_accounts()
+        other_token = bool(tokens and raw.token and raw.token not in tokens)
+        other_digits = bool(digits and raw.digits and raw.digits not in digits)
+        if not (other_token or other_digits):
+            return
+        log.warning("American Express Banking: the documents list is another account's "
+                    "than the one this config's records hold")
+        self.write_failure("read the documents list", "the window shows another account")
+        tabs.stop(self, [
+            "The browser window shows another American Express Banking account than the",
+            "one this config listed and saved before, so nothing was listed or downloaded.",
+            "Choose that account in the page's account switcher, then press Continue.",
+            "A second account needs a config of its own (login.bat biz2 reads config.biz2.json).",
+        ])
 
     def cmd_discover(self, quiet: bool = False, finish: bool = True) -> int:
         # A list read only in part (passed_over) keeps the documents it
@@ -414,6 +450,7 @@ class App:
             print("it writes to an issue.")
             self.write_failure("read the documents list", "the documents list did not answer")
             raise SystemExit(0)
+        self._stop_if_another_account(raw)
         log.info("American Express Banking: %d document(s) read from the list", len(raw))
         passed_over = list(raw.passed_over)
         if passed_over:

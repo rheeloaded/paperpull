@@ -95,8 +95,16 @@ def test_parse_tax_documents():
 def test_parse_empty_and_malformed():
     assert parse_banking_document_list({}).passed_over == (site.NOT_A_LIST,)
     assert parse_banking_document_list({"statements": "not-a-list"}).passed_over == (site.NOT_A_LIST,)
-    empty = parse_banking_document_list({"statements": []})
+    empty = parse_banking_document_list({"statements": [], "totalCount": 0})
     assert list(empty) == [] and empty.passed_over == (site.EMPTY_LIST,)
+
+
+def test_a_list_that_says_no_count_is_not_whole():
+    """Nothing else says the page asked for all of the list in one answer."""
+    docs = parse_banking_document_list({"statements": [
+        {"statementMonth": "1", "statementYear": "2026", "tag": "a"}]})
+    assert [d.document_id for d in docs] == ["a"]
+    assert docs.passed_over == (site.NO_COUNT,)
 
 
 @pytest.mark.parametrize("item, part", [
@@ -110,8 +118,8 @@ def test_parse_empty_and_malformed():
     ("not a document", site.NOT_A_LIST),
 ])
 def test_a_document_that_cannot_be_read_is_passed_over_and_said(item, part):
-    payload = {"statements": [item, {"statementMonth": "1", "statementYear": "2026",
-                                     "tag": "kept"}]}
+    payload = {"totalCount": 2, "statements": [item, {"statementMonth": "1", "statementYear": "2026",
+                                                      "tag": "kept"}]}
     docs = parse_banking_document_list(payload)
     assert [d.document_id for d in docs] == ["kept"]
     assert docs.passed_over == (part,)

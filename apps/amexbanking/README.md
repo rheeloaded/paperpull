@@ -62,14 +62,24 @@ bot checks.
   file names and in the index is read from the page's account switcher once
   the list has answered, or from the page's address (Business Checking,
   Personal Savings and so on) when the switcher cannot be read. To file an
-  account under a name of your own, set `account_name` in its config. That
-  name goes on everything the config reads, so give a second account a
-  config of its own (`login.bat biz2` reads `config.biz2.json`).
+  account under a name of your own, set `account_name` in its config. The
+  switcher is read all the same, since its last four digits say which
+  account the page shows.
+- **A config keeps to one account.** Once a config has listed anything, it is
+  tied to the account its records hold. A list asked for another account's
+  token, or listed while the switcher shows other last four digits than its
+  records hold, stops the run before anything is listed or downloaded, and
+  the run says to choose that account in the switcher and press Continue. A
+  document known already keeps the account it was first listed under. Give a
+  second account a config of its own (`login.bat biz2` reads
+  `config.biz2.json`), and choose that account in its window before its
+  first run, which takes the account the window shows.
 - **A list read in part is never called whole.** A list call that did not
   answer, a document whose id, month or year could not be read, a document
   of a kind this app does not know, a list whose own count disagrees with
-  what it holds, and lists of more than one account in one page load are
-  each a part of the list missing. What was read is downloaded, a failure
+  what it holds or that says no count, and lists of more than one account
+  in one page load are each a part of the list missing. What was read is
+  downloaded, a failure
   file is written, and the run stops at its end rather than finish. Resume
   reads no list, carries on with what was read, and then stops the same way.
   Pilot or Run All reads the list again.
