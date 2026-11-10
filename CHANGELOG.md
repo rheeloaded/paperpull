@@ -9,7 +9,40 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Changed
+- **One Get help under More.** Make a support report and Record steps for
+  support were two items and two dialogs, and the file a failed run had
+  just written was a third place to look. Get help opens one dialog that
+  offers a recent failure file first, then the support report with its
+  sign-in button, then recording as the next step. What each file holds
+  moved under What's in the file?, every word of it kept. Contributed by
+  @JasperDale420. Before merging, Record steps waits while the sign-in the
+  dialog started is going, as Make the report does, and the failure file
+  is offered as one written in the last hour, with what the Run page says
+  of it, rather than as the last run's, which may have gone well since.
+- **A run can be followed from the tab, and a round leaves you where you
+  are.** The browser tab's title shows a run's progress and how it ended,
+  so somebody working in the provider's window can see it. A run that ends
+  while you are on another page of PaperPull says so with a link to the
+  outcome. Get new for all no longer pulls you back to the Run page at each
+  account, and its last line lists each account with what it came to, so
+  one that saved documents and set one aside no longer reads as a failure.
+  Contributed by @JasperDale420. Before merging, a run that did not finish
+  is named in the title by its outcome's own words, such as You stopped
+  this run or This run did not start, where it read "stopped" for a run
+  that never started and for one the page had lost touch with.
+
 ### Fixed
+- **A checkout nobody has set up shows the welcome.** Its `apps/` holds the
+  provider templates, which looked like installs, so the README's quick
+  start landed on every provider "Not started" with no welcome, and a run
+  there wrote its log into the git tree. A checkout with no chosen folder
+  and no `config.json` in `apps/` now shows the welcome, and somebody
+  already running from `apps/` carries on as before. Contributed by
+  @JasperDale420. Before merging, the welcome, Settings and Import history
+  refuse that `apps/` folder, or one inside it, as the PaperPull folder
+  until one of its apps has a `config.json`, and Settings no longer names
+  it as the folder, fills it in, or lists its templates as accounts.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On
@@ -237,29 +270,6 @@ steps, and a run started outside its app's folder keeps to that folder.
   and leave the window on the documents page, and offers the sign-in window
   and the report again. A report from a signed-in page PaperPull cannot make
   sense of still reads as saved, since that is the one a repair needs.
-- **One Get help under More.** Make a support report and Record steps for
-  support were two items and two dialogs, and the file a failed run had
-  just written was a third place to look. Get help opens one dialog that
-  offers a recent failure file first, then the support report with its
-  sign-in button, then recording as the next step. What each file holds
-  moved under What's in the file?, every word of it kept.
-- **A run can be followed from the tab, and a round leaves you where you
-  are.** The browser tab's title shows a run's progress and how it ended,
-  so somebody working in the provider's window can see it. A run that ends
-  while you are on another page of PaperPull says so with a link to the
-  outcome. Get new for all no longer pulls you back to the Run page at each
-  account, and its last line lists each account with what it came to, so
-  one that saved documents and set one aside no longer reads as a failure.
-- **A checkout nobody has set up shows the welcome.** Its `apps/` holds the
-  provider templates, which looked like installs, so the README's quick
-  start landed on every provider "Not started" with no welcome, and a run
-  would have written PDFs and sign-ins into the git tree. A checkout with no
-  chosen folder and no `config.json` in `apps/` now shows the welcome, and
-  somebody already running from `apps/` carries on as before.
-- **A support report takes three steps, not fifteen.** Its dialog said to
-  sign in first with no way to, so a person cancelled, signed in and came
-  back through More; Open folder then opened a folder of two or three
-  files to pick the one to attach from; and where to send it was under
   Settings, About. The dialog now opens the sign-in window itself and stays
   open for the report, Show the file selects the survey or recording in
   the file manager, and Report a problem opens a new problem report for
