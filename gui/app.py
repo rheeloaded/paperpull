@@ -1329,6 +1329,31 @@ DOWNLOAD_ACTIONS = ("pilot", "all", "resume")
 LATEST_SHOWN = 4
 
 
+@app.get("/api/finishing", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
+async def api_finishing():
+    """What is applying its changes now and must not be stopped partway,
+    named by its action alone. A Rename or a Move applying its changes
+    (FINISHED_WHEN_LEFT), the Move into the documents folder that ends a
+    download run (_move_new_documents), named as the Move it is, and a
+    history import.
+
+    PaperPull.app asks this when its window goes, and waits while it names
+    anything before it stops the panel and every run the panel started
+    (gui/mac_host.py). A Rename or a Move stopped partway would leave the
+    index and progress.json naming files it had already moved. A run stays
+    in _RUNS until it has finished and been noted, whether its page is still
+    open or went and left it to finish by itself, so an empty list means
+    nothing is left that a stop would break. It changes nothing and names
+    no account. Only on the desktop, since PaperPull Server has no window
+    to close."""
+    names = ["move_documents_apply" if run.get("moving") else run.get("action")
+             for run in list(_RUNS.values())
+             if run.get("action") in FINISHED_WHEN_LEFT or run.get("moving")]
+    if _IMPORTING.locked():
+        names.append("history_import")
+    return {"finishing": sorted(names)}
+
+
 def _account_root(meta: dict, account: str) -> Path:
     """The folder an account's documents and records are written to."""
     return server_mode.output_root(Path(meta["dir"]), account)
@@ -4653,7 +4678,16 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             # account's documents folder, if it has one (#102), after the
             # plug-ins have read each file where the run saved it.
             if action in DOWNLOAD_ACTIONS and root is not None:
-                said = await to_thread.run_sync(_move_new_documents, meta, account, saved, env)
+                # The move is a Move applying its changes, so /api/finishing
+                # names it while it goes and a quit of PaperPull.app waits.
+                running = _RUNS.get((app, account))
+                if running is not None:
+                    running["moving"] = True
+                try:
+                    said = await to_thread.run_sync(_move_new_documents, meta, account, saved, env)
+                finally:
+                    if running is not None:
+                        running.pop("moving", None)
                 for told in said:
                     yield _event(told)
             if _closes_its_window(action, code, result):

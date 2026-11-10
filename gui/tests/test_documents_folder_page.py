@@ -341,6 +341,43 @@ def test_after_a_download_run_what_it_saved_moves_to_the_documents_folder(
     assert move_env[renaming.MOVE_DOCUMENTS_ENV] == "new"
 
 
+def finishing():
+    """What /api/finishing names, asked from inside the panel's event loop or
+    outside it. The route awaits nothing, so it answers on its first step."""
+    step = app_module.api_finishing()
+    try:
+        step.send(None)
+    except StopIteration as done:
+        return done.value["finishing"]
+    step.close()
+    raise AssertionError("api_finishing awaited something")
+
+
+def test_a_download_runs_move_is_named_as_finishing_while_it_goes(started, downloading, tmp_path):
+    """The move after a download run is the same Move as Settings' own, so
+    a quit of PaperPull.app waits for it (gui/mac_host.py), and it is named
+    no longer once it has ended."""
+    real = app_module.subprocess.Popen
+    seen = []
+
+    def watch(cmd, **kwargs):
+        if "--pilot" in cmd:
+            seen.append(("pilot", finishing()))
+            downloading([str(tmp_path / "Statements" / "a.pdf")])
+        else:
+            seen.append(("move", finishing()))
+        return real(cmd, **kwargs)
+
+    app_module.subprocess.Popen = watch
+    try:
+        out = ran("pilot")
+    finally:
+        app_module.subprocess.Popen = real
+    assert "event: done\ndata: 0" in out, out
+    assert seen == [("pilot", []), ("move", ["move_documents_apply"])]
+    assert finishing() == []
+
+
 def test_what_a_run_saved_is_what_the_page_lists_after_its_move(started, downloading, tmp_path):
     """The move is the app's own Rename, and every app's Rename wrote a run
     summary of its own, new-this-run.txt with nothing in it. The panel read
@@ -470,6 +507,70 @@ def test_any_other_run_is_stopped_when_its_page_closes(slow):
     closed_after_its_first_line("pilot")
     assert slow["stopped"]
     assert ("Shop Docs", "primary") not in app_module._RUNS
+
+
+@pytest.fixture()
+def held_open(slow, monkeypatch):
+    """The slow stand-in, with output that goes on until the test lets the
+    run end by setting the event this returns."""
+    import io
+    import threading
+    go = threading.Event()
+
+    class Output(io.StringIO):
+        def __init__(self):
+            super().__init__("moving one\n")
+
+        def readline(self, *args):
+            line = super().readline()
+            if not line:
+                go.wait(10)
+            return line
+
+        def __iter__(self):
+            line = self.readline()
+            while line:
+                yield line
+                line = self.readline()
+
+    class Process:
+        def __init__(self, cmd, **kwargs):
+            self.stdin = io.StringIO()
+            self.stdout = Output()
+
+        def poll(self):
+            return 0 if go.is_set() else None
+
+        def wait(self, **kwargs):
+            go.wait(10)
+            return 0
+
+        def terminate(self):
+            go.set()
+
+        kill = terminate
+
+    monkeypatch.setattr(app_module.subprocess, "Popen", Process)
+    yield go
+    go.set()
+
+
+def test_a_rename_applying_is_named_as_finishing_until_it_has_finished(held_open):
+    """PaperPull.app asks /api/finishing before a quit stops the panel and
+    every run it started, and waits while it names anything. So a Rename
+    whose page closed is named there for as long as it goes on by itself,
+    and nothing is named once it has ended and been noted."""
+    import time
+    assert finishing() == []
+    closed_after_its_first_line("rename_apply")
+    assert ("Shop Docs", "primary") in app_module._RUNS, "it goes on after its page closed"
+    assert finishing() == ["rename_apply"]
+    held_open.set()
+    for _ in range(500):
+        if ("Shop Docs", "primary") not in app_module._RUNS:
+            break
+        time.sleep(0.01)
+    assert finishing() == []
 
 
 def test_the_move_is_the_apps_own_rename_with_the_cores_mark():

@@ -1993,7 +1993,7 @@ async function exportHistory() {
   a.download = named ? named[1] : 'PaperPull history.ppz';
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-  $('hxmsg').textContent = 'Your browser saved ' + a.download + ' where it keeps downloads. Keep it as private as your documents.';
+  $('hxmsg').textContent = 'Made ' + a.download + '. Once it is saved, keep it as private as your documents.';
 }
 async function hxPost(url) {
   const body = {file: HX_FILE, root: hxWelcome() ? $('newroot').value.trim() : ''};

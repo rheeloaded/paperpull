@@ -56,7 +56,7 @@ jobs:
       # A keychain that exists only for this job. The certificate is decoded
       # into it, the identity's name is read back out for codesign, and the
       # decoded file is removed at once. The keychain itself is deleted in the
-      # last step, whether or not the build succeeded.
+      # step right after the build, whether or not the build succeeded.
       - name: Import the signing certificate
         if: env.HAVE_CERT == 'true'
         env:
@@ -105,6 +105,17 @@ jobs:
         if: env.HAVE_CERT != 'true'
         run: python packaging/build_macos.py --arch ${{ matrix.arch }}
 
+      # Nothing after the build signs or notarizes, so the key and the
+      # keychain go here, before the steps below run the bundle's Python and
+      # its own executable. Whether or not the build succeeded.
+      - name: Remove the signing keychain and key
+        if: always() && env.HAVE_CERT == 'true'
+        run: |
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          if [ -n "${MACOS_KEYCHAIN:-}" ] && [ -f "$MACOS_KEYCHAIN" ]; then
+            security delete-keychain "$MACOS_KEYCHAIN"
+          fi
+
       - name: Prove the panel starts from the bundle
         run: |
           export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
@@ -120,7 +131,73 @@ jobs:
           done
           python3 -c "import json; d=json.load(open('providers.json'))['providers']; print(len(d), 'providers'); assert len(d) >= 26"
           curl -fs http://127.0.0.1:8765/ | grep -o 'v0\.[0-9][^<]*' | head -1
+          # Gone before the next step, which would otherwise find this
+          # person's own panel on 8765 and show it rather than start one.
           kill %1
+          wait %1 || true
+
+      # The step above runs the bundle's Python by hand. This one runs the
+      # bundle's own main executable, the native launcher that a person
+      # double-clicks, in its "ready" self-test: it starts the panel exactly
+      # as the app does, waits for GET / to answer 200, prints one READY line
+      # and stops the panel. That proves the compiled Mach-O, of this
+      # runner's architecture, finds the bundled Python and starts the panel,
+      # which the step above cannot. This is the hard gate. It runs after
+      # the build step, so on a signed build it is the signed executable
+      # that runs. The port is the launcher's own choice (8765, or a free
+      # one), so the line is read for its address, not compared with a
+      # fixed one.
+      - name: Prove the app's own executable starts the panel
+        # The watchdog's SIGTERM is handled on the launcher's main queue, so
+        # a launcher stuck there would outlive it. This ends the step anyway.
+        timeout-minutes: 5
+        run: |
+          export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
+          lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull
+          test "$(lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull)" = "${{ matrix.arch }}"
+          # macOS has no timeout(1), so a watchdog gives the self-test 90 s,
+          # and the launcher gives up by itself after 60 s.
+          PAPERPULL_LAUNCHER_SELFTEST=ready dist/PaperPull.app/Contents/MacOS/PaperPull > ready.out 2> ready.err &
+          pid=$!
+          ( sleep 90; kill "$pid" ) > /dev/null 2>&1 &
+          watchdog=$!
+          status=0
+          wait "$pid" || status=$?
+          kill "$watchdog" 2>/dev/null || true
+          cat ready.out
+          cat ready.err >&2
+          test "$status" = 0
+          grep -Eq '^READY http://127\.0\.0\.1:[0-9]+$' ready.out
+
+      # The step above creates no window and no web view, so on its own it
+      # says nothing about WebKit or the plist's App Transport Security key.
+      # This one runs the same signed executable in "window" mode, which
+      # builds the window and the WKWebView, loads the panel into it and
+      # prints one WINDOW line once the page has loaded. It is allowed to
+      # fail, visibly: a hosted macOS runner may have no window server
+      # session, so a failure here can mean "no display" and not "broken
+      # app". It stays in the workflow so that whenever a runner can show a
+      # window, a launcher that cannot is seen on the run, as a failed step
+      # with the job still green, rather than not at all.
+      - name: Prove the app's own executable opens its window (may fail on a headless runner)
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
+          lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull
+          test "$(lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull)" = "${{ matrix.arch }}"
+          # The same watchdog as above kills the launcher after 90 s.
+          PAPERPULL_LAUNCHER_SELFTEST=window dist/PaperPull.app/Contents/MacOS/PaperPull > window.out 2> window.err &
+          pid=$!
+          ( sleep 90; kill "$pid" ) > /dev/null 2>&1 &
+          watchdog=$!
+          status=0
+          wait "$pid" || status=$?
+          kill "$watchdog" 2>/dev/null || true
+          cat window.out
+          cat window.err >&2
+          test "$status" = 0
+          grep -Eq '^WINDOW title=PaperPull$' window.out
 
       - name: What Gatekeeper will say
         if: env.HAVE_CERT == 'true'
@@ -156,11 +233,3 @@ jobs:
             dist/PaperPull-*.dmg
             dist/SHA256SUMS.txt
           if-no-files-found: error
-
-      - name: Remove the signing keychain and key
-        if: always() && env.HAVE_CERT == 'true'
-        run: |
-          rm -f "$RUNNER_TEMP/AuthKey.p8"
-          if [ -n "${MACOS_KEYCHAIN:-}" ] && [ -f "$MACOS_KEYCHAIN" ]; then
-            security delete-keychain "$MACOS_KEYCHAIN"
-          fi
