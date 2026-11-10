@@ -5302,12 +5302,12 @@ def _one_folder(spelled: Path, home: Path) -> bool:
             return False
         if not above:
             return True
-        with os.scandir(made) as names:
-            for entry in names:
-                other = entry.name.swapcase()
-                if other != entry.name and other.swapcase() == entry.name:
-                    other = os.path.join(made, other)
-                    return os.path.exists(other) and os.path.samefile(other, entry.path)
+        # The first name in name order, so one folder always gets one answer.
+        for name in sorted(os.listdir(made)):
+            other = name.swapcase()
+            if other != name and other.swapcase() == name:
+                other = os.path.join(made, other)
+                return os.path.exists(other) and os.path.samefile(other, os.path.join(made, name))
         return True
     except (OSError, ValueError, IndexError):
         return True
