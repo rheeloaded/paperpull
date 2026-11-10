@@ -157,7 +157,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   else looks like too, since every account has statements. An account
   whose dropdown has no Quarterly Statements has none to read and finishes
   as before, a minute sooner, since asking for that option no longer waits
-  for it twice. Contributed by @JasperDale420.
+  for it twice (#197). Contributed by @JasperDale420. Before merging #197,
+  only a dropdown read whole that lists other kinds and no Quarterly
+  Statements at all says the account has none. A Quarterly Statements
+  listed and turned off, or a dropdown that lists no kind yet or cannot be
+  read by then, still leaves the list not whole.
 - **Spectrum takes both statements two accounts share a date on (#190).** After a
   transfer the current and the prior account can each have a statement of
   one date, and their rows on Statements read alike, so both were refused

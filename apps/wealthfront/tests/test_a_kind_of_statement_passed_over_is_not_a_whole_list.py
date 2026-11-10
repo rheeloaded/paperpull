@@ -213,3 +213,71 @@ def test_a_first_page_drawn_late_is_still_read_whole(make_app, page, monkeypatch
     app.cmd_discover()
     assert listing.last(app) == listing.COMPLETE and failures(tmp_path) == []
     assert [d["summary"] for d in app.discovery.data.values()]
+
+
+# Before Quarterly Statements is asked for, the dropdown redrawn as `shape`,
+# so Statements was read from a whole dropdown and the second kind is asked
+# of whatever the page shows by then.
+def redrawn_before_quarterly(monkeypatch, page, shape):
+    real = site.set_document_type
+
+    def ask(pg, kind):
+        if kind == "Quarterly Statements":
+            pg.set_content(shape)
+        return real(pg, kind)
+    monkeypatch.setattr(site, "set_document_type", ask)
+
+
+TURNED_OFF = "<option disabled>Quarterly Statements</option>"
+NO_KIND_YET = PAGE % ""
+
+
+def test_the_dropdown_says_an_account_has_no_quarterly_statements_only_when_read_whole(page):
+    """Only a dropdown that lists some other kind and no Quarterly
+    Statements at all, turned off or not, says the account has none."""
+    page.set_content(PAGE % STATEMENTS)
+    assert site.has_no_kind(page, "Quarterly Statements") is True
+    page.set_content(PAGE.replace("selectedDocumentType", "kind") % STATEMENTS)
+    assert site.has_no_kind(page, "Quarterly Statements") is True
+    for shape in (PAGE % (STATEMENTS + QUARTERLY), PAGE % (STATEMENTS + TURNED_OFF),
+                  PAGE % (STATEMENTS + "<option>  Quarterly\n Statements </option>"),
+                  NO_KIND_YET, NO_DROPDOWN):
+        page.set_content(shape)
+        assert site.has_no_kind(page, "Quarterly Statements") is False, shape
+
+
+def test_quarterly_statements_turned_off_is_not_whole(make_app, page):
+    """The dropdown lists the kind and will not let it be chosen, which says
+    nothing of whether the account has any."""
+    page.set_content(PAGE % (STATEMENTS + TURNED_OFF))
+    app = make_app("--discover")
+    with pytest.raises(SystemExit):
+        app.cmd_discover()
+    assert listing.last(app) == listing.STOPPED
+
+
+@pytest.mark.parametrize("shape", [NO_KIND_YET, NO_DROPDOWN], ids=["no kind listed", "no dropdown"])
+def test_a_dropdown_not_read_whole_when_quarterly_is_asked_is_not_whole(make_app, page, monkeypatch,
+                                                                        tmp_path, shape):
+    """Statements was read, and by the time Quarterly Statements is asked
+    the dropdown lists no kind, as one still drawing does, or is gone. That
+    is no account without quarterly statements, so the list is not whole."""
+    page.set_content(PAGE % (STATEMENTS + QUARTERLY))
+    redrawn_before_quarterly(monkeypatch, page, shape)
+    app = make_app("--discover")
+    with pytest.raises(SystemExit):
+        app.cmd_discover()
+    assert listing.last(app) == listing.STOPPED
+    assert len(failures(tmp_path)) == 1
+    assert [d["summary"] for d in app.discovery.data.values()]
+
+
+def test_an_account_whose_dropdown_lists_other_kinds_and_no_quarterly_is_whole(make_app, page, monkeypatch,
+                                                                                tmp_path):
+    """As on the contributor's account, whose dropdown lists Statements and
+    Trade Confirmations, every run that reads Statements whole finishes."""
+    page.set_content(PAGE % (STATEMENTS + "<option>Trade Confirmations</option>"))
+    for _ in range(2):
+        app = make_app("--discover")
+        app.cmd_discover()
+        assert listing.last(app) == listing.COMPLETE and failures(tmp_path) == []
