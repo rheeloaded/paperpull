@@ -91,11 +91,6 @@ DECIDES_NOTHING = {
 # Rename reads, and a record without the fields matches nothing there and
 # changes nothing.
 WALKS_FOR_RENAME = {
-    "amexbanking": {
-        "amexbanking_docs.App._reconcile_index":
-            "gives the index a row for each saved file a record names, before Rename "
-            "reads the index, and the index does not move with a history",
-    },
     "costco": {
         "costco_receipts.App._settle_stores":
             "gives each purchase the part of Costco its receipt's heading names, before "

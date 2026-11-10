@@ -3,7 +3,8 @@ from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
 import pytest
-from amexbanking_site import parse_banking_document_list, RawDoc
+import amexbanking_site as site
+from amexbanking_site import parse_banking_document_list
 
 
 def test_parse_monthly_statements():
@@ -27,6 +28,7 @@ def test_parse_monthly_statements():
 
     docs = parse_banking_document_list(payload, account_label="Business Checking", account_token="tok-123")
     assert len(docs) == 2
+    assert docs.passed_over == ()
 
     # August 2026 ends on the 31st
     assert docs[0].category == "Statement"
@@ -91,6 +93,35 @@ def test_parse_tax_documents():
 
 
 def test_parse_empty_and_malformed():
-    assert parse_banking_document_list({}) == []
-    assert parse_banking_document_list({"statements": "not-a-list"}) == []
-    assert parse_banking_document_list({"statements": [{"invalid": True}]}) == []
+    assert parse_banking_document_list({}).passed_over == (site.NOT_A_LIST,)
+    assert parse_banking_document_list({"statements": "not-a-list"}).passed_over == (site.NOT_A_LIST,)
+    empty = parse_banking_document_list({"statements": []})
+    assert list(empty) == [] and empty.passed_over == (site.EMPTY_LIST,)
+
+
+@pytest.mark.parametrize("item, part", [
+    # A month or a year that cannot be read is never made into a date.
+    ({"statementMonth": "Sept", "statementYear": "2026", "tag": "a"}, site.NO_DATE),
+    ({"statementMonth": "13", "statementYear": "2026", "tag": "a"}, site.NO_DATE),
+    ({"statementMonth": "10", "statementYear": "26", "tag": "a"}, site.NO_DATE),
+    ({"taxYear": "TY2025", "taxFormType": "1099-INT", "tag": "a"}, site.NO_DATE),
+    ({"statementMonth": "10", "statementYear": "2026"}, site.NO_ID),
+    ({"invalid": True, "tag": "a"}, site.UNKNOWN_KIND),
+    ("not a document", site.NOT_A_LIST),
+])
+def test_a_document_that_cannot_be_read_is_passed_over_and_said(item, part):
+    payload = {"statements": [item, {"statementMonth": "1", "statementYear": "2026",
+                                     "tag": "kept"}]}
+    docs = parse_banking_document_list(payload)
+    assert [d.document_id for d in docs] == ["kept"]
+    assert docs.passed_over == (part,)
+
+
+@pytest.mark.parametrize("count", [3, "3", 1])
+def test_a_list_its_own_count_disagrees_with_is_not_whole(count):
+    payload = {"totalCount": count, "statements": [
+        {"statementMonth": "1", "statementYear": "2026", "tag": "a"},
+        {"statementMonth": "2", "statementYear": "2026", "tag": "b"}]}
+    docs = parse_banking_document_list(payload)
+    assert len(docs) == 2
+    assert docs.passed_over == (site.SHORT_OF_COUNT,)

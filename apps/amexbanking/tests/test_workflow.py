@@ -32,7 +32,7 @@ def app_instance(tmp_path):
     cfg_path = tmp_path / "config.json"
     cfg = {
         "owner": "biz",
-        "output_dir": ".",
+        "output_dir": str(tmp_path),
         "min_pdf_bytes": 10,
         "max_path_length": 240,
         "pilot_count": 3,
@@ -122,40 +122,3 @@ def test_select_ordering_and_pilot_limit(app_instance):
     piloted = app._select(limit=2)
     assert len(piloted) == 2
     assert [d.date for d in piloted] == ["2026-10-31", "2026-08-31"]
-
-
-def test_reconcile_index_does_not_duplicate(app_instance):
-    app, root = app_instance
-    doc = Document(
-        title="Business Checking Statement",
-        date="2026-08-31",
-        category="Statement",
-        summary="Business Checking Statement",
-        account="AmexBiz 1234",
-        document_id="URN:AXP:SCS:BANKING_STATEMENTS:DOC:BS:abc",
-    )
-    fake_pdf = root / "Statements" / "2026-08-31 Statement.pdf"
-    fake_pdf.write_bytes(b"%PDF-1.4 fake")
-
-    app.progress.update(doc.key, {
-        "downloaded_ok": True,
-        "state": State.PDF_VERIFIED.value,
-        "title": doc.title,
-        "date": doc.date,
-        "category": doc.category,
-        "summary": doc.summary,
-        "account": doc.account,
-        "document_id": doc.document_id,
-        "pdf_path": str(fake_pdf.resolve()),
-        "pdf_filename": fake_pdf.name,
-    })
-
-    # Initial reconcile populates index_csv
-    assert len(app.index_csv.read_all()) == 0
-    app._reconcile_index()
-    assert len(app.index_csv.read_all()) == 1
-
-    # Second reconcile does not add duplicate rows
-    app._reconcile_index()
-    assert len(app.index_csv.read_all()) == 1
-
