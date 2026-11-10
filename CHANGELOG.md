@@ -9,6 +9,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Changed
+- **The sample can be looked at before the terms.** Somebody only looking
+  had to accept the Terms of Use to see invented data. With no accounts yet,
+  the dialog offers Just look at the sample, which sets the dialog aside
+  only once the sample is open and says why when it cannot be opened.
+  Leaving the sample brings the dialog back. Until I understand is pressed
+  the panel itself refuses a run, a sign-in, a folder shown, a file handed
+  over, a spreadsheet or a setting saved anywhere but in the sample, so a
+  tab still showing the sample after another tab left it, or after the
+  panel started again, does nothing real, and has the dialog back the next
+  time it reads the accounts.
+
 ### Fixed
 - **Wealthfront never calls its list whole with a kind of statement left
   out.** The Documents page shows statements through a dropdown, and a kind
@@ -210,21 +222,6 @@ steps, and a run started outside its app's folder keeps to that folder.
   sign in first with no way to, so a person canceled, signed in and came
   back through More. Open folder then opened a folder of two or three
   files to pick the one to attach from, and where to send it was under
-- **The sample can be opened before the terms.** Somebody only looking had
-  to accept the Terms of Use and read warnings about sign-ins to see
-  invented data. With no accounts yet, the dialog offers Just look at the
-  sample. It runs nothing, leaving it brings the dialog back, and only I
-  understand reaches a real account.
-- **A checkout nobody has set up shows the welcome.** Its `apps/` holds the
-  provider templates, which looked like installs, so the README's quick
-  start landed on every provider "Not started" with no welcome, and a run
-  would have written PDFs and sign-ins into the git tree. A checkout with no
-  chosen folder and no `config.json` in `apps/` now shows the welcome, and
-  somebody already running from `apps/` carries on as before.
-- **A support report takes three steps, not fifteen.** Its dialog said to
-  sign in first with no way to, so a person cancelled, signed in and came
-  back through More; Open folder then opened a folder of two or three
-  files to pick the one to attach from; and where to send it was under
   Settings, About. The dialog now opens the sign-in window itself and stays
   open for the report, Show the file selects the survey or recording in
   the file manager, and Report a problem opens a new problem report for

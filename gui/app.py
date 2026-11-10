@@ -634,6 +634,30 @@ def _not_in_sample() -> None:
                                  "Leave the sample first.")
 
 
+# Before the terms of use are accepted the page asks for these alone, to draw
+# itself behind the dialog and to offer the sample. Every other route of the
+# API carries _terms_first (gui/tests/test_terms.py holds each to it).
+BEFORE_THE_TERMS = {("POST", "/api/terms"), ("POST", "/api/sample"), ("GET", "/api/apps"),
+                    ("GET", "/api/accounts"), ("GET", "/api/providers")}
+# I understand was pressed in this process, whether or not the answer could
+# be saved. A page whose answer was not saved goes on (api_terms), and the
+# terms are asked again the next time the panel's page opens.
+_TERMS_TAKEN = False
+
+
+def _terms_first() -> None:
+    """A run or a sign-in, a folder shown, a file handed over, a spreadsheet
+    built or a setting saved waits for the terms of use to be accepted,
+    whatever the page shows. The sample is invented and every route that
+    changes an archive is refused there (_not_in_sample), so while the panel
+    is looking at it this lets everything through. The dialog alone kept
+    these from the page until the sample could be opened before it, and a
+    tab that still shows the sample after another left it, or after the
+    panel started again, would act on the real folder."""
+    if _SAMPLE is None and not _TERMS_TAKEN and terms_due():
+        raise HTTPException(409, "Accept the Terms of Use first. Reload the page to read them.")
+
+
 def _entry_script(app_dir: Path):
     for p in sorted(app_dir.glob("*.py")):
         if ENTRY_RE.match(p.name):
@@ -958,7 +982,7 @@ def _export_module():
     return None
 
 
-@app.post("/api/export", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/export", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_export(request: Request):
     """Every purchase from every receipt archive under the root, as one
     spreadsheet written beside the installs. Rebuilt from the apps' own
@@ -994,7 +1018,7 @@ async def api_export(request: Request):
     return {"ok": True, **result}
 
 
-@app.get("/api/export/providers", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/export/providers", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_export_providers():
     """Which providers a spreadsheet makes sense for. Receipt archives have
     line items. Statement archives do not, and are left off the list rather
@@ -1018,7 +1042,7 @@ def _transactions_tool() -> Optional[Path]:
     return None
 
 
-@app.get("/api/export/transactions/providers", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/export/transactions/providers", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_export_transactions_providers():
     """Statement archives with PDFs on disk, the ones a transactions
     workbook can be built from."""
@@ -1049,7 +1073,7 @@ def _event(data="", name: Optional[str] = None) -> str:
             + "data: %s\n\n" % run_result.one_line(data))
 
 
-@app.get("/api/export/transactions", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/export/transactions", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_export_transactions(provider: str = "", csv: str = ""):
     """Build the transactions workbook, streaming the tool's progress the
     way a run streams. Only a provider the tool itself lists may be named."""
@@ -1120,7 +1144,7 @@ def api_export_transactions(provider: str = "", csv: str = ""):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.post("/api/export/reveal", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 def api_export_reveal():
     """Show the last spreadsheet this panel wrote in the file manager. Takes no
     path from the page on purpose, only the one the server itself wrote."""
@@ -1139,7 +1163,7 @@ def api_export_reveal():
     return {"ok": True}
 
 
-@app.get("/api/export/download", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/export/download", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_export_download():
     """On PaperPull Server, the last spreadsheet this panel wrote, handed to
     the browser, where the desktop shows it in a folder. Like reveal, it
@@ -1209,7 +1233,7 @@ def _jsonable(value):
     return value
 
 
-@app.get("/api/status", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/status", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_status():
     """How current each archive is, and which periods look missing.
 
@@ -2030,7 +2054,7 @@ def _documents_folder_or_404(meta: dict, account: str, what: str = "documents") 
     return folder
 
 
-@app.get("/api/saved-in", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.get("/api/saved-in", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 def api_saved_in(app: str = "", account: str = "primary"):
     """Where an account's last download run saved its documents
     (_saved_folder), for the page to say "Saved to" it beside an Open folder
@@ -2048,7 +2072,7 @@ def api_saved_in(app: str = "", account: str = "primary"):
     return {"folder": folder if folder and Path(folder).is_dir() else ""}
 
 
-@app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.post("/api/reveal", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 async def api_reveal(request: Request):
     """Show where one account's documents are in the file manager
     (_where_documents_are). Takes the app's name and the account, both
@@ -2194,7 +2218,7 @@ def _synced_by(root: Path) -> str:
     return ""
 
 
-@app.post("/api/root/check", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.post("/api/root/check", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 async def api_root_check(request: Request):
     """What the welcome says of the folder typed in its first step, before
     the person goes on. That is what is wrong with it, the providers already
@@ -2226,7 +2250,7 @@ def _root_check(raw) -> dict:
             "synced_by": _synced_by(root)}
 
 
-@app.get("/api/root", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/root", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_root_get():
     root = apps_root()
     return {"root": str(root), "exists": root.is_dir(),
@@ -2234,7 +2258,7 @@ def api_root_get():
             "settings_file": str(_settings_path())}
 
 
-@app.post("/api/root", dependencies=[Depends(_same_origin_only), Depends(_desktop_only),
+@app.post("/api/root", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only),
                                      Depends(_not_in_sample)])
 async def api_root_set(request: Request):
     """Remember where the downloaders live.
@@ -2931,7 +2955,7 @@ def api_providers():
             "suggested_root": str(suggested), "server": server_mode.enabled()}
 
 
-@app.post("/api/create", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/create", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_create(request: Request):
     """Make installs for the chosen providers under the chosen folder, and
     remember that folder. The folder is created if it does not exist, since a
@@ -3019,7 +3043,7 @@ def _account_module():
     return None
 
 
-@app.post("/api/account", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/account", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_account(request: Request):
     """Make config.<label>.json for one app, a second person's account with
     its own folder beside the first one's, its own browser profile and its
@@ -3157,7 +3181,7 @@ def _migrate_or_fail():
     return mod
 
 
-@app.get("/api/history/export", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.get("/api/history/export", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 def api_history_export():
     """The history file, handed to the browser. Written in memory, so no
     copy of it is left on this computer or in the server's shared folder."""
@@ -3371,7 +3395,7 @@ def _history_walk(mod, manifest: dict, root: Path, apply: bool) -> list:
     return rows
 
 
-@app.post("/api/history/plan", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/history/plan", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_history_plan(request: Request):
     """What Import would do with a history file. Writes nothing."""
     mod, manifest, root, _ = await _history_upload(request)
@@ -3380,7 +3404,7 @@ async def api_history_plan(request: Request):
             "version": manifest.get("version") or ""}
 
 
-@app.post("/api/history/import", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/history/import", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_history_import(request: Request):
     """Set up each provider and person a history file names that is not
     set up here, with their settings, and fold in what each had already
@@ -3483,7 +3507,7 @@ def _latest_failure(meta: dict, account: str = "primary", pattern: str = "failur
     return None
 
 
-@app.get("/api/failure/latest", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/failure/latest", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_failure_latest(app: str = "", account: str = "primary"):
     """Whether the run that just stopped left a file worth attaching."""
     apps = discover_apps()
@@ -3495,7 +3519,7 @@ def api_failure_latest(app: str = "", account: str = "primary"):
     return {"found": True, "name": found.name}
 
 
-@app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only), Depends(_desktop_only)])
+@app.post("/api/failure/reveal", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_desktop_only)])
 async def api_failure_reveal(request: Request):
     """Show that file in the file manager, selected. Takes no path from the
     page, only the app name and which kind of file, the failure file, or a
@@ -3527,7 +3551,7 @@ async def api_failure_reveal(request: Request):
     return {"ok": True}
 
 
-@app.get("/api/failure/download", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/failure/download", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_failure_download(app: str = "", account: str = "primary"):
     """On PaperPull Server, the newest failure file of one app, handed to the
     browser to attach to an issue. Only the app's name comes from the page,
@@ -3638,7 +3662,7 @@ def _handed(meta: dict, account: str, name: str, path: Path) -> Response:
 REPORT_FILES = {"diagnose": "survey-*.json", "record": "recording.json"}
 
 
-@app.get("/api/diagnostics/download", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/diagnostics/download", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_diagnostics_download(app: str = "", account: str = "primary", action: str = ""):
     """On PaperPull Server, the file a support report or a recording wrote
     in the last hour, handed to the browser to attach to an issue, where
@@ -3701,7 +3725,7 @@ def _zip_name(arc: str) -> str:
     return arc.replace("\\", "_")
 
 
-@app.get("/api/aside/download", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/aside/download", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_aside_download(app: str = "", account: str = "primary"):
     """On PaperPull Server, the documents an account has set aside for a
     look, in one zip, where the desktop opens the provider's folder. They
@@ -3757,7 +3781,7 @@ def api_aside_download(app: str = "", account: str = "primary"):
     return StreamingResponse(chunks(), media_type="application/zip", headers=_attachment(named))
 
 
-@app.post("/api/record/stop", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/record/stop", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_record_stop(request: Request):
     """End a recording that is waiting on us.
 
@@ -3810,7 +3834,7 @@ def _removal_summary(folder: Path) -> dict:
     return {"pdfs": pdfs, "history": history, "profile": profile}
 
 
-@app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_remove(request: Request):
     """Move an install out of the list. The name must be one the panel
     itself discovered, so nothing outside the root can ever be named."""
@@ -3922,7 +3946,7 @@ def _run_env(meta: dict) -> dict:
     return env
 
 
-@app.get("/api/run", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/run", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_run(app: str, account: str = "primary", action: str = "pilot",
             year: str = "", start: str = "", end: str = "",
             redownload: Optional[str] = None, confirmed: Optional[str] = None):
@@ -3935,7 +3959,7 @@ def api_run(app: str, account: str = "primary", action: str = "pilot",
     return _start_run(app, account, action, _scope_flags(year, start, end))
 
 
-@app.post("/api/run", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/run", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_run_body(request: Request):
     """The run GET /api/run starts, asked for with a JSON body instead.
 
@@ -4090,7 +4114,7 @@ async def _review_json(request: Request):
         raise HTTPException(400, "expected a JSON body")
 
 
-@app.post("/api/review-names", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/review-names", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_review_names(request: Request):
     """The receipts an app would ask a better name for. Renames nothing it
     names, but an app may write its own records while it reads them (Target
@@ -4120,7 +4144,7 @@ async def api_review_names(request: Request):
             _RUNNING.discard(app_name)
 
 
-@app.post("/api/review-names/apply", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/review-names/apply", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_review_names_apply(request: Request):
     """Rename each receipt given a new summary, streamed as a run is."""
     body = await _review_json(request)
@@ -4652,7 +4676,7 @@ def _write_config_now(cfg_path: Path, key: str, value: str, stamp: str, why: str
     return True
 
 
-@app.get("/api/naming", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/naming", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_naming(app: str):
     naming = _naming()
     d = _naming_app(app)
@@ -4673,7 +4697,7 @@ def api_naming(app: str):
     }
 
 
-@app.post("/api/naming/preview", dependencies=[Depends(_same_origin_only)])
+@app.post("/api/naming/preview", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 async def api_naming_preview(request: Request):
     body = await request.json()
     naming = _naming()
@@ -4713,7 +4737,7 @@ async def api_naming_preview(request: Request):
 
 
 @app.post("/api/naming/save",
-          dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+          dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_naming_save(request: Request):
     """Write a pattern where it applies. "shared" goes into every install of
     this app's kind, every account's config, so all receipts apps or all
@@ -5317,13 +5341,13 @@ async def _folder_body(request: Request) -> dict:
     return body
 
 
-@app.get("/api/documents", dependencies=[Depends(_same_origin_only)])
+@app.get("/api/documents", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
 def api_documents(app: str, account: str = "primary"):
     apps, meta, root = _documents_account(app, account)
     return _documents_answer(meta, account, root, apps=apps)
 
 
-@app.post("/api/documents", dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+@app.post("/api/documents", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_documents_save(request: Request):
     """Give one account a documents folder of its own, in its own config, a
     copy kept in Backups first, or, with "follow", set it back to its folder
@@ -5372,7 +5396,7 @@ def _save_account_documents(body: dict) -> dict:
 
 
 @app.post("/api/documents/root",
-          dependencies=[Depends(_same_origin_only), Depends(_not_in_sample)])
+          dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_documents_root_save(request: Request):
     """Set or clear the one documents folder, in the panel's settings, and
     give every account that follows it its folder inside it, in its own
@@ -5445,6 +5469,8 @@ async def api_terms(request: Request):
         raise HTTPException(400, "expected a JSON body")
     if not isinstance(body, dict) or body.get("accepted") != TERMS_VERSION:
         raise HTTPException(409, "The terms have changed. Reload the page to read them.")
+    global _TERMS_TAKEN
+    _TERMS_TAKEN = True
     data = _read_settings()
     data["terms_accepted"] = TERMS_VERSION
     try:

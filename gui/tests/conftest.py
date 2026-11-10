@@ -110,6 +110,17 @@ def _own_home(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
 
 
+@pytest.fixture(autouse=True)
+def _terms_not_yet_taken(monkeypatch):
+    """The panel remembers I understand for as long as it runs, saved or
+    not, so a test that pressed it would open the API for every test after
+    it. Each test starts as a panel that has not been answered, and the
+    settings file it reads says the rest."""
+    panel = sys.modules.get("app")
+    if panel is not None and hasattr(panel, "_TERMS_TAKEN"):
+        monkeypatch.setattr(panel, "_TERMS_TAKEN", False)
+
+
 # -- the guard -----------------------------------------------------------------
 
 # The audit events that change a file or a folder. For each, the argument
