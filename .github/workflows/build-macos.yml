@@ -56,7 +56,7 @@ jobs:
       # A keychain that exists only for this job. The certificate is decoded
       # into it, the identity's name is read back out for codesign, and the
       # decoded file is removed at once. The keychain itself is deleted in the
-      # last step, whether or not the build succeeded.
+      # step right after the build, whether or not the build succeeded.
       - name: Import the signing certificate
         if: env.HAVE_CERT == 'true'
         env:
@@ -105,6 +105,17 @@ jobs:
         if: env.HAVE_CERT != 'true'
         run: python packaging/build_macos.py --arch ${{ matrix.arch }}
 
+      # Nothing after the build signs or notarizes, so the key and the
+      # keychain go here, before the steps below run the bundle's Python and
+      # its own executable. Whether or not the build succeeded.
+      - name: Remove the signing keychain and key
+        if: always() && env.HAVE_CERT == 'true'
+        run: |
+          rm -f "$RUNNER_TEMP/AuthKey.p8"
+          if [ -n "${MACOS_KEYCHAIN:-}" ] && [ -f "$MACOS_KEYCHAIN" ]; then
+            security delete-keychain "$MACOS_KEYCHAIN"
+          fi
+
       - name: Prove the panel starts from the bundle
         run: |
           export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
@@ -120,7 +131,10 @@ jobs:
           done
           python3 -c "import json; d=json.load(open('providers.json'))['providers']; print(len(d), 'providers'); assert len(d) >= 26"
           curl -fs http://127.0.0.1:8765/ | grep -o 'v0\.[0-9][^<]*' | head -1
+          # Gone before the next step, which would otherwise find this
+          # person's own panel on 8765 and show it rather than start one.
           kill %1
+          wait %1 || true
 
       # The step above runs the bundle's Python by hand. This one runs the
       # bundle's own main executable, the native launcher that a person
@@ -134,12 +148,15 @@ jobs:
       # one), so the line is read for its address, not compared with a
       # fixed one.
       - name: Prove the app's own executable starts the panel
+        # The watchdog's SIGTERM is handled on the launcher's main queue, so
+        # a launcher stuck there would outlive it. This ends the step anyway.
+        timeout-minutes: 5
         run: |
           export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
           lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull
           test "$(lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull)" = "${{ matrix.arch }}"
-          # macOS has no timeout(1), so the self-test is given 90 s by a
-          # watchdog; the launcher gives up by itself after 60 s.
+          # macOS has no timeout(1), so a watchdog gives the self-test 90 s,
+          # and the launcher gives up by itself after 60 s.
           PAPERPULL_LAUNCHER_SELFTEST=ready dist/PaperPull.app/Contents/MacOS/PaperPull > ready.out 2> ready.err &
           pid=$!
           ( sleep 90; kill "$pid" ) > /dev/null 2>&1 &
@@ -164,11 +181,12 @@ jobs:
       # with the job still green, rather than not at all.
       - name: Prove the app's own executable opens its window (may fail on a headless runner)
         continue-on-error: true
+        timeout-minutes: 5
         run: |
           export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1
           lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull
           test "$(lipo -archs dist/PaperPull.app/Contents/MacOS/PaperPull)" = "${{ matrix.arch }}"
-          # Same watchdog as above: 90 s, then the launcher is killed.
+          # The same watchdog as above kills the launcher after 90 s.
           PAPERPULL_LAUNCHER_SELFTEST=window dist/PaperPull.app/Contents/MacOS/PaperPull > window.out 2> window.err &
           pid=$!
           ( sleep 90; kill "$pid" ) > /dev/null 2>&1 &
@@ -215,11 +233,3 @@ jobs:
             dist/PaperPull-*.dmg
             dist/SHA256SUMS.txt
           if-no-files-found: error
-
-      - name: Remove the signing keychain and key
-        if: always() && env.HAVE_CERT == 'true'
-        run: |
-          rm -f "$RUNNER_TEMP/AuthKey.p8"
-          if [ -n "${MACOS_KEYCHAIN:-}" ] && [ -f "$MACOS_KEYCHAIN" ]; then
-            security delete-keychain "$MACOS_KEYCHAIN"
-          fi

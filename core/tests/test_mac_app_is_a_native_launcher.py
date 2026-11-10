@@ -275,6 +275,51 @@ def test_the_launcher_starts_the_host_with_the_bundled_python(source):
         "the panel's Host check allows them, but the web view must use 127.0.0.1"
 
 
+def _method(source, signature):
+    start = source.index(signature)
+    return source[start:source.index("\n}\n", start)]
+
+
+def _line(source, start):
+    return next(line for line in source.splitlines() if line.startswith(start))
+
+
+def test_the_launcher_and_the_host_speak_the_same_lines(source):
+    host = (REPO / "gui" / "mac_host.py").read_text(encoding="utf-8")
+    assert 'write_line("READY %d" % port)' in host and 'tell_window("FINISHING")' in host
+    assert '"READY %d"' in source and '[line hasPrefix:@"FINISHING"]' in source
+
+
+def test_a_quit_leaves_the_panels_page_and_waits_while_the_host_is_finishing(source):
+    """The host stops the panel only once nothing is applying its changes
+    (gui/mac_host.py). The window leaves the panel's page first, so nothing
+    new starts from it, and never goes back to it while it quits, and it
+    stays, saying why, for as long as the host says it waits."""
+    quit = _method(source, "- (NSApplicationTerminateReply)applicationShouldTerminate:")
+    assert quit.index("[self showMessage:") < quit.index("[self.hostInput closeFile]")
+    assert "if (!weak.finishing) [NSApp replyToApplicationShouldTerminate:YES];" in quit
+    finishing = _method(source, "- (void)panelFinishing")
+    assert "if (!self.quitting) return;" in finishing and "self.finishing = YES;" in finishing
+    assert "if (self.quitting) return;" in _method(source, "- (void)panelReady:")
+    for back in ("- (void)reload:", "- (void)webViewWebContentProcessDidTerminate:"):
+        assert "!self.quitting" in _line(source, back), back
+
+
+def test_the_window_sends_nothing_and_looks_up_no_site(source):
+    """It shows the panel at 127.0.0.1 and nothing else. The guide opens in
+    the default browser from the Help menu alone, and the window itself asks
+    nothing of the network, no update check and no list of fraudulent sites."""
+    assert "cfg.preferences.fraudulentWebsiteWarningEnabled = NO;" in source
+    for network in ("NSURLSession", "NSURLConnection", "dataTask", "Sparkle", "SUUpdater"):
+        assert network not in source, network
+    code = re.sub(r"/\*.*?\*/|(?<!:)//[^\n]*", "", source, flags=re.S)  # comments, not the // of a URL
+    assert set(re.findall(r"https?://[^\"\s<>\\]+", code)) == {
+        "https://paperpull.net/guide.html", "http://127.0.0.1:%d/", "http://127.0.0.1:%d"}
+    assert re.findall(r"openURL:", code) == ["openURL:"] * 3, "openOutside, the guide and the log"
+    outside = _method(source, "- (void)openOutside:")
+    assert '@[@"http", @"https", @"mailto"]' in outside
+
+
 # -- the workflow --------------------------------------------------------------
 
 def _steps():
@@ -317,6 +362,51 @@ def test_the_workflow_runs_the_apps_own_executable_in_ready_mode_after_the_panel
     assert re.search(r"^\s+if:", step, re.M) is None, \
         "it runs for both architectures, signed or not"
     assert "continue-on-error" not in step, "the ready step is the hard gate"
+
+
+def test_the_signing_key_and_keychain_are_gone_before_the_bundle_runs():
+    """Nothing after the build signs or notarizes, so the notarization key
+    and the unlocked keychain are removed straight after it, and neither
+    the bundle's Python nor its own executable runs beside them."""
+    steps, order = _steps(), _order()
+    remove = "Remove the signing keychain and key"
+    builds = ("Build, sign, notarize and staple", "Build unsigned (no certificate in this repository)")
+    assert max(order.index(b) for b in builds) + 1 == order.index(remove)
+    for runs in ("Prove the panel starts from the bundle", READY, WINDOW, "What Gatekeeper will say"):
+        assert order.index(remove) < order.index(runs), runs
+    step = steps[remove]
+    assert "if: always() && env.HAVE_CERT == 'true'" in step, "even after a failed build"
+    assert 'rm -f "$RUNNER_TEMP/AuthKey.p8"' in step
+    assert 'security delete-keychain "$MACOS_KEYCHAIN"' in step
+    assert order.count(remove) == 1
+
+
+def test_a_launcher_that_hangs_cannot_hold_the_job():
+    """The watchdog's SIGTERM is handled on the launcher's main queue, so a
+    launcher stuck there outlives it. A step timeout ends it anyway."""
+    steps = _steps()
+    for name in (READY, WINDOW):
+        m = re.search(r"^\s+timeout-minutes: (\d+)$", steps[name], re.M)
+        assert m and int(m.group(1)) <= 10, name
+
+
+def test_the_panel_started_by_hand_is_gone_before_the_launcher_runs():
+    """The launcher shows this person's own panel when one holds 8765, so a
+    panel left from the step before would be shown, and the gate would not
+    prove the app starts one."""
+    step = _steps()["Prove the panel starts from the bundle"]
+    assert re.search(r"^\s+kill %1\n\s+wait %1 \|\| true$", step, re.M), step
+
+
+def test_ci_runs_these_tests_where_bash_and_execute_bits_are_real():
+    """The host's own tests, the terminal script tests and the execute bit
+    checks skip themselves on Windows, which is where the test parts run, so
+    the posix job runs them on Linux and on a Mac."""
+    tests_yml = (REPO / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    posix = tests_yml[tests_yml.index("\n  posix:\n"):]
+    posix = posix[:re.search(r"\n  [a-z_]+:\n", posix[1:]).start() + 1]
+    assert ("python -m pytest core/tests/test_mac_host.py core/tests/test_mac_app_is_a_native_launcher.py"
+            in posix)
 
 
 def test_the_workflow_also_tries_the_window_and_may_fail_there():
