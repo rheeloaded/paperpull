@@ -2048,6 +2048,75 @@ def test_a_window_stays_on_the_server_or_if_asked(monkeypatch):
     assert app_module._closes_its_window(*good) is False
 
 
+def _window(root, config, port):
+    """Give an account of Bank Statements a debugging port and a profile."""
+    path = root / "Bank Statements" / config
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(cdp_url="http://127.0.0.1:%d" % port, profile_dir="browser-profile-" + config.split(".")[-2])
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _closing(monkeypatch, answer):
+    """What close_signin_browser was asked to close, answering `answer`."""
+    assert app_module._ports() is not None
+    from paperpull_core import browser
+    asked = []
+
+    def close(profile, port):
+        asked.append((Path(profile).name, port))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    monkeypatch.setattr(browser, "close_signin_browser", close)
+    return asked
+
+
+def test_a_finished_run_closes_only_its_own_window(root, monkeypatch):
+    _window(root, "config.json", 9481)
+    _window(root, "config.second.json", 9482)
+    asked = _closing(monkeypatch, {"closed": True, "in_use": False})
+    said = app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary")
+    assert asked == [("browser-profile-config", 9481)]
+    assert said == ["Closed the sign-in window, since this run finished."]
+
+
+@pytest.mark.parametrize("other", ["config.second.json", "Shop Receipts"])
+def test_a_window_on_a_port_another_account_names_is_left_open(root, monkeypatch, other):
+    """A browser on a port two configs name is the one a run of either
+    attaches to and a sign-in of either joins, so it may be the other
+    account's, mid run or mid sign-in. It is never closed, whichever
+    provider or person the other one is."""
+    _window(root, "config.json", 9481)
+    if other == "Shop Receipts":
+        (root / other / "config.json").write_text(json.dumps({"cdp_url": "http://127.0.0.1:9481"}), encoding="utf-8")
+    else:
+        _window(root, other, 9481)
+    asked = _closing(monkeypatch, {"closed": True, "in_use": False})
+    assert app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary") == []
+    assert asked == []
+
+
+def test_a_window_is_left_open_when_ports_cannot_be_read(root, monkeypatch):
+    _window(root, "config.json", 9481)
+    asked = _closing(monkeypatch, {"closed": True, "in_use": False})
+    monkeypatch.setattr(app_module, "_ports", lambda: None)
+    assert app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary") == []
+    assert asked == []
+
+
+def test_a_window_somebody_is_in_is_said_to_stay(root, monkeypatch):
+    _window(root, "config.json", 9481)
+    _closing(monkeypatch, {"closed": False, "in_use": True})
+    said = app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary")
+    assert said == ["Left the sign-in window open, since you are using it."]
+
+
+def test_a_window_that_will_not_close_never_ends_the_run(root, monkeypatch):
+    _window(root, "config.json", 9481)
+    _closing(monkeypatch, RuntimeError("anything"))
+    assert app_module._close_sign_in_window(app_module.discover_apps()["Bank Statements"], "primary") == []
+
+
 _CLEAN = {"action": "all", "exit_code": 0, "closed": False, "scope": [], "redownload": False, "ended": "2026-11-08T11:32:00",
           "result": {"new_files": 0, "stopped": 0, "failed": 0, "validation_failures": 0, "list_not_read": 0}}
 _NOW = app_module.datetime(2026, 11, 9, 12, 0)

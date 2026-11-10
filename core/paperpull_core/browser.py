@@ -1336,8 +1336,10 @@ def _open_tab_in(port: str, url: str) -> bool:
 def bring_forward(port) -> bool:
     """Put the browser on this debugging port in front of the person, its
     first page showing, through the browser's own endpoint. No permission is
-    asked of the operating system. False when it could not be reached, which
-    costs nothing: the window is still there."""
+    asked of the operating system. False when it could not be reached, or
+    answered with anything but its pages, which costs nothing: the window
+    is still there. Anything at all that goes wrong here is only that, so a
+    browser that closes while it answers never ends the sign-in it opened."""
     import json
     import urllib.request
     from .characters import whole_json
@@ -1349,8 +1351,30 @@ def bring_forward(port) -> bool:
         with open_local(urllib.request.Request("http://127.0.0.1:%d/json/activate/%s" % (int(port), pages[0]["id"])),
                         timeout=3) as r:
             return 200 <= r.status < 300
-    except (OSError, ValueError, TypeError):
+    except Exception:
         return False
+
+
+# The ends _try_each gives the profile folder of a browser it falls back to,
+# one for each brand, so a sign-in that opened in another browser is still
+# known as this account's own.
+_FALLBACK_ENDS = tuple("-" + re.sub(r"[^a-z0-9]+", "", name.lower())
+                       for name in (CHROMIUM, EDGE, CHROME, BRAVE, VIVALDI, OPERA))
+
+
+def _names_profile(command: str, real: str) -> bool:
+    """Whether a command line opens exactly this profile folder, or the one
+    _try_each made beside it for a fallback browser. A folder whose name only
+    starts the same, another person's "browser-profile-2" say, is not it."""
+    flag = "--user-data-dir=" + real
+    at = command.find(flag)
+    while at >= 0:
+        rest = command[at + len(flag):]
+        for end in ("",) + _FALLBACK_ENDS:
+            if rest.startswith(end) and (rest[len(end):] == "" or rest[len(end):].startswith(" --")):
+                return True
+        at = command.find(flag, at + 1)
+    return False
 
 
 def signin_browser_pid(profile_dir, port) -> Optional[int]:
@@ -1367,7 +1391,7 @@ def signin_browser_pid(profile_dir, port) -> Optional[int]:
         return None
     for line in out.splitlines():
         pid, _, command = line.strip().partition(" ")
-        if ("--remote-debugging-port=%s " % port) in (command + " ") and ("--user-data-dir=" + real) in command \
+        if ("--remote-debugging-port=%s " % port) in (command + " ") and _names_profile(command, real) \
                 and "--type=" not in command and pid.isdigit():
             return int(pid)
     return None
@@ -1388,16 +1412,22 @@ def frontmost_pid() -> Optional[int]:
 
 def close_signin_browser(profile_dir, port) -> dict:
     """Close this account's sign-in browser, as quitting it would. Answers
-    {"closed": whether it did, "was_front": whether the person was in it}."""
+    {"closed": whether it did, "in_use": whether it was left open because
+    the person is in it now}. A window somebody is signing in to, or
+    reading a page of their own in, looks like any other from here, so one
+    in front is left open, and so is every one when what is in front cannot
+    be told, which is anywhere but a Mac."""
     pid = signin_browser_pid(profile_dir, port)
     if pid is None:
-        return {"closed": False, "was_front": False}
-    was_front = frontmost_pid() == pid
+        return {"closed": False, "in_use": False}
+    front = frontmost_pid()
+    if front is None or front == pid:
+        return {"closed": False, "in_use": front == pid}
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError:
-        return {"closed": False, "was_front": False}
-    return {"closed": True, "was_front": was_front}
+        return {"closed": False, "in_use": False}
+    return {"closed": True, "in_use": False}
 
 
 # What open_signin_browser answers with when the port was already held, in

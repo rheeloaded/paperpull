@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Changed
+- **A sign-in window comes to the front, and goes when it is done.** Opening
+  one, or reusing one already open, now brings it forward. When Get new
+  documents or Continue finishes on a Mac, PaperPull closes that account's
+  sign-in window, unless you are in it. A run that stops leaves the window
+  open, and so does one whose port another account names too, since that
+  browser may be the other account's. Only a browser PaperPull opened on
+  the account's own port and profile folder is ever closed, never an
+  everyday one, and `"close_signin_window": false` in settings.json turns
+  closing off. Contributed by @JasperDale420 (#186).
+
 ### Fixed
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
@@ -206,13 +217,6 @@ steps, and a run started outside its app's folder keeps to that folder.
   until its provider sent something. A whole clean run now counts as a check
   for as long as that provider usually takes, between 3 and 14 days. **Mark as done** under the three dots takes
   any account off the list for that time, and can be undone.
-- **A sign-in window comes to the front, and goes when it is done.** Opening
-  one, or reusing one already open, now brings it forward. When Get new
-  documents or Continue finishes, PaperPull closes that account's sign-in
-  browser, and returns you to PaperPull if you were in it. A run that stops
-  leaves the window open. It is known by its port and its profile folder, so
-  an everyday browser is never closed, and `"close_signin_window": false` in
-  settings.json turns it off. Mac and Linux for now.
 - **What a real run on a real account showed.** A list that stopped partway
   is said as a page PaperPull did not expect, not as a sign-out with
   Continue, for each of the providers that can stop that way. The last line

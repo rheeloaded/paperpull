@@ -4294,16 +4294,38 @@ def _closes_its_window(action, code, result) -> bool:
     went all the way: one that stopped leaves the window open, since the
     next thing the person needs is that page. Never on PaperPull Server,
     whose windows live on its own screen, and never with
-    "close_signin_window": false in the settings."""
+    "close_signin_window": false in the settings. Which window, and whether
+    it is safe to close now, is _close_sign_in_window's to say."""
     return (action in CLOSE_WINDOW_AFTER and code == 0 and isinstance(result, dict) and not result.get("stopped")
             and not server_mode.enabled() and _read_settings().get("close_signin_window") is not False)
 
 
+def _port_is_only_its_own(meta: dict, account: str) -> bool:
+    """Whether no other config under the root names this account's port, as
+    paperpull_core.ports reads them. A browser on a port two configs name is
+    the one a run of either attaches to and a sign-in of either joins, so
+    it may be another account's, mid run or mid sign-in. False too when
+    that cannot be read."""
+    mod = _ports()
+    if mod is None:
+        return False
+    try:
+        return mod.key_of(_account_config(meta, account)) not in mod.findings(mod.installs_in(apps_root()))
+    except Exception:
+        return False
+
+
 def _close_sign_in_window(meta: dict, account: str) -> list:
-    """Close the account's sign-in browser, and put PaperPull's own window in
-    front if the person was in that browser. Somebody who has gone to
-    another program is left there."""
-    from paperpull_core import browser
+    """Close the account's sign-in browser once its run is done, unless the
+    person is in it, or its port is another account's too. Whatever goes
+    wrong here leaves the window open and never the run's own end."""
+    try:
+        return _close_own_window(meta, account)
+    except Exception:
+        return []
+
+
+def _close_own_window(meta: dict, account: str) -> list:
     cfg = _config_of(meta, account)
     try:
         port = urllib.parse.urlsplit(str(cfg.get("cdp_url") or "")).port
@@ -4312,17 +4334,16 @@ def _close_sign_in_window(meta: dict, account: str) -> list:
         return []
     if not port or not str(profile) or str(profile) == ".":
         return []
+    if not _port_is_only_its_own(meta, account):
+        return []
+    from paperpull_core import browser
     if not profile.is_absolute():
         profile = Path(meta["dir"]) / profile
     closed = browser.close_signin_browser(profile, port)
-    if not closed["closed"]:
+    if closed.get("in_use"):
+        return ["Left the sign-in window open, since you are using it."]
+    if not closed.get("closed"):
         return []
-    app_path = os.environ.get("PAPERPULL_APP_PATH")
-    if closed["was_front"] and app_path and sys.platform == "darwin":
-        try:
-            subprocess.Popen(["open", app_path])
-        except OSError:
-            pass
     return ["Closed the sign-in window, since this run finished."]
 
 
