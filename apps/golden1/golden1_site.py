@@ -46,6 +46,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core import intake
+from paperpull_core.urls import host_matches, host_of
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
@@ -578,11 +579,7 @@ def _on_vendor_host(url: str) -> bool:
     """True for an address on a known vendor host or on the host the
     bank's button opened this run."""
     hosts = set(VENDOR_HOSTS) | _VENDOR_HOSTS_SEEN
-    try:
-        host = (urlsplit(url or "").hostname or "").lower()
-    except ValueError:
-        return False
-    return bool(host) and any(host == h or host.endswith("." + h) for h in hosts)
+    return host_matches(host_of(url), hosts)
 
 
 def _vendor_tab(page):
@@ -626,10 +623,9 @@ def on_bank_host(url: str) -> bool:
     admits the vendor's host as well, and the vendor is not the bank."""
     try:
         parts = urlsplit(url or "")
-        host = (parts.hostname or "").lower()
     except ValueError:
         return False
-    return parts.scheme == "https" and (host == BANK_DOMAIN or host.endswith("." + BANK_DOMAIN))
+    return parts.scheme == "https" and host_matches(host_of(url), (BANK_DOMAIN,))
 
 
 def _still_at_the_bank(page) -> bool:
@@ -2281,16 +2277,13 @@ def _where(url: str) -> str:
     from the lists above, a known host of the bank's or the vendor's, the
     domain for any other page of theirs, "another site", or "nowhere".
     Never the address itself, its port or anything before its host."""
-    try:
-        host = (urlsplit(url or "").hostname or "").lower()
-    except ValueError:
-        return "nowhere"
+    host = host_of(url)
     if not host:
         return "nowhere"
     if host in _KNOWN_HOSTS:
         return host
     for domain in _KNOWN_DOMAINS:
-        if host == domain or host.endswith("." + domain):
+        if host_matches(host, (domain,)):
             return domain
     return "another site"
 
@@ -2403,8 +2396,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     except Exception:
         href = ""
     if href and not href.lower().startswith(("javascript", "#")):
-        from urllib.parse import urljoin
-        target = urljoin(page.url, href)
+        from paperpull_core.urls import join as join_url
+        target = join_url(page.url, href)
         # A link on the provider's own hosts is fetched through the session
         # first. A PDF answer is the document. Anything else means the link
         # is a page or a handoff, and the click below follows it.

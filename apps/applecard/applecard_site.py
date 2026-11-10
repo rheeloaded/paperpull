@@ -83,6 +83,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core import intake
+from paperpull_core.urls import host_matches, host_of
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
 
@@ -548,11 +549,7 @@ def _safe_query(url: str) -> str:
 
 
 def _on_sign_in_host(url: str) -> bool:
-    try:
-        host = (urlsplit(url or "").hostname or "").lower().rstrip(".")
-    except ValueError:
-        return False
-    return any(host == h or host.endswith("." + h) for h in SIGN_IN_HOSTS)
+    return host_matches(host_of(url), SIGN_IN_HOSTS)
 
 
 def looks_signed_out(page) -> bool:
@@ -1505,12 +1502,12 @@ def _is_apple_file_host(url: str) -> bool:
         parts = urlsplit(url or "")
     except ValueError:
         return False
-    host = (parts.hostname or "").lower().rstrip(".")
+    host = host_of(url)
     if parts.scheme != "https" or parts.username or parts.password:
         return False
     if parts.port not in (None, 443):
         return False
-    return host == "apple.com" or host.endswith(".apple.com")
+    return host_matches(host, ("apple.com",))
 
 
 def _new_names(dl_dir, before: set) -> List[str]:
@@ -1854,8 +1851,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     except Exception:
         href = ""
     if href and not href.lower().startswith(("javascript", "#")):
-        from urllib.parse import urljoin
-        target = urljoin(page.url, href)
+        from paperpull_core.urls import join as join_url
+        target = join_url(page.url, href)
         # A link on the provider's own hosts is fetched through the session
         # first. A PDF answer is the document. Anything else means the link
         # is a page or a handoff, and the click below follows it.

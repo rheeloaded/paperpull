@@ -2970,8 +2970,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                       "have": _hint_word(hint),
                       "so": "the row's own control on the page is the only way left"})
     if hint and "/" in hint:
-        from urllib.parse import urljoin
-        target = urljoin(page.url, hint)
+        from paperpull_core.urls import join as join_url
+        target = join_url(page.url, hint)
         # Discovery used to drop this address before it reached here, so
         # it had never been asked for. What goes in the trace is a status, a
         # word for the content type and for what came back, a size, and
@@ -3154,8 +3154,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
 
     def fetch_then_press() -> bool:
         if href and not href.lower().startswith(("javascript", "#")):
-            from urllib.parse import urljoin
-            target = urljoin(page.url, href)
+            from paperpull_core.urls import join as join_url
+            target = join_url(page.url, href)
             # A link on the provider's own hosts is fetched through the
             # session first. A PDF answer is the document. Anything else
             # means the link is a page or a handoff, and the click below

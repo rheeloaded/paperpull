@@ -48,7 +48,8 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
+from paperpull_core.urls import join as join_url
 
 from paperpull_core import intake
 from paperpull_core import page_check as _page_check
@@ -337,7 +338,7 @@ def receipt_links(card: RawCard) -> List[dict]:
         words = f"{ln.get('text', '')} {ln.get('label', '')} {ln.get('href', '')}"
         if not re.search(r"receipt|invoice|download|view", words, re.I):
             continue
-        href = urljoin(BASE, ln.get("href") or "")
+        href = join_url(BASE, ln.get("href") or "")
         if not is_safe_url(href):
             continue
         name = ln.get("text") or ln.get("label") or "Receipt"

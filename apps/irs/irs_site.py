@@ -92,6 +92,7 @@ from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core import intake
+from paperpull_core.urls import host_matches, host_of
 from paperpull_core import redirects
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
@@ -326,16 +327,13 @@ class NotLive(SessionExpired):
 
 
 def _host(url: str) -> str:
-    try:
-        return (urlsplit(url or "").hostname or "").lower()
-    except ValueError:
-        return ""
+    return host_of(url)
 
 
 def on_identity_host(url: str) -> bool:
     """True for a page on ID.me or Login.gov, or any subdomain of them."""
     h = _host(url)
-    return any(h == d or h.endswith("." + d) for d in IDENTITY_HOSTS)
+    return host_matches(h, IDENTITY_HOSTS)
 
 
 def address_signed_out(url: str) -> bool:

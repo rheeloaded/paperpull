@@ -168,6 +168,36 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its account and date, and never as the same file as the other. Anything
   else after a press still stops the run. Not yet run on a live account. Contributed by @JasperDale420.
 
+### Security
+- **An address Python and a browser read differently is refused.** Python
+  reads the host of `https://evil.example\.chase.com/x` as one ending in
+  .chase.com, which every app's host check took for Chase's, while Chromium
+  and Playwright's own request client read the backslash as a slash and go
+  to evil.example. So a link on a provider's page, or a redirect from it,
+  could send a run to another site, and a PDF from there could be kept as
+  a statement. The shared check now refuses a backslash anywhere before an
+  address's query, and compares only a host of letters, digits, hyphens
+  and underscores in labels joined by dots. Nine checks of a host by its
+  ending in Anthem, Apple Card, Discover, Discover Bank, Golden 1 and IRS,
+  which each app had written for itself, go through it too. A link is now
+  resolved against its page by one shared step, which gives nothing for a
+  link a browser would take to another host, such as `///evil.example/x`
+  that Python's own joining read as a path on the provider's site.
+  American Family and TreasuryDirect checked such a joined address and
+  then pressed the link itself. A repo-wide test finds a host compared by
+  its ending, or a link joined, the way these were. A provider's cookies
+  go only to its own hosts, so they never went with such a request.
+  Reported privately by @JasperDale420.
+- **Wealthfront files a form set's other files by what they are.** It
+  kept each under the ending the site's file name gave, so a file named to
+  run, a .command on a Mac or a .bat on Windows, would have been saved
+  among the tax documents, where a double click runs it. A PDF,
+  spreadsheet, CSV, text or ZIP file keeps its ending. Any other file is
+  filed by its bytes, a PDF as a .pdf and a ZIP as a ZIP, and anything
+  else is kept in Manual Review under the ending .held, which nothing
+  opens, and the record says how many were. Reported privately by
+  @JasperDale420.
+
 ## [0.62.0] - 2026-11-09
 
 DKB, Discover Bank, Ziply Fiber and Cetera are the 82nd to 85th apps, and

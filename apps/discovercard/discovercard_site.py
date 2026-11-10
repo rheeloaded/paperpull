@@ -95,6 +95,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core import intake
+from paperpull_core.urls import host_matches, host_of
 from paperpull_core import controls as _controls
 from paperpull_core import redirects
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -341,12 +342,7 @@ def looks_moved_to_capital_one(page) -> bool:
     Host equality on the parsed hostname, not a substring, for the same reason
     every other host check here works that way.
     """
-    from urllib.parse import urlparse
-    try:
-        host = (urlparse(page.url or "").hostname or "").lower()
-    except ValueError:
-        return False
-    return any(host == h or host.endswith("." + h) for h in MOVED_HOSTS)
+    return host_matches(host_of(page.url or ""), MOVED_HOSTS)
 
 
 def looks_signed_out(page) -> bool:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from paperpull_core.urls import is_safe_url  # noqa: E402
+from paperpull_core.urls import host_matches, host_of, is_safe_url, join  # noqa: E402
 
 HOSTS = {"chase.com"}
 
@@ -110,3 +110,157 @@ def test_subdomains_off_lists_the_subdomains_it_wants():
     hosts = {"chase.com", "secure.chase.com"}
     assert is_safe_url("https://secure.chase.com/x", hosts, subdomains=False)
     assert not is_safe_url("https://other.chase.com/x", hosts, subdomains=False)
+
+
+# -- a host Python and a browser read differently ------------------------------
+
+# urlsplit ends the host at the first /, ? or #, and a browser (Chromium,
+# Node, Playwright's own request client) also at a backslash. So each of
+# these has a Python host ending in .chase.com and a browser host of
+# evil.example. Measured with Node's URL, which follows the same standard,
+# "https://evil.example\\.chase.com/x" reads as host evil.example, path
+# /.chase.com/x.
+BACKSLASHED = [
+    "https://evil.example\\.chase.com/x",
+    "https://evil.example\\.chase.com",
+    "https://evil.example\\.secure.chase.com/statement.pdf",
+    "https://evil.example\\.chase.com./x",
+    "https://EVIL.example\\.Chase.COM/x",
+    "https://evil.example\\\\.chase.com/x",
+    "https://evil.example\\/.chase.com/x",
+]
+
+
+def test_a_backslash_in_the_host_is_never_the_provider():
+    for url in BACKSLASHED:
+        assert not is_safe_url(url, HOSTS), url
+        assert not is_safe_url(url, HOSTS | {"secure.chase.com"}, subdomains=False), url
+
+
+def test_any_host_that_is_not_a_plain_name_is_refused():
+    """Fail closed. A browser decodes, maps or refuses each of these, and
+    which one it does is not this guard's to guess."""
+    for url in ("https://evil.example%5C.chase.com/x",
+                "https://evil.example%2F.chase.com/x",
+                "https://evil.example%2e.chase.com/x",
+                "https://evil.example .chase.com/x",
+                "https://evil.example／.chase.com/x",
+                "https://evil.example＼.chase.com/x",
+                "https://chаse.com/x"):
+        assert not is_safe_url(url, HOSTS), url
+
+
+def test_a_plain_name_still_passes_in_every_form_it_did():
+    for url in ("https://chase.com/x", "https://secure.chase.com/x",
+                "https://a-b.chase.com/x", "https://a_b.chase.com/x",
+                "https://s3.chase.com/x", "https://SECURE.Chase.COM./x",
+                "https://chase.com:443/x"):
+        assert is_safe_url(url, HOSTS), url
+
+
+def test_host_of_gives_a_plain_name_or_nothing():
+    assert host_of("https://Secure.Chase.com./x") == "secure.chase.com"
+    assert host_of("http://chase.com:8080/x") == "chase.com"
+    for url in BACKSLASHED + ["", None, "not a url", "https://"]:
+        assert host_of(url) == "", url
+
+
+# A backslash before the host's own @, so urlsplit takes what comes before it
+# for a user and reads the host as chase.com, while a browser ends the host
+# at the backslash and reads evil.example.
+IN_THE_USER = [
+    "https://evil.example\\@chase.com/x",
+    "https://evil.example\\@secure.chase.com/x",
+    "https://evil.example\\:pw@chase.com/x",
+]
+
+# A backslash after the host, which a browser reads as a slash. Requested as
+# it is, this one stays on Chase, but checked and then left to a browser to
+# resolve as a link, `/\evil.example/x` goes to evil.example.
+IN_THE_PATH = [
+    "https://chase.com/\\evil.example/x",
+    "https://chase.com\\/evil.example/x",
+]
+
+
+def test_a_backslash_anywhere_before_the_query_is_refused():
+    for url in IN_THE_USER + IN_THE_PATH:
+        assert not is_safe_url(url, HOSTS), url
+        assert host_of(url) == "", url
+
+
+def test_a_backslash_in_the_query_or_fragment_is_only_text():
+    assert is_safe_url("https://chase.com/x?path=a\\b", HOSTS)
+    assert is_safe_url("https://chase.com/x#a\\b", HOSTS)
+    assert host_of("https://chase.com/x?path=a\\b") == "chase.com"
+
+
+def test_a_host_is_not_tidied_into_a_plain_name():
+    """A browser keeps these, and asks no host of Chase's. Tidying them
+    first answered for an address no browser would go to."""
+    for url in ("https://chase.com　/x", "https:// chase.com/x",
+                "https://chase.com\x1f/x", "https://chase.com../x",
+                "https://chase.com.../x", "https://chase.com /x"):
+        assert not is_safe_url(url, HOSTS), repr(url)
+        assert host_of(url) == "", repr(url)
+    assert not host_matches(" chase.com", HOSTS)
+    assert not host_matches("chase.com..", HOSTS)
+
+
+# -- join, a link as a browser resolves it -------------------------------------
+
+PAGE = "https://secure.chase.com/statements/list?x=1"
+
+
+def test_join_resolves_an_ordinary_link_as_urljoin_does():
+    for href, want in [
+        ("/statements/2031.pdf", "https://secure.chase.com/statements/2031.pdf"),
+        ("2031.pdf", "https://secure.chase.com/statements/2031.pdf"),
+        ("?page=2", "https://secure.chase.com/statements/list?page=2"),
+        ("https://secure.chase.com/a?b=c\\d", "https://secure.chase.com/a?b=c\\d"),
+        ("//static.chase.com/a.pdf", "https://static.chase.com/a.pdf"),
+        ("https:/a.pdf", "https://secure.chase.com/a.pdf"),
+        ("https:a.pdf", "https://secure.chase.com/statements/a.pdf"),
+        ("  /a.pdf\n", "https://secure.chase.com/a.pdf"),
+        ("/a\t.pdf", "https://secure.chase.com/a.pdf"),
+        ("//evil.example/x", "https://evil.example/x"),
+    ]:
+        assert join(PAGE, href) == want, href
+
+
+# Each of these resolves to Chase by urljoin and to evil.example in a
+# browser. Measured with Node's URL, which follows the same standard.
+TO_ANOTHER_HOST = [
+    "/\\evil.example/x",
+    "\\\\evil.example/x",
+    "\\/evil.example/x",
+    "///evil.example/x",
+    "////evil.example/x",
+    "https:///evil.example/x",
+    "HTTPS:////evil.example/x",
+    "/\t//evil.example/x",
+    "http:evil.example/x",
+    "http:/evil.example/x",
+]
+
+
+def test_join_gives_nothing_for_a_link_a_browser_resolves_elsewhere():
+    from urllib.parse import urljoin
+    for href in TO_ANOTHER_HOST:
+        assert join(PAGE, href) == "", href
+        assert not is_safe_url(join(PAGE, href), HOSTS), href
+    # What urljoin made of the first ones, and the guard took for Chase's.
+    assert is_safe_url(urljoin(PAGE, "///evil.example/x"), HOSTS)
+    assert is_safe_url(urljoin(PAGE, "https:///evil.example/x"), HOSTS)
+
+
+def test_host_matches_by_label_and_only_for_a_plain_name():
+    assert host_matches("chase.com", HOSTS)
+    assert host_matches("secure.chase.com", HOSTS)
+    assert host_matches("Secure.Chase.com.", HOSTS)
+    assert not host_matches("secure.chase.com", HOSTS, subdomains=False)
+    assert not host_matches("notchase.com", HOSTS)
+    assert not host_matches("evil.example\\.chase.com", HOSTS)
+    assert not host_matches("", HOSTS)
+    assert not host_matches(None, HOSTS)
+    assert not host_matches("chase.com", set())

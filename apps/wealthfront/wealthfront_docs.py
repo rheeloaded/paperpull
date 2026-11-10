@@ -34,6 +34,7 @@ import argparse
 import logging
 import random
 import re
+import shutil
 import sys
 import time
 from datetime import datetime
@@ -61,6 +62,37 @@ DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 # holds these words, so a history moved to another computer carries the
 # note too (tools/migrate.py).
 NO_CONTROL = "No safe download control found for this row"
+
+# The endings a form set's other files keep as Wealthfront names them. The
+# name comes from the answer, and an ending can be anything, while a file
+# the app saves may carry no mark that it came from the web, so a .command
+# on a Mac or a .bat on Windows could run on a double click with no
+# warning. Any other file is filed by its bytes, a PDF as a .pdf and a ZIP
+# as a .zip. Anything else is set aside in Manual Review under HELD, an
+# ending nothing opens, never deleted, and the record says how many were.
+COMPANION_ENDINGS = (".pdf", ".xls", ".xlsx", ".csv", ".zip", ".txt")
+HELD = ".held"
+
+
+def _starts_as_pdf(path: Path) -> bool:
+    try:
+        with open(path, "rb") as f:
+            return f.read(len(receipt_pdf.PDF_MAGIC)) == receipt_pdf.PDF_MAGIC
+    except OSError:
+        return False
+
+
+def _held_name(stem: str, ext: str) -> str:
+    """A set-aside file's name, with the ending the site gave it as a plain
+    word, so a person can tell what it claimed to be."""
+    word = re.sub(r"[^a-z0-9]", "", ext.lower())[:12]
+    return f"{stem} {word}{HELD}" if word else stem + HELD
+
+
+def _set_aside_note(count: int) -> str:
+    what, which = ("1 file", "it") if count == 1 else ("%d files" % count, "each")
+    return ("%s of the form set kept in Manual Review, since %s was neither a PDF nor a "
+            "spreadsheet, CSV, text or ZIP file" % (what, which))
 
 
 def ask(prompt: str) -> str:
@@ -736,6 +768,7 @@ class App:
         # A form set can include corrected versions (idx=1, ...). Save those
         # alongside the primary file so nothing is silently dropped.
         extra_paths: List[Path] = []
+        set_aside = 0
         for n, href in enumerate(extra_hrefs, start=2):
             try:
                 url = href if href.startswith("http") else site.BASE + href
@@ -751,14 +784,36 @@ class App:
                 download = dl.value
                 # Companion files in a 1099 set are often spreadsheets, not
                 # PDFs. Keep Wealthfront's own extension so the file is
-                # openable instead of a .pdf that nothing can read.
+                # openable instead of a .pdf that nothing can read, but only
+                # one of COMPANION_ENDINGS.
                 suggested = getattr(download, "suggested_filename", "") or ""
-                ext = Path(suggested).suffix.lower() or ".pdf"
+                ext = Path(suggested).suffix.lower()
+                as_named = ext in COMPANION_ENDINGS
                 stem = f"{out_path.stem} ({n} of {len(extra_hrefs) + 1})"
-                extra_path = unique_path(out_path.parent, stem + ext,
-                                         self.config["max_path_length"])
-                receipt_pdf.save_download(download, extra_path)
-                if receipt_pdf.is_zip(extra_path) and ext not in (".zip", ".xlsx"):
+                max_len = self.config["max_path_length"]
+                if as_named:
+                    extra_path = unique_path(out_path.parent, stem + ext, max_len)
+                    receipt_pdf.save_download(download, extra_path)
+                else:
+                    # Saved first where nothing opens it, and filed only once
+                    # its bytes say what it is.
+                    held = unique_path(self.paths.manual_review, _held_name(stem, ext), max_len)
+                    receipt_pdf.save_download(download, held)
+                    # A ZIP goes in under a PDF's name too, since open_zip
+                    # puts a lone PDF in the archive's own place and renames
+                    # an archive it keeps whole to .zip.
+                    if not (_starts_as_pdf(held) or receipt_pdf.is_zip(held)):
+                        set_aside += 1
+                        self.stats["manual_review"] += 1
+                        log.warning("a form set file was kept in Manual Review, it is not a "
+                                    "PDF or a ZIP and was named as a kind of file a form set "
+                                    "does not hold")
+                        print(f"  !! An additional file was kept in Manual Review as {held.name}, "
+                              "since it was neither a PDF nor a spreadsheet, CSV, text or ZIP file.")
+                        continue
+                    extra_path = unique_path(out_path.parent, stem + ".pdf", max_len)
+                    shutil.move(str(held), str(extra_path))
+                if receipt_pdf.is_zip(extra_path) and (not as_named or ext not in (".zip", ".xlsx")):
                     opened = receipt_pdf.open_zip(extra_path)
                     extra_path = opened.pdf or opened.kept or extra_path
                 print(f"  + additional file: {extra_path.name}")
@@ -774,6 +829,8 @@ class App:
                 f"form set has {len(extra_hrefs) + 1} files"
             doc.invoices = [{"file": str(out_path), "kept": True}] + [
                 {"file": str(p), "kept": True} for p in extra_paths]
+        if set_aside:
+            doc.notes = (doc.notes + "; " if doc.notes else "") + _set_aside_note(set_aside)
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
