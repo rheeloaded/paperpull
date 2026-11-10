@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 import csv
 import hashlib
+import html
 import json
 import mimetypes
 import os
@@ -67,6 +68,54 @@ try:
     VERSION = (HERE.parent / "VERSION").read_text(encoding="utf-8").strip()
 except Exception:
     VERSION = "0.1.0"
+
+# The branch, commit and folder of the checkout the panel runs from, for a
+# developer with several worktrees to see which one this page is. Nothing in
+# PaperPull Server or the built package, which run no checkout of their own.
+_DEV_INFO_CACHE: Optional[tuple[float, Optional[dict]]] = None
+
+
+def _git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(repo_dir), capture_output=True,
+                          text=True, timeout=1, check=False)
+
+
+def _dev_info(force_refresh: bool = False) -> Optional[dict]:
+    """Development branch, commit, root folder, and unedited status when running
+    from a git checkout. None in server mode, packaged mode, or outside git."""
+    global _DEV_INFO_CACHE
+    if server_mode.enabled() or _is_packaged():
+        return None
+
+    now = time.time()
+    if not force_refresh and _DEV_INFO_CACHE is not None and (now - _DEV_INFO_CACHE[0]) < 2.0:
+        return _DEV_INFO_CACHE[1]
+
+    repo_dir = HERE.parent
+    # A file in a worktree, a folder in a plain checkout.
+    if not (repo_dir / ".git").exists():
+        _DEV_INFO_CACHE = (now, None)
+        return None
+
+    try:
+        branch = (_git(repo_dir, "branch", "--show-current").stdout.strip()
+                  or _git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+                  or "HEAD")
+        commit = _git(repo_dir, "rev-parse", "--short", "HEAD").stdout.strip() or "unknown"
+        status = _git(repo_dir, "status", "--porcelain")
+        info = {
+            "branch": branch,
+            "commit": commit,
+            "root": str(repo_dir),
+            "clean": status.returncode == 0 and not status.stdout.strip(),
+        }
+    except Exception:
+        info = None
+
+    _DEV_INFO_CACHE = (now, info)
+    return info
+
+
 # -- where the downloaders live ----------------------------------------------
 #
 # Three sources, most specific first.
@@ -5774,11 +5823,38 @@ def index() -> str:
     server = server_mode.enabled()
     bar = server_mode.server_bar() if server else ""
     footer = FOOTER_SERVER if server else FOOTER_DESKTOP
-    return (HTML.replace("__FOOTER__", footer)
+    dev = _dev_info()
+    page = (HTML.replace("__FOOTER__", footer)
             .replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
             .replace("__SERVER__", "true" if server else "false")
             .replace("__TERMS_VERSION__", TERMS_VERSION)
             .replace("__TERMS_DUE__", "true" if terms_due() else "false"))
+    if dev:
+        status_suffix = "" if dev.get("clean") else "*"
+        badge_text = f"dev: {dev['branch']}{status_suffix}"
+        # The details are a card the stylesheet shows the moment the badge is
+        # hovered, or the brand link has the keyboard. A native title tooltip
+        # waits for the pointer to rest and goes on any movement (Chrome on
+        # macOS), so it took several tries to read.
+        rows = "".join("<dt>%s</dt><dd>%s</dd>" % (label, html.escape(value, quote=False))
+                       for label, value in (("Branch", dev["branch"]), ("Commit", dev["commit"]),
+                                            ("Folder", dev["root"]),
+                                            ("Status", "clean" if dev.get("clean") else "modified")))
+        dev_badge_html = (f'<span id="devbadge" class="badge dev-badge">'
+                          f'{html.escape(badge_text, quote=False)}'
+                          f'<span class="dev-card" role="tooltip"><dl>{rows}</dl></span></span>')
+        page = page.replace('<span id="devbadge" class="badge dev-badge" hidden></span>', dev_badge_html, 1)
+
+        about_text = (
+            f'<p class="muted small" id="g-dev-info" style="margin-top: 8px;">'
+            f'<b>Development branch:</b> {html.escape(dev["branch"], quote=False)} '
+            f'({html.escape("clean" if dev.get("clean") else "modified", quote=False)})<br>'
+            f'<b>Root folder:</b> <code>{html.escape(dev["root"], quote=False)}</code><br>'
+            f'<b>Commit:</b> <code>{html.escape(dev["commit"], quote=False)}</code></p>'
+        )
+        page = page.replace('<p class="muted small" id="g-dev-info" hidden style="margin-top: 8px;"></p>', about_text, 1)
+
+    return page
 
 
 @app.get("/", response_class=HTMLResponse)
