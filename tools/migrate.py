@@ -94,7 +94,12 @@ twice. None of these is a plan or employer number. It leaves out the
 employer's name a combined statement was made under and whether a
 statement waits in Manual Review for one to tell its plan, so after the
 move such a statement is set aside like any other in Manual Review, never
-filed, and is made and judged again once its file there is gone.
+filed, and is made and judged again once its file there is gone. An
+American Express Banking document keeps the token the page's list gave its
+account and the last four digits its account switcher showed, so after the
+move a config still refuses a list of another account rather than save its
+statements under this one. The token is the page's own word for the
+account, not its number, and no sign-in.
 A record still under a key that left out its account's
 last four, as the apps did past forty characters until 0.34.0 and Chase did
 at any length until 0.17.1, also keeps what its key is built from
@@ -200,7 +205,13 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # (_saved_with_one_plan). None names a person or an
                         # account number.
                         "NetBenefits": ("category", "date", "title", "occurrence", "covers",
-                                        "plan", "text_sha256", "account")}
+                                        "plan", "text_sha256", "account"),
+                        # A config keeps to the account its records were
+                        # listed under, by the list's own token for it and
+                        # the last four digits the account switcher shows,
+                        # and stops when the window shows another
+                        # (amexbanking_docs.App._held_accounts).
+                        "American Express Banking": ("account_token", "account_digits")}
 
 
 def _optum_form(rec: dict) -> bool:

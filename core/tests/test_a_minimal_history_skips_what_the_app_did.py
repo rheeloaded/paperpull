@@ -1177,6 +1177,7 @@ def test_another_app_does_not_carry_a_providers_own_fields():
     rec = dict(HISTORY, state=State.COMPLETED.value, downloaded_ok=True, pdf_pages="2",
                href="/account/products/12345678/tax_documents/777.pdf",
                occurrence=1, covers=["cd" * 32], plan="ef" * 32,
+               account_token="tok-invented-0001", account_digits="4321",
                invoices=[{"file": "Invoices/2026-05-14 Invented Invoice (1 of 1).pdf",
                           "part": "1 of 1", "number": "10000000000000001", "kept": True,
                           "names": True, "size": 4096, "pages": 1}])
@@ -1184,7 +1185,7 @@ def test_another_app_does_not_carry_a_providers_own_fields():
     for provider, (_which, fields) in migrate.PROVIDER_KIND_FIELDS.items():
         own.setdefault(provider, set()).update(fields)
     assert {"Robinhood", "American Family", "AT&T", "Optum Bank", "Target",
-            "NetBenefits"} <= set(own)
+            "NetBenefits", "American Express Banking"} <= set(own)
     for provider, fields in own.items():
         assert fields <= set(migrate._skip_fields(rec, provider)), provider
     every = set().union(*own.values())
