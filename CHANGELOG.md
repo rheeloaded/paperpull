@@ -10,6 +10,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **A sign-in starts its run by itself once it is done.** Open sign-in
+  window used to end with the person coming back to the panel to press
+  Get new. Now the panel watches the sign-in window's tabs, their address
+  and title only, read from its own debugging port on this computer
+  (`core/paperpull_core/signin_watch.py`), and starts the run the sign-in
+  was for as soon as the person is signed in. A round of Get new that
+  stopped at an account for its sign-in goes on with the round from there.
+  One stopped at another account still waits for Continue, and one that is
+  over has no say. The wait ends after ten minutes, when the window is
+  closed, or when a run for the account is started some other way. A later
+  sign-in of the account, in another tab say, ends an earlier one's wait,
+  so only one page starts a run, once. A window on a port another
+  account's config names too is not watched, since a sign-in there may be
+  that account's. Not on PaperPull Server, whose sign-in is in the page.
+  Contributed by @JasperDale420.
+- **A panel run from a git checkout says which one.** A small badge beside
+  the version names the checkout's branch, with a `*` when it has changes,
+  and its card and Settings, About PaperPull, add the commit. It never names
+  the folder, and git is never run on PaperPull Server, in the built
+  package, or in a folder with no `.git`. Contributed by @appchamp.
 - **American Express Banking, the 86th app, Business Checking statements
   and tax forms (#168).** `amexbanking` reads American Express National
   Bank deposit accounts, apart from the `amex` card app. It saves every
@@ -171,6 +191,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account's number or a token, is written as its shape, every letter as a
   and every digit as 9. Nothing is asked of the address to name it.
   Contributed by @JasperDale420 (#199).
+- **On a Mac, an account's documents folder is never another's in other
+  letter case.** A Mac tells folder names apart without case, so
+  `target receipts/Chase` is inside Target Receipts' folder. The check
+  that a folder is no other account's compared the paths as spelled, which
+  Windows does without case and a Mac did not, so the panel saved such a
+  folder there and two accounts' documents would have shared it. The
+  suites run on Windows in CI, where it held, and the test that says so
+  failed only on a Mac. A Mac disk formatted to tell case apart is asked,
+  and there the two spellings stay two folders. A folder inside an
+  account's own Manual Review, Logs, Diagnostics or Backups is refused in
+  any letter case, as a run already refused it. Contributed by
+  @JasperDale420.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On

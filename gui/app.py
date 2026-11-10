@@ -26,6 +26,7 @@ from __future__ import annotations
 import base64
 import csv
 import hashlib
+import html
 import json
 import mimetypes
 import os
@@ -47,7 +48,7 @@ from pathlib import Path
 
 import run_result
 
-from anyio import to_thread
+from anyio import sleep as async_sleep, to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -67,6 +68,64 @@ try:
     VERSION = (HERE.parent / "VERSION").read_text(encoding="utf-8").strip()
 except Exception:
     VERSION = "0.1.0"
+
+# The branch and commit of the checkout the panel runs from, for a developer
+# with several worktrees to see which one this page is. Nothing in PaperPull
+# Server or the built package, which run no checkout of their own.
+_DEV_INFO_CACHE: Optional[tuple[float, Optional[dict]]] = None
+
+
+def _git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(repo_dir), capture_output=True,
+                          text=True, timeout=1, check=False)
+
+
+def _dev_info(force_refresh: bool = False) -> Optional[dict]:
+    """The branch and commit of the git checkout the panel runs from, and
+    whether it has changes, or None on PaperPull Server, in the built
+    package, outside a checkout, and whenever git is missing or fails. Never
+    its folder, since a path names whose computer it is, and the page is
+    what a screenshot in an issue shows."""
+    global _DEV_INFO_CACHE
+    if server_mode.enabled() or _is_packaged():
+        return None
+
+    now = time.time()
+    if not force_refresh and _DEV_INFO_CACHE is not None and (now - _DEV_INFO_CACHE[0]) < 2.0:
+        return _DEV_INFO_CACHE[1]
+
+    repo_dir = HERE.parent
+    # A file in a worktree, a folder in a plain checkout.
+    if not (repo_dir / ".git").exists():
+        _DEV_INFO_CACHE = (now, None)
+        return None
+
+    try:
+        # A .git that git cannot read, a worktree's copied without its
+        # repository say, is no checkout to name.
+        head = _git(repo_dir, "rev-parse", "--short", "HEAD")
+        commit = head.stdout.strip() if head.returncode == 0 else ""
+        if not commit:
+            info = None
+        else:
+            branch = (_git(repo_dir, "branch", "--show-current").stdout.strip()
+                      or _git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+                      or "HEAD")
+            # Without the index's lock, which a git working in this checkout
+            # at that moment would otherwise find taken.
+            status = _git(repo_dir, "--no-optional-locks", "status", "--porcelain")
+            info = {
+                "branch": branch,
+                "commit": commit,
+                "clean": status.returncode == 0 and not status.stdout.strip(),
+            }
+    except Exception:
+        info = None
+
+    _DEV_INFO_CACHE = (now, info)
+    return info
+
+
 # -- where the downloaders live ----------------------------------------------
 #
 # Three sources, most specific first.
@@ -4615,6 +4674,108 @@ def _port_is_only_its_own(meta: dict, account: str) -> bool:
         return False
 
 
+def _sign_in_port(meta: dict, account: str) -> Optional[int]:
+    """The debugging port of the account's sign-in browser, or None."""
+    try:
+        return urllib.parse.urlsplit(str(_config_of(meta, account).get("cdp_url") or "")).port
+    except ValueError:
+        return None
+
+
+# -- waiting for a sign-in ------------------------------------------------------
+#
+# Open sign-in window used to end with the person coming back here to press
+# Get new. Once the window is open, the page asks here to be told when the
+# person has signed in, and starts that run itself. The address and title of
+# the window's tabs are all that is looked at, from its own debugging port on
+# this computer, and neither goes further than this file (core signin_watch).
+#
+# What to watch comes from the sign-in itself, kept here per account until the
+# wait has used it. A wrong "signed in" costs one run, which finds nobody
+# signed in and says so, and another wait needs another press of the button.
+# Each sign-in's plan is its own. A sign-in starting drops the one before it,
+# so a wait is only ever for the latest sign-in of its account, and only
+# that wait's page starts a run, once.
+
+# Long enough for a code by text or email, short enough that the panel does
+# not go on watching a window nobody came back to.
+SIGN_IN_WAIT_SECONDS = 600
+SIGN_IN_LOOK_EVERY = 2.0
+_SIGN_IN_PLANS: dict = {}
+
+
+@app.get("/api/sign-in/wait", dependencies=[Depends(_same_origin_only), Depends(_terms_first)])
+def api_sign_in_wait(app: str, account: str = "primary"):
+    """A stream that ends by saying how the wait for this account's sign-in
+    came out, as signed_in, timed_out, no_window, run_started, replaced by
+    another sign-in of the account since, or cannot_tell for a sign-in the
+    panel has no way to watch."""
+    apps = discover_apps()
+    if app not in apps:
+        raise HTTPException(404, "That account is no longer here. Reload the page.")
+    if account not in apps[app]["accounts"]:
+        raise HTTPException(400, "That account is no longer here. Reload the page.")
+    meta = apps[app]
+    key = (app, account)
+
+    async def stream():
+        from paperpull_core import signin_watch
+        plan = _SIGN_IN_PLANS.get(key)
+        port = await to_thread.run_sync(_sign_in_port, meta, account)
+        # Not on PaperPull Server, whose sign-in is docked in the page. Nor
+        # on a port another config names too, whose window may be another
+        # account's sign-in, and whose run would then save that account's
+        # documents as this one's.
+        if server_mode.enabled() or plan is None or not port or \
+                not await to_thread.run_sync(_port_is_only_its_own, meta, account):
+            yield _event("cannot_tell", "ended")
+            return
+        yield _event("", "waiting")
+        watch = signin_watch.Watch(plan)
+        silent = 0
+        deadline = time.monotonic() + SIGN_IN_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            # Somebody pressed a run for this account, here or in another
+            # tab, and it is that run's window now. The sign-in that opened
+            # this wait may still be on its way out as it starts.
+            if _RUNS.get(key, {}).get("action") not in (None, "login"):
+                yield _event("run_started", "ended")
+                return
+            # Another sign-in of this account started since, in another tab
+            # most often, and the run is for that one's page to start.
+            if _SIGN_IN_PLANS.get(key) is not plan:
+                yield _event("replaced", "ended")
+                return
+            tabs = await to_thread.run_sync(signin_watch.read_tabs, port)
+            if tabs is None:
+                # The browser was closed. Asked again first, as a browser
+                # busy starting a page can be slow to answer.
+                silent += 1
+                if silent >= 3:
+                    yield _event("no_window", "ended")
+                    return
+            elif watch.look(tabs):
+                silent = 0
+                # Taken with nothing awaited since it was asked, so of two
+                # waits for one sign-in only one is told.
+                if _SIGN_IN_PLANS.get(key) is not plan:
+                    yield _event("replaced", "ended")
+                    return
+                _SIGN_IN_PLANS.pop(key, None)
+                yield _event("signed_in", "ended")
+                return
+            else:
+                silent = 0
+            # Said each look, so a page that went away, Stop waiting pressed
+            # or the tab closed, ends this too, not ten minutes later.
+            yield _event("", "waiting")
+            await async_sleep(SIGN_IN_LOOK_EVERY)
+        yield _event("timed_out", "ended")
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 def _close_sign_in_window(meta: dict, account: str) -> list:
     """Close the account's sign-in browser once its run is done, unless the
     person is in it, or its port is another account's too. Whatever goes
@@ -4627,8 +4788,8 @@ def _close_sign_in_window(meta: dict, account: str) -> list:
 
 def _close_own_window(meta: dict, account: str) -> list:
     cfg = _config_of(meta, account)
+    port = _sign_in_port(meta, account)
     try:
-        port = urllib.parse.urlsplit(str(cfg.get("cdp_url") or "")).port
         # As the browser was opened on it (browser._launch), "~" and all.
         profile = Path(str(cfg.get("profile_dir") or "")).expanduser()
     except (ValueError, RuntimeError):
@@ -4778,6 +4939,10 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
             root = None
         _RUNS[(app, account)] = {"action": action,
                                  "started": datetime.now().isoformat(timespec="seconds")}
+        if action == "login":
+            # What to watch is this sign-in's from now, or nothing, and a
+            # wait for an earlier one ends (api_sign_in_wait).
+            _SIGN_IN_PLANS.pop((app, account), None)
         noted = False
         handed = None
         # What the run saved, read once its process has ended (below).
@@ -4870,8 +5035,14 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
                     read_all = True
                     break
                 parsed = run_result.parse(line.rstrip("\r\n"), mark)
+                plan = run_result.sign_in_plan(line.rstrip("\r\n"), mark)
                 if parsed is not None:
                     result = parsed
+                elif plan is not None:
+                    # Kept for a sign-in alone. Any run that opens a window
+                    # says it, and none shows it among its lines.
+                    if action == "login":
+                        _SIGN_IN_PLANS[(app, account)] = plan
                 else:
                     yield _event(line.rstrip())
             code = await to_thread.run_sync(proc.wait)
@@ -5350,7 +5521,47 @@ def _within(path, folder) -> bool:
         where, home = Path(path).resolve(), Path(folder).resolve()
     except (OSError, RuntimeError, ValueError):
         return False
-    return where == home or home in where.parents
+    if where == home or home in where.parents:
+        return True
+    # A Mac's disk most often tells names apart without case, as
+    # _in_root_name has it, so "target receipts" can be the folder "Target
+    # Receipts", and resolve() there keeps the spelling it was given.
+    # Windows paths already compare so. Whether it is, the disk says.
+    if sys.platform == "darwin":
+        home_name = str(home).casefold()
+        return any(str(step).casefold() == home_name and _one_folder(step, home)
+                   for step in (where, *where.parents))
+    return False
+
+
+def _one_folder(spelled: Path, home: Path) -> bool:
+    """Whether spelled, the path home in other letter case, is that folder
+    on this disk. A Mac's disk can be formatted to tell case apart, and then
+    the two are two folders. The nearest folder made of home's is asked. A
+    disk without case finds it in either spelling, and finds a name not yet
+    made in it as it finds the names already there. A disk that cannot say
+    has the two taken as one, which refuses more than it has to."""
+    try:
+        made = home
+        while not made.exists():
+            if made.parent == made:
+                return True
+            made = made.parent
+        above = len(home.parts) - len(made.parts)
+        twin = spelled.parents[above - 1] if above else spelled
+        if not (twin.exists() and os.path.samefile(twin, made)):
+            return False
+        if not above:
+            return True
+        # The first name in name order, so one folder always gets one answer.
+        for name in sorted(os.listdir(made)):
+            other = name.swapcase()
+            if other != name and other.swapcase() == name:
+                other = os.path.join(made, other)
+                return os.path.exists(other) and os.path.samefile(other, os.path.join(made, name))
+        return True
+    except (OSError, ValueError, IndexError):
+        return True
 
 
 def _profiles_known(apps: dict) -> list:
@@ -5411,12 +5622,16 @@ def _documents_problem(apps: dict, app_name: str, account: str, folder: str):
                         "Choose a folder of its own." % who)
             if (name, other) == (app_name, account) and _within(target, root):
                 # Inside its own folder it may be, but not where a document
-                # that failed its check or a run's own records are kept.
+                # that failed its check or a run's own records are kept, in
+                # any letter case, as a run tells them (core storage
+                # _in_a_kept_folder). The folder in it is counted, not
+                # matched, since on a Mac its spelling can be another.
                 try:
-                    first = target.resolve().relative_to(root.resolve()).parts[:1]
+                    first = target.resolve().parts[len(root.resolve().parts):][:1]
                 except (ValueError, OSError, RuntimeError):
                     first = ()
-                if first and (first[0] in KEPT_FOLDERS or first[0].startswith(".")):
+                kept = {f.casefold() for f in KEPT_FOLDERS}
+                if first and (first[0].casefold() in kept or first[0].startswith(".")):
                     return ("That folder is inside %s, where documents that failed their "
                             "check or a run's own logs and backups are kept. Choose a folder of their "
                             "own." % first[0])
@@ -6025,11 +6240,36 @@ def index() -> str:
     server = server_mode.enabled()
     bar = server_mode.server_bar() if server else ""
     footer = FOOTER_SERVER if server else FOOTER_DESKTOP
-    return (HTML.replace("__FOOTER__", footer)
+    dev = _dev_info()
+    page = (HTML.replace("__FOOTER__", footer)
             .replace("__VERSION__", VERSION).replace("__SERVER_BAR__", bar)
             .replace("__SERVER__", "true" if server else "false")
             .replace("__TERMS_VERSION__", TERMS_VERSION)
             .replace("__TERMS_DUE__", "true" if terms_due() else "false"))
+    if dev:
+        status_suffix = "" if dev.get("clean") else "*"
+        badge_text = f"dev: {dev['branch']}{status_suffix}"
+        # The details are a card the stylesheet shows the moment the badge is
+        # hovered, or the brand link has the keyboard. A native title tooltip
+        # waits for the pointer to rest and goes on any movement (Chrome on
+        # macOS), so it took several tries to read.
+        rows = "".join("<dt>%s</dt><dd>%s</dd>" % (label, html.escape(value, quote=False))
+                       for label, value in (("Branch", dev["branch"]), ("Commit", dev["commit"]),
+                                            ("Status", "clean" if dev.get("clean") else "modified")))
+        dev_badge_html = (f'<span id="devbadge" class="badge dev-badge">'
+                          f'{html.escape(badge_text, quote=False)}'
+                          f'<span class="dev-card" role="tooltip"><dl>{rows}</dl></span></span>')
+        page = page.replace('<span id="devbadge" class="badge dev-badge" hidden></span>', dev_badge_html, 1)
+
+        about_text = (
+            f'<p class="muted small" id="g-dev-info" style="margin-top: 8px;">'
+            f'<b>Development branch:</b> {html.escape(dev["branch"], quote=False)} '
+            f'({html.escape("clean" if dev.get("clean") else "modified", quote=False)})<br>'
+            f'<b>Commit:</b> <code>{html.escape(dev["commit"], quote=False)}</code></p>'
+        )
+        page = page.replace('<p class="muted small" id="g-dev-info" hidden style="margin-top: 8px;"></p>', about_text, 1)
+
+    return page
 
 
 @app.get("/", response_class=HTMLResponse)
