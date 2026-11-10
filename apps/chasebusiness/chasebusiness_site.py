@@ -93,11 +93,10 @@ KNOWN CEILINGS (ponytail: left until a live run shows otherwise)
   * Two statements of one account on one date stop the list, on every run,
     since nothing on a row tells them apart.
   * Rows do not name their account, so a saved PDF is kept only when the
-    account number after its "Account Number" label, or with no label the
+    account number on its "Account Number" label's line, or otherwise the
     first account number its text prints, ends in the account's last four
-    (names_tail). No real statement has been read by this rule yet, so a
-    live run that leaves every statement for review should look here
-    first.
+    (names_tail). The owner's ten saved checking statements and one card
+    statement were read by this rule in November 2026.
   * Tax documents, notices, ATM receipts, check images and branch documents
     are never opened. The business card is listed like any account, and its
     rows are saved by their Saves document link. A card statement is kept
@@ -2127,11 +2126,14 @@ def names_tail(text: str, tail: str) -> bool:
     more that a space or a dash may part, ending in four digits, as in
     "000000123451234" or "XXXX XXXX XXXX 1234" (_account_number).
 
-    When the text has an "Account Number" label, the first account number
-    printed after it is judged, on the label's line or a later one, since
-    the owner's saved statement printed its number on a line of its own
-    apart from the label. Only when there is no label is the first account
-    number in the whole text judged. Either way only one number is judged,
+    When the "Account Number" label's own line prints an account number,
+    as a card statement's does, that number is judged. Otherwise the first
+    account number in the whole text is judged: a Business Checking
+    statement's text has the label's line empty, Chase's site and phone
+    number after it, and its account number first of all, at the top of
+    the page, as every saved one read (November 2026). The first number
+    after such a label was a transaction number, so every real checking
+    statement was refused. Either way only one number is judged,
     so another account's statement that names this account in a transfer
     line, or a long transaction number ending in the same four, is not
     kept. A ZIP+4, a mail sort number, a run of zeros, a phone number, a
@@ -2144,8 +2146,14 @@ def names_tail(text: str, tail: str) -> bool:
     if not re.fullmatch(r"\d{4}", tail or ""):
         return False
     text = text or ""
+    start = 0
     label = _ACCOUNT_LABEL_RE.search(text)
-    for run in _NUMBER_RUN_RE.finditer(text, label.end() if label else 0):
+    if label:
+        end = text.find("\n", label.end())
+        end = len(text) if end < 0 else end
+        if any(_account_number(run.group(0)) for run in _NUMBER_RUN_RE.finditer(text, label.end(), end)):
+            start = label.end()
+    for run in _NUMBER_RUN_RE.finditer(text, start):
         last = _account_number(run.group(0))
         if last:
             return last.endswith(tail)
