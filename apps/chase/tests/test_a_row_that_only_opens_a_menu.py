@@ -8,9 +8,11 @@ download ever came. Nine such records failed on every later run for good,
 since a record with no file is always tried again.
 
 Such a row's statement is still on the list and is not taken here, so the
-list it was read from is never noted whole. The run takes what else it
-read and stops at its end, as it does for a year or a card it could not
-choose.
+list it was read from is never noted whole. The run says it left the
+statement out, takes what else it read, and finishes. No later run would
+read the row either, so a stop for it stopped every run of such an account,
+and the panel offered a sign-in and a Continue that could not help. A year
+or a card that could not be chosen still stops the run at its end.
 
 In a real browser. Every page here is made up and served from memory, and
 every other request is refused, so nothing leaves this machine.
@@ -29,6 +31,7 @@ import chase_docs as app_mod  # noqa: E402
 import chase_site as site  # noqa: E402
 from chase_docs import App, Document, MENU_ROW_NOTE, State, retire_menu_rows  # noqa: E402
 from paperpull_core import listing  # noqa: E402
+from paperpull_core.run_reporting import PREFIX, report_run_result  # noqa: E402
 from storage import JsonStore  # noqa: E402
 
 DOCUMENTS = "https://secure.chase.com/web/auth/dashboard"
@@ -118,24 +121,58 @@ def _run_all(tmp_path, monkeypatch, passed_over):
     return app, pressed
 
 
-def test_a_list_with_a_menu_row_is_not_noted_whole(tmp_path, monkeypatch, capsys):
-    """The plain statement is taken, and the run stops at its end with a
-    failure file that says why, rather than finish with a statement on
-    the list never taken."""
+def _result(capsys):
+    """What the run's summary line tells the panel."""
+    report_run_result({})
+    [line] = [x for x in capsys.readouterr().out.splitlines() if PREFIX in x]
+    return json.loads(line.split(PREFIX, 1)[1])
+
+
+def test_a_list_with_a_menu_row_is_not_noted_whole_and_the_run_finishes(
+        tmp_path, monkeypatch, capsys):
+    """The plain statement is taken and the run finishes, saying in its own
+    words what it left out, with no failure file and nothing that tells the
+    panel it stopped. The list is not noted whole."""
     app, pressed = _run_all(tmp_path, monkeypatch, (site.DOCUMENT_MENU,))
+    app.cmd_run("all")
+    assert pressed == ["2026-07-31"]
+    assert listing.last(app) == listing.STOPPED
+    said = " ".join(capsys.readouterr().out.split())
+    assert ("Chase's statement list holds a statement saved only through a menu, which this app "
+            "never presses, so it is left out and the list is not noted as read whole.") in said
+    assert "The Chase Business app takes a business account's statements." in said
+    for wrong in ("could not be chosen", "this run stops", "The next run reads the list again",
+                  "Run it again later"):
+        assert wrong not in said, wrong
+    assert not list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    result = _result(capsys)
+    assert result["stopped"] == 0 and "stop" not in result and "list_not_read" not in result
+
+
+def test_a_pilot_of_a_list_with_a_menu_row_finishes(tmp_path, monkeypatch):
+    app, pressed = _run_all(tmp_path, monkeypatch, (site.DOCUMENT_MENU,))
+    app.cmd_pilot()
+    assert pressed == ["2026-07-31"]
+    assert listing.last(app) == listing.STOPPED
+
+
+def test_a_part_that_could_not_be_chosen_still_stops_the_run(tmp_path, monkeypatch, capsys):
+    """A menu row beside a year the picker would not take. The year is a
+    part of the list a later run may read, so the run stops at its end, as
+    it always did."""
+    app, pressed = _run_all(tmp_path, monkeypatch, (site.DOCUMENT_MENU, "year picker"))
     with pytest.raises(SystemExit) as stopped:
         app.cmd_run("all")
     assert stopped.value.code == 0
     assert pressed == ["2026-07-31"]
     assert listing.last(app) == listing.STOPPED
     said = " ".join(capsys.readouterr().out.split())
-    assert "Chase's statement list was not read whole." in said
-    assert "A statement on it is saved only through a menu, which this app never presses." in said
-    assert "could not be chosen" not in said
+    assert "since a year, a card or an account on it could not be chosen" in said
+    assert "it is left out" in said
     [path] = list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
     report = json.loads(path.read_text(encoding="utf-8"))
-    assert (report["step"], report["reason"]) == (
-        "read the statement list", "a statement on the list is saved only through a menu")
+    assert (report["step"], report["reason"]) == ("read the statement list",
+                                                  "some of the list could not be chosen")
 
 
 def test_a_list_with_no_menu_row_is_noted_whole(tmp_path, monkeypatch):

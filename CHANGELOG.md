@@ -175,8 +175,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   that shape left by an older version is set down as No Longer Listed.
   Contributed by @JasperDale420 (#191). Before merging, a list with such a
   row was made to read as not whole, since its statement is on the list and
-  is not taken, so the run keeps what it saved, says why and stops at its
-  end.
+  is not taken. The run says it left that statement out, that the Chase
+  Business app takes a business account's statements, and finishes, and a
+  run of Chase settles no gap in the panel. A year, a card or an account
+  that could not be chosen still stops the run at its end.
 - **Chase Business keeps a Business Checking statement (#195).** Every
   real checking statement was refused and deleted once downloaded, since
   its text leaves the "Account Number" label's line empty and the number
