@@ -693,8 +693,9 @@ _ENABLED_OPTION = "option:not([disabled])"
 class Listed(list):
     """The documents a walk of the list read. passed_over names each part
     of the list a picker offered and the walk could not read through,
-    "year picker", "card" or "account picker", so the list is not whole
-    however much was read."""
+    "year picker", "card" or "account picker", and DOCUMENT_MENU for a row
+    whose only control opens a menu, so the list is not whole however much
+    was read."""
     passed_over: tuple = ()
 
 
