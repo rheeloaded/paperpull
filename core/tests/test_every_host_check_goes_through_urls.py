@@ -41,9 +41,12 @@ DOMAIN_ENDS = {"com", "net", "org", "gov", "mil", "edu", "io", "us", "co", "me",
                "de", "ca", "app", "dev", "bank", "info", "biz", "markets", "finance"}
 
 
-def _source_files(root: Path):
+def _source_files():
+    """Every Python file of the repository that ships, read from REPO, tests
+    and copies a build or an install made left out
+    (core/tests/test_no_census_reads_a_copy_a_build_made.py)."""
     for top in SCANNED:
-        for here, dirs, files in os.walk(root / top):
+        for here, dirs, files in os.walk(REPO / top):
             # Pruned by name before descending, so a worktree's linked
             # environments (.venv junctions) are never walked into.
             dirs[:] = [d for d in dirs if d not in NOT_SOURCE and not d.startswith(".")]
@@ -131,7 +134,7 @@ def own_link_joins(source: str):
 
 def _census(ask, word):
     offenders = []
-    for path in _source_files(REPO):
+    for path in _source_files():
         rel = path.relative_to(REPO)
         if rel == THE_ONE:
             continue
