@@ -40,6 +40,7 @@ Alternatively use **Record steps** under **More → Get help** in the panel.
 ## Implementation status
 
 - Stable entry URL: `https://banking.renault-bank-direkt.de/services_cloud/portal/`.
+- Postfach: `https://banking.renault-bank-direkt.de/services_cloud/portal/webcomp/epostfach/postfach`.
 - Authentication routes are treated as signed out.
 - Separate browser profile and CDP port `9311`.
 - Document categories, index, resumable state and CLI follow the existing apps.

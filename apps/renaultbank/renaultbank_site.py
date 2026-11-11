@@ -50,6 +50,8 @@ URLS = {
     "home": BASE + "/services_cloud/portal/",
     # login.bat opens this, the sign-in address the request names (#172).
     "login": BASE + "/services_cloud/portal/",
+    # The account holder supplied the Postfach's exact route (#172).
+    "documents": BASE + "/services_cloud/portal/webcomp/epostfach/postfach",
 }
 
 # Public, non-personal route vocabulary. The recorder keeps these words
@@ -61,7 +63,8 @@ RECORD_WORDS = frozenset({
     "checkMessageSupport", "deep-links", "profile", "active",
     "messageCount", "messages", "messageAttachmentDownload",
     "documentUpload", "datasharing", "download", "LIST_ITEM_HEADER",
-    "ATTACHMENT_ICON", "banking_start", "account", "accounts", "statement",
+    "ATTACHMENT_ICON", "banking_start", "epostfach", "postfach",
+    "account", "accounts", "statement",
     "statements", "document", "documents", "archive", "folder", "folders",
     "tax", "securities", "card", "cards", "contract", "information",
     "content", "file", "files", "attachment", "attachments", "history",
