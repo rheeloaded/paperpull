@@ -28,6 +28,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
   has begun. A check turned off while it waited keeps nothing, a failed
   download can be tried again, a half-copied app is removed, and the swap
   waits for the window to close before it opens the new app.
+- **CIBC and MBNA, first shells for a tester (#204, #205).** Add one from
+  the panel, sign in with Open sign-in window, and press Record steps
+  (More, then Get help) for one trip to a document. That recording is what
+  the real app is built from. Each shell opens its sign-in page in a
+  browser profile of its own and does nothing more. CIBC's is CIBC Online
+  Banking's sign-on page, and MBNA's is the address mbna.ca's own Login
+  links lead to, which hands over to the sign-in on authentication.mbna.ca.
+  It presses nothing on the provider's pages and acts only on
+  cibconline.cibc.com or mbna.ca. Discover, Pilot and Run All say it is
+  not built yet and stop, and Resume says nothing has been listed yet, so
+  nothing is listed or downloaded. Login names a sign-in page or a check
+  and never says you are signed in. The panel names Record steps after a
+  shell's sign-in, starts no run by itself once it is done, and leaves a
+  shell out of Get new for all. The guards read English and French. CIBC
+  on port 9311, MBNA on 9312, the person's own Edge or Chrome first.
 
 ### Changed
 - **A recording keeps a Canadian bank's words for its accounts.** `Chequing`,
