@@ -412,9 +412,10 @@ def test_a_restore_that_ends_early_says_continue_will_not_download_again():
         assert words in left, words
     outcome = " ".join(function("runOutcome").split())
     # Every way a run can end without finishing says it, and offers Continue
-    # only to a run that downloads and was not a restore.
+    # only to a run that downloads and was not a restore, nor a first shell's
+    # (gui/tests/test_a_first_shell_in_the_panel.py).
     assert "const next = RUN.again ? AGAIN_LEFT :" in outcome
-    assert "const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again;" in outcome
+    assert "const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again && !RUN.shell;" in outcome
     assert outcome.count("+ next + '.'") + outcome.count("say: next + '.'") >= 4
     # The five ways a run ends early, and the four stops the run can name
     # (needs you, a page it did not expect, no answer in time, an error)
@@ -432,7 +433,8 @@ def test_a_restore_that_ends_early_says_continue_will_not_download_again():
     assert "act: again ? restore : {label: 'Continue', run: 'resume', primary: true}" in present
     assert "!(r.last_run && r.last_run.redownload)" in function("queueTargets")
     account = " ".join(function("renderAccount").split())
-    assert "const again = r.state === 'stopped' && Boolean(r.last_run && r.last_run.redownload);" in account
+    # A first shell has nothing to restore (test_a_first_shell_in_the_panel.py).
+    assert "const again = !r.shell && r.state === 'stopped' && Boolean(r.last_run && r.last_run.redownload);" in account
     assert "const stoppedHere = continues(r) && !again;" in account
     assert "(again && !SERVER && !inSample() ?" in account
 

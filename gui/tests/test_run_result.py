@@ -214,7 +214,9 @@ def test_a_discover_that_stopped_offers_to_check_again():
     again for a Discover that stopped, never Continue."""
     js = (Path(app.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
     assert "const downloads = ['pilot', 'all', 'resume'].includes(RUN.action)" in js
-    assert "const recheck = RUN.action === 'discover';" in js
+    # A first shell's Discover has nothing to check again
+    # (gui/tests/test_a_first_shell_in_the_panel.py).
+    assert "const recheck = RUN.action === 'discover' && !RUN.shell;" in js
     assert "recheck ? 'Check again when you are ready'" in js
     assert 'data-action="discover"' in js and "Check again</button>" in js
 
