@@ -1042,21 +1042,21 @@ class App:
         structure = sv.get("postbox_structure") or {}
         if structure.get("inspected"):
             print(f"Postbox DOM: {shape_tree(structure['rows'], words)} rows, "
-                  f"{shape_tree(structure['rows_with_download'], words)} with a download link; "
-                  "current page only.")
-            print(f"  {shape_tree(structure['rows_with_parseable_date'], words)} readable dates; "
+                  f"{shape_tree(structure['rows_with_download'], words)} with a download link, "
+                  "on the page on screen only.")
+            print(f"  {shape_tree(structure['rows_with_parseable_date'], words)} readable dates, "
                   f"{shape_tree(structure['statement_candidates'], words)} possible statements "
                   f"and {shape_tree(structure['tax_candidates'], words)} possible tax documents.")
-            print(f"  {shape_tree(structure['unread_rows'], words)} marked unread; "
+            print(f"  {shape_tree(structure['unread_rows'], words)} marked unread, "
                   f"{shape_tree(structure['pagination_controls'], words)} paging controls.")
             if not structure["table_present"]:
-                print("The expected Postbox table was not found; the row count may be incomplete.")
+                print("The expected Postbox table was not found, so the row count may be incomplete.")
             if structure["truncated"]:
-                print("The Postbox DOM census reached its limit; the counts are incomplete.")
+                print("The Postbox DOM census reached its limit, so the counts are incomplete.")
         elif structure:
-            print("Postbox DOM not inspected: open the Postbox in the browser and retry.")
+            print("Postbox DOM not inspected. Open the Postbox in the browser and try again.")
         if "collect_error" in info:
-            print("Rows collected: unavailable (the list could not be read; see the detailed file).")
+            print("Rows collected: unavailable (the list could not be read, see the detailed file).")
         else:
             print(f"Rows collected: {shape_tree(info['collected'], words)}")
             passed = info.get(Fixed("skipped")) or {}

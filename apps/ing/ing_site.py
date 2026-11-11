@@ -6,15 +6,16 @@ and fetches each PDF from inside that page with the browser's own session.
 It presses nothing: no filter, no menu, no further page, no button. A page
 it does not recognize stops the list rather than being guessed at.
 
-The addresses and selectors were originally based on public descriptions of
-the ING Postbox. A run may stop where another account's page differs.
-Diagnose and Record help map the difference.
+The addresses and selectors were first taken from public descriptions of
+the ING Postbox, then checked on the contributor's own account. A run may
+stop where another account's page differs. Diagnose and Record help map
+the difference.
 
 It never moves money, trades, changes settings, submits forms or confirms
 dialogs. A row the Postbox marks unread is downloaded too unless
-include_unread is false; whether fetching a document marks it read in ING
-has not been checked. Record observes the account
-holder's own actions, and Diagnose is passive.
+include_unread is false, and whether fetching a document marks it read in
+ING has not been checked. Record observes the account holder's own
+actions, and Diagnose is passive.
 """
 from __future__ import annotations
 
@@ -50,7 +51,7 @@ URLS = {
     "home": f"{BASE}/app/obligo",
     "login": f"{BASE}/app/obligo",
     # The Postbox and its archive, as public descriptions of the page name
-    # them. Not yet checked on an account by this project.
+    # them and the contributor's own account showed them.
     "documents": f"{BASE}/app/postbox/postbox",
     "archive": f"{BASE}/app/postbox/postbox_archiv",
 }
@@ -77,7 +78,7 @@ ALL_CATEGORIES = [ACCOUNT, CARD, SECURITIES, TAX, CONTRACT, MESSAGE]
 # (classify). Checked in order, the first that matches wins: a Steuer-
 # bescheinigung for the depot is a tax document, a Kreditkartenabrechnung
 # is not a Kontoauszug, and a Wertpapierabrechnung is not a statement.
-# The words are matched loosely, in German and English; not all ING document
+# The words are matched loosely, in German and English. Not all ING document
 # types have been checked.
 
 
@@ -97,7 +98,7 @@ _KIND_RULES = [
 ]
 
 
-# Common sign-out paths to reject; ING's expiry behavior is not mapped.
+# Common sign-out paths to reject. ING's expiry behavior is not mapped.
 LOGIN_URL_MARKERS = ["/login", "/logout", "/timeout", "/anmeldung", "/abmeldung", "/session-expired"]
 
 
@@ -403,9 +404,16 @@ _ROW_LIMIT = 5000
 _MAX_LINKS = 4
 _READING = {
     # The words of an empty list, which stand for its rows when it has none.
-    "emptyText": (r"(?:^|[^0-9a-zäöü])(?:keine|0)\s+(?:neuen\s+)?"
-                  r"(?:dokumente|nachrichten|einträge|eintraege|mitteilungen)|"
-                  r"(?:postbox|postfach|archiv) ist leer|no documents|no messages"),
+    # They are read only inside the list's own box (wrapper), and only as
+    # the sentence ING was seen to show there for an empty archive, "Zu
+    # Ihrer Suche können keine Dokumente angezeigt werden", or one like it.
+    # A count or "keine neuen Nachrichten" elsewhere on the page, such as a
+    # header's unread badge, says nothing of the list, and no new documents
+    # is not no documents.
+    "emptyText": (r"\bkeine\s+(?:dokumente|nachrichten|einträge|eintraege|mitteilungen)\s+"
+                  r"(?:angezeigt|vorhanden|gefunden)|"
+                  r"\b(?:postbox|postfach|archiv) ist leer|"
+                  r"\bno (?:documents|messages) (?:to display|found|available)"),
     "busy": '[aria-busy="true"]',
     "rounds": 60, "waitRounds": 16, "stableRounds": 3, "pause": 500,
     "limit": _ROW_LIMIT, "maxLinks": _MAX_LINKS,
@@ -465,7 +473,8 @@ _ROWS_JS = r"""async (a) => {
     .filter(el => shown(el) && el.querySelectorAll("a, button").length > 1).length;
   const anyDownload = Array.from(document.querySelectorAll("a[href]")).some(isDownload);
   const empty = !all.length && !anyDownload &&
-                emptyText.test(words(document.body).slice(0, 50000));
+                Array.from(document.querySelectorAll(a.wrapper))
+                  .some(box => emptyText.test(words(box).slice(0, 50000)));
   const dateOf = (text) => {
     const found = new Set();
     for (const m of text.matchAll(/(?<!\d)\d{1,2}\.\d{1,2}\.\d{4}(?!\d)/g)) found.add(m[0]);
@@ -576,7 +585,7 @@ SKIPS = ("unread", "no_link", "unclear", "refused")
 
 
 def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool = True,
-               scroll: bool = True) -> dict:
+               scroll: bool = True, again: bool = False) -> dict:
     """One list, "postbox" or "archive", read whole or not at all.
 
     Every row that might be a document comes back among the candidates,
@@ -584,9 +593,11 @@ def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool 
     more than one, or a link this app does not follow. Rows alike in type,
     subject and date are told apart by their place among those alike
     (rank), which is all the page says of them. The rest, with a date,
-    are its documents. Anything not read whole raises ListStopped."""
+    are its documents. Anything not read whole raises ListStopped. With
+    `again`, the list is opened by its own address even when it is on
+    screen already."""
     if navigate:
-        _open_area(page, source)
+        _open_area(page, source, again=again)
     elif looks_signed_out(page):
         raise SessionExpired("ING shows its sign-in page")
     elif _list_area(page.url or "") != source:
@@ -623,8 +634,8 @@ def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool 
                           + (" (read_archive: false leaves the archive out)"
                              if source == "archive" else ""))
     if candidates and not any(c["hrefs"] for c in candidates):
-        raise ListStopped(f"{where} shows no download link in its rows; it may sit in "
-                          "a menu, which this app does not open")
+        raise ListStopped(f"{where} shows no download link in its rows, and the link may "
+                          "sit in a menu, which this app does not open")
     groups: Dict[str, List[dict]] = {}
     for c in candidates:
         groups.setdefault(c["sig"], []).append(c)
@@ -732,7 +743,12 @@ def _all_rows(page, config: Optional[dict] = None, fresh: bool = False,
     undated_rows = 0
     passed = dict.fromkeys(SKIPS, 0)
     for source in sources:
-        area = _read_area(page, source, config, navigate=navigate, scroll=navigate)
+        # A listing opens each list by its own address, never the view the
+        # person left on screen, which may hold a search or a filter of
+        # their own (ING's empty notice asks to check "Ihre Suche oder die
+        # Filterkriterien"), so a filtered list is never read as the whole.
+        area = _read_area(page, source, config, navigate=navigate, scroll=navigate,
+                          again=navigate)
         rows += [_row_of(c, source, serial) for c in area["rows"]]
         undated_rows += area["undated"]
         for k, n in area["skipped"].items():
@@ -958,7 +974,7 @@ def _fetch(page, href: str) -> Optional[bytes]:
     if state == "failed":
         if looks_signed_out(page):
             raise SessionExpired("ING shows its sign-in page")
-        raise FetchFailed("the document could not be fetched; the connection failed, "
+        raise FetchFailed("the document could not be fetched. The connection failed, "
                           "or ING sent its link on to another host, which this app "
                           "does not follow")
     if state == "moved":
@@ -1003,8 +1019,8 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
             return row["item_id"]
     if failed is not None:
         raise failed
-    raise RuntimeError("ING answered with a page instead of the document; "
-                       "its link may have expired")
+    raise RuntimeError("ING answered with a page instead of the document, "
+                       "so its link may have expired")
 
 
 def _page_summary(page) -> dict:

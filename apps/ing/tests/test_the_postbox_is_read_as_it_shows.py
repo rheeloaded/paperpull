@@ -369,6 +369,15 @@ def test_one_listing_serves_a_while_and_another_setting_reads_again(monkeypatch)
     assert len(page.looks) == 8
 
 
+@pytest.mark.parametrize("start", [POSTBOX, POSTBOX + "?3", ARCHIVE])
+def test_a_listing_opens_each_list_by_its_address_not_the_view_on_screen(start):
+    # The Postbox the person left on screen may hold a search or a filter
+    # of their own, and a filtered list is not the whole one.
+    page = Page(url=start, areas=two_lists())
+    site._all_rows(page, {}, fresh=True)
+    assert page.gotos == [POSTBOX, ARCHIVE]
+
+
 def test_read_archive_false_leaves_the_archive_unopened():
     page = Page(url=OBLIGO, areas=two_lists())
     rows = site._all_rows(page, {"read_archive": False})

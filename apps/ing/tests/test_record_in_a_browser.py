@@ -10,24 +10,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import ing_docs as docs
 import ing_site as site
-from paperpull_core import browser as browser_launcher
 from paperpull_core import recorder, redact
 
 pw_api = pytest.importorskip("playwright.sync_api")
+
+# Playwright's own Chromium, as every suite here runs on, never the Edge or
+# Chrome installed on this computer, with every name resolved to nowhere so
+# a request the route below does not answer cannot leave the machine.
+ARGS = ["--disable-extensions", "--disable-sync", "--no-first-run",
+        "--disable-background-networking", "--disable-component-update",
+        "--no-proxy-server", "--host-resolver-rules=MAP * ~NOTFOUND"]
 
 
 @pytest.fixture
 def page(monkeypatch):
     monkeypatch.setattr(redact, "_PRIVATE_WORDS", [])
-    _, executable = browser_launcher.find_browser(prefer_real=True)
-    if not executable:
-        pytest.skip("no Chromium-based browser is installed")
-
     with pw_api.sync_playwright() as driver:
-        try:
-            browser = driver.chromium.launch(headless=True, executable_path=executable)
-        except pw_api.Error as exc:
-            pytest.skip("the installed browser could not launch: %s" % exc)
+        browser = driver.chromium.launch(headless=True, args=ARGS)
         context = browser.new_context()
 
         def answer(route):
@@ -249,8 +248,8 @@ def test_diagnose_writes_the_postbox_census_without_private_values(
     assert "May Price" not in text and "private-account-id" not in text
     output = " ".join(capsys.readouterr().out.split())
     assert "Postbox DOM: 1 rows, 1 with a download link" in output
-    assert "1 readable dates; 0 possible statements and 0 possible tax documents" in output
-    assert "1 marked unread; 1 paging controls." in output
+    assert "1 readable dates, 0 possible statements and 0 possible tax documents" in output
+    assert "1 marked unread, 1 paging controls." in output
     assert "Rows collected: unavailable" in output
     assert "May Price" not in output and "01.02.2026" not in output
     assert page.url.endswith("/app/postbox/postbox_archiv")
@@ -306,6 +305,24 @@ def test_the_empty_archive_census_does_not_count_column_headers(empty_archive):
 
 def test_column_headers_without_an_empty_notice_do_not_prove_an_empty_archive(empty_archive):
     empty_archive.locator("p").evaluate("node => node.remove()")
+    with pytest.raises(site.ListStopped, match="no rows this app reads"):
+        site._read_area(empty_archive, "archive", navigate=False, scroll=False)
+
+
+@pytest.mark.parametrize("notice,where", [
+    # The notice ING shows for an empty list, but outside the list's box,
+    # where a header or a side panel says something else.
+    ("Zu Ihrer Suche können keine Dokumente angezeigt werden.", "body"),
+    # No new messages, or a count, is not a list with nothing in it.
+    ("Keine neuen Nachrichten", ".ibbr-table-wrapper-postbox"),
+    ("0 Dokumente", ".ibbr-table-wrapper-postbox"),
+    ("No messages", ".ibbr-table-wrapper-postbox"),
+])
+def test_only_the_lists_own_empty_notice_reads_as_an_empty_list(empty_archive, notice, where):
+    empty_archive.locator("p").evaluate("node => node.remove()")
+    empty_archive.locator(where).evaluate(
+        '(node, text) => node.insertAdjacentHTML("beforeend", "<p>" + text + "</p>")', notice)
+    assert site._look(empty_archive, scroll=False)["empty"] is False
     with pytest.raises(site.ListStopped, match="no rows this app reads"):
         site._read_area(empty_archive, "archive", navigate=False, scroll=False)
 

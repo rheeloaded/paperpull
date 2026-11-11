@@ -422,7 +422,7 @@ def test_a_list_where_no_document_has_a_date_this_app_reads_is_not_read(home):
     ("pager", "has a further page or a show-more button, which this app does not press"),
     ("loading", "was still loading its rows"),
     ("cut", "shows more rows than this app reads at once"),
-    ("menus", "shows no download link in its rows; it may sit in a menu"),
+    ("menus", "shows no download link in its rows, and the link may sit in a menu"),
     ("blank", "showed no rows this app reads"),
 ])
 def test_a_list_not_read_whole_records_nothing_of_either_list(home, switch, words, area):
