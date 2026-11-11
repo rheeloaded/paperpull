@@ -48,8 +48,9 @@ same one.
 That is worth several rounds on its own. It is **not** the whole job, and it
 would be unfair to tell you otherwise. A recording says what a person did. It
 cannot say what happens when a program tries to do the same thing twice, and
-that is where most of the work turns out to be. Expect to run **Pilot** a few
-times after the first build and to say what came out wrong. Costco took one
+that is where most of the work turns out to be. Expect to press **Try the
+newest few first** a few times after the first build and to say what came
+out wrong. Costco took one
 recording and then several rounds of exactly that.
 
 ---
@@ -93,23 +94,30 @@ window of its own on a Mac. Everything from here happens in that panel.
 
 ## Add the provider
 
-1. Click **add a provider**.
-2. Tick the one you are testing. If it is not in the list, it does not exist
-   yet, so
+1. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it asks which folder your documents go in, then shows the same
+   list by itself.
+2. Click the one you are testing, then **Continue**, then **Set up**. If it
+   is not in the list, it does not exist yet, so
    [open an issue](https://github.com/rheeloaded/paperpull/issues/new/choose)
    asking for it and somebody will build the shell for you to test.
-3. Pick it in the **App** list at the top.
+3. PaperPull goes back to Accounts, where the provider now has a row of its
+   own. Click its name to open its page.
 
 PaperPull makes a folder for it, downloads the browser pieces it needs, and
 tells you when it is ready. The first provider takes a few minutes. Every one
 after that takes seconds.
 
+A provider that is only a shell so far says **Not built yet**. Its page
+offers **Record steps** where a finished provider offers **Get new
+documents**, and recording is exactly what this page is about.
+
 ---
 
 ## Sign in
 
-Click **Login**. Your Edge or Chrome opens on the provider's site, in a
-profile of its own.
+On the provider's page, click **Open sign-in window**. Your Edge or Chrome
+opens on the provider's site, in a profile of its own.
 
 Sign in the way you normally would. Type your password yourself, answer the
 text message or the authenticator code yourself, tick **remember this device**
@@ -123,8 +131,10 @@ Do not close it and do not go back to the control panel yet.
 
 ## Record one trip to a document
 
-1. In the control panel, click **more** under the buttons.
-2. Click **Record**.
+1. In the control panel, on the provider's page, click **More**, then
+   **Get help**. A provider that is not built yet has a **Record steps**
+   button on its page as well, which opens the same place.
+2. Click **Record steps**.
 3. The panel prints a short notice saying what is being recorded. Read it.
 4. Go back to the browser window and **click your way to one document**, the
    way you always do. Pick the year, open the bill history, click the
@@ -210,8 +220,9 @@ Post it.
 ## What happens next
 
 The maintainer reads the recording, writes the site layer, and posts a new
-build, usually within a few days. You update PaperPull, click **Pilot**, and
-say whether the documents landed in the provider's folder.
+build, usually within a few days. You update PaperPull, click **Try the
+newest few first** on the provider's page, and say whether the documents
+landed in the provider's folder.
 
 If they did, you get a line in the README under Thanks, with your GitHub
 username, and the provider stops being marked untested. If they did not, say
@@ -235,7 +246,7 @@ of milliseconds, never anything from the page.
 which used to take three rounds on a good site and eight on a bad one. Making
 it work is a separate job, because a recording cannot show what happens when
 a program tries the same path twice, and that is where the awkward bugs live.
-Costco took one recording and then several Pilot runs.
+Costco took one recording and then several tries of the newest few.
 
 The next section is how to make those rounds short.
 
@@ -270,7 +281,7 @@ guessing, and guessing is what turns two rounds into six.
 Every run that fails leaves one in the provider's `Diagnostics` folder, named
 after the command that failed and the time it failed.
 
-**What is in it.** The same kind of thing a Diagnose file holds, which is
+**What is in it.** The same kind of thing a support report holds, which is
 counts, states, and words written by us rather than by the site.
 
 * how many of the things the app looks for were on the page, and how many
@@ -362,16 +373,16 @@ read it, you edit it, and you decide whether to send it.
 ## When something goes wrong
 
 **Record refuses and says you are not signed in.** You are on the wrong page,
-or the session expired while you were reading this. Click **Login** again,
-sign in, get to the documents page, and try again.
+or the session expired while you were reading this. Click **Open sign-in
+window** again, sign in, get to the documents page, and try again.
 
 **Record refuses and says there is a password field on the page.** That is the
 check working. Get past the sign-in first.
 
 **Nothing was recorded, the file has no steps.** The page was replaced between
-you pressing Record and your first click, which happens on sites that reload
-themselves a moment after loading. Wait for the page to settle, then press
-Record and click straight away.
+you pressing **Record steps** and your first click, which happens on sites
+that reload themselves a moment after loading. Wait for the page to settle,
+then press **Record steps** and click straight away.
 
 **Your clicks are recorded but nothing happens on the site.** That is fine.
 Record watches, it does not drive. If the site is broken, it is broken for
@@ -385,7 +396,7 @@ will have to deal with it, so knowing is useful.
 publisher it names is the project's maintainer, but SmartScreen can still
 show its prompt while the certificate is new. If you would rather not run
 it, say so on the issue. A
-[Diagnose](../CONTRIBUTING.md#fixing-a-provider-that-broke) file from an
+[support report](../CONTRIBUTING.md#fixing-a-provider-that-broke) from an
 existing install is less complete but still helps, and the signing is
 explained in [docs/code-signing.md](code-signing.md).
 

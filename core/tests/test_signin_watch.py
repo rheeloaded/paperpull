@@ -243,6 +243,22 @@ def test_the_first_shells_here_say_nothing_to_watch(providers, monkeypatch, caps
         assert capsys.readouterr().out == "", name
 
 
+def test_every_first_shell_is_one_the_panel_knows(providers):
+    """The panel reads no app's site, so it knows a first shell from
+    gui/providers.json, "shell": true, and leaves it out of Get new for all,
+    never offers it Continue, and names Record steps after its sign-in. Held
+    here to NOT_MAPPED, the mark announce reads, for every app, so a shell
+    built into a downloader leaves the panel's shells with it and a new shell
+    joins them. A shell has downloaded nothing, so it is never called tested."""
+    cards = json.loads((REPO / "gui" / "providers.json").read_text(encoding="utf-8"))["providers"]
+    assert sorted(cards) == sorted(providers)
+    shells = {n for n, s in providers.items() if getattr(s, "NOT_MAPPED", "")}
+    marked = {slug for slug, card in cards.items() if card.get("shell") is True}
+    assert {"consorsbank", "scalable"} <= shells and marked == shells
+    assert all(card.get("shell", False) in (True, False) for card in cards.values())
+    assert all(cards[slug].get("tested", True) is False for slug in marked)
+
+
 def test_a_run_from_a_terminal_says_nothing(monkeypatch, capsys):
     monkeypatch.delenv("PAPERPULL_RUN_MARK", raising=False)
     watch.announce("https://bank.example/login")

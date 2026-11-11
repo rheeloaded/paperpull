@@ -107,6 +107,29 @@ def test_no_doc_names_a_control_the_panel_stopped_showing():
     assert not found, found
 
 
+# The tester guide walks a person through the panel one press at a time, as a
+# provider's first shell is built from what they record, so each control it
+# names is on screen, by the name the screen gives it. It said "click more
+# under the buttons, then Record", Login and Pilot, which the panel no longer
+# shows. Record steps is in Get help, which is under More.
+GUIDE = REPO / "docs" / "testing-a-provider.md"
+GUIDE_GONE = ["**more**", "**Record**", "**Login**", "**Pilot**", "**App** list", "**add a provider**",
+              "**Diagnose**", "Diagnose file", "Pilot runs", "pressing Record and", "press Record and"]
+GUIDE_SAYS = ["Add a provider", "Continue", "Set up", "Not built yet", "Record steps", "Get new documents",
+              "Open sign-in window", "More", "Get help", "Stop recording", "Try the newest few first"]
+
+
+def test_the_tester_guide_names_each_control_as_the_panel_shows_it():
+    text = " ".join(GUIDE.read_text(encoding="utf-8").split())
+    page = (STATIC / "app.js").read_text(encoding="utf-8") + (STATIC / "index.html").read_text(encoding="utf-8")
+    assert not [old for old in GUIDE_GONE if old in text]
+    for name in GUIDE_SAYS:
+        assert "**%s**" % name in text, name
+        assert name in page, name
+    assert "**More**, then **Get help**" in text
+    assert text.index("**Get help**") < text.index("2. Click **Record steps**")
+
+
 def test_a_folder_with_no_config_is_told_what_mends_it(tmp_path):
     """Adding a person to a provider whose folder has no config.json said to
     sign in once first, and a sign-in never writes one. Setting a provider
