@@ -39,7 +39,7 @@ def test_an_install_starts_with_every_kind_the_real_build_may_file():
 
 
 @pytest.mark.parametrize("title,category,summary", [
-    ("Kontoauszug 10/2026", "Statement", "Kontoauszug"),
+    ("Kontoauszug 1/2026", "Statement", "Kontoauszug"),
     ("Depotauszug vom 30.09.2026", "Statement", "Depotauszug"),
     ("Abrechnung Kauf WKN A0B1C2", "Statement", "Wertpapierabrechnung Kauf"),
     ("Abrechnung Sparplan WKN A0B1C2", "Statement", "Wertpapierabrechnung Kauf"),
