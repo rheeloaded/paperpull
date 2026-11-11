@@ -37,7 +37,7 @@ def test_unread_rows_and_the_archive_are_read_unless_set_otherwise():
 
 @pytest.mark.parametrize("text,category", [
     ("bankAccountStatement", site.ACCOUNT),
-    ("Kontoauszug Nr. 10/2026", site.ACCOUNT),
+    ("Kontoauszug Nr. 1/2026", site.ACCOUNT),
     ("Rechnungsabschluss Tagesgeld", site.ACCOUNT),
     ("creditCardStatement", site.CARD),
     ("Kreditkartenabrechnung Oktober", site.CARD),
@@ -78,7 +78,7 @@ def test_a_rows_document_type_decides_its_kind_before_its_subject(kind, subject,
 
 
 @pytest.mark.parametrize("title,summary", [
-    ("Kontoauszug 10/2026", "Kontoauszug"),
+    ("Kontoauszug 1/2026", "Kontoauszug"),
     ("Kreditkartenabrechnung", "Kreditkartenabrechnung"),
     ("Depotauszug", "Depotauszug"),
     ("Wertpapierabrechnung Verkauf", "Wertpapierabrechnung Verkauf"),
@@ -91,7 +91,7 @@ def test_known_ing_titles_name_their_file(title, summary):
 
 
 @pytest.mark.parametrize("subject,summary", [
-    ("Kontoauszug 10/2026 vom 31.10.2026 zu Konto 1234567890", "Kontoauszug"),
+    ("Kontoauszug 1/2026 vom 31.01.2026 zu Konto 1234567890", "Kontoauszug"),
     ("Abrechnung Kauf WKN A0B1C2 vom 02.10.2026 zu Depot 509999999", "Wertpapierabrechnung Kauf"),
     ("Abrechnung Verkauf WKN A0B1C2 vom 02.10.2026", "Wertpapierabrechnung Verkauf"),
     ("Depotauszug vom 31.12.2025 zu Depot 509999999", "Depotauszug"),

@@ -78,11 +78,11 @@ class Postbox:
 
 def test_diagnose_reads_the_postbox_on_screen_and_says_what_it_left_out(
         app, monkeypatch, capsys):
-    page = Postbox([_row("Kontoauszug 01/2026"),
-                    _row("Kontoauszug 02/2026", "28.02.2026", unread=True),
-                    _row("Kontoauszug 03/2026", "Heute"),
-                    _row("Kontoauszug 04/2026", "28.04.2026", link=""),
-                    _row("Kontoauszug 05/2026", "28.05.2026", link="archivieren")])
+    page = Postbox([_row("Kontoauszug 1/2026"),
+                    _row("Kontoauszug 2/2026", "28.02.2026", unread=True),
+                    _row("Kontoauszug 3/2026", "Heute"),
+                    _row("Kontoauszug 4/2026", "28.04.2026", link=""),
+                    _row("Kontoauszug 5/2026", "28.05.2026", link="archivieren")])
     monkeypatch.setattr(app, "page", lambda: page)
     monkeypatch.setattr(site, "survey", lambda page: {"pages": [], "responses": []})
     monkeypatch.setitem(app.config, "include_unread", False)

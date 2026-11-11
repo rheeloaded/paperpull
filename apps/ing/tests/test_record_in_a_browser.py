@@ -346,7 +346,7 @@ def test_an_empty_notice_does_not_hide_a_document(empty_archive, row_parent):
         node.insertAdjacentHTML("beforeend", `
           <div class="ibbr-table-row">
             <div class="postbox-grid-left"><span>Kontoauszug</span></div>
-            <div class="postbox-grid-description">Kontoauszug 01/2026</div>
+            <div class="postbox-grid-description">Kontoauszug 1/2026</div>
             <div class="postbox-grid-right">31.01.2026</div>
             <a href="/app/document">Download</a>
           </div>`);
