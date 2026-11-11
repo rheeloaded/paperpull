@@ -59,9 +59,12 @@ and message your care team. This tool does none of it. Concretely:
   is `claimType|claimId|docKind`: the claim type and kind must be ones this app
   knows and the claim number is validated to Anthem's alphanumeric shape, so the
   request is built from values this app recognizes rather than any stored string.
-- **The opaque per-document token never leaves the page.** Anthem authorizes a
-  PDF fetch with a per-document `eobId` token minted into the page. It is read
-  and spent inside the page in one expression and is **never stored**; the
+  A Pharmacy statement for a month has no claim, so its identity is
+  `Pharmacy|<its date, YYYYMMDD>|Statement`.
+- **The opaque per-document tokens never leave the page.** Anthem authorizes a
+  PDF fetch with a per-document `eobId` token and a token for the claim (the
+  summary shows the claim number beside it), both made new on every listing.
+  They are read and spent inside the page and are **never stored**; the
   identity above is looked up fresh at download time.
 - **A session that expires, or an Akamai block page, stops the run** and says
   so, rather than filing everything as "needs manual review" and exiting as
