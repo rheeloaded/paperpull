@@ -14,10 +14,11 @@ echo   2. Open the Postbox.
 echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
 echo   4. Then run:  paperpull ing diagnose   (a safe look, downloads nothing)
 echo.
-echo NOT YET TESTED on a real ING account. Start with diagnose and a pilot.
+echo Tested on one ING account so far. Start with diagnose and a pilot.
 echo READ-ONLY: this tool only downloads the PDFs in your ING Postbox. It
 echo NEVER transfers money, sets up a standing order, buys or sells
-echo securities, locks a card, marks a message read, or changes any setting.
+echo securities, locks a card, presses "mark as read", or changes any setting.
+echo Downloading a document marked unread may mark it read, as opening it would.
 echo.
 rem This app's own Python when setup.bat made one. Otherwise, in a
 rem checkout, the one setup-all.bat made for every app in gui\.venv, once

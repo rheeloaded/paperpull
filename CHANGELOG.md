@@ -10,23 +10,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
-- **ING (ING-DiBa), the Postbox and its archive (#169).** Tested on one
-  contributor's account so far; a populated archive and some document types
-  have not been checked. Like DKB it saves account and card statements,
-  securities documents, tax certificates, contract information and
-  messages, each kind in a folder of its own. It was built without an
-  account, from public descriptions of the Postbox, so it assumes no API:
-  the rows are read as the signed-in page shows them, nothing is clicked,
-  and each PDF is fetched with a GET from inside the page, only from an
-  https address under `/app/` on banking.ing.de whose words do not sign
+- **ING (ING-DiBa), the 87th app, the Postbox and its archive (#203).**
+  `ing` saves Kontoauszüge, credit card statements, securities documents,
+  tax certificates, contract information and messages from the ING
+  Postbox and its archive, each kind in a folder of its own, the way DKB
+  does. Nothing is clicked. The rows are read as the signed-in page shows
+  them, and each PDF is fetched with a GET from inside the page, only from
+  an https address under `/app/` on banking.ing.de whose words do not sign
   out, delete, move, mark read, pay or cancel. A list is read whole or the
   run stops and says why. A row with no download link, or more than one,
   is passed over and counted, and a document that cannot be told from
-  another alike is left unsaved rather than guessed at. Unread documents
-  are downloaded too unless `include_unread` is set to `false`, since
+  another alike is left unsaved rather than guessed at. Documents marked
+  unread are downloaded too unless `include_unread` is `false`, since
   fetching one may mark it read. Diagnose counts the Postbox rows it can
-  see, and those with a link, a date or an unread mark, without downloading
-  anything. See [local testing](apps/ing/README.md#local-test-before-a-pr).
+  see, and those with a link, a date or an unread mark, without
+  downloading anything. Contributed by @MelleD and run on the
+  contributor's own account, requested in #169. A populated archive and
+  some document types have not been checked. Before merging, a list is
+  read as empty only when its own box shows ING's notice for an empty
+  list, never from a count or "keine neuen Nachrichten" elsewhere on the
+  page, and each listing opens the Postbox and the archive by their own
+  addresses rather than read a view the person left searched or
+  filtered. See [local testing](apps/ing/README.md#local-test-before-a-pr).
 - **A sign-in starts its run by itself once it is done (#200).** Open sign-in
   window used to end with the person coming back to the panel to press
   Get new. Now the panel watches the sign-in window's tabs, their address
@@ -79,15 +84,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   sign-in window opened or nothing was recorded.
 
 ### Changed
-- **Record can keep the shape of a page rendered by the server.** An app
-  may ask Record to note its HTML navigation too: the address shape,
-  status and query key names of each page, never its body or a query
-  value. Every app's recording now also says when it reached its request
-  limit or could not record a response, where before those were dropped
-  without a word.
-- **Personal run files stay out of panel templates.** When a checkout is
-  used as a template, new installs and code refreshes no longer copy its
-  run history and its backups, document indexes or downloaded archives.
+- **Record can keep the shape of a page rendered by the server (#203).**
+  An app may ask Record to note its page loads too, the address shape,
+  status and query key names of each page, never what the page says or a
+  query value. ING is the first to ask. Every app's recording now also
+  says when it reached its request limit or could not record an answer,
+  where before those were dropped without a word. Contributed by @MelleD.
+- **Personal run files stay out of panel templates (#203).** When a
+  checkout is used as a template, new installs and code refreshes no
+  longer copy its run history and its backups, document indexes or
+  downloaded archives. Contributed by @MelleD.
 - **PaperPull.app opens the control panel in a window of its own (#141).**
   Double-clicking it on a Mac no longer opens Terminal and a browser tab.
   The window shows the same panel, with a Dock icon and a menu bar, and

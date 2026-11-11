@@ -1187,9 +1187,9 @@ class Recorder:
         summary = "%d step(s)%s, %d provider request(s)" % (
             len(self.steps), " (" + parts + ")" if parts else "", len(self.requests))
         if self.dropped.get("request_limit"):
-            summary += "; request limit reached, some responses were not recorded"
+            summary += ". The request limit was reached, so some answers were not recorded"
         if self.dropped.get("unreadable_response"):
-            summary += "; %d response(s) could not be recorded" % self.dropped["unreadable_response"]
+            summary += ". %d answer(s) could not be recorded" % self.dropped["unreadable_response"]
         return summary
 
 
@@ -1497,8 +1497,8 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
 
     say(_CONSENT)
     if include_html:
-        say("HTML navigation and request addresses are recorded as shapes; "
-            "their bodies are not read.")
+        say("The addresses of pages and their requests are recorded as shapes. "
+            "What the pages say is not read.")
     if not owner:
         # A name leaves as its shape because it is not on the word list. A
         # name that is also a word on it, Bill or May, is told apart only

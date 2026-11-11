@@ -14,21 +14,21 @@ Run these from the PaperPull folder (paperpull.bat on Windows,
   Re-check PDFs   paperpull ing verify              paperpull ing verify --account spouse
   Record          paperpull ing record              paperpull ing record --account spouse
 
-Tested on one real ING account so far; a populated archive and some document
-types have not been checked. Test it in this order:
+Tested on one real ING account so far. A populated archive and some
+document types have not been checked. Test it in this order.
 FLOW:  login.bat  ->  paperpull ing diagnose  ->  paperpull ing discover
        ->  paperpull ing pilot  ->  paperpull ing pilot  ->  paperpull ing all
 Sign in yourself, open the Postbox, keep the browser OPEN.
 The second pilot must save nothing new. When a step stops, its message
 says which list and why. Send it with the diagnose output, run with that
-list open. Review the Diagnostics files before sharing them; never commit
-them.
+list open. Review the Diagnostics files before sharing them, and never
+commit them.
 
 READ-ONLY: downloads the PDFs in the ING Postbox and its archive only. It
 NEVER clicks anything there, transfers money, sets up a standing order,
 buys or sells securities, changes a limit, locks a card, archives or
 deletes a message, or changes any setting. Whether a download marks a
-document read is not known; documents marked unread are downloaded too
+document read is not known. Documents marked unread are downloaded too
 unless include_unread is false in the config.
 
 Scope: Kontoauszuege (Girokonto, Extra-Konto), Kreditkartenabrechnungen,

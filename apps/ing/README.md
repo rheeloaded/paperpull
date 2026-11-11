@@ -1,18 +1,21 @@
 # ING (ING-DiBa) document downloader
 
 Downloads the PDFs in your ING **Postbox**, the bank's document inbox, and in
-its archive, for your records: Kontoauszüge, Kreditkartenabrechnungen,
+its archive, for your records. Kontoauszüge, Kreditkartenabrechnungen,
 Wertpapierdokumente, Steuerbescheinigungen, Vertragsinformationen and
 Mitteilungen. Read-only, delete-safe, and part of
-[PaperPull](../../README.md). Built after the [DKB](../dkb) app and requested
-in [#169](https://github.com/rheeloaded/paperpull/issues/169).
+[PaperPull](../../README.md). Contributed by
+[@MelleD](https://github.com/MelleD) in
+[#203](https://github.com/rheeloaded/paperpull/pull/203), built after the
+[DKB](../dkb) app and requested in
+[#169](https://github.com/rheeloaded/paperpull/issues/169).
 
-**Status: tested on one contributor's real ING account using the command
-line.** A full run saved documents and a subsequent pilot saved no new
-files. A populated archive and some document types have not been checked,
-and no separate real-account panel test has been confirmed. The app was
-initially written from public descriptions of the Postbox (see
-[Sources](#sources)); its automated tests run against an invented page.
+**Status. Tested on one contributor's real ING account from the command
+line.** A full run saved documents and a pilot after it saved no new files.
+A populated archive and some document types have not been checked, and no
+run from the panel on a real account has been confirmed yet. The app was
+first written from public descriptions of the Postbox (see
+[Sources](#sources)), and its automated tests run against an invented page.
 Where ING's page differs from what the app expects, a run stops and says
 what it did not find, rather than guess or report an empty success.
 
@@ -20,11 +23,11 @@ what it did not find, rather than guess or report an empty success.
 
 After sign-in the browser is on ING's web banking at `banking.ing.de`. The
 app reads two lists there, the Postbox (`/app/postbox/postbox`) and its
-archive (`/app/postbox/postbox_archiv`), as the rows the page shows: each
+archive (`/app/postbox/postbox_archiv`), as the rows the page shows, each
 row's document type, subject, date and download link. A row is filed by the
 words of its document type, or, when the type names only a message or
 nothing below, by its type and subject together. The first line that
-matches wins:
+matches wins.
 
 | Words in the row (German or English) | Folder | `document_types` entry |
 |---|---|---|
@@ -36,37 +39,45 @@ matches wins:
 | Mitteilung, Information, Schreiben, Brief | `Mitteilungen` | `Message` |
 | anything else | `Sonstige Dokumente` | `Other Document` |
 
-The app never clicks, types or submits anything in the Postbox. It opens the
-two list addresses, waits for the rows to settle, scrolls the list so rows
-that load on scrolling appear, and reads them. Each PDF is fetched with a GET
-from inside the signed-in page, so the session cookies never leave the
-browser. ING's download links carry the page they were read from, so a
-document's link is read again from its list just before the PDF is fetched.
-When ING answers with a page instead of the PDF, as it may for a link that
-has expired, the list is opened again and the fresh link fetched once more.
-When that fails too, the document is marked failed and the next run tries it
-again. A ZIP holding one PDF is unpacked; anything else in a ZIP is kept for
-manual review.
+The app never clicks, types or submits anything in the Postbox. Each time
+it lists, it opens the two list addresses itself, even when the Postbox is
+already on screen, so a search or filter you left set in the window is not
+read as the whole list. It waits for the rows to settle, scrolls the list
+so rows that load on scrolling appear, and reads them. Each PDF is fetched
+with a GET from inside the signed-in page, so the session cookies never
+leave the browser. ING's download links carry the page they were read from,
+so a document's link is read again from its list just before the PDF is
+fetched. When ING answers with a page instead of the PDF, as it may for a
+link that has expired, the list is opened again and the fresh link fetched
+once more. When that fails too, the document is marked failed and the next
+run tries it again. A ZIP holding one PDF is unpacked, and anything else in
+a ZIP is kept for manual review.
 
 A list is read whole or not at all. A run stops, and says which list and
 why, when a list is still loading, has a further page or a "show more"
 button (the app presses neither), shows more than 5000 rows, shows rows but
-none the app reads, shows no download link in any row (it may sit in a menu,
-which the app does not open), or has no row with a date it can read. Nothing
-read is then taken as the whole list. It stops the same way when ING shows
-its sign-in page.
+none the app reads, shows no download link in any row (it may sit in a
+menu, which the app does not open), or has no row with a date it can read.
+Nothing read is then taken as the whole list. It stops the same way when
+ING shows its sign-in page.
 
 Column headings are not document rows. A list with no document rows or
-download links is accepted as empty only when ING shows an explicit notice,
-such as "Zu Ihrer Suche können keine Dokumente angezeigt werden." This
-notice describes the current search and filters; the app does not reset
-them. Check them in ING if you expect documents to be there.
+download links is accepted as empty only when the list's own box shows
+ING's notice for an empty list, "Zu Ihrer Suche können keine Dokumente
+angezeigt werden", or one like it. The same words anywhere else on the
+page, a count, or "keine neuen Nachrichten" (no new messages, which is not
+no messages) do not count. The notice speaks of a search and its filters.
+The app opens each list by its own address, which is expected to clear
+them, but whether ING keeps a filter for the whole session has not been
+checked. If a list you know holds documents is read as empty, look at its
+filters in ING.
 
-Some rows are passed over, and Discover says how many and why: rows the
-Postbox marks unread when `include_unread` is `false`, rows with no download
-link, with more than one, or with one the app does not follow, and rows
-without a date in the form `dd.mm.yyyy`, which includes rows dated "Heute"
-or "Gestern". Nothing is saved for them; open them in the Postbox yourself.
+Some rows are passed over, and Discover says how many and why. These are
+rows the Postbox marks unread when `include_unread` is `false`, rows with
+no download link, with more than one, or with one the app does not follow,
+and rows without a date in the form `dd.mm.yyyy`, which includes rows dated
+"Heute" or "Gestern". Nothing is saved for them. Open them in the Postbox
+yourself.
 
 Each document is identified by its kind, its title, the last four digits of
 the account, depot or card it names, and its date, never by its link, which
@@ -77,18 +88,18 @@ rather than guessed. File names carry the date, a fixed name for the kind,
 such as `Kontoauszug`, and the last four digits of the account, depot or
 card, never the whole number and never the subject.
 
-**Options** in `config.json`:
+**Options** in `config.json`.
 
-- `document_types`: which kinds a run downloads, all seven by default. Drop
+- `document_types`, which kinds a run downloads, all seven by default. Drop
   the ones you do not want, for example keep only `"Statement"` and
   `"Tax Document"`.
-- `include_unread`: `true` by default, so rows the Postbox marks unread are
-  downloaded too. Downloading an unread document has not yet been checked
-  on a real account and may mark it read in ING. Set this to `false` to
-  leave unread rows alone.
-- `read_archive`: `true` by default. `false` reads the Postbox only.
-- `pilot_count`: how many documents a pilot downloads, 5 by default.
-- `delay_min_seconds` and `delay_max_seconds`: the pause between documents.
+- `include_unread`, `true` by default, so rows the Postbox marks unread are
+  downloaded too. Whether downloading an unread document marks it read in
+  ING has not been checked on a real account, and it may. Set this to
+  `false` to leave unread rows alone.
+- `read_archive`, `true` by default. `false` reads the Postbox only.
+- `pilot_count`, how many documents a pilot downloads, 5 by default.
+- `delay_min_seconds` and `delay_max_seconds`, the pause between documents.
 
 ## Sign-in
 
@@ -112,7 +123,7 @@ not keep the session alive behind the bank's back.
 This is a bank account, and may hold a credit card and a securities account.
 The site can transfer money, set up standing orders, buy and sell
 securities, change limits and lock cards. This app activates no control at
-all: it reads the rows of the two Postbox lists and fetches their download
+all. It reads the rows of the two Postbox lists and fetches their download
 links. A link is fetched only when it is `https` on `banking.ing.de` under
 `/app/`, and never when its address carries a word of an action, such as
 logout, delete, archive, move, mark read, unread, transfer, payment,
@@ -123,14 +134,16 @@ session stops the run rather than reporting an empty success.
 
 ## Limits
 
-The single-account test does not cover every case:
+The single-account test does not cover every case.
 
 - The row, cell and link structures and ING's document-type words have been
-  checked on one account only; not all document types have been seen.
-- Downloading an unread document on a real account and whether fetching it
-  marks it read (hence `include_unread`).
-- A populated archive. An empty archive has been seen; when its layout
+  checked on one account only, and not all document types have been seen.
+- Whether downloading an unread document marks it read (hence
+  `include_unread`).
+- A populated archive. An empty archive has been seen, and when its layout
   differs, the run stops there. `read_archive: false` leaves it out.
+- Whether ING keeps a search or filter set in the Postbox after the list's
+  own address is opened again.
 - A list with paging or a "show more" button stops the run, since nothing is
   pressed. A download link inside a menu is not followed.
 - A link that ING sends on to another host fails.
@@ -138,12 +151,12 @@ The single-account test does not cover every case:
   saved twice.
 - When one of two documents alike was saved and the other failed, later
   runs mark the other failed rather than guess which it is.
-- A repeated pilot saved no new files on the one account; other document
+- A repeated pilot saved no new files on the one account. Other document
   sets have been tested only against invented pages.
 
 ## Local test before a PR
 
-From the repository root on macOS, with a Chromium-based browser installed:
+From the repository root on macOS, with a Chromium-based browser installed.
 
 ```bash
 # Once, if the checkout has not been set up:
@@ -156,7 +169,8 @@ From the repository root on macOS, with a Chromium-based browser installed:
 In `apps/ing/config.json`, set `owner`, and set `output_dir` to the full path
 of a folder outside the checkout, such as `/Users/you/Documents/ING-Test`
 (`~` is not expanded), so no statement, log or run file is written into the
-repository. For the first test, set `pilot_count` to `2`. Then:
+repository. For the first test, set `pilot_count` to `2`. Then follow these
+steps.
 
 1. `./paperpull --root apps ing login` opens the browser. Sign in yourself,
    open the Postbox, and leave the window open.
@@ -174,7 +188,7 @@ repository. For the first test, set `pilot_count` to `2`. Then:
 6. `./paperpull --root apps ing all`, then compare the folders with the
    Postbox and the archive.
 
-Optionally, to answer whether a download marks a document read: when the
+Optionally, to answer whether a download marks a document read, when the
 newest document in the Postbox is unread, set `pilot_count` to `1`, run
 `pilot`, and see whether ING now shows it as read.
 
@@ -187,20 +201,20 @@ subject, name or number. It also writes `Diagnostics/diagnose-documents.json`
 in the output folder. Read them all through before sharing them.
 
 When the page needs mapping again, `./paperpull --root apps ing record`
-records the navigation you choose after it starts: open the Postbox, the
+records the navigation you choose after it starts. Open the Postbox, the
 archive and one PDF yourself, then press Enter. Opening a message yourself
 may mark it read in ING. It writes `Diagnostics/recording.json` in the output
 folder, with shaped addresses, query-parameter names, methods and statuses
 for HTML navigations and requests, but never query values, HTML bodies or
-form contents. If Record reports that its request limit was reached or that
-a response could not be recorded, the file may be incomplete. Save it before
+form contents. If Record says its request limit was reached or that an
+answer could not be recorded, the file may be incomplete. Save it before
 starting another recording, which otherwise replaces it.
 
 Record and Diagnose shape or redact data, but cannot guarantee that every
 personal detail is removed. Never commit them, your browser profile, config,
 PDFs, credentials or account data.
 
-Run the automated checks, one suite per pytest process:
+Run the automated checks, one suite per pytest process.
 
 ```bash
 (cd apps/ing && ../../gui/.venv/bin/python -m pytest tests -q)
@@ -231,17 +245,17 @@ python -m pytest tests -q
 
 The automated tests run against an invented Postbox, including one in a real
 headless browser. They show that the app reads what it expects and stops
-where it should; the real-account test covers only one account.
+where it should. The real-account test covers only one account.
 
 ## Sources
 
 ING's [Postbox help](https://www.ing.de/hilfe/persoenliches/postbox/) describes
 the inbox and archive. A public [Postbox downloader](https://github.com/LinusHoppe/ing-postbox-downloader)
-describes the document rows in the page, but handles only the currently
-visible documents and uses browser clicks because programmatic downloads can
-fail. Another [browser extension](https://github.com/et15/firefox_ing_mailboxdownload)
-fetches links from the currently displayed table using the signed-in
-session. An [additional userscript](https://github.com/Erzmaster/Unofficial-ING-Documents-Batch-Downloader)
-distinguishes an unread row class and explicitly clicks a row when its
-mark-as-read option is enabled. None establishes how to traverse the whole
-Postbox or whether downloading alone changes a document's read status.
+describes the document rows in the page, but handles only the documents on
+screen and uses browser clicks because programmatic downloads can fail.
+Another [browser extension](https://github.com/et15/firefox_ing_mailboxdownload)
+fetches links from the table on screen using the signed-in session. An
+[additional userscript](https://github.com/Erzmaster/Unofficial-ING-Documents-Batch-Downloader)
+tells an unread row by its class and clicks a row when its mark-as-read
+option is turned on. None of them shows how to read the whole Postbox or
+whether downloading alone changes a document's read status.

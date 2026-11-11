@@ -355,7 +355,7 @@ def test_opted_in_html_reports_when_eligible_responses_exceed_the_limit(monkeypa
     page.emit("response", html)
     assert len(r.requests) == 1
     assert r.report()["dropped"]["request_limit"] == 1
-    assert "request limit reached" in r.summary()
+    assert "The request limit was reached" in r.summary()
 
 
 @pytest.mark.parametrize("attribute", ["resource_type", "method"])
@@ -380,7 +380,7 @@ def test_a_response_recording_failure_is_reported_without_exposing_its_error(att
     page.emit("response", response)
     report = r.report()
     assert report["dropped"]["unreadable_response"] == 1
-    assert "1 response(s) could not be recorded" in r.summary()
+    assert "1 answer(s) could not be recorded" in r.summary()
     assert "private response details" not in json.dumps(report)
 
 
