@@ -360,6 +360,9 @@ def test_an_empty_notice_does_not_hide_a_document(empty_archive, row_parent):
 
 @pytest.mark.parametrize("obstacle,reason", [
     ('<button>Next page</button>', "further page"),
+    ('<button>Weitere Dokumente laden</button>', "further page"),
+    ('<a href="#more">Ältere Nachrichten anzeigen</a>', "further page"),
+    ('<button>Load older documents</button>', "further page"),
     ('<div aria-busy="true">Loading</div>', "still loading"),
 ])
 def test_an_empty_notice_does_not_hide_paging_or_loading(empty_archive, obstacle, reason):

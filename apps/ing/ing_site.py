@@ -393,10 +393,15 @@ _PARTS = {
     # A download link is one whose words, label or title are only this.
     "linkLabel": r"^(?:download|herunterladen|pdf|pdf herunterladen|dokument herunterladen)$",
     # A control that would show more rows. This app presses none of them,
-    # so a list that has one is not read whole, and stops.
+    # so a list that has one is not read whole, and stops. The words may
+    # name what more there is, "Weitere Dokumente laden" or "Ältere
+    # Nachrichten anzeigen".
     "pagerLabel": (r"^(?:next|next page|weiter|nächste|nächste seite|naechste|naechste seite|"
                    r"mehr anzeigen|mehr laden|weitere anzeigen|weitere laden|"
-                   r"load more|show more)$"),
+                   r"load more|show more|"
+                   r"(?:mehr|weitere|ältere|aeltere)\s+(?:dokumente|nachrichten|einträge|"
+                   r"eintraege|mitteilungen)\s+(?:anzeigen|laden)|"
+                   r"(?:load|show)\s+(?:more|older)\s+(?:documents|messages))$"),
     "pagerBox": ('[class*="pagination"], .pager, nav[aria-label*="seite" i], '
                  'nav[aria-label*="page" i]'),
 }
