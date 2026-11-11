@@ -87,6 +87,21 @@ def test_card_statement_titles_classify(title, category, summary):
     "Préférences", "Adresse", "Courriel", "Téléphone", "Modifier", "Changer", "Supprimer",
     "Annuler", "Soumettre", "Confirmer", "Accepter", "Déconnexion", "Fermeture de session",
     "Quitter",
+    # French for what the English above refuses, found by the review of
+    # the first build.
+    "Régler le solde du relevé",
+    "Rembourser le solde du relevé",
+    "Acquitter le solde du relevé",
+    "Règlement du relevé",
+    "Passer aux relevés électroniques",
+    "Adhérer aux relevés électroniques",
+    "Opter pour les relevés électroniques",
+    "Abonnement aux relevés électroniques",
+    "Recevoir les relevés en ligne",
+    "Gérer les relevés électroniques",
+    "Virer des fonds",
+    "Payer les factures",
+    "Ajouter un bénéficiaire",
     "Download PDF | Make a payment",
 ])
 def test_paying_borrowing_and_changing_the_card_are_never_safe(name):

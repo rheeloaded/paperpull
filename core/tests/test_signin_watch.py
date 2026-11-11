@@ -131,8 +131,10 @@ def test_a_provider_with_no_way_to_tell_has_no_plan():
 
 # Their sign-in leaves no address to tell it by, so the window is left to the
 # person to come back from, as it always was. A name added here is a provider
-# whose sign-in no longer starts by itself.
-CANNOT_TELL = {"applecard", "bofa", "fairfaxwater", "mypay", "paylocity", "ukg"}
+# whose sign-in no longer starts by itself. CIBC's sign-on and its banking
+# pages are one page that routes by its fragment, and its window opens at
+# the site's root, which says nothing (a first shell, #204).
+CANNOT_TELL = {"applecard", "bofa", "cibc", "fairfaxwater", "mypay", "paylocity", "ukg"}
 # What each provider's own documents address reads as, of the ones with one,
 # when it is not an account page.
 DOCUMENTS_NOT_AN_ACCOUNT_PAGE = {"ibkr", "simmons"}

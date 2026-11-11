@@ -101,6 +101,20 @@ def test_bank_card_and_credit_line_titles_classify(title, category, summary):
     "Préférences", "Adresse", "Courriel", "Téléphone", "Modifier", "Changer", "Supprimer",
     "Annuler", "Soumettre", "Confirmer", "Accepter", "Déconnexion", "Fermeture de session",
     "Quitter",
+    # French for what the English above refuses, found by the review of
+    # the first build.
+    "Régler le solde du relevé",
+    "Rembourser le solde du relevé",
+    "Acquitter le solde du relevé",
+    "Règlement du relevé",
+    "Passer aux relevés électroniques",
+    "Adhérer aux relevés électroniques",
+    "Opter pour les relevés électroniques",
+    "Abonnement aux relevés électroniques",
+    "Recevoir les relevés en ligne",
+    "Gérer les relevés électroniques",
+    "Ajouter un bénéficiaire",
+    "Dépôt mobile",
     "Download PDF | Transfer funds",
 ])
 def test_moving_money_borrowing_and_changing_the_account_are_never_safe(name):

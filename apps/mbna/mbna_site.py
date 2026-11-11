@@ -154,6 +154,11 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"\benvoy|\bdemand|\bch[èe]ques?\b|avance\s+de\s+fonds|limite\s+de\s+cr[ée]dit|"
     r"\bemprunt|\bpr[eê]ts?\b|\bversements?\b|\br[ée]compens|\bpoints\b|\boffres?\b|"
     r"\bacheter|\bachat|"
+    # Paying a balance, switching to or enrolling in eStatements, managing
+    # them, adding a payee and depositing, French, as the English above.
+    r"\br[ée]gl(er|ez)\b|\br[éè]glements?\b|\brembours|\bacquitt|"
+    r"\bpasser\s+aux?\b|\badh[ée]r|\bopt(er|ez)\b|\babonn|\brecevoir|\bg[ée]r(er|ez)\b|"
+    r"\bvirer\b|\bfactures?\b|b[ée]n[ée]ficiaire|\bd[ée]p[oô]ts?\b|"
     # Opening and closing, adding a user, ordering, signing, the card and
     # the person's own data, French. "Ouvrir" alone is a document's own
     # button.
