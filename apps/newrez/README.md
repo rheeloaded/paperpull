@@ -15,24 +15,30 @@ delete-safe, part of [PaperPull](../../README.md).
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Newrez**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Newrez**, then **Continue**,
+   then **Set up**. Back on Accounts, click **Newrez** to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in yourself, answer any code it sends, and leave the window open.
-4. Click **more** under the buttons, then **Diagnose**. It reads the
-   documents page and writes `Diagnostics\diagnose-documents.json` in the
-   Newrez folder. It downloads nothing, takes no screenshot, and writes
+4. Back in Get help, click **Make the report**. This support report reads
+   the documents page and writes `Diagnostics\diagnose-documents.json` in
+   the Newrez folder. It downloads nothing, takes no screenshot, and writes
    any word that is not on PaperPull's fixed list as its shape. It presses
-   only links and buttons that lead to the documents or show more of them,
-   a documents link or "Show more" for instance. On
-   the statements page it also chooses each year in the year picker, to
-   read that year's list, and does nothing else there.
-5. Click **Record**, in the same **more** menu. Go back to the browser window
-   and click your way to one document the way you normally would, then come
-   back here and click **Stop recording**. It writes
+   only links and buttons that lead to the documents or show more of them, a
+   documents link or "Show more" for instance. On the statements page it
+   also chooses each year in the year picker, to read that year's list, and
+   does nothing else there.
+5. Once the report is done, click **Back to Newrez**, then **More**, then
+   **Get help** again, and click **Record steps**. Go back to the browser
+   window and click your way to one document the way you normally would,
+   then come back here and click **Stop recording**. It writes
    `Diagnostics\recording.json`, which is the path you actually took rather
    than a guess at it. It records nothing you type and reads no cookies, and
-   it refuses to start before you are signed in. The whole walkthrough, written
-   for someone who has never done this, is
+   it refuses to start before you are signed in. The whole walkthrough,
+   written for someone who has never done this, is
    [Testing a provider](../../docs/testing-a-provider.md).
 6. Open each file in Notepad and look through it. It should hold page
    headings, the names of buttons and links, and the shape of the data the
@@ -43,16 +49,19 @@ delete-safe, part of [PaperPull](../../README.md).
    in it to edit.
 7. Attach both files to [issue #38](https://github.com/rheeloaded/paperpull/issues/38)
    with a sentence about how you get from the dashboard to your statements, and whether the 1098 sits with them or on a tax page.
-8. When a new build is posted, click **Pilot** and say whether PDFs landed
-   in `Statements\` or `Tax Documents\`, then attach a fresh Diagnose file.
+8. When a new build is posted, click **Try the newest few first** on the
+   provider's page and say whether PDFs landed in `Statements\` or
+   `Tax Documents\`, then attach a fresh support report. If it says to sign
+   in first, sign in from Get help as in step 3 and click it again.
    If the run printed any lines that begin with `Waited for`, copy
    those into your comment as well. They say which way of waiting
    each page needed, which is the thing the next build keeps. The same
    goes for the lines that begin with `Year picker` or `No year picker`,
    which say which years were read and how many statements each gave.
 
-A Diagnose file and one recording together are usually enough to get a
-provider working in a single round. Diagnose on its own takes two or three.
+A support report and one recording together are usually enough to get a
+provider working in a single round. A support report on its own takes two
+or three.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It
@@ -82,7 +91,7 @@ paperpull newrez pilot            REM once the site layer is confirmed
   control whose name says it fetches a statement, an escrow analysis or a
   1098 is read, and the date comes from the control's name or the row it
   sits in.
-- **Years.** Recorded, from a tester's **Record** file (#38). The monthly
+- **Years.** Recorded, from a tester's recording (#38). The monthly
   page shows one year's statements at a time, with a year picker above
   the list, and choosing a year draws that year's list a moment later.
   Discovery reads the list the page shows first, then chooses each year

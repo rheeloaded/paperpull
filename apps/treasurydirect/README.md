@@ -64,15 +64,25 @@ stay in the saved PDFs, which are your documents.
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **TreasuryDirect**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **TreasuryDirect**, then
+   **Continue**, then **Set up**. Back on Accounts, click **TreasuryDirect**
+   to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in yourself, with ID.me or TreasuryDirect's own sign-in, and leave
-   the window on your account. Do not use the browser's Back button.
-4. Click **Pilot**. It saves the newest document and stops. Say whether a
-   PDF landed in `Statements\` and whether it looks right.
+   the window on your account. Do not use the browser's Back button. Then
+   click **Close** to leave Get help.
+4. Click **Try the newest few first**. It saves the newest document and
+   stops. Say whether a PDF landed in `Statements\` and whether it looks
+   right.
 5. If you have a tax year with a 1099 (ManageDirect, Manage My Taxes, a year
    **without** "(No taxable transactions)"), open that year's page in the
-   browser yourself, then click **more**, then **Diagnose**. It writes
+   browser yourself. Then in PaperPull click **Back to TreasuryDirect**,
+   then **More**, then **Get help**, and click **Make the report**. This
+   support report writes
    `Diagnostics\diagnose-documents.json` about the page your tab is on. It
    presses nothing, takes no screenshot, and writes any word that is not on
    PaperPull's fixed list as its shape. Do the same on the 1099 itself.

@@ -46,9 +46,9 @@ Walmart, Verizon and Chase apps, never the bundled Playwright Chromium.
   its address. No menu or link of the site is pressed to get there. When the
   address lands anywhere else, the run says it could not open Statements and
   stops, and you open it in the window yourself.
-- **Login** says you are signed in only once the account menu reads and an
-  account's statement list answers. A tab that only sits at the Statements
-  address says nothing of the session.
+- **The sign-in** says you are signed in only once the account menu reads
+  and an account's statement list answers. A tab that only sits at the
+  Statements address says nothing of the session.
 - **The accounts** are read from the page's own account menu, from the
   state the page keeps for it, never by opening the menu or choosing an
   account on it. Every option that is a deposit account is read, with the

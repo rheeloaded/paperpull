@@ -30,6 +30,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Whether the bank marks a document read when its PDF is fetched has not
   been checked yet.
 
+### Fixed
+- **The tester steps in the app READMEs name the panel's buttons as it
+  shows them.** Twenty-seven app READMEs, the README, CONTRIBUTING.md,
+  PROVIDERS.md and docs/adding-a-provider.md still said to click add a
+  provider, pick it in the App list, then Login, more, Record, Diagnose
+  and Pilot, none of which the panel shows. They now go through Add a
+  provider, Continue and Set up, the provider's own page, then More and
+  Get help with its Open sign-in window, Make the report, Record steps and
+  Stop recording, and Try the newest few first. The sign-in in Get help is
+  the one they use, since it starts no download once you are signed in,
+  where the one on the provider's page can start Get new documents by
+  itself. A census in the panel's tests fails on any of the old names, and
+  pins each control the READMEs name, and the provider's name as the panel
+  writes it, to where the page shows it.
+
 ## [0.65.0] - 2026-11-12
 
 The update check now installs on Windows too, and PaperPull Server gives

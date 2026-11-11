@@ -8,8 +8,8 @@ rounds are on
 [issue #47](https://github.com/rheeloaded/paperpull/issues/47).
 
 It has been run by one person on one membership, so it is new rather
-than proven. If you have a Costco card, a **Pilot** run and a word about
-what it got wrong is worth a lot.
+than proven. If you have a Costco card, pressing **Try the newest few
+first** and saying what it got wrong is worth a lot.
 
 Downloads your Costco purchase history and saves each purchase's receipt
 as a PDF, plus two CSV files, one row per line item and one row per
@@ -32,22 +32,29 @@ contributed to anything, is
 1. Install PaperPull from the
    [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Costco**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate
-   profile. Sign in to costco.com yourself, answer any code it sends, and
-   leave the window open.
-4. Click **Pilot**. It takes the newest few from each tab. Say whether
-   PDFs landed in `In-Warehouse\` and `Online\`, and whether they are
-   readable, which is the one thing nobody has checked yet.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Costco**, then **Continue**,
+   then **Set up**. Back on Accounts, click **Costco** to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
+   Sign in to costco.com yourself, answer any code it sends, and leave the
+   window open. Then click **Close** to leave Get help.
+4. Click **Try the newest few first**. It takes the newest few from each
+   tab. Say whether PDFs landed in `In-Warehouse\` and `Online\`, and
+   whether they are readable, which is the one thing nobody has checked yet.
    If the run printed any lines that begin with `Waited for`, copy
    those into your comment as well. They say which way of waiting
    each page needed, which is the thing the next build keeps.
 5. If a run stops early it writes a `failure-*.json` in `Diagnostics`
    by itself and prints where. Attach that. It names the step that broke
    and holds no text from your account.
-6. If a run finishes but the PDFs are wrong, click **more**, then
-   **Diagnose**, and attach that file. It says what the app sees on both
-   tabs. A fresh **Record** helps too, if the path it takes has changed.
+6. If a run finishes but the PDFs are wrong, click **Back to Costco**, then
+   **More**, then **Get help**, and click **Make the report**. Attach the
+   file this support report writes. It says what the app sees on both tabs.
+   A fresh recording, from **Record steps** in the same Get help, helps too,
+   if the path it takes has changed.
 7. Read any file through before you attach it. A recording ends by
    printing anything worth a second look. Delete any line you do not
    like.

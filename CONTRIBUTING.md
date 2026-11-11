@@ -28,8 +28,9 @@ GitHub website with nothing installed.
 
 **You have an account with a provider nobody has tested.** This is the most
 useful thing on the page and it needs no code. Install PaperPull, sign in,
-press **Record**, and click your way to one document. The app writes down the
-path you took and you send that back. The whole walkthrough is
+press **Record steps** (under **More**, then **Get help** on the provider's
+page), and click your way to one document. The app writes down the path you
+took and you send that back. The whole walkthrough is
 [Testing a provider](docs/testing-a-provider.md), written for someone who has
 never contributed to anything.
 
@@ -37,8 +38,8 @@ never contributed to anything.
 [New issue](https://github.com/rheeloaded/paperpull/issues/new/choose) and
 pick **A supported app stopped working**. Say which provider, what you ran,
 and what it did. Leave out account numbers, balances and anything with your
-name in it. A report that says "Chase, ran Pilot, it found zero statements
-where last month it found twelve" is exactly enough.
+name in it. A report that says "Chase, tried the newest few first, it found
+zero statements where last month it found twelve" is exactly enough.
 
 **You want a provider that does not exist.** Same page, pick **Request a
 provider**. Say who the provider is and what documents they offer. Someone

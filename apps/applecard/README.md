@@ -32,13 +32,18 @@ contributed to anything, is
 1. Install PaperPull from the
    [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Apple Card**. Pick it in the App
-   list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Apple Card**, then
+   **Continue**, then **Set up**. Back on Accounts, click **Apple Card** to
+   open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile
    at card.apple.com. Sign in yourself, approve the code on your iPhone or
    Mac, and leave the window open.
-4. Click **more** under the buttons, then **Record**. Go back to the
-   browser and click your way, the way you normally would, to
+4. Back in Get help, click **Record steps**. Go back to the browser and
+   click your way, the way you normally would, to
 
    - one **Apple Card statement**, as far as downloading its PDF,
    - one **Savings statement**, the same way, and
@@ -48,8 +53,9 @@ contributed to anything, is
    `Diagnostics\recording.json`, the path you actually took. One
    recording can hold all three trips. If you do not have Savings, or no
    tax form is listed, just record what you have.
-5. Click **Diagnose** as well, in the same **more** menu. It downloads
-   nothing, presses nothing but a Statements, Savings, Documents or Tax
+5. Make a support report as well. Click **Back to Apple Card**, then
+   **More**, then **Get help** again, and click **Make the report**. It
+   downloads nothing, presses nothing but a Statements, Savings, Documents or Tax
    Documents link and a "Show more" or the like that lists more of
    them, and takes no screenshot. It writes two files. The one
    whose name starts with `survey-diagnose-` holds counts and states and
@@ -73,15 +79,18 @@ contributed to anything, is
    go. Do not attach a screenshot of a statement. A statement carries
    your card and account numbers, and the recording deliberately does
    not.
-8. When a new build is posted, click **Pilot** and say whether PDFs
-   landed in `Statements\`, and whether the card and Savings statements
-   came out with the right names and months. A Pilot saves the five
-   newest documents, which are usually all statements, since a tax form
-   is filed at the end of its tax year. Tax forms come with a full run.
+8. When a new build is posted, click **Try the newest few first** on the
+   provider's page and say whether PDFs landed in `Statements\`, and whether
+   the card and Savings statements came out with the right names and months.
+   It saves the five newest documents, which are usually all statements,
+   since a tax form is filed at the end of its tax year. Tax forms come with
+   **Get new documents**. If it says to sign in first, sign in from Get help
+   as in step 3 and click it again.
 
 One recording is usually enough to write the first working build. Expect
-a few Pilot runs after it, each with a word about what came out wrong,
-which is the normal shape of it and not a sign anything went wrong.
+a few tries of the newest few after it, each with a word about what came
+out wrong, which is the normal shape of it and not a sign anything went
+wrong.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It

@@ -4,8 +4,8 @@
 American Family policy, so that someone who holds one can test it without
 writing code. It runs, its guards are tested, and every guess about
 myaccount.amfam.com is marked in `amfam_site.py`. What it needs is a
-survey from a signed-in account, which the Diagnose button produces and
-which contains no personal data. The conversation is
+survey from a signed-in account, which the support report in Get help
+produces and which contains no personal data. The conversation is
 [issue #45](https://github.com/rheeloaded/paperpull/issues/45).
 
 Downloads your American Family **billing statements**, and any tax form
@@ -17,26 +17,33 @@ ID cards and notices alone. Read-only, delete-safe, part of
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **American Family**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **American Family**, then
+   **Continue**, then **Set up**. Back on Accounts, click **American
+   Family** to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile
    at myaccount.amfam.com. Sign in yourself, answer any code it sends, and
    leave the window open.
-4. Click **more** under the buttons, then **Diagnose**. It reads the
-   documents page and writes `Diagnostics\diagnose-documents.json` in the
-   American Family folder. It downloads nothing and takes no screenshot.
+4. Back in Get help, click **Make the report**. This support report reads
+   the documents page and writes `Diagnostics\diagnose-documents.json` in
+   the American Family folder. It downloads nothing and takes no screenshot.
    All it presses are Escape and End, a button that closes or dismisses
    something drawn over the page, a link or button whose whole words name a
    documents page, a Show more or the like on the billing page or a bill's
    statements, and each bill's Bill details, twice, once to read what it
    shows and once to time it. Every word it writes that is not on
    PaperPull's fixed list is written as its shape.
-5. Click **Record**, in the same **more** menu. Go back to the browser window
-   and click your way to one document the way you normally would, then come
-   back here and click **Stop recording**. It writes
-   `Diagnostics\recording.json`, which is the path you actually took rather
-   than a guess at it. It records nothing you type and reads no cookies, and
-   it refuses to start before you are signed in. The whole walkthrough, written
-   for someone who has never done this, is
+5. Once the report is done, click **Back to American Family**, then
+   **More**, then **Get help** again, and click **Record steps**. Go back to
+   the browser window and click your way to one document the way you
+   normally would, then come back here and click **Stop recording**. It
+   writes `Diagnostics\recording.json`, which is the path you actually took
+   rather than a guess at it. It records nothing you type and reads no
+   cookies, and it refuses to start before you are signed in. The whole
+   walkthrough, written for someone who has never done this, is
    [Testing a provider](../../docs/testing-a-provider.md).
 6. Open each file in Notepad and look through it. It should hold page
    headings, the names of buttons and links, and the shape of the data the
@@ -47,15 +54,17 @@ ID cards and notices alone. Read-only, delete-safe, part of
    in it to edit.
 7. Attach both files to [issue #45](https://github.com/rheeloaded/paperpull/issues/45)
    with a sentence about what the documents page looks like to you.
-8. When a new build is posted, click **Pilot** and say whether PDFs landed
-   in `Statements\` or `Tax Documents\`, then attach a fresh
-   Diagnose file.
+8. When a new build is posted, click **Try the newest few first** on the
+   provider's page and say whether PDFs landed in `Statements\` or
+   `Tax Documents\`, then attach a fresh support report. If it says to sign
+   in first, sign in from Get help as in step 3 and click it again.
    If the run printed any lines that begin with `Waited for`, copy
    those into your comment as well. They say which way of waiting
    each page needed, which is the thing the next build keeps.
 
-A Diagnose file and one recording together are usually enough to get a
-provider working in a single round. Diagnose on its own takes two or three.
+A support report and one recording together are usually enough to get a
+provider working in a single round. A support report on its own takes two
+or three.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It

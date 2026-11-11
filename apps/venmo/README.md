@@ -19,25 +19,31 @@ Balance tabs, the Balance tab is saved as its own file,
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Venmo**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Venmo**, then **Continue**,
+   then **Set up**. Back on Accounts, click **Venmo** to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in yourself, answer the code Venmo texts or emails you, and leave
    the window open. Then open **Statements** from the menu on the left.
-4. Click **more** under the buttons, then **Diagnose**. It opens the
-   Statements page, and the last two finished months by their own
-   addresses, and writes `Diagnostics\diagnose-documents.json` in the
-   Venmo folder. It saves no statement, clicks nothing, takes no
-   screenshot, and writes any word that is not on PaperPull's fixed list
-   as its shape. Addresses are written as their path and the names of
-   their fields, never the values, so your profile id is not in it.
-5. Click **Record**, in the same **more** menu. Go back to the browser window
-   and click your way to last month's statement the way you normally
-   would (do not press Download CSV or Send to email), then come back here and click **Stop recording**. It writes
-   `Diagnostics\recording.json`, which is the path you actually took rather
-   than a guess at it. It records nothing you type and reads no cookies, and
-   it refuses to start before you are signed in. The whole walkthrough, written
-   for someone who has never done this, is
-   [Testing a provider](../../docs/testing-a-provider.md).
+4. Back in Get help, click **Make the report**. This support report opens
+   the Statements page, and the last two finished months by their own
+   addresses, and writes `Diagnostics\diagnose-documents.json` in the Venmo
+   folder. It saves no statement, clicks nothing, takes no screenshot, and
+   writes any word that is not on PaperPull's fixed list as its shape.
+   Addresses are written as their path and the names of their fields, never
+   the values, so your profile id is not in it.
+5. Once the report is done, click **Back to Venmo**, then **More**, then
+   **Get help** again, and click **Record steps**. Go back to the browser
+   window and click your way to last month's statement the way you normally
+   would (do not press Download CSV or Send to email), then come back here
+   and click **Stop recording**. It writes `Diagnostics\recording.json`,
+   which is the path you actually took rather than a guess at it. It records
+   nothing you type and reads no cookies, and it refuses to start before you
+   are signed in. The whole walkthrough, written for someone who has never
+   done this, is [Testing a provider](../../docs/testing-a-provider.md).
 6. Open each file in Notepad and look through it. It should hold page
    headings, the names of buttons and links, and month names, no
    usernames, names, amounts or notes. If anything in it looks personal,
@@ -49,11 +55,13 @@ Balance tabs, the Balance tab is saved as its own file,
    [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
    for Venmo, with a sentence about how you choose a month on the
    Statements page.
-8. Click **Pilot**. It saves last month's statement as a PDF in
-   `Statements\`. Open it and say whether it shows the whole month, then
-   attach a fresh Diagnose file. If it then says months older than two
-   years were not listed, choose "Between two dates" under "Which dates"
-   and set a From date before your next run.
+8. Click **Back to Venmo**, then **Try the newest few first**. It saves
+   last month's statement as a PDF in `Statements\`. Open it and say
+   whether it shows the whole month, then
+   attach a fresh support report. If it says to sign in first, sign in from
+   Get help as in step 3 and click it again. If it then says months older
+   than two years were not listed, choose "Between two dates" under "Which
+   dates" and set a From date before your next run.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It

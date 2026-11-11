@@ -124,7 +124,8 @@ New to this? Look for the **`good first provider`** label, those are easy sites
 Status legend: **requested** → **claimed** (someone's building it) →
 **in review** (PR open) → merged (moves to Supported). **Built, needs a
 tester** is an app written without an account, which anyone who holds one
-can finish by running its Diagnose button and attaching the result.
+can finish by making a support report, **Make the report** under **More**
+and then **Get help** on its page, and attaching the result.
 
 ## How the list grows
 

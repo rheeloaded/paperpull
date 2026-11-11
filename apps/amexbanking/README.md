@@ -17,8 +17,8 @@ windows.
 
 - **Business Checking** is confirmed on a real account.
 - **Personal Checking and Savings** are read the same way but have not been
-  seen yet. If you have one, a Diagnose file attached to the issue tells us
-  whether the same list and the same names come back.
+  seen yet. If you have one, a support report attached to the issue tells
+  us whether the same list and the same names come back.
 
 ## Setup
 
@@ -56,8 +56,9 @@ bot checks.
   does. It comes back as base64 and is written only when it is a PDF. A PDF
   that comes back with the bytes of another document saved in the same run
   is not saved, and that document is tried again on the next run.
-- **Login** says you are signed in only once the documents list answers. A
-  tab that only sits at the page's address says nothing of the session.
+- **The sign-in** says you are signed in only once the documents list
+  answers. A tab that only sits at the page's address says nothing of the
+  session.
 - **One account a run**, the one Documents and Statements shows. Its name in
   file names and in the index is read from the page's account switcher once
   the list has answered, or from the page's address (Business Checking,

@@ -58,7 +58,7 @@ it reads as a cardholder, an initial and a surname such as "J. SURNAME
 Statements. One of that shape that shows Statements, a second card or an
 account nicknamed like a person say, stops the list. So does any other
 entry without a product word, a card whose name has none say, and the
-Diagnose file counts such entries.
+support report counts such entries.
 
 Chase gives each account a new id every time you sign in, so a statement
 is known by its account's class and last four instead. Two accounts of one
@@ -111,20 +111,27 @@ yet seen or known:
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Chase Business**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Chase Business**, then
+   **Continue**, then **Set up**. Back on Accounts, click **Chase Business**
+   to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in with your business login yourself, answer any code it sends, and
    leave the window open.
-4. Click **more** under the buttons, then **Diagnose**. It reads the
-   document center and writes `Diagnostics\diagnose-documents.json` in the
-   Chase Business folder. It downloads nothing, presses nothing, takes no
-   screenshot, and keeps account names and numbers out of the file.
+4. Back in Get help, click **Make the report**. This support report reads
+   the document center and writes `Diagnostics\diagnose-documents.json` in
+   the Chase Business folder. It downloads nothing, presses nothing, takes
+   no screenshot, and keeps account names and numbers out of the file.
 5. Open the file in Notepad and look through it. It should hold counts,
    section names and the shape of the page, no values. If anything in it
    looks personal, delete that line.
-6. Click **Pilot**. It saves one statement. Say whether a PDF landed in
+6. Back in PaperPull, click **Back to Chase Business**, then **Try the
+   newest few first**. It saves one statement. Say whether a PDF landed in
    `Statements\` and whether it opens.
-7. Attach the Diagnose file to a new
+7. Attach the support report's file to a new
    [issue](https://github.com/rheeloaded/paperpull/issues) with a sentence
    about what happened.
 

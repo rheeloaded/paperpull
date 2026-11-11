@@ -34,12 +34,18 @@ review and says to download it yourself in the Dashboard.
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Stripe**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Stripe**, then **Continue**,
+   then **Set up**. Back on Accounts, click **Stripe** to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in to the Stripe Dashboard yourself, answer any code it sends, and
    leave the window open.
-4. Click **more** under the buttons, then **Diagnose**. It opens the two
-   list pages and writes two files in the Stripe folder's `Diagnostics`.
+4. Back in Get help, click **Make the report**. This support report opens
+   the two list pages and writes two files in the Stripe folder's
+   `Diagnostics`.
    `survey-diagnose-<time>.json` is the one to send. It holds counts and
    states and no text from your account. `diagnose-documents.json` is the
    detailed one. It keeps the shape of each list (field names, types and
@@ -48,11 +54,12 @@ review and says to download it yourself in the Dashboard.
    say, is written as its shape, a for a letter and 9 for a digit, so it
    can be sent too if you are asked for it. Diagnose downloads nothing,
    clicks nothing and takes no screenshot.
-5. Click **Record**, in the same **more** menu, then click your way to one
+5. Once the report is done, click **Back to Stripe**, then **More**, then
+   **Get help** again. Click **Record steps**, then click your way to one
    invoice or tax form download the way you normally would, and come back
    and click **Stop recording**. It writes `Diagnostics\recording.json`,
-   records nothing you type and reads no cookies. The whole walkthrough
-   is [Testing a provider](../../docs/testing-a-provider.md).
+   records nothing you type and reads no cookies. The whole walkthrough is
+   [Testing a provider](../../docs/testing-a-provider.md).
 6. Open the files you will send in Notepad and look through them. If
    anything in one looks personal, delete that line.
 7. Attach the survey file and the recording to
