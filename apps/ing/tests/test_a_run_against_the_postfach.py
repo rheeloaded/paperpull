@@ -514,6 +514,24 @@ def test_resume_whose_first_document_is_of_a_list_showing_only_the_notice_stops_
     assert "The ING list could not be read again whole" in said
 
 
+def test_a_document_gone_from_the_list_read_waits_while_the_other_is_left_out(home):
+    """P2 is gone from the Postbox since Discover, and the archive shows only
+    the notice, so P2 may be there or nowhere. It is left for now, with
+    nothing recorded, and P1 after it is taken, run after run."""
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P2", 3), statement("P1", 1)]
+    home.run("--discover")
+    assert isinstance(home.stopped, ListNotRead)
+    home.bank.lists["postbox"].pop(0)
+    for _ in range(2):
+        code, said = home.run_all()
+        assert isinstance(home.stopped, ListNotRead) and code == 0
+        assert home.on_disk() == ["P1"] and home.failed() == []
+        assert ("Left for now. The list this run read does not show it, and it may be in "
+                "the Postbox archive, which showed only ING's notice that nothing "
+                "matches.") in said
+
+
 def test_a_row_alike_to_a_document_of_a_list_left_out_takes_nothing_of_its_record(home):
     """A new Postbox row alike to an archived document, while the archive
     shows only the notice, is not taken for that document. Once the

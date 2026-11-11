@@ -679,6 +679,8 @@ class App:
                 pass
             try:
                 page = self._on_its_site()
+                if self._waits_for_a_list_left_out(page, doc):
+                    continue
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
@@ -701,6 +703,27 @@ class App:
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
+
+    def _waits_for_a_list_left_out(self, page, doc: Document) -> bool:
+        """Whether a document the listing does not show waits, rather than
+        being looked up, because this run left a list out. It may be in that
+        list, moved there, or gone from ING, and which cannot be told, so it
+        is left for now with nothing recorded, the run goes on to the rest
+        and stops at its end (_stop_if_not_whole). Asked of the listing a
+        download reads, before the document is looked up in it, so the
+        lookup's stop for a list that stops is left for a list first read
+        inside the download."""
+        if not self._not_shown:
+            return False
+        shown = site.lists_alike(page, doc.title, doc.date, doc.account,
+                                 category=doc.category, config=self.config)
+        self._not_shown.update(site.not_shown_empty())
+        if shown:
+            return False
+        lists = " and ".join(site.named(s) for s in sorted(self._not_shown, reverse=True))
+        print(f"  Left for now. The list this run read does not show it, and it may be in "
+              f"{lists}, which showed only ING's notice that nothing matches.")
+        return True
 
     def session_ended(self) -> None:
         """Stop the run because ING answered the list as signed out.

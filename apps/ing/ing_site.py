@@ -845,6 +845,14 @@ def listed_rows(page, config: Optional[dict] = None, fresh: bool = False,
             if r["category"] in wanted]
 
 
+def lists_alike(page, title: str, date: str, account: str, *, category: str,
+                config: Optional[dict] = None) -> bool:
+    """Whether a recent listing shows a row of this document's kind, title,
+    date and account, as resolve_item looks for it."""
+    return any(r["title"] == title and r["date"] == date and r["account"] == account
+               and filed_category(r) == category for r in listed_rows(page, config))
+
+
 def collect_documents(page, keep=None, config: Optional[dict] = None,
                       navigate: bool = True) -> List[dict]:
     """Every PDF the Postbox and its archive list, newest first. `keep` is
