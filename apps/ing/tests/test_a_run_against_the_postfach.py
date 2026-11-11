@@ -532,6 +532,31 @@ def test_a_document_gone_from_the_list_read_waits_while_the_other_is_left_out(ho
                 "matches.") in said
 
 
+def test_a_sign_out_met_while_a_list_is_left_out_says_to_sign_in_again(home, monkeypatch):
+    """The listing a download reads is read again once it is old, and ING
+    answers it with its sign-in page. The run stops as signed out and says
+    to sign in, not as a list that stopped."""
+    monkeypatch.setattr(site, "LISTING_SECONDS", 0)
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    opened, real = [], home.bank.goto
+
+    def goto(url, **kw):
+        if url == POSTBOX:
+            opened.append(url)
+            if len(opened) == 2:
+                home.bank.signs_out_at = POSTBOX
+        real(url, **kw)
+
+    monkeypatch.setattr(home.bank, "goto", goto)
+    code, said = home.run_all()
+    assert isinstance(home.stopped, SystemExit) and code == 0
+    assert not isinstance(home.stopped, ListNotRead)
+    assert "!! ING answered the list as signed out, so this run stops here." in said
+    assert "Sign in again in the open browser window, then run this again." in said
+    assert home.bank.fetched == [] and not home.listed_whole()
+
+
 def test_a_row_alike_to_a_document_of_a_list_left_out_takes_nothing_of_its_record(home):
     """A new Postbox row alike to an archived document, while the archive
     shows only the notice, is not taken for that document. Once the

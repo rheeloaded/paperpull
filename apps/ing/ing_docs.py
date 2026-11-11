@@ -715,8 +715,14 @@ class App:
         inside the download."""
         if not self._not_shown:
             return False
-        shown = site.lists_alike(page, doc.title, doc.date, doc.account,
-                                 category=doc.category, config=self.config)
+        # The tab is checked first, as download_one checks it, so a sign-out
+        # or a security check met here says what to do about it.
+        self.check_session(page)
+        try:
+            shown = site.lists_alike(page, doc.title, doc.date, doc.account,
+                                     category=doc.category, config=self.config)
+        except site.SessionExpired:
+            self.session_ended()
         self._not_shown.update(site.not_shown_empty())
         if shown:
             return False
