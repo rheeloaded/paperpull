@@ -899,7 +899,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 - ✅ All **eighty-nine** apps pass their tests, the eighty-two that are
   supported, the five still waiting for a tester and the Scalable Capital
-  and Consorsbank shells, 35,564 of them
+  and Consorsbank shells, 38,158 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).

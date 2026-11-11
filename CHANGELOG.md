@@ -7,7 +7,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.63.0] - 2026-11-11
+
+ING saves the ING Postbox and its archive as the 87th app, American
+Express Banking saves Business Checking statements as the 86th, and
+Scalable Capital and Consorsbank have first shells for a tester to
+record. On a Mac, PaperPull.app opens the control panel in a window of
+its own. A sign-in starts its run by itself once it is done, an
+account's page names what a run set aside, and one Get help holds the
+support report and Record steps. An address Python and a browser read
+differently is now refused in every app, and Wealthfront files a form
+set's other files by what they are, both reported privately.
 
 ### Added
 - **ING (ING-DiBa), the 87th app, the Postbox and its archive (#203).**
@@ -145,7 +155,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   @JasperDale420. Before merging, Record steps waits while the sign-in the
   dialog started is going, as Make the report does, and the failure file
   is offered as one written in the last hour, with what the Run page says
-  of it, rather than as the last run's, which may have gone well since. Contributed by @JasperDale420.
+  of it, rather than as the last run's, which may have gone well since.
 - **A run can be followed from the tab, and a round leaves you where you
   are (#180).** The browser tab's title shows a run's progress and how it ended,
   so somebody working in the provider's window can see it. A run that ends
@@ -182,7 +192,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   browser may be the other account's. Only a browser PaperPull opened on
   the account's own port and profile folder is ever closed, never an
   everyday one, and `"close_signin_window": false` in settings.json turns
-  closing off. Contributed by @JasperDale420 (#186).
+  closing off. Contributed by @JasperDale420.
 - **An account just checked comes off the list, and can be marked done (#187).**
   "Due" came only from the age of the newest document, so a run that found
   nothing new left the account due until its provider sent something. A Get
@@ -191,7 +201,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   reads no list, so it is no check, and an account with gaps still shows
   them. **Mark as done** under the three dots takes an account off the list
   until its next run, or for that time at most, and can be undone.
-  Contributed by @JasperDale420 (#187).
+  Contributed by @JasperDale420.
 - **The sample can be looked at before the terms (#188).** Somebody only looking
   had to accept the Terms of Use to see invented data. With no accounts yet,
   the dialog offers Just look at the sample, which sets the dialog aside
@@ -214,7 +224,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   that failed its check, keeps it.
   Done writes only the account's own note and never moves or deletes a
   document or a record, and neither Done nor Open is taken while a run, a
-  Rename or a Move goes on that account. Contributed by @JasperDale420 (#193).
+  Rename or a Move goes on that account. Contributed by @JasperDale420.
 
 ### Fixed
 - **A provider's first shell no longer stops a round of Get new for all.**
@@ -237,7 +247,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   failed on every later run, and a press on that control never saved
   anything. Those controls are no longer pressed or listed, and a record of
   that shape left by an older version is set down as No Longer Listed.
-  Contributed by @JasperDale420 (#191). Before merging, a list with such a
+  Contributed by @JasperDale420. Before merging, a list with such a
   row was made to read as not whole, since its statement is on the list and
   is not taken. The run says it left that statement out, that the Chase
   Business app takes a business account's statements, and finishes, and a
@@ -261,7 +271,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   A host that is no host name but words, or a part of one that reads like an
   account's number or a token, is written as its shape, every letter as a
   and every digit as 9. Nothing is asked of the address to name it.
-  Contributed by @JasperDale420 (#199).
+  Contributed by @JasperDale420.
 - **On a Mac, an account's documents folder is never another's in other
   letter case (#198).** A Mac tells folder names apart without case, so
   `target receipts/Chase` is inside Target Receipts' folder. The check
@@ -293,7 +303,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   @JasperDale420. Before merging, the welcome, Settings and Import history
   refuse that `apps/` folder, or one inside it, as the PaperPull folder
   until one of its apps has a `config.json`, and Settings no longer names
-  it as the folder, fills it in, or lists its templates as accounts. Contributed by @JasperDale420.
+  it as the folder, fills it in, or lists its templates as accounts.
 - **A support report that read nothing says so (#182).** Made with the window on a
   sign-in page or a security check, it still read "Support report saved",
   and people attached it. It now ends as Nothing was read, says to sign in
