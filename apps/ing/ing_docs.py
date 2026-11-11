@@ -535,9 +535,10 @@ class App:
             self._say_not_shown(source)
         if left:
             self.write_failure("read the documents list", "a list could not be shown to be empty")
-        else:
-            # The whole list is in, and only now may a Resume that carries on
-            # from it call the run finished (paperpull_core.listing).
+        # The whole list is in, and only now may a Resume that carries on
+        # from it call the run finished (paperpull_core.listing). Not when a
+        # list was left out.
+        if not left:
             listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -661,7 +662,7 @@ class App:
             # with nothing recorded against it, and the run stops at its end
             # (_stop_if_not_whole). A list first seen so while a document is
             # taken stops the run at once, as any list that stops does.
-            self._not_shown.update(site.not_shown_empty())
+            self._not_shown.update(site.not_shown_empty() or ())
             if doc.client_id in self._not_shown:
                 print(f"  Left for now, since {site.named(doc.client_id)} showed only ING's "
                       "notice that nothing matches.")
@@ -723,7 +724,7 @@ class App:
                                      category=doc.category, config=self.config)
         except site.SessionExpired:
             self.session_ended()
-        self._not_shown.update(site.not_shown_empty())
+        self._not_shown.update(site.not_shown_empty() or ())
         if shown:
             return False
         lists = " and ".join(site.named(s) for s in sorted(self._not_shown, reverse=True))
