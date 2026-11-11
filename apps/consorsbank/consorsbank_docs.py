@@ -492,12 +492,12 @@ class App:
             self.stats["session_expired"] = 1
             raise
         if not saved:
-            self._record(doc, State.NEEDS_MANUAL_REVIEW,
+            self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
-            self._write_row(doc, "Capture failed", "Needs Manual Review")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
-            self.stats["manual_review"] += 1
-            print("  Could not capture this document - marked for manual review.")
+            self.stats["failed"] += 1
+            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
@@ -780,8 +780,11 @@ class App:
         print(f"Pages surveyed: {len(pages)}   "
               f"on consorsbank.de: {sum(1 for p in pages if p.get('on_site'))}")
         print(f"Documents listed: {shape_tree(info.get('collected', '?'), words)}")
+        # Fixed words, as the census of what Diagnose prints reads any
+        # answer of a core function as a page's.
         print("This first build lists nothing yet. A recording of one trip to a")
-        print(f"document is what it needs, {after_sign_in(record=True)}.")
+        print("document is what it needs, Record steps in the panel (More, then")
+        print("Get help), or the record command in a terminal.")
 
     def cmd_record(self):
         """Record the path a person takes to a document, so this app can be
