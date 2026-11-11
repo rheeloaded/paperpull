@@ -52,6 +52,22 @@ URLS = {
     "login": BASE + "/services_cloud/portal/",
 }
 
+# Public, non-personal route vocabulary. The recorder keeps these words
+# readable while shaping every other unknown URL segment, identifier and
+# query value. This makes the account holder's request flow useful for
+# mapping without retaining account data.
+RECORD_WORDS = frozenset({
+    "oauth", "token", "assets", "de-DE", "serviceproxy", "rest",
+    "checkMessageSupport", "deep-links", "profile", "active",
+    "messageCount", "messages", "messageAttachmentDownload",
+    "documentUpload", "datasharing", "download", "LIST_ITEM_HEADER",
+    "ATTACHMENT_ICON", "banking_start", "account", "accounts", "statement",
+    "statements", "document", "documents", "archive", "folder", "folders",
+    "tax", "securities", "card", "cards", "contract", "information",
+    "content", "file", "files", "attachment", "attachments", "history",
+    "transfer", "balance", "product", "products", "customer", "user",
+})
+
 # Diagnose writes this down, so a survey file says it came from a shell.
 NOT_MAPPED = ("Renault Bank direkt is not built yet. This first build only opens "
               "the site for a sign-in, and Record and Diagnose.")
