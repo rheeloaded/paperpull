@@ -553,11 +553,25 @@ def versioned(page):
 
 def test_a_link_that_answers_with_a_page_is_read_again_from_the_list_opened_afresh(tmp_path):
     page = Page(url=OBLIGO, areas={"postbox": versioned})
-    page.files[f"{POSTBOX}?2-1.-rows-0-download"] = file_answer(pdf("d1"))
+    page.files[f"{POSTBOX}?3-1.-rows-0-download"] = file_answer(pdf("d1"))
     assert fetch_one(page, tmp_path / "doc.pdf")
     assert (tmp_path / "doc.pdf").read_bytes() == pdf("d1")
-    assert page.fetched == [f"{POSTBOX}?1-1.-rows-0-download", f"{POSTBOX}?2-1.-rows-0-download"]
-    assert page.gotos == [POSTBOX, POSTBOX]
+    # The listing opens the list, then each try at the document opens it
+    # afresh before its link is read, the second after the first answered
+    # with a page.
+    assert page.fetched == [f"{POSTBOX}?2-1.-rows-0-download", f"{POSTBOX}?3-1.-rows-0-download"]
+    assert page.gotos == [POSTBOX, POSTBOX, POSTBOX]
+
+
+def test_each_document_reads_its_link_from_its_list_opened_afresh(tmp_path):
+    # A link read from the page an earlier document left on screen may name
+    # its row by a place in the list that has moved since.
+    page = Page(url=POSTBOX, areas={"postbox": versioned})
+    page.files[f"{POSTBOX}?2-1.-rows-0-download"] = file_answer(pdf("d1"))
+    site._all_rows(page, {"read_archive": False})
+    page.gotos.clear()
+    assert fetch_one(page, tmp_path / "doc.pdf")
+    assert page.gotos == [POSTBOX] and page.fetched == [f"{POSTBOX}?2-1.-rows-0-download"]
 
 
 def test_a_document_that_twice_answers_with_a_page_fails_and_saves_nothing(tmp_path):

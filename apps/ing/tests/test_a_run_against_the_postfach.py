@@ -369,6 +369,66 @@ def test_no_document_link_is_kept_on_disk(home):
         assert "-rows-" not in path.read_text(encoding="utf-8", errors="replace"), path.name
 
 
+class BankOfPlaces(Bank):
+    """A Postbox whose links name a row by its place in the list, followed
+    against the list as the server holds it when the link is fetched, the
+    way a page framework's list may. The page on screen shows the rows as
+    they were when it was last opened, and only an opening shows newer."""
+
+    def __init__(self):
+        super().__init__()
+        self.shown = {"postbox": [], "archive": []}
+        self.after_first_fetch = None
+
+    def goto(self, url, **kw):
+        super().goto(url, **kw)
+        area = site._list_area(url)
+        if area:
+            self.shown[area] = list(self.lists[area])
+
+    def _rows(self):
+        area = site._list_area(self.url)
+        self.looked.append(area)
+        rows = [] if area is None else [
+            {"kind": e["kind"], "subject": e["subject"], "date": e["date"],
+             "unread": e["unread"],
+             "hrefs": ["%s?%d-1.-rows-%d-download" % (LISTS[area], self.version, place)]}
+            for place, e in enumerate(self.shown[area])]
+        return {"table_present": bool(rows), "settled": True, "truncated": False,
+                "empty": area is not None and not rows, "pagination": 0, "rows": rows}
+
+    def _fetch(self, url):
+        area = site._list_area(url)
+        m = re.fullmatch(r"(\d+)-1\.-rows-(\d+)-download", urlsplit(url).query)
+        version, place = int(m.group(1)), int(m.group(2))
+        if version != self.version or site._list_area(self.url) != area \
+                or place >= len(self.lists[area]):
+            return dict(A_PAGE)
+        name = self.lists[area][place]["doc"]
+        self.fetched.append(name)
+        if self.after_first_fetch:
+            arrives, self.after_first_fetch = self.after_first_fetch, None
+            arrives()
+        return {"state": "file", "b64": base64.b64encode(pdf_of(name)).decode()}
+
+
+def test_a_document_arriving_mid_run_moves_no_link_onto_its_neighbor(home):
+    """Each document's link is read from its list opened afresh, never from
+    the page an earlier document left on screen. Read from that page, every
+    link after a new arrival would name its neighbor, and February's record
+    would hold March's PDF."""
+    bank = home.bank = BankOfPlaces()
+    bank.lists["postbox"] = [statement("P3", 3), statement("P2", 2), statement("P1", 1)]
+    bank.after_first_fetch = lambda: bank.lists["postbox"].insert(0, tax("NEW", 2026))
+    code, _said = home.run_all()
+    assert code == 0 and home.stopped is None
+    held = home.held()
+    assert len(held) == 3
+    for key, whose_bytes in held.items():
+        month = re.search(r"2026-(\d\d)-28", key).group(1)
+        assert whose_bytes == "P%d" % int(month), key
+
+
 # -- rows passed over are said, and left alone ---------------------------------
 
 def test_a_document_marked_unread_is_said_and_left_as_it_is_when_include_unread_is_off(home):

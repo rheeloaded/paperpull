@@ -33,7 +33,8 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in,
+                                          report_run_result)
 
 import argparse
 import logging
@@ -334,7 +335,7 @@ class App:
             raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
-        print("Sign in, open the Postbox, keep the window OPEN, then run --diagnose before the pilot.")
+        print(f"Sign in, open the Postbox, keep the window OPEN, then {after_sign_in()}.")
 
     def cmd_login(self):
         print("Checking the connection to your signed-in ING browser...\n")
@@ -1016,6 +1017,9 @@ class App:
             info["samples"] = []
             for d in (docs or [])[:12]:
                 cat, summ, _ = doc_types.classify_document(d.get("title", ""), self.rules)
+                # The category a run files the row under, from its document
+                # type (site.classify), not the rules' guess from its title.
+                cat = site.filed_category(d) or cat
                 info["samples"].append({
                     "title": (d.get("title") or "")[:90],
                     "date": d.get("date", ""),

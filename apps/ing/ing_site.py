@@ -870,16 +870,20 @@ _SKIP_SAID = {
 }
 
 
-def _fresh_href(page, row: dict, config: Optional[dict], reload: bool = False) -> str:
+def _fresh_href(page, row: dict, config: Optional[dict]) -> str:
     """The download address the Postbox shows now for the document of `row`.
     ING's links carry the page they were read from, so one read in an
     earlier look may no longer lead to the document. The row is found again
     by its type, subject and date and its place among the rows alike, and
-    only where the list shows as many alike as it did."""
+    only where the list shows as many alike as it did.
+
+    The list is opened by its own address every time, never read as the tab
+    still shows it from an earlier document. A link may name its row by its
+    place in the list as the server holds it when the link is followed, so
+    a link read from a page minutes old, with a document come or gone since,
+    can lead to its neighbor's PDF."""
     source = row["source"]
-    if reload:
-        _open_area(page, source, again=True)
-    area = _read_area(page, source, config)
+    area = _read_area(page, source, config, again=True)
     alike = [c for c in area["candidates"] if c["sig"] == row["sig"]]
     if not alike:
         raise RuntimeError("the Postbox no longer lists this document")
@@ -998,17 +1002,17 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
 
     Its row is found in a recent listing (resolve_item, which raises
     NotToldApart when that cannot be told), and its download link is read
-    again from the Postbox as it stands now. The PDF is fetched from inside
-    the page. When ING answers with a page instead, or the fetch does not
-    finish, the list is opened afresh and the link read and fetched once
-    more. Nothing is pressed."""
+    again from the Postbox, opened afresh by its address. The PDF is fetched
+    from inside the page. When ING answers with a page instead, or the fetch
+    does not finish, the list is opened afresh once more and the link read
+    and fetched again. Nothing is pressed."""
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins,
                        config=config)
     if row is None:
         raise RuntimeError("the Postbox no longer lists this document")
-    for attempt in range(2):
-        href = _fresh_href(page, row, config, reload=attempt > 0)
+    for _attempt in range(2):
+        href = _fresh_href(page, row, config)
         failed = None
         try:
             data = _fetch(page, href)
