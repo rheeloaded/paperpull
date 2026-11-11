@@ -287,10 +287,16 @@ def test_a_list_showing_only_the_notice_is_not_read_as_empty(source, where):
     for a search or filter that finds nothing (#203)."""
     page = Page(url=site.URLS["archive" if source == "archive" else "documents"],
                 areas={source: EMPTY})
-    with pytest.raises(site.NotShownEmpty) as stop:
-        site._read_area(page, source, {}, navigate=False)
-    assert str(stop.value) == f"{where} shows no document, only ING's notice that nothing matches"
-    assert stop.value.source == source and isinstance(stop.value, site.ListStopped)
+    area = site._read_area(page, source, {}, navigate=False)
+    assert area["only_notice"] is True
+    assert area["rows"] == area["candidates"] == [] and area["undated"] == 0
+    page.areas[source] = look(row(base=site.URLS["archive" if source == "archive"
+                                                  else "documents"]))
+    assert site._read_area(page, source, {}, navigate=False)["only_notice"] is False
+    # Where a document is taken, the same list stops the run.
+    stop = site.NotShownEmpty(source, site.named(source))
+    assert str(stop) == f"{where} shows no document, only ING's notice that nothing matches"
+    assert stop.source == source and isinstance(stop, site.ListStopped)
 
 
 def test_a_listing_leaves_out_a_list_showing_only_the_notice_and_names_it():

@@ -418,8 +418,8 @@ def test_a_document_whose_list_shows_only_the_notice_is_left_for_now_not_failed(
     code, said = home.run_all()
     assert isinstance(home.stopped, ListNotRead) and code == 0
     assert home.on_disk() == ["P1"] and home.failed() == []
-    assert ("Left for now, since the Postbox archive shows no document, only ING's "
-            "notice that nothing matches.") in said
+    assert ("Left for now, since the Postbox archive showed only ING's notice that "
+            "nothing matches.") in said
     home.bank.lists["archive"] = held_back
     code, said = home.run_all()
     assert code == 0 and home.stopped is None
@@ -436,6 +436,11 @@ def test_resume_leaves_a_document_whose_list_shows_only_the_notice_and_stops(hom
     assert isinstance(home.stopped, ListNotRead) and code == 0
     assert home.on_disk() == ["P1"] and home.failed() == []
     assert not home.listed_whole()
+    # P1's listing showed the archive left out, so A1 after it is left for
+    # now rather than looked up.
+    assert ("Left for now, since the Postbox archive showed only ING's notice that "
+            "nothing matches.") in said
+    assert "could not be read again whole" not in said
 
 
 def test_a_list_left_out_stops_the_run_though_a_later_listing_reads_it(home, monkeypatch):
@@ -458,6 +463,81 @@ def test_a_list_left_out_stops_the_run_though_a_later_listing_reads_it(home, mon
     assert len(opened) >= 2
     assert isinstance(home.stopped, ListNotRead) and code == 0
     assert home.on_disk() == ["P1"] and not home.listed_whole()
+
+
+def test_a_pilot_that_takes_a_document_still_stops_when_a_list_was_left_out(home):
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    code, said = home.run("--pilot")
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert home.on_disk() == ["P1"] and not home.listed_whole()
+    assert "PILOT RESULTS" in said
+
+
+def test_a_list_first_showing_only_the_notice_while_a_document_is_taken_stops_at_once(
+        home, monkeypatch):
+    """The listing read the archive, and the archive shows only the notice
+    when the first document's link is read from it again (a filter set in
+    ING meanwhile, say). Every later document would read the same list, so
+    the run stops there, with nothing fetched or recorded."""
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    home.bank.lists["archive"] = [statement("A1", 1, 2027), statement("A2", 2, 2027)]
+    opened, real = [], home.bank.goto
+
+    def goto(url, **kw):
+        if url == ARCHIVE:
+            opened.append(url)
+            if len(opened) == 2:
+                home.bank.lists["archive"] = []
+        real(url, **kw)
+
+    monkeypatch.setattr(home.bank, "goto", goto)
+    code, said = home.run_all()
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert home.bank.fetched == [] and home.store("progress.json") == {}
+    assert not home.listed_whole()
+    assert ("The ING list could not be read again whole (the Postbox archive shows no "
+            "document, only ING's notice that nothing matches)") in said
+
+
+def test_resume_whose_first_document_is_of_a_list_showing_only_the_notice_stops_at_once(home):
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    home.bank.lists["archive"] = [statement("A1", 1, 2027)]
+    assert home.run("--discover")[0] == 0 and home.listed_whole()
+    home.bank.lists["archive"] = []
+    _code, said = home.run("--resume")
+    assert isinstance(home.stopped, ListNotRead)
+    assert home.bank.fetched == [] and home.store("progress.json") == {}
+    assert not home.listed_whole()
+    assert "The ING list could not be read again whole" in said
+
+
+def test_a_row_alike_to_a_document_of_a_list_left_out_takes_nothing_of_its_record(home):
+    """A new Postbox row alike to an archived document, while the archive
+    shows only the notice, is not taken for that document. Once the
+    archive is read again, each is saved with its own bytes."""
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("T1", 3)]
+    home.bank.lists["archive"] = [statement("A1", 1)]
+    assert home.run("--discover")[0] == 0 and home.listed_whole()
+    before = home.store("discovery.json")
+    archived, home.bank.lists["archive"] = home.bank.lists["archive"], []
+    home.bank.lists["postbox"].append(statement("P1", 1))
+    home.run_all()
+    assert isinstance(home.stopped, ListNotRead)
+    after = home.store("discovery.json")
+    for key, rec in before.items():
+        if rec["client_id"] == "archive":
+            assert (after[key]["client_id"], after[key]["item_id"]) == (
+                "archive", rec["item_id"])
+    assert sorted(home.held().values()) == ["T1"]
+    home.bank.lists["archive"] = archived
+    code, _said = home.run_all()
+    assert code == 0 and home.stopped is None
+    assert sorted(home.held().values()) == ["A1", "P1", "T1"]
+    assert home.failed() == []
 
 
 def test_a_run_that_left_a_list_out_and_stopped_for_a_sign_in_is_not_noted_whole(home):

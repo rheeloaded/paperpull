@@ -517,14 +517,19 @@ class App:
         # took the other one's number and was skipped as done while the
         # other was fetched again beside it. A number now stays with the id
         # it was given to (keys.told_apart).
-        for d, (occ, sure) in zip(raw, self._numbered(raw)):
-            n_new += self._record_statement_doc(d, occ, sure)
-        self.discovery.save()
         # A list that showed only ING's notice that nothing matches was left
         # out, since the same notice stands for a search or filter that
         # finds nothing (site.NotShownEmpty). The rest is recorded, and the
-        # listing stays one that stopped.
+        # listing stays one that stopped. A row alike to a document listed
+        # before from a list left out may be that document, moved, or another
+        # beside it, and the list that would say which was not read, so the
+        # row is not sure and writes nothing over that document's record.
         left = site.not_shown_empty()
+        unread = self._listed_from(left)
+        for d, (occ, sure) in zip(raw, self._numbered(raw)):
+            sure = sure and listed_key(d) not in unread
+            n_new += self._record_statement_doc(d, occ, sure)
+        self.discovery.save()
         self._not_shown.update(left)
         for source in left:
             self._say_not_shown(source)
@@ -558,6 +563,15 @@ class App:
         if finish:
             self._stop_if_not_whole()
         return n_new
+
+    def _listed_from(self, sources) -> set:
+        """The keys, before their number, of the documents known from these
+        lists, as listed_key reads a row, so a row alike to one is found."""
+        keys = set()
+        for rec in self.discovery.data.values():
+            if isinstance(rec, dict) and rec.get("client_id") in sources:
+                keys.add(Document.from_dict(dict(rec, occurrence=0)).key)
+        return keys
 
     def _say_not_shown(self, source: str) -> None:
         """Why a list was left out of this run, and what settles it."""
@@ -642,6 +656,16 @@ class App:
                 print("  Already downloaded and verified - skipping.")
                 self.stats["skipped_completed"] += 1
                 continue
+            # A document of a list a listing in this run left out, since it
+            # showed only ING's notice that nothing matches, is left for now
+            # with nothing recorded against it, and the run stops at its end
+            # (_stop_if_not_whole). A list first seen so while a document is
+            # taken stops the run at once, as any list that stops does.
+            self._not_shown.update(site.not_shown_empty())
+            if doc.client_id in self._not_shown:
+                print(f"  Left for now, since {site.named(doc.client_id)} showed only ING's "
+                      "notice that nothing matches.")
+                continue
             filename = build_pdf_filename(doc.date, doc.summary, "", record=doc)
             if dry_run:
                 print(f"  DRY RUN - would save: {filename}")
@@ -667,13 +691,6 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
-            except site.NotShownEmpty as notice:
-                # Its list, or one it may have moved to, shows only ING's
-                # notice that nothing matches, which a filter set in ING
-                # shows too. Nothing is recorded against it, the run takes
-                # the rest, and it stops at its end (_stop_if_not_whole).
-                print(f"  Left for now, since {notice}.")
-                self._not_shown.add(notice.source)
             except site.ListStopped as stop:
                 # The list, read again for this document, could not be read
                 # whole. Every document after it reads the same list, so the

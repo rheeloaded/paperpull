@@ -38,10 +38,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   ING could have made a run finish clean with a list it never read. Now a
   list that shows only the notice is left out and named. The run takes the
   other list's documents, records nothing against a document from the list
-  left out, and stops at its end rather than finish, as one whose list was
-  not read. If your archive is empty in ING, set `read_archive` to `false`
-  and runs leave it out. Diagnose says when the list on screen shows only
-  the notice.
+  left out or a row alike to one, and stops at its end rather than finish,
+  as one whose list was not read. A list that shows only the notice while a
+  document is taken from it stops the run there. If your archive is empty
+  in ING, set `read_archive` to `false` and runs leave it out. Diagnose
+  says when the list on screen shows only the notice.
 
 ## [0.63.0] - 2026-11-11
 

@@ -291,8 +291,9 @@ def test_an_archive_showing_only_the_notice_is_not_read_as_empty(empty_archive):
     seen = site._look(empty_archive, scroll=False)
     assert seen["rows"] == []
     assert seen["empty"] is True and seen["settled"] is True
-    with pytest.raises(site.NotShownEmpty, match="only ING's notice that nothing matches"):
-        site._read_area(empty_archive, "archive", navigate=False, scroll=False)
+    area = site._read_area(empty_archive, "archive", navigate=False, scroll=False)
+    assert area["only_notice"] is True
+    assert area["rows"] == area["candidates"] == []
     assert empty_archive.url == before and empty_archive.evaluate("window.clicked") is False
 
 

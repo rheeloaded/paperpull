@@ -71,7 +71,10 @@ list empty. A list that shows only the notice is left out and named. The
 run takes the other list's documents, records nothing against a document
 listed before from the list left out, and stops at its end rather than
 finish, as a run whose list was not read. A later run takes that document
-once its list shows it again. If your archive is empty in ING, set
+once its list shows it again. A row alike to it in the other list waits as
+well, so neither is taken for the other. A list that shows only the notice
+while a document is taken from it stops the run there, as any list that
+stops does. If your archive is empty in ING, set
 `read_archive` to `false` and runs leave it out. If the Postbox shows only
 the notice, look at its search and filters in ING. The same words anywhere
 else on the page, a count, or "keine neuen Nachrichten" (no new messages,
