@@ -206,6 +206,12 @@ class Home:
         self.configure(owner="Dana Example", output_dir=str(self.out),
                        profile_dir=str(tmp_path / "profile"), cdp_url="http://127.0.0.1:9",
                        delay_min_seconds=0, delay_max_seconds=0, default_start_date="")
+        # The made-up archive is empty unless a test fills it, and an empty
+        # list shows only ING's notice that nothing matches, which a run
+        # cannot tell from a filter (#203). So these accounts leave the
+        # archive out, as the app asks of one, and a test that fills it
+        # reads it.
+        self.configure(read_archive=False)
         for name in ("_FILENAME_PATTERN", "_PATTERN_OWNER", "_FILENAME_OWNER"):
             monkeypatch.setattr(core_storage, name, getattr(core_storage, name))
         monkeypatch.setattr(docs.App, "page", lambda app: self.bank)
@@ -286,6 +292,7 @@ def discover_stops(home) -> str:
 # -- a run that reads everything -------------------------------------------------
 
 def test_a_run_saves_the_postbox_and_the_archive_each_with_its_own_bytes(home):
+    home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1), tax("P2")]
     home.bank.lists["archive"] = [statement("A1", 1, 2019)]
     code, said = home.run_all()
@@ -298,6 +305,7 @@ def test_a_run_saves_the_postbox_and_the_archive_each_with_its_own_bytes(home):
 
 
 def test_discover_lists_both_and_fetches_nothing(home):
+    home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1)]
     home.bank.lists["archive"] = [tax("A1", 2019)]
     code, said = home.run("--discover")
@@ -309,6 +317,7 @@ def test_discover_lists_both_and_fetches_nothing(home):
 
 
 def test_a_second_run_takes_nothing_again_though_its_list_comes_in_another_order(home):
+    home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1), statement("P2", 2), tax("P3")]
     home.bank.lists["archive"] = [statement("A1", 1, 2019)]
     assert home.run_all()[0] == 0
@@ -321,6 +330,7 @@ def test_a_second_run_takes_nothing_again_though_its_list_comes_in_another_order
 
 
 def test_a_document_moved_to_the_archive_is_not_taken_again(home):
+    home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1), statement("P2", 2)]
     assert home.run_all()[0] == 0
     home.bank.lists["archive"] = [home.bank.lists["postbox"].pop()]
@@ -339,12 +349,133 @@ def test_a_pilot_then_a_run_takes_each_document_once(home):
     assert home.on_disk() == ["P1", "P2"]
 
 
-def test_an_empty_postbox_and_archive_are_a_whole_list(home):
+# -- a list that shows only ING's notice that nothing matches ------------------
+# A made-up list with no rows shows ING's notice, "Zu Ihrer Suche können keine
+# Dokumente angezeigt werden" ("empty"). ING shows it for an empty list and for
+# a search or filter that finds nothing (#203), so it never shows a list empty.
+
+def notice_said(area: str) -> str:
+    where = site.named(area)
+    return "!! %s shows no document, only ING's notice that nothing matches." % (
+        where[0].upper() + where[1:])
+
+
+@pytest.mark.parametrize("area,other", [("archive", "postbox"), ("postbox", "archive")])
+def test_a_list_showing_only_the_notice_is_left_out_and_the_run_stops_at_its_end(
+        home, area, other):
+    home.configure(read_archive=True)
+    home.bank.lists[other] = [statement("K1", 1)]
+    code, said = home.run_all()
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert home.on_disk() == ["K1"] and home.failed() == []
+    assert not home.listed_whole()
+    assert notice_said(area) in said
+    assert ("This run did not read %s, which showed only ING's notice that nothing "
+            "matches, so it stops here rather than finish." % site.named(area)) in said
+    if area == "archive":
+        assert 'set "read_archive" to false in config.json' in said
+    else:
+        assert "If ING shows a search or filter set on the Postbox, clear it there" in said
+    assert list((home.out / "Diagnostics").glob("failure-*.json"))
+
+
+def test_discover_with_a_list_showing_only_the_notice_records_the_rest_and_stops(home):
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    code, said = home.run("--discover")
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert len(home.store("discovery.json")) == 1
+    assert home.bank.fetched == [] and not home.listed_whole()
+    assert "Discovery read part of the list. Documents known: 1" in said
+    assert notice_said("archive") in said
+
+
+def test_an_empty_postbox_and_archive_stop_rather_than_finish(home):
+    home.configure(read_archive=True)
+    code, said = home.run_all()
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert home.on_disk() == [] and not home.listed_whole()
+    assert notice_said("postbox") in said and notice_said("archive") in said
+    assert "This run did not read the Postbox and the Postbox archive" in said
+
+
+def test_a_pilot_with_nothing_to_take_still_stops_when_a_list_was_left_out(home):
+    code, said = home.run("--pilot")
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert "No documents in scope to pilot." in said
+    assert notice_said("postbox") in said and not home.listed_whole()
+
+
+def test_a_document_whose_list_shows_only_the_notice_is_left_for_now_not_failed(home):
+    """A document listed before, whose list now shows only the notice (a
+    filter set in ING, say), is neither failed nor called gone. Nothing is
+    recorded for it, and a run that reads its list again takes it."""
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    home.bank.lists["archive"] = [statement("A1", 1, 2027)]
+    assert home.run("--discover")[0] == 0 and home.listed_whole()
+    held_back, home.bank.lists["archive"] = home.bank.lists["archive"], []
+    code, said = home.run_all()
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert home.on_disk() == ["P1"] and home.failed() == []
+    assert ("Left for now, since the Postbox archive shows no document, only ING's "
+            "notice that nothing matches.") in said
+    home.bank.lists["archive"] = held_back
     code, said = home.run_all()
     assert code == 0 and home.stopped is None
-    assert home.listed_whole()
-    assert home.on_disk() == []
-    assert "Discovery complete. Documents known: 0" in said
+    assert home.on_disk() == ["A1", "P1"] and home.listed_whole()
+
+
+def test_resume_leaves_a_document_whose_list_shows_only_the_notice_and_stops(home):
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    home.bank.lists["archive"] = [statement("A1", 1, 2019)]
+    assert home.run("--discover")[0] == 0 and home.listed_whole()
+    home.bank.lists["archive"] = []
+    code, said = home.run("--resume")
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert home.on_disk() == ["P1"] and home.failed() == []
+    assert not home.listed_whole()
+
+
+def test_a_list_left_out_stops_the_run_though_a_later_listing_reads_it(home, monkeypatch):
+    """What the run recorded came from a listing that left the archive out,
+    so the run is not whole, whatever a later look for one document reads."""
+    monkeypatch.setattr(site, "LISTING_SECONDS", 0)
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    opened, real = [], home.bank.goto
+
+    def goto(url, **kw):
+        if url == ARCHIVE:
+            opened.append(url)
+            if len(opened) == 2:
+                home.bank.lists["archive"] = [statement("A1", 1, 2019)]
+        real(url, **kw)
+
+    monkeypatch.setattr(home.bank, "goto", goto)
+    code, _said = home.run_all()
+    assert len(opened) >= 2
+    assert isinstance(home.stopped, ListNotRead) and code == 0
+    assert home.on_disk() == ["P1"] and not home.listed_whole()
+
+
+def test_a_run_that_left_a_list_out_and_stopped_for_a_sign_in_is_not_noted_whole(home):
+    """However the run ends, a listing that left a list out is not noted
+    whole, so a Resume after a sign-in says the list was not read rather
+    than finish with only what that listing held."""
+    home.configure(read_archive=True)
+    home.bank.lists["postbox"] = [statement("P1", 1)]
+    home.bank.answer_with["P1"] = "sign-in"
+    code, _said = home.run_all()
+    assert isinstance(home.stopped, SystemExit) and code == 0
+    assert not isinstance(home.stopped, ListNotRead)
+    assert not home.listed_whole()
+    home.bank.lists["archive"] = [statement("A1", 1, 2019)]
+    del home.bank.answer_with["P1"]
+    _code, said = home.run("--resume")
+    assert "The last run stopped before it read ING's whole list" in said
+    assert isinstance(home.stopped, ListNotRead)
 
 
 def test_read_archive_false_never_opens_the_archive(home):
@@ -360,6 +491,7 @@ def test_read_archive_false_never_opens_the_archive(home):
 def test_no_document_link_is_kept_on_disk(home):
     """A link carries the page it was read from, and may carry the session,
     so only the list's own address is written anywhere."""
+    home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1)]
     home.bank.lists["archive"] = [statement("A1", 1, 2019)]
     assert home.run_all()[0] == 0
@@ -486,6 +618,7 @@ def test_a_list_where_no_document_has_a_date_this_app_reads_is_not_read(home):
     ("blank", "showed no rows this app reads"),
 ])
 def test_a_list_not_read_whole_records_nothing_of_either_list(home, switch, words, area):
+    home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1)]
     home.bank.lists["archive"] = [statement("A1", 1, 2019)]
     getattr(home.bank, switch).add(area)
@@ -495,6 +628,7 @@ def test_a_list_not_read_whole_records_nothing_of_either_list(home, switch, word
 
 
 def test_a_run_whose_list_is_not_read_whole_fetches_nothing(home):
+    home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1)]
     home.bank.pager.add("archive")
     code, _said = home.run_all()
@@ -503,6 +637,7 @@ def test_a_run_whose_list_is_not_read_whole_fetches_nothing(home):
 
 
 def test_a_list_that_signs_out_partway_records_nothing(home):
+    home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1)]
     home.bank.lists["archive"] = [statement("A1", 1, 2019)]
     home.bank.signs_out_at = ARCHIVE

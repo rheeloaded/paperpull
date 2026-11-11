@@ -56,8 +56,9 @@ class Postbox:
     """The Postbox on screen, which Diagnose reads as it stands."""
     url = POSTBOX
 
-    def __init__(self, rows):
+    def __init__(self, rows, empty=False):
         self.rows = rows
+        self.empty = empty    # only ING's notice that nothing matches
         self.looks = []
 
     def locator(self, _selector):
@@ -72,7 +73,7 @@ class Postbox:
     def evaluate(self, _js, arg=None):
         assert isinstance(arg, dict) and "rowSelectors" in arg, "Diagnose only reads rows"
         self.looks.append(arg["scroll"])
-        return {"table_present": True, "settled": True, "truncated": False, "empty": False,
+        return {"table_present": True, "settled": True, "truncated": False, "empty": self.empty,
                 "pagination": 0, "rows": self.rows}
 
 
@@ -99,6 +100,22 @@ def test_diagnose_reads_the_postbox_on_screen_and_says_what_it_left_out(
     assert report["collected"] == 1 and "collect_error" not in report
     for said in (out, text):
         assert "/2026" not in said and "-rows-" not in said and "Kontoauszug" not in said
+
+
+def test_diagnose_says_when_the_list_on_screen_shows_only_the_notice(app, monkeypatch, capsys):
+    page = Postbox([], empty=True)
+    monkeypatch.setattr(app, "page", lambda: page)
+    monkeypatch.setattr(site, "survey", lambda page: {"pages": [], "responses": []})
+
+    app.cmd_diagnose()
+
+    out = " ".join(capsys.readouterr().out.split())
+    assert page.looks == [False]
+    assert "Rows collected: 0 " in out
+    assert ("The list on screen shows only ING's notice that nothing matches, which ING shows "
+            "for an empty list and for a search or filter that finds nothing.") in out
+    report = json.loads((app.paths.diagnostics / "diagnose-documents.json").read_text())
+    assert report["lists_showing_only_the_notice"] == 1 and "collect_error" not in report
 
 
 def test_diagnose_failure_is_reported_and_not_a_success(app, monkeypatch, capsys):

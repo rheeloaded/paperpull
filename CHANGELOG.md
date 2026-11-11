@@ -29,6 +29,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   download can be tried again, a half-copied app is removed, and the swap
   waits for the window to close before it opens the new app.
 
+### Fixed
+- **ING no longer takes the notice that nothing matches for an empty list
+  (#203).** A Postbox or archive with no document shows "Zu Ihrer Suche
+  können keine Dokumente angezeigt werden", and ING shows the same notice
+  for a search or filter that finds nothing, as @MelleD found on their own
+  account. ING read the notice as an empty list, so a filter still set in
+  ING could have made a run finish clean with a list it never read. Now a
+  list that shows only the notice is left out and named. The run takes the
+  other list's documents, records nothing against a document from the list
+  left out, and stops at its end rather than finish, as one whose list was
+  not read. If your archive is empty in ING, set `read_archive` to `false`
+  and runs leave it out. Diagnose says when the list on screen shows only
+  the notice.
+
 ## [0.63.0] - 2026-11-11
 
 ING saves the ING Postbox and its archive as the 87th app, American

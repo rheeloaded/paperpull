@@ -202,6 +202,10 @@ class App:
         self._context = None
         self._work_page = None
         self._cdp_mode = False
+        # The lists this run left out, since each showed only ING's notice
+        # that nothing matches (site.NotShownEmpty). Kept for the whole run,
+        # so a later listing that reads them does not make it end clean.
+        self._not_shown = set()
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -454,9 +458,12 @@ class App:
         return 0
 
 
-    def cmd_discover(self, quiet: bool = False) -> int:
+    def cmd_discover(self, quiet: bool = False, finish: bool = True) -> int:
         # A listing that stops on the way, however it stops, is noted as one
-        # that stopped, for Resume (paperpull_core.listing).
+        # that stopped, for Resume (paperpull_core.listing). A listing that
+        # left a list out is read, and the run then stops at its end rather
+        # than finish. With finish=False the caller does that, once it has
+        # taken the documents (_stop_if_not_whole).
         listing.started(self)
         page = self.page()
         if not site.ensure_statements(page):
@@ -513,14 +520,26 @@ class App:
         for d, (occ, sure) in zip(raw, self._numbered(raw)):
             n_new += self._record_statement_doc(d, occ, sure)
         self.discovery.save()
-        # The whole list is in, and only now may a Resume that carries on
-        # from it call the run finished (paperpull_core.listing).
-        listing.read_whole(self)
+        # A list that showed only ING's notice that nothing matches was left
+        # out, since the same notice stands for a search or filter that
+        # finds nothing (site.NotShownEmpty). The rest is recorded, and the
+        # listing stays one that stopped.
+        left = site.not_shown_empty()
+        self._not_shown.update(left)
+        for source in left:
+            self._say_not_shown(source)
+        if left:
+            self.write_failure("read the documents list", "a list could not be shown to be empty")
+        else:
+            # The whole list is in, and only now may a Resume that carries on
+            # from it call the run finished (paperpull_core.listing).
+            listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
-            print(f"\nDiscovery complete. Documents known: {len(docs)}")
+            print(f"\nDiscovery {'read part of the list' if left else 'complete'}. "
+                  f"Documents known: {len(docs)}")
             by_cat = {}
             for d in docs:
                 by_cat.setdefault(d.category, []).append(d)
@@ -536,7 +555,37 @@ class App:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
+        if finish:
+            self._stop_if_not_whole()
         return n_new
+
+    def _say_not_shown(self, source: str) -> None:
+        """Why a list was left out of this run, and what settles it."""
+        where = site.named(source)
+        print(f"\n!! {where[0].upper() + where[1:]} shows no document, only ING's notice that")
+        print("   nothing matches. ING shows that notice for an empty list and for a search")
+        print("   or filter that finds nothing, so this app cannot tell that it is empty.")
+        print("   It is left out of this run, which takes the rest and then stops rather")
+        print("   than call the list read.")
+        if source == "archive":
+            print('   If the archive is empty in ING, set "read_archive" to false in')
+            print("   config.json, and runs leave the archive out.")
+        else:
+            print("   If ING shows a search or filter set on the Postbox, clear it there,")
+            print("   then run this again.")
+
+    def _stop_if_not_whole(self) -> None:
+        """A run that left a list out did not read the whole list, and must
+        not read as a clean one. Once it has taken what it could, it leaves
+        on ListNotRead, the way a list that stops while the documents are
+        taken does, which the panel reports as a run that stopped and
+        offers a run that lists again for (paperpull_core.listing)."""
+        if not self._not_shown:
+            return
+        lists = " and ".join(site.named(s) for s in sorted(self._not_shown, reverse=True))
+        listing.read_again_stopped(self, (
+            "This run did not read %s, which showed only ING's notice that nothing "
+            "matches, so it stops here rather than finish." % lists))
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -618,6 +667,13 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.NotShownEmpty as notice:
+                # Its list, or one it may have moved to, shows only ING's
+                # notice that nothing matches, which a filter set in ING
+                # shows too. Nothing is recorded against it, the run takes
+                # the rest, and it stops at its end (_stop_if_not_whole).
+                print(f"  Left for now, since {notice}.")
+                self._not_shown.add(notice.source)
             except site.ListStopped as stop:
                 # The list, read again for this document, could not be read
                 # whole. Every document after it reads the same list, so the
@@ -803,14 +859,16 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.\n")
-        self.cmd_discover()
+        self.cmd_discover(finish=False)
         docs = self._select(limit=self.config.get("pilot_count", 5))
         if not docs:
             print("\nNo documents in scope to pilot. Run --diagnose.")
+            self._stop_if_not_whole()
             return
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
         self._pilot_report(docs)
+        self._stop_if_not_whole()
 
     def _pilot_report(self, docs: List[Document]):
         print("\n" + "=" * 70)
@@ -850,19 +908,22 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover()
+        self.cmd_discover(finish=False)
         docs = self._select()
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
+        self._stop_if_not_whole()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
         # Resume reads no list of its own. With nothing listed, or after a
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished
-        # (paperpull_core.listing).
+        # (paperpull_core.listing). A document whose list showed only ING's
+        # notice that nothing matches is left for now, and stops it too.
         docs = [d for d in self._select() if not self._already_done(d)]
         listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run))
+        self._stop_if_not_whole()
 
 
     def cmd_rename(self):
@@ -1012,6 +1073,7 @@ class App:
                 info[Fixed("collect_error")] = "%s: %s" % (type(e).__name__, e)
                 docs = None
             info["collected"] = len(docs) if docs is not None else None
+            info[Fixed("lists_showing_only_the_notice")] = len(site.not_shown_empty())
             info[Fixed("undated")] = site.undated()
             info[Fixed("skipped")] = site.skipped()
             info["samples"] = []
@@ -1063,6 +1125,9 @@ class App:
             print("Rows collected: unavailable (the list could not be read, see the detailed file).")
         else:
             print(f"Rows collected: {shape_tree(info['collected'], words)}")
+            if info.get(Fixed("lists_showing_only_the_notice")):
+                print("  The list on screen shows only ING's notice that nothing matches, which")
+                print("  ING shows for an empty list and for a search or filter that finds nothing.")
             passed = info.get(Fixed("skipped")) or {}
             print(f"  Left out: {shape_tree(info.get(Fixed('undated')), words)} without a "
                   f"readable date, {shape_tree(passed.get('unread'), words)} marked unread, "

@@ -280,10 +280,42 @@ def test_a_list_not_read_whole_stops(seen, said):
         site._read_area(page, "postbox", {})
 
 
-def test_an_empty_list_is_read_whole_with_nothing_in_it():
-    page = Page(areas={"postbox": EMPTY})
-    area = site._read_area(page, "postbox", {})
-    assert area["rows"] == [] and area["undated"] == 0
+@pytest.mark.parametrize("source,where", [("postbox", "the Postbox"),
+                                          ("archive", "the Postbox archive")])
+def test_a_list_showing_only_the_notice_is_not_read_as_empty(source, where):
+    """ING's notice that nothing matches is the same for an empty list and
+    for a search or filter that finds nothing (#203)."""
+    page = Page(url=site.URLS["archive" if source == "archive" else "documents"],
+                areas={source: EMPTY})
+    with pytest.raises(site.NotShownEmpty) as stop:
+        site._read_area(page, source, {}, navigate=False)
+    assert str(stop.value) == f"{where} shows no document, only ING's notice that nothing matches"
+    assert stop.value.source == source and isinstance(stop.value, site.ListStopped)
+
+
+def test_a_listing_leaves_out_a_list_showing_only_the_notice_and_names_it():
+    page = Page(areas={"postbox": look(row()), "archive": EMPTY})
+    rows = site._all_rows(page, {"read_archive": True}, fresh=True)
+    assert [r["source"] for r in rows] == ["postbox"]
+    assert site.not_shown_empty() == ["archive"]
+    assert site._listing["rows"] == rows
+    page.areas["archive"] = look(row("a1", base=ARCHIVE, date="31.01.2019"))
+    rows = site._all_rows(page, {"read_archive": True}, fresh=True)
+    assert [r["source"] for r in rows] == ["postbox", "archive"]
+    assert site.not_shown_empty() == []
+    page.areas["postbox"] = EMPTY
+    rows = site._all_rows(page, {"read_archive": True}, fresh=True)
+    assert [r["source"] for r in rows] == ["archive"]
+    assert site.not_shown_empty() == ["postbox"]
+
+
+def test_a_listing_that_stops_leaves_no_list_named_from_the_one_before():
+    page = Page(areas={"postbox": look(row()), "archive": EMPTY})
+    site._all_rows(page, {"read_archive": True}, fresh=True)
+    page.areas["postbox"] = look(row(), pagination=1)
+    with pytest.raises(site.ListStopped):
+        site._all_rows(page, {"read_archive": True}, fresh=True)
+    assert site.not_shown_empty() == []
 
 
 def test_rows_alike_are_told_apart_only_by_their_place():

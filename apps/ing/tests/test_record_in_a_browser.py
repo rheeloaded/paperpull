@@ -281,15 +281,18 @@ def empty_archive(page, monkeypatch):
     return page
 
 
-def test_an_empty_archive_with_column_headers_is_read_as_empty(empty_archive):
+def test_an_archive_showing_only_the_notice_is_not_read_as_empty(empty_archive):
+    """The notice is the one ING was seen to show for an empty archive. It
+    asks to check "Ihre Suche oder die Filterkriterien", and ING shows it
+    for a filter that finds nothing too (#203), so it is seen, and not taken
+    to show the archive empty."""
     before = empty_archive.url
 
     seen = site._look(empty_archive, scroll=False)
     assert seen["rows"] == []
     assert seen["empty"] is True and seen["settled"] is True
-    area = site._read_area(empty_archive, "archive", navigate=False, scroll=False)
-    assert area["rows"] == area["candidates"] == []
-    assert area["undated"] == 0
+    with pytest.raises(site.NotShownEmpty, match="only ING's notice that nothing matches"):
+        site._read_area(empty_archive, "archive", navigate=False, scroll=False)
     assert empty_archive.url == before and empty_archive.evaluate("window.clicked") is False
 
 
@@ -310,15 +313,15 @@ def test_column_headers_without_an_empty_notice_do_not_prove_an_empty_archive(em
 
 
 @pytest.mark.parametrize("notice,where", [
-    # The notice ING shows for an empty list, but outside the list's box,
-    # where a header or a side panel says something else.
+    # ING's notice that nothing matches, but outside the list's box, where
+    # a header or a side panel says something else.
     ("Zu Ihrer Suche können keine Dokumente angezeigt werden.", "body"),
     # No new messages, or a count, is not a list with nothing in it.
     ("Keine neuen Nachrichten", ".ibbr-table-wrapper-postbox"),
     ("0 Dokumente", ".ibbr-table-wrapper-postbox"),
     ("No messages", ".ibbr-table-wrapper-postbox"),
 ])
-def test_only_the_lists_own_empty_notice_reads_as_an_empty_list(empty_archive, notice, where):
+def test_only_the_notice_in_the_lists_own_box_is_seen_as_it(empty_archive, notice, where):
     empty_archive.locator("p").evaluate("node => node.remove()")
     empty_archive.locator(where).evaluate(
         '(node, text) => node.insertAdjacentHTML("beforeend", "<p>" + text + "</p>")', notice)
