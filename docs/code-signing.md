@@ -103,10 +103,12 @@ not transfer any information to other networked systems unless specifically
 requested by the user.
 
 Concretely, the only sites it contacts are the providers a user signs in to
-themselves, and only when the user starts a run. It does not phone home,
-check for updates, or send telemetry. The one download it may offer is a
-browser, at sign-in time, only if no usable browser is already on the
-machine, and only after the user agrees on screen. Everything it saves stays
+themselves, and only when the user starts a run. It does not phone home or
+send telemetry. It asks GitHub whether a newer version exists only when the
+user has turned that check on in Settings and then presses the button for
+it, and never at launch or in the background. The one other download it may
+offer is a browser, at sign-in time, only if no usable browser is already on
+the machine, and only after the user agrees on screen. Everything it saves stays
 on the user's own computer.
 
 ## Team

@@ -502,6 +502,7 @@ app = FastAPI(title="PaperPull", docs_url=None, redoc_url=None, openapi_url=None
 # PaperPull Server's sign-in, its gate and its browser screen. They do
 # nothing unless PAPERPULL_SERVER=1, which only the server image sets.
 import server_mode  # noqa: E402
+import updater  # noqa: E402
 
 server_mode.install(app)
 
@@ -6216,6 +6217,159 @@ async def api_terms(request: Request):
     except OSError as e:
         raise HTTPException(500, "Could not save the answer (%s)." % e)
     return {"accepted": TERMS_VERSION}
+
+
+# -- updates -----------------------------------------------------------------
+#
+# The panel can ask GitHub whether a newer PaperPull exists, and on a Mac
+# installed from the disk image, install it (gui/updater.py). PRIVACY.md says
+# the program contacts nothing unless the person asked, so nothing here runs
+# at launch or in the background. The check is off until the person turns it
+# on in Settings, and turning it on asks nobody: it shows the button that does.
+# The one request is the one that button starts, and the button says it
+# contacts github.com. The Store edition updates through the Store and
+# PaperPull Server through docker compose pull, so neither is offered any of
+# this (updater.offered, _desktop_only).
+
+_update_ability = {}
+
+
+def _updates_offered() -> None:
+    """Refuse the update routes where updates come some other way."""
+    _desktop_only()
+    if not updater.offered():
+        raise HTTPException(404, "this edition updates through the Microsoft Store")
+
+
+def _can_install_here() -> tuple:
+    """Whether this copy could replace itself. Asking codesign is slow enough
+    to do once."""
+    app_dir = updater.bundle_path()
+    key = str(app_dir)
+    if key not in _update_ability:
+        _update_ability[key] = updater.can_install(app_dir)
+    return _update_ability[key]
+
+
+def _update_state() -> dict:
+    s = _read_settings()
+    enabled = s.get("update_check") is True
+    latest = s.get("update_latest") if enabled else None
+    latest = latest if isinstance(latest, dict) else {}
+    ver = latest.get("version")
+    newer = bool(updater.parse_version(ver)) and updater.is_newer(ver, VERSION)
+    ok, why = _can_install_here()
+    checked = s.get("update_checked_at") if enabled else 0
+    return {
+        "current": VERSION,
+        "enabled": enabled,
+        "checked_at": checked if isinstance(checked, (int, float)) else 0,
+        "newer": newer,
+        "latest": ver if newer else "",
+        "page": updater.RELEASE_PAGE + "v" + ver if newer else "",
+        "can_install": bool(newer and ok and latest.get("installable")),
+        "why": "" if ok else why,
+        "install": updater.INSTALL.snapshot(),
+    }
+
+
+def _update_check() -> dict:
+    """Ask GitHub once, because the person pressed the button."""
+    s = _read_settings()
+    if s.get("update_check") is not True:
+        raise HTTPException(409, "The update check is off. Turn it on in Settings first.")
+    try:
+        rel = updater.check_latest(VERSION)
+    except updater.UpdateError as e:
+        raise HTTPException(502, str(e))
+    s["update_checked_at"] = time.time()
+    s["update_latest"] = {"version": rel["version"], "installable": bool(rel["asset"])}
+    try:
+        _write_settings(s)
+    except OSError as e:
+        raise HTTPException(500, "could not save the answer: %s" % e)
+    return _update_state()
+
+
+@app.get("/api/update", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                      Depends(_updates_offered)])
+def api_update():
+    """What is known, with no request to anyone."""
+    return _update_state()
+
+
+@app.post("/api/update/setting", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                               Depends(_updates_offered)])
+async def api_update_setting(request: Request):
+    """Turn the check on or off. Neither asks anybody anything."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "expected a JSON body")
+    if not isinstance(body, dict) or not isinstance(body.get("check"), bool):
+        raise HTTPException(400, "check must be true or false")
+    data = _read_settings()
+    data["update_check"] = body["check"]
+    if not body["check"]:
+        data.pop("update_latest", None)
+        data.pop("update_checked_at", None)
+    try:
+        _write_settings(data)
+    except OSError as e:
+        raise HTTPException(500, "could not save the answer: %s" % e)
+    return _update_state()
+
+
+@app.post("/api/update/check", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                             Depends(_updates_offered)])
+async def api_update_check():
+    """The person pressed Check github.com for an update. The only route
+    that asks GitHub whether a newer version exists."""
+    return await to_thread.run_sync(_update_check)
+
+
+@app.post("/api/update/install", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                               Depends(_updates_offered)])
+def api_update_install():
+    """Download the new version and prove it is genuine. Nothing is replaced
+    until the person presses restart."""
+    state = _update_state()
+    if not state["newer"]:
+        raise HTTPException(409, "PaperPull is up to date")
+    if not state["can_install"]:
+        raise HTTPException(409, state["why"] or "this copy cannot update itself")
+    updater.INSTALL.start(VERSION, updater.bundle_path())
+    return _update_state()
+
+
+def _exit_soon() -> None:
+    """Stop this panel a moment from now, after the answer has gone out. A
+    page streaming a run can hold a graceful stop open, so there is a second,
+    harder stop behind it."""
+    import signal
+
+    def go():
+        time.sleep(1.0)
+        os.kill(os.getpid(), signal.SIGINT)
+        time.sleep(4.0)
+        os._exit(0)
+    threading.Thread(target=go, daemon=True).start()
+
+
+@app.post("/api/update/restart", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                               Depends(_updates_offered)])
+def api_update_restart():
+    if _RUNS or _RUNNING:
+        raise HTTPException(409, "a download is running. Wait for it to finish, or stop it, "
+                                 "then restart to update.")
+    try:
+        updater.INSTALL.restart()
+    except updater.UpdateError as e:
+        raise HTTPException(409, str(e))
+    except OSError as e:
+        raise HTTPException(500, "could not start the update: %s" % e)
+    _exit_soon()
+    return {"restarting": True}
 
 
 # The line along the bottom of the page. The desktop one says the panel runs

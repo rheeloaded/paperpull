@@ -10,6 +10,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- **An update check that asks only when you press its button (#146).**
+  Settings has an Updates card, off until you turn it on. Turning it on
+  sends nothing. It shows **Check github.com for an update**, and each press
+  asks GitHub's release list once. Nothing is asked at launch or in the
+  background. On a Mac installed from the disk image, **Update now**
+  downloads the release's disk image. The new app has to match the SHA-256
+  GitHub recorded and carry the running app's Apple Team ID, checked again
+  just before the swap, or nothing is replaced. It goes in place when you
+  press **Restart and update**. Elsewhere the panel links to the release
+  page. The Microsoft Store edition and PaperPull Server show none of it.
+  PRIVACY.md and the README now name this one request.
 - **A sign-in starts its run by itself once it is done (#200).** Open sign-in
   window used to end with the person coming back to the panel to press
   Get new. Now the panel watches the sign-in window's tabs, their address

@@ -34,6 +34,9 @@ __CSS__
 <div id="notice" class="notice" role="status" hidden><span id="noticetext"></span><a id="noticelink" href="#/run" hidden></a>
   <button class="btn btn-ghost btn-sm" type="button" data-do="dismiss-notice">Dismiss</button></div>
 
+<div id="updatebar" class="notice" role="status" hidden><span id="updatetext"></span>
+  <div id="updatebtns" class="row-actions"></div></div>
+
 <main id="main" tabindex="-1">
 
 <!-- welcome, and adding providers later ----------------------------------- -->
@@ -345,6 +348,18 @@ __CSS__
         <label><input type="radio" name="theme" value="light">Light</label>
         <label><input type="radio" name="theme" value="dark">Dark</label></div>
       <p class="hint">Remembered in this browser only.</p></div>
+    </section>
+    <section class="card pad stack" aria-labelledby="g-upd" id="g-updcard">
+      <h2 id="g-upd">Updates</h2>
+      <p class="hint">PaperPull can ask github.com, where its releases are published, whether a newer version
+        exists. It is off until you turn it on, and even then it asks only when you press the button, never on its
+        own. That request carries nothing about you or your accounts beyond what any request reveals, such as your
+        address. On a Mac installed from the disk image it can also download the new version, check it is the one
+        GitHub published and signed by the same publisher, and install it when you say so.</p>
+      <p id="updstatus" role="status"></p>
+      <div class="row-actions"><button class="btn btn-s" type="button" id="updtoggle" data-do="upd-toggle"></button>
+        <button class="btn btn-s" type="button" id="updcheck" data-do="upd-check" hidden>Check github.com for an update</button>
+        <span class="hint" id="updmsg" role="status"></span></div>
     </section>
     <section class="card pad stack" aria-labelledby="g-about">
       <h2 id="g-about">About PaperPull</h2>
