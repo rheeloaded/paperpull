@@ -49,6 +49,7 @@
     "golden1": {"gets": "Statements and tax forms", "group": "banks"},
     "homedepot": {"gets": "Online and store receipts, about two years online", "group": "shopping"},
     "ibkr": {"gets": "Monthly activity statements", "group": "investing"},
+    "ing": {"gets": "Kontoauszüge, card statements, securities documents and tax certificates", "group": "banks", "note": "Tested on one account so far, a populated archive not yet"},
     "irs": {"gets": "Account, return, wage and income, and record of account transcripts", "group": "bills", "note": "Tested on one account so far"},
     "kroger": {"gets": "In-store, fuel, pickup and delivery receipts", "group": "shopping"},
     "lowes": {"gets": "Store and online receipts and returns, back to 2023", "group": "shopping"},

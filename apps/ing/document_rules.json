@@ -1,0 +1,92 @@
+{
+  "_comment": "Filename summary rules for ING Postbox titles. Case-insensitive regexes are checked in order: tax, then statement. A title that matches no rule can still be downloaded and named after its category. So far the app has only been checked against one contributor's own documents; the rules have not been verified for all ING document types.",
+  "tax_rules": [
+    {
+      "pattern": "jahressteuerbescheinigung",
+      "summary": "Jahressteuerbescheinigung"
+    },
+    {
+      "pattern": "verlustbescheinigung",
+      "summary": "Verlustbescheinigung"
+    },
+    {
+      "pattern": "freistellungsauftrag",
+      "summary": "Freistellungsauftrag"
+    },
+    {
+      "pattern": "ertr(ae|ä)gnisaufstellung",
+      "summary": "Ertraegnisaufstellung"
+    },
+    {
+      "pattern": "steuerbescheinigung|steuer",
+      "summary": "Steuerbescheinigung"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "kreditkarten?abrechnung|kreditkarte",
+      "summary": "Kreditkartenabrechnung"
+    },
+    {
+      "pattern": "depotauszug|depot\\s*auszug|verm(oe|ö)gensaufstellung",
+      "summary": "Depotauszug"
+    },
+    {
+      "pattern": "^verkauf\\b|abrechnung\\s+verkauf|wertpapier\\w*\\s+verkauf",
+      "summary": "Wertpapierabrechnung Verkauf"
+    },
+    {
+      "pattern": "^kauf\\b|abrechnung\\s+(kauf|sparplan)|wertpapier\\w*\\s+kauf",
+      "summary": "Wertpapierabrechnung Kauf"
+    },
+    {
+      "pattern": "wertpapierabrechnung|\\babrechnung\\s+wkn",
+      "summary": "Wertpapierabrechnung"
+    },
+    {
+      "pattern": "ertragsabrechnung|dividende|aussch(ue|ü)ttung",
+      "summary": "Ertragsabrechnung"
+    },
+    {
+      "pattern": "kapitalma(ss|ß)nahme",
+      "summary": "Kapitalmassnahme"
+    },
+    {
+      "pattern": "fondssparpl(ae|ä)n|sparplan",
+      "summary": "Sparplanabrechnung"
+    },
+    {
+      "pattern": "kosteninformation|ex-?ante|ex-?post",
+      "summary": "Kosteninformation"
+    },
+    {
+      "pattern": "rechnungsabschluss",
+      "summary": "Rechnungsabschluss"
+    },
+    {
+      "pattern": "vollmacht",
+      "summary": "Vollmacht"
+    },
+    {
+      "pattern": "einlagensicherung",
+      "summary": "Informationsbogen Einlagensicherung"
+    },
+    {
+      "pattern": "kontoauszug",
+      "summary": "Kontoauszug"
+    },
+    {
+      "pattern": "preis-?\\s*und\\s*leistung",
+      "summary": "Preis- und Leistungsverzeichnis"
+    },
+    {
+      "pattern": "bedingungen|vertrag|vereinbarung",
+      "summary": "Vertragsinformation"
+    },
+    {
+      "pattern": "mitteilung|information|schreiben",
+      "summary": "Mitteilung"
+    }
+  ]
+}

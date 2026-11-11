@@ -74,7 +74,7 @@ import re
 import time
 from typing import Callable, Optional
 
-from .api_census import kind_of as _kind_of
+from .api_census import kind_of as _kind_of, query_keys as _query_keys
 from .browser import can_ask
 from .characters import whole_json
 from .failure import SAFE_TAGS as _SAFE_TAGS
@@ -617,11 +617,12 @@ class Recorder:
                  is_safe_url: Callable[[str], bool],
                  looks_signed_out: Optional[Callable] = None,
                  is_safe_control: Optional[Callable[[str], bool]] = None,
-                 provider: str = "", words=None):
+                 provider: str = "", words=None, include_html: bool = False):
         self.page = page
         self._is_safe_url = is_safe_url
         self._looks_signed_out = looks_signed_out
         self._is_safe_control = is_safe_control
+        self._include_html = include_html
         self.provider = provider
         # The app's own words on top of the fixed list, its name and its
         # site module's, so "PayPal" in an address reads as itself.
@@ -960,7 +961,8 @@ class Recorder:
         step = self._current()
         if step is not None:
             step["effect"]["navigated"] = True
-            step["effect"]["landed_on"] = shape_url(frame.url or "", self.words)[:200]
+            step["effect"]["landed_on"] = shape_url(
+                frame.url or "", self.words, query=not self._include_html)[:200]
         self._install()
 
     def _on_new_tab(self, page) -> None:
@@ -1048,40 +1050,53 @@ class Recorder:
             pass
 
     def _on_response(self, response) -> None:
-        """The JSON and PDF a step set off, as names and shapes. A request
-        to anywhere but the provider is counted and not described."""
-        if len(self.requests) >= _MAX_REQUESTS:
-            return
+        """Record response metadata and JSON shapes, never HTML bodies. A
+        request to anywhere but the provider is counted and not described."""
         try:
             url = response.url or ""
             if not self._is_safe_url(url):
                 self.dropped["off_host_request"] += 1
                 return
             kind = (response.headers.get("content-type") or "").lower()
-            if "json" not in kind and "pdf" not in kind:
+            response_type = _kind_of(kind)
+            html = self._include_html and response_type == "html"
+            if html and response.request.resource_type not in ("document", "xhr", "fetch"):
+                return
+            if response_type not in ("json", "pdf") and not html:
+                return
+            if len(self.requests) >= _MAX_REQUESTS:
+                key = Fixed("request_limit")
+                self.dropped[key] = self.dropped.get(key, 0) + 1
                 return
             step = self._current()
             entry = {
                 "step": step["i"] if step else None,
                 "url": shape_url(url, self.words, query=False)[:200],
                 "status": _count(response.status),
-                "type": _kind_of(kind),
+                "type": response_type,
             }
-            query = shape_query(url, self.words)
-            if query:
-                entry["query"] = query[:240]
+            if html:
+                keys = _query_keys(url)
+                if keys:
+                    entry["query_keys"] = keys
+            else:
+                query = shape_query(url, self.words)
+                if query:
+                    entry["query"] = query[:240]
             try:
                 method = str(response.request.method or "").upper()
                 entry["method"] = method if method in _METHODS else "other"
-                body = response.request.post_data or ""
-                if body.lstrip().startswith("{"):
-                    import json as _json
-                    parsed = whole_json(_json.loads(body))
-                    if isinstance(parsed, dict):
-                        entry["post_keys"] = sorted(
-                            shape(str(k), self.words)[:40] for k in parsed)[:30]
+                if not html:
+                    body = response.request.post_data or ""
+                    if body.lstrip().startswith("{"):
+                        import json as _json
+                        parsed = whole_json(_json.loads(body))
+                        if isinstance(parsed, dict):
+                            entry["post_keys"] = sorted(
+                                shape(str(k), self.words)[:40] for k in parsed)[:30]
             except Exception:
-                pass
+                if html:
+                    raise
             if "json" in kind:
                 size = 0
                 try:
@@ -1099,7 +1114,8 @@ class Recorder:
             if step is not None:
                 step["effect"]["requests"] += 1
         except Exception:
-            pass
+            key = Fixed("unreadable_response")
+            self.dropped[key] = self.dropped.get(key, 0) + 1
 
     def _json_shape(self, obj, depth: int = 0):
         """The shape of a JSON answer, never its values. Keys are the
@@ -1168,8 +1184,13 @@ class Recorder:
         for s in self.steps:
             kinds[s["action"]] = kinds.get(s["action"], 0) + 1
         parts = ", ".join("%d %s" % (n, k) for k, n in sorted(kinds.items()))
-        return "%d step(s)%s, %d provider request(s)" % (
+        summary = "%d step(s)%s, %d provider request(s)" % (
             len(self.steps), " (" + parts + ")" if parts else "", len(self.requests))
+        if self.dropped.get("request_limit"):
+            summary += "; request limit reached, some responses were not recorded"
+        if self.dropped.get("unreadable_response"):
+            summary += "; %d response(s) could not be recorded" % self.dropped["unreadable_response"]
+        return summary
 
 
 # ---------------------------------------------------------------------------
@@ -1441,12 +1462,14 @@ def _wait_for_stop(page, stop_file, say) -> None:
 
 
 def record_session(page, site, diagnostics_dir, provider: str = "",
-                   owner: str = "", say=print) -> Optional[str]:
+                   owner: str = "", say=print, *, include_html: bool = False) -> Optional[str]:
     """Start a recording on `page`, wait for the person, write the file.
 
     `site` is the app's own site module, for the two host checks and its
     control guard. Returns the path written, or None if it refused or
-    recorded no step, so an app never ends an empty one as a saved file."""
+    recorded no step, so an app never ends an empty one as a saved file.
+    With include_html, record HTML response metadata without bodies or query
+    values, and omit navigation query strings from step effects."""
     from .redact import set_private_words
     from .words import write_shaped
     from pathlib import Path
@@ -1466,13 +1489,16 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
                    is_safe_url=site.is_safe_url,
                    looks_signed_out=getattr(site, "looks_signed_out", None),
                    is_safe_control=getattr(site, "is_safe_control", None),
-                   provider=provider, words=words)
+                   provider=provider, words=words, include_html=include_html)
     why = rec.refusal()
     if why:
         say("Not recording, because %s." % why)
         return None
 
     say(_CONSENT)
+    if include_html:
+        say("HTML navigation and request addresses are recorded as shapes; "
+            "their bodies are not read.")
     if not owner:
         # A name leaves as its shape because it is not on the word list. A
         # name that is also a word on it, Bill or May, is told apart only

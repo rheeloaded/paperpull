@@ -138,6 +138,31 @@ def test_nothing_personal_from_the_template_is_copied(templates, settings, tmp_p
     assert "Someone Real" not in json.dumps(cfg), "the template's real config leaked"
 
 
+def test_runtime_data_from_a_checkout_never_reaches_an_install(templates, settings, tmp_path):
+    source = templates / "bank"
+    private = (
+        "last-listing.json", "panel-runs.json", "panel-runs.json.tmp",
+        "new-this-run.txt", "run-summary.txt", "Bank Document Index.csv",
+        "Bank Document Index.CSV.BAK", "statement.PDF", "statement.zip",
+        "run.log", "progress.json.bak", "config.json.save", "plans.json",
+        "plans.json.bak", "other.json.orig",
+    )
+    for name in private:
+        (source / name).write_text("source account data", encoding="utf-8")
+
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["bank"]})
+    installed = home / "Bank Statements"
+    for name in private:
+        assert not (installed / name).exists(), name
+        (installed / name).write_text("own account data", encoding="utf-8")
+
+    (source / "bank_site.py").write_text("# updated\n", encoding="utf-8")
+    assert "bank_site.py" in app_module.refresh_install_code(installed, source)
+    for name in private:
+        assert (installed / name).read_text(encoding="utf-8") == "own account data", name
+
+
 def test_a_checkout_keeps_the_launchers_in_a_new_install(templates, settings, tmp_path):
     home = tmp_path / "home"
     _create({"root": str(home), "providers": ["bank"]})

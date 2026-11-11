@@ -1638,16 +1638,17 @@ _NOTHING_TO_TAKE = ("Completed", "No Longer Listed")
 # switch, since whose it is cannot be told. Discover Bank passes over an
 # account its menu holds with no usable id, and that run stops at its end, so
 # it would settle nothing anyway. Chase leaves out a statement its page saves
-# only through a menu, which it never presses. The others pass over a row they
-# cannot date or open.
+# only through a menu, which it never presses. ING leaves a document its
+# Postbox marks unread alone when include_unread is false. The others pass
+# over a row they cannot date or open.
 # gui/tests/test_accounts.py finds these by a log line written out as one
 # string. An app can also pass over a document and say so some other way, or
 # leave no trace at all, as Citi does with a requested statement not ready yet
 # and PayPal with a report still being made, which is why _settled waits for
 # a second run on another day.
 _LISTS_LEAVE_OUT = frozenset({"aafmaa", "affirm", "ally", "amex", "amfam", "applecard",
-                              "chase", "discoverbank", "dkb", "golden1", "ibkr", "sba",
-                              "statefarm", "tsp", "wellsfargo"})
+                              "chase", "discoverbank", "dkb", "golden1", "ibkr", "ing",
+                              "sba", "statefarm", "tsp", "wellsfargo"})
 
 
 def _gap_keys(gaps) -> list:
@@ -2658,22 +2659,30 @@ _TEMPLATE_SKIP = {".venv", "__pycache__", ".pytest_cache", "tests", "Backups",
                   "Logs", "Diagnostics", "Manual Review", "config.json",
                   "progress.json", "discovery.json"}
 
+_PERSONAL_RUNTIME_FILES = ("config.json", "progress.json", "discovery.json",
+                           "last-listing.json", "panel-runs.json", "plans.json",
+                           "new-this-run.txt", "run-summary.txt")
+
 
 def _is_someones_own(name: str) -> bool:
     """A file that belongs to whoever set that folder up, not to the code.
 
-    config.json was listed by name, and a second person's account is
-    config.<label>.json, which no list knew about. In a checkout used as
-    the template root, one of those on disk would have been copied into
-    every install as though it were part of the app, handing them an
-    account nobody asked for, pointing at somebody else's folders and
-    carrying their name. config.example.json is the one that does ship,
-    because it is the template for a config rather than one.
+    A checkout used as the template root can hold an account's config,
+    document index, run history and backups beside the code. None should
+    travel to another install. The example config is the one that ships.
     """
     low = name.lower()
     if low == "config.example.json":
         return False
-    return low.startswith("config.") and low.endswith(".json")
+    return (any(low == item or low.startswith(item + ".") for item in _PERSONAL_RUNTIME_FILES)
+            or (low.startswith("config.") and low.endswith(".json"))
+            or low.endswith((".pdf", ".zip", ".csv", ".log", ".json.bak",
+                             ".json.orig", ".csv.bak")))
+
+
+def _skip_template_part(name: str) -> bool:
+    return (name in _TEMPLATE_SKIP or _is_someones_own(name)
+            or "browser-profile" in name.lower())
 
 
 def _templates_root() -> Path | None:
@@ -2799,14 +2808,9 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
     # (_launcher_left_out).
     for item in src.rglob("*"):
         rel = item.relative_to(src)
-        # Exact names, plus anything profile-shaped. A profile folder is
-        # named <slug>-browser-profile, and in a repo checkout it can be
-        # sitting there signed in. The test that copies a fake one with a
-        # Cookies file inside is what caught this.
-        if any(part in _TEMPLATE_SKIP or _is_someones_own(part)
-               or "browser-profile" in part.lower()
-               or part.lower().endswith(".pdf")
-               for part in rel.parts):
+        # A checkout used as a template can hold a signed-in profile and
+        # personal runtime files beside its source.
+        if any(_skip_template_part(part) for part in rel.parts):
             continue
         if _launcher_left_out(item):
             continue
@@ -2941,9 +2945,7 @@ def _template_files(src: Path):
         if item.is_dir():
             continue
         rel = item.relative_to(src)
-        if any(part in _TEMPLATE_SKIP or _is_someones_own(part)
-               or "browser-profile" in part.lower()
-               or part.lower().endswith(".pdf") for part in rel.parts):
+        if any(_skip_template_part(part) for part in rel.parts):
             continue
         if _launcher_left_out(item):
             continue
@@ -6336,4 +6338,3 @@ def _page() -> str:
 
 
 HTML = _page()
-

@@ -1,0 +1,42 @@
+ING DOCUMENTS  -  commands   (READ-ONLY)
+============================================================
+Run these from the PaperPull folder (paperpull.bat on Windows,
+./paperpull on macOS). login.bat is the one double-click that stays.
+
+  Task            You                                 Spouse
+  --------------  ----------------------------------  ----------------------------------
+  Sign in         login.bat                           login.bat spouse
+  Look (no d/l)   paperpull ing diagnose            paperpull ing diagnose --account spouse
+  List (no d/l)   paperpull ing discover            paperpull ing discover --account spouse
+  Pilot (test)    paperpull ing pilot               paperpull ing pilot --account spouse
+  Full run        paperpull ing all                 paperpull ing all --account spouse
+  Continue        paperpull ing resume              paperpull ing resume --account spouse
+  Re-check PDFs   paperpull ing verify              paperpull ing verify --account spouse
+  Record          paperpull ing record              paperpull ing record --account spouse
+
+Tested on one real ING account so far; a populated archive and some document
+types have not been checked. Test it in this order:
+FLOW:  login.bat  ->  paperpull ing diagnose  ->  paperpull ing discover
+       ->  paperpull ing pilot  ->  paperpull ing pilot  ->  paperpull ing all
+Sign in yourself, open the Postbox, keep the browser OPEN.
+The second pilot must save nothing new. When a step stops, its message
+says which list and why. Send it with the diagnose output, run with that
+list open. Review the Diagnostics files before sharing them; never commit
+them.
+
+READ-ONLY: downloads the PDFs in the ING Postbox and its archive only. It
+NEVER clicks anything there, transfers money, sets up a standing order,
+buys or sells securities, changes a limit, locks a card, archives or
+deletes a message, or changes any setting. Whether a download marks a
+document read is not known; documents marked unread are downloaded too
+unless include_unread is false in the config.
+
+Scope: Kontoauszuege (Girokonto, Extra-Konto), Kreditkartenabrechnungen,
+Wertpapierdokumente, Steuerbescheinigungen, Vertragsinformationen,
+Mitteilungen.
+Statements and tax documents contain your IBAN and tax data - handle
+accordingly.
+
+Your files: this folder (Kontoauszuege\, Wertpapierdokumente\, ...).
+Spouse's:  "ING Statements - spouse".
+Full command reference: COMMANDS.txt in the parent folder.

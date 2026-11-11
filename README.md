@@ -95,6 +95,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`dkb`](apps/dkb) | DKB (Deutsche Kreditbank) | Kontoauszüge, Kreditkartenabrechnungen, Wertpapierdokumente, Steuerbescheinigungen, Vertragsinformationen and Mitteilungen, from the Postfach and its archive | **Contributed by [@tabacha](https://github.com/tabacha), 611 documents saved on a full run of the contributor's own account.** The Postfach's own API from inside the page, nothing clicked. DKB answers 500 for most archived securities documents, which its own page cannot open either |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
 | [`ebay`](apps/ebay) | eBay | Order receipts, ten years of purchase history | **Confirmed by [@jpfieber](https://github.com/jpfieber), every order back to 2017.** Order-details page rendered to PDF, nothing clicked but the order list's Show more, real Edge/Chrome. Requested in [#44](https://github.com/rheeloaded/paperpull/issues/44) |
+| [`ing`](apps/ing) | ING (ING-DiBa) | Kontoauszüge, Kreditkartenabrechnungen, Wertpapierdokumente, Steuerbescheinigungen, Vertragsinformationen and Mitteilungen, from the Postbox and its archive | **Tested on one contributor's account so far.** The Postbox rows are read from the page and each PDF fetched from inside it, nothing clicked. A populated archive and some document types have not been checked. Requested in [#169](https://github.com/rheeloaded/paperpull/issues/169) |
 | [`lowes`](apps/lowes) | Lowe's Home Improvement | Store and online receipts, and returns | **Built on the maintainer's own account.** The purchase history read by address, each purchase's details page saved as the receipt, nothing clicked, real Edge/Chrome |
 | [`homedepot`](apps/homedepot) | The Home Depot | Order receipts, with model and store SKU numbers | **Built on the maintainer's own account.** The history through the page's own request, Home Depot's own print receipt taken without opening the print dialog, nothing clicked, real Edge/Chrome. Home Depot keeps two years online |
 | [`etrade`](apps/etrade) | E*TRADE | Statements, trade confirmations, tax forms | **Confirmed by [@watling777](https://github.com/watling777)**, whose Pilot and full run saved every statement ([#36](https://github.com/rheeloaded/paperpull/issues/36)). No tax form seen yet |
@@ -895,7 +896,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
   supported and the five still waiting for a tester, 35,564 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
-  and in [Thanks](#thanks).
+  and in [Thanks](#thanks). ING, the eighty-seventh, adds its own
+  automated suite and has been run on one contributor's account.
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with
   every release since 0.43.0 as `ghcr.io/rheeloaded/paperpull-server`.
   See [PaperPull Server](#paperpull-server).

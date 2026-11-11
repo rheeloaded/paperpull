@@ -20,6 +20,9 @@ config.*.json
 # Runtime state / output
 discovery.json
 progress.json
+# Whether the last listing was read whole, and when.
+last-listing.json
+panel-runs.json
 # NetBenefits keeps the plans of a sign-in with several here, with the
 # site's own plan and employer numbers in their addresses.
 plans.json
