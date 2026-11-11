@@ -59,7 +59,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
+from paperpull_core.urls import join as join_url
 
 from paperpull_core import pdf_reader
 from paperpull_core import intake
@@ -1023,7 +1024,7 @@ def receipt_links(card: RawCard) -> List[dict]:
         words = f"{ln.get('text', '')} {ln.get('label', '')} {ln.get('href', '')}"
         if not re.search(r"receipt|invoice|download|view|details|order", words, re.I):
             continue
-        href = urljoin(BASE, ln.get("href") or "")
+        href = join_url(BASE, ln.get("href") or "")
         if not is_receipt_address(href):
             continue
         name = ln.get("text") or ln.get("label") or "Receipt"
@@ -1206,7 +1207,7 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
         return None
     c, el = picked
     label = c["text"] or c["label"]
-    href = urljoin(BASE, c["href"] or "")
+    href = join_url(BASE, c["href"] or "")
     if c["href"] and is_safe_url(href):
         body = fetch_receipt_bytes(page, href)
         if body:
@@ -1467,7 +1468,7 @@ def _href_kind(h: str) -> str:
         return "script"
     if h.startswith("#"):
         return "fragment"
-    return "meijer" if is_safe_url(urljoin(BASE, h)) else "elsewhere"
+    return "meijer" if is_safe_url(join_url(BASE, h)) else "elsewhere"
 
 
 def goto_receipt_page(page, url: str) -> bool:

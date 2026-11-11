@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from paperpull_core import intake
+from paperpull_core.urls import host_matches, host_of
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 
@@ -348,8 +349,7 @@ def is_anthem_owned(url: str) -> bool:
         return False
     if got.scheme != "https" or got.username or got.password:
         return False
-    host = (got.hostname or "").lower()
-    return host == "anthem.com" or host.endswith(".anthem.com")
+    return host_matches(host_of(url), ("anthem.com",))
 
 
 def is_anthem_owned_page(page) -> bool:

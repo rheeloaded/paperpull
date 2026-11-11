@@ -104,7 +104,8 @@ from pathlib import Path
 from typing import List, Optional
 import time as _time
 from datetime import timedelta as _td, timezone as _tz
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
+from paperpull_core.urls import join as join_url
 
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -594,7 +595,7 @@ def _messages_next(j: dict, asked: set) -> str:
     nxt = links.get("next") if isinstance(links, dict) else None
     if not nxt:
         return ""
-    nxt = urljoin(BASE + "/", str(nxt))
+    nxt = join_url(BASE + "/", str(nxt))
     parts = urlsplit(nxt)
     if (not is_safe_url(nxt) or parts.netloc != urlsplit(BASE).netloc
             or parts.path != urlsplit(API["messages"]).path or nxt in asked):

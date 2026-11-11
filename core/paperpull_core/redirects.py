@@ -29,7 +29,7 @@ only this module reads where a redirect points.
 from __future__ import annotations
 
 import logging
-from urllib.parse import urljoin
+from paperpull_core.urls import join as join_url
 
 log = logging.getLogger("paperpull.redirects")
 
@@ -76,7 +76,7 @@ def get(client, url: str, is_safe_url, *, hops: int = HOPS, params=None, **kwarg
             return resp
         # Read against the address asked, which with max_redirects=0 is the
         # answer's own, `params` and all.
-        onward = urljoin(resp.url or url, where)
+        onward = join_url(resp.url or url, where)
         if not is_safe_url(onward):
             log.info("a redirect led off the app's own hosts and was not followed")
             return resp

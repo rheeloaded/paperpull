@@ -88,12 +88,12 @@ def stand_in(monkeypatch, app):
     monkeypatch.setattr(app, "check_session", lambda page: None)
 
 
-def download(app, monkeypatch, names, doc=None):
+def download(app, monkeypatch, names, doc=None, bodies=None):
     """The app saves a form whose dialog lists `names`, and each file's bytes
-    say which download it was."""
+    say which download it was, a PDF's unless `bodies` says otherwise."""
     doc = doc or a_form()
     stand_in(monkeypatch, app)
-    bodies = [PDF_START + name.encode() for name in names]
+    bodies = bodies or [PDF_START + name.encode() for name in names]
     monkeypatch.setattr(app_mod.site, "resolve_tax_file_links",
                         lambda page, account, title: ["http://example.com/" + n for n in names])
     page = MagicMock()
@@ -167,6 +167,136 @@ def test_a_name_taken_is_counted_once(tmp_path, monkeypatch):
     assert app.stats["duplicate_filenames"] == 0
     download(app, monkeypatch, ["corrected.pdf"], a_form("Second Form"))
     assert app.stats["duplicate_filenames"] == 1
+
+
+# -- what a form set's other files may be saved as -----------------------------
+
+FOLDER = ("Wealthfront", "Investing", "2031")
+A_SCRIPT = b"#!/bin/sh\necho invented\n"
+
+
+def _saved(app):
+    folder = app.paths.tax_documents.joinpath(*FOLDER)
+    return sorted(p.name for p in folder.iterdir())
+
+
+SET_ASIDE = ("1 file of the form set kept in Manual Review, since it was neither a PDF "
+             "nor a spreadsheet, CSV, text or ZIP file")
+
+
+def _held(app):
+    """Each file in Manual Review by its bytes."""
+    return {p.read_bytes(): p.name for p in app.paths.manual_review.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("name, held", [
+    ("run.command", "2031-12-31 Tax Document (2 of 2) command.held"),
+    ("run.terminal", "2031-12-31 Tax Document (2 of 2) terminal.held"),
+    ("run.sh", "2031-12-31 Tax Document (2 of 2) sh.held"),
+    ("run.app", "2031-12-31 Tax Document (2 of 2) app.held"),
+    ("run.bat", "2031-12-31 Tax Document (2 of 2) bat.held"),
+    ("run.cmd", "2031-12-31 Tax Document (2 of 2) cmd.held"),
+    ("run.exe", "2031-12-31 Tax Document (2 of 2) exe.held"),
+    ("run.js", "2031-12-31 Tax Document (2 of 2) js.held"),
+    ("run.vbs", "2031-12-31 Tax Document (2 of 2) vbs.held"),
+    ("run.ps1", "2031-12-31 Tax Document (2 of 2) ps1.held"),
+    ("run.hta", "2031-12-31 Tax Document (2 of 2) hta.held"),
+    ("run.lnk", "2031-12-31 Tax Document (2 of 2) lnk.held"),
+    ("run.scr", "2031-12-31 Tax Document (2 of 2) scr.held"),
+    ("run.PDF.command", "2031-12-31 Tax Document (2 of 2) command.held"),
+    ("run.xlsm", "2031-12-31 Tax Document (2 of 2) xlsm.held"),
+    ("run.c$o m", "2031-12-31 Tax Document (2 of 2) com.held"),
+    ("run", "2031-12-31 Tax Document (2 of 2).held"),
+    ("", "2031-12-31 Tax Document (2 of 2).held"),
+])
+def test_a_file_that_is_no_pdf_under_another_ending_is_held_where_nothing_opens_it(
+        tmp_path, monkeypatch, name, held):
+    """The name comes from the answer. Kept under its own ending, a .command
+    or a .bat would run on a double click, with no mark that it came from
+    the web. It is not deleted either, since it may be the only copy."""
+    app = make_app(tmp_path)
+    doc, bodies = download(app, monkeypatch, ["form.pdf", name],
+                           bodies=[PDF_START + b"form", A_SCRIPT])
+    assert _saved(app) == ["2031-12-31 Tax Document.pdf"]
+    assert A_SCRIPT not in files(app.paths.tax_documents)
+    assert _held(app) == {A_SCRIPT: held}
+    rec = stored(app, doc)
+    assert rec["invoices"] is None
+    assert rec["notes"] == SET_ASIDE
+    assert app.stats["new_files"] == [str(app.paths.tax_documents.joinpath(
+        *FOLDER, "2031-12-31 Tax Document.pdf"))]
+    assert app.stats["manual_review"] == 1
+    assert rec["state"] == State.COMPLETED.value
+
+
+def _zip_of(**members) -> bytes:
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, body in members.items():
+            z.writestr(name.replace("_", "."), body)
+    return buf.getvalue()
+
+
+def test_a_zip_under_another_ending_is_opened_as_a_zip(tmp_path, monkeypatch):
+    """As before the endings were limited, a ZIP holding one PDF gives that PDF."""
+    app = make_app(tmp_path)
+    inner = PDF_START + b"corrected"
+    doc, _bodies = download(app, monkeypatch, ["form.pdf", "bundle"],
+                            bodies=[PDF_START + b"form", _zip_of(corrected_pdf=inner)])
+    assert _saved(app) == ["2031-12-31 Tax Document (2 of 2).pdf",
+                           "2031-12-31 Tax Document.pdf"]
+    assert bodies_listed(stored(app, doc))[1] == inner
+    assert _held(app) == {}
+
+
+def test_a_zip_holding_anything_else_is_kept_whole_as_a_zip(tmp_path, monkeypatch):
+    app = make_app(tmp_path)
+    archive = _zip_of(run_command=A_SCRIPT)
+    doc, _bodies = download(app, monkeypatch, ["form.pdf", "bundle.exe"],
+                            bodies=[PDF_START + b"form", archive])
+    assert _saved(app) == ["2031-12-31 Tax Document (2 of 2).zip",
+                           "2031-12-31 Tax Document.pdf"]
+    assert bodies_listed(stored(app, doc))[1] == archive
+
+
+@pytest.mark.parametrize("name", ["corrected.command", "corrected.exe", "corrected", ""])
+def test_a_pdf_under_another_ending_is_kept_as_a_pdf(tmp_path, monkeypatch, name):
+    app = make_app(tmp_path)
+    doc, bodies = download(app, monkeypatch, ["form.pdf", name])
+    assert _saved(app) == ["2031-12-31 Tax Document (2 of 2).pdf",
+                           "2031-12-31 Tax Document.pdf"]
+    assert bodies_listed(stored(app, doc)) == bodies
+    assert stored(app, doc)["notes"] == "form set has 2 files"
+
+
+@pytest.mark.parametrize("ending", [".xls", ".xlsx", ".csv", ".txt", ".zip", ".pdf", ".XLSX"])
+def test_a_file_of_a_kind_a_form_set_holds_keeps_its_ending(tmp_path, monkeypatch, ending):
+    """Whatever its bytes. Opening one of these runs nothing."""
+    app = make_app(tmp_path)
+    doc, bodies = download(app, monkeypatch, ["form.pdf", "gain_loss" + ending],
+                           bodies=[PDF_START + b"form", b"invented,columns\n1,2\n"])
+    second = "2031-12-31 Tax Document (2 of 2)" + ending.lower()
+    assert _saved(app) == sorted(["2031-12-31 Tax Document.pdf", second])
+    assert bodies_listed(stored(app, doc)) == bodies
+
+
+def test_of_four_files_the_two_held_are_left_out_of_the_list_and_counted(tmp_path, monkeypatch):
+    app = make_app(tmp_path)
+    doc, bodies = download(app, monkeypatch, ["form.pdf", "run.command", "gain_loss.xls", "x.bat"],
+                           bodies=[PDF_START + b"form", A_SCRIPT, b"invented,columns\n",
+                                   b"@echo invented\r\n"])
+    assert _saved(app) == ["2031-12-31 Tax Document (3 of 4).xls",
+                           "2031-12-31 Tax Document.pdf"]
+    assert sorted(_held(app).values()) == ["2031-12-31 Tax Document (2 of 4) command.held",
+                                           "2031-12-31 Tax Document (4 of 4) bat.held"]
+    rec = stored(app, doc)
+    assert bodies_listed(rec) == [bodies[0], bodies[2]]
+    assert rec["notes"] == ("form set has 4 files; 2 files of the form set kept in Manual "
+                            "Review, since each was neither a PDF nor a spreadsheet, CSV, text "
+                            "or ZIP file")
+    assert app.stats["manual_review"] == 2
 
 
 def test_no_folder_is_made_when_the_dialog_gives_no_link(tmp_path, monkeypatch):

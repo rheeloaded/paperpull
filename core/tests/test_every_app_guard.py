@@ -39,6 +39,8 @@ HOSTILE_URLS = [
     "http://{h}/statement.pdf",
     "https://{h}.evil.test/statement.pdf",
     "https://{h}@evil.test/statement.pdf",
+    # Python reads the host as evil.test\.{h}, a browser as evil.test.
+    "https://evil.test\\.{h}/statement.pdf",
     "//evil.test/statement.pdf",
     "javascript:alert(1)",
     "",

@@ -111,7 +111,15 @@ The `.gitignore` already blocks all of the following. Do not override it.
     links whose whole text is a section name it knows, such as Statements or
     Documents, each through `is_safe_control()`.
   - **Every app has a host allowlist.** A stored or page-supplied URL that
-    resolves to any other host is refused before the browser goes there. A
+    resolves to any other host is refused before the browser goes there.
+    So is an address Python and a browser could read differently, one with
+    a backslash before its query or a host that is anything but a plain
+    name (`https://evil.example\.chase.com/` is Chase's to one and
+    evil.example's to the other). A link is resolved against its page by
+    one shared step that gives nothing for a link a browser would take to
+    another host, and a repo-wide test finds a host compared by its ending,
+    or a link joined, outside that shared code the way the old copies were
+    (`core/tests/test_every_host_check_goes_through_urls.py`). A
     repo-wide test (`core/tests/test_every_app_guard.py`) checks that every
     app has the allowlist and a working guard, that a guard an app defines
     is asked on a path its run takes, that an app said here to click nothing

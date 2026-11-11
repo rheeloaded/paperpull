@@ -29,9 +29,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
+from paperpull_core.urls import join as join_url
 
 from paperpull_core import intake
+from paperpull_core.urls import host_matches, host_of
 from paperpull_core import controls as _controls
 from paperpull_core.controls import SETTINGS_CONTROL_RE
 from paperpull_core.dates import last_day as _last_day
@@ -269,12 +271,7 @@ def looks_moved_to_capital_one(page) -> bool:
     Host equality on the parsed hostname, not a substring, for the same reason
     every other host check here works that way.
     """
-    from urllib.parse import urlparse
-    try:
-        host = (urlparse(page.url or "").hostname or "").lower()
-    except ValueError:
-        return False
-    return any(host == h or host.endswith("." + h) for h in MOVED_HOSTS)
+    return host_matches(host_of(page.url or ""), MOVED_HOSTS)
 
 
 def looks_signed_out(page) -> bool:
@@ -572,7 +569,7 @@ def parse_statements_api(json_data, account_label: str, account_id: str = "") ->
         if not isinstance(binary_href, str):
             binary_href = ""
         if binary_href.startswith("/"):
-            binary_href = urljoin(BASE, binary_href)
+            binary_href = join_url(BASE, binary_href)
         owner = account_of_href(binary_href)
         if not owner or not stmt_date or (account_id and owner != account_id):
             log.warning("refusing a statement on the list (%s), since its PDF is not "
@@ -1092,7 +1089,7 @@ def discoverbank_download(
     and writes it only when %PDF- is within its first 1024 bytes."""
     href = href or kw.get("document_id", "")
     if href and href.startswith("/"):
-        href = urljoin(BASE, href)
+        href = join_url(BASE, href)
     if not href:
         log.warning("No download URL provided for %s %s", account, date)
         return False

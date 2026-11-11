@@ -50,7 +50,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
+from paperpull_core.urls import join as join_url
 
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -304,8 +305,8 @@ def parse_href(href: str) -> Optional[Tuple[str, int, int]]:
     """(kind, number, year) from a download link, or None when it is not
     exactly one of this site's statement links with a sane period."""
     href = _html.unescape(href or "")
-    path = urlparse(urljoin(BASE, href))
-    if path.path != DOWNLOAD_PATH or not is_safe_url(urljoin(BASE, href)):
+    path = urlparse(join_url(BASE, href))
+    if path.path != DOWNLOAD_PATH or not is_safe_url(join_url(BASE, href)):
         return None
     m = _PARAMS_RE.fullmatch(path.query)
     if not m:

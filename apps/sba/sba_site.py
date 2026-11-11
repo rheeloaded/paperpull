@@ -1225,8 +1225,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     except Exception:
         href = ""
     if href and not href.lower().startswith(("javascript", "#")):
-        from urllib.parse import urljoin
-        target = urljoin(page.url, href)
+        from paperpull_core.urls import join as join_url
+        target = join_url(page.url, href)
         # A link on the provider's own hosts is fetched through the session
         # first. A PDF answer is the document. Anything else means the link
         # is a page or a handoff, and the click below follows it.

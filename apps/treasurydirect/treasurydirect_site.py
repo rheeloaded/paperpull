@@ -87,7 +87,8 @@ from datetime import date as _date
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import List, Optional, Tuple
-from urllib.parse import parse_qs, urljoin, urlsplit
+from urllib.parse import parse_qs, urlsplit
+from paperpull_core.urls import join as join_url
 
 from paperpull_core import pressing
 from paperpull_core import receipt_pdf
@@ -746,7 +747,7 @@ def _press_link(page, link: Link, what: str, step: str, landed, tabs: bool = Tru
     # signed-in address on TreasuryDirect's own host is ever pressed toward.
     href = (link.href or "").strip()
     if not href or href.lower().startswith(("javascript:", "data:", "#")) \
-            or not is_signed_in_url(urljoin(_url(page), href)):
+            or not is_signed_in_url(join_url(_url(page), href)):
         raise ListStopped("a link that leads off the signed-in pages")
     loc = page.locator('a[href*="UIHandler=%s"]' % link.handler).filter(
         has_text=re.compile(r"^\s*%s\s*$" % escape_for_locator(link.text)))
