@@ -31,8 +31,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   list, never from a count or "keine neuen Nachrichten" elsewhere on the
   page, each listing opens the Postbox and the archive by their own
   addresses rather than read a view the person left searched or
-  filtered, and a control such as "Weitere Dokumente laden" stops the run
-  as paging does. See [local testing](apps/ing/README.md#local-test-before-a-pr).
+  filtered, each document's link is read from its list opened afresh, so
+  a document arriving mid-run cannot move a later link onto its neighbor,
+  and a control such as "Weitere Dokumente laden" stops the run as paging
+  does. See [local testing](apps/ing/README.md#local-test-before-a-pr).
 - **A sign-in starts its run by itself once it is done (#200).** Open sign-in
   window used to end with the person coming back to the panel to press
   Get new. Now the panel watches the sign-in window's tabs, their address

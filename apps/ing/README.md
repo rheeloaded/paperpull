@@ -46,10 +46,12 @@ read as the whole list. It waits for the rows to settle, scrolls the list
 so rows that load on scrolling appear, and reads them. Each PDF is fetched
 with a GET from inside the signed-in page, so the session cookies never
 leave the browser. ING's download links carry the page they were read from,
-so a document's link is read again from its list just before the PDF is
-fetched. When ING answers with a page instead of the PDF, as it may for a
-link that has expired, the list is opened again and the fresh link fetched
-once more. When that fails too, the document is marked failed and the next
+and may name a row by its place in the list, so a document's link is read
+again from its list, opened afresh by its address, just before the PDF is
+fetched. A document arriving during a run cannot then move a later link
+onto its neighbor. When ING answers with a page instead of the PDF, as it
+may for a link that has expired, the list is opened again and the fresh
+link fetched once more. When that fails too, the document is marked failed and the next
 run tries it again. A ZIP holding one PDF is unpacked, and anything else in
 a ZIP is kept for manual review.
 
