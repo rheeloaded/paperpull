@@ -2014,6 +2014,9 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
         "slug": _issue_slug(slug, cards),
         "gets": cards.get(slug, {}).get("documents", ""),
         "group": cards.get(slug, {}).get("group", ""),
+        # A first shell downloads nothing yet, so the page never offers it
+        # Get new or Continue, and its step after a sign-in is Record steps.
+        "shell": cards.get(slug, {}).get("shell") is True,
         "kind": (row or {}).get("kind") or kind,
         "state": quiet["state"],
         "marked_done": quiet["marked_done"],
@@ -2162,7 +2165,8 @@ def account_rows() -> list:
                     "app": name, "account": account, "provider": provider, "owner": "",
                     "slug": _issue_slug(slug, cards),
                     "gets": cards.get(slug, {}).get("documents", ""),
-                    "group": cards.get(slug, {}).get("group", ""), "kind": kind,
+                    "group": cards.get(slug, {}).get("group", ""),
+                    "shell": cards.get(slug, {}).get("shell") is True, "kind": kind,
                     "state": "nostatus", "settled": False, "documents": 0, "newest": None,
                     "checked": None, "ran": None,
                     "age_days": None, "cadence_days": None, "cadence": "-", "gaps": [], "to_check": [],
@@ -2730,9 +2734,12 @@ def _provider_notes() -> dict:
     PROVIDERS.md, which is written for GitHub and carries who tested an app,
     issue numbers and how it reads the site, so a new user picking their
     bank read "Confirmed by @watling777 ... (#26)". providers.json holds the
-    short line, the group the provider sits in and whether it has been run
-    on a real account yet. Best effort. A missing or broken file just means
-    no note, never another document's text."""
+    short line, the group the provider sits in, whether it has been run
+    on a real account yet, and whether it is a first shell, which opens the
+    site for a sign-in and downloads nothing yet (its site's NOT_MAPPED,
+    core/tests/test_signin_watch.py holds the two equal). Best effort. A
+    missing or broken file just means no note, never another document's
+    text, and no provider called a shell."""
     try:
         data = json.loads(PROVIDER_CARDS.read_text(encoding="utf-8"))
         groups, cards = data["groups"], data["providers"]
@@ -2747,6 +2754,7 @@ def _provider_notes() -> dict:
                        "group": group,
                        "category": groups.get(group, "") if isinstance(groups, dict) else "",
                        "tested": card.get("tested", True) is not False,
+                       "shell": card.get("shell") is True,
                        "note": card.get("note", "")}
     return notes
 

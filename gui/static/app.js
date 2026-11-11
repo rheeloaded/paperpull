@@ -141,11 +141,20 @@ const ACTION_DOING = {login: 'Opening the sign-in window for %s', discover: 'Che
 // says an account is signed in, since nothing short of a run knows that.
 const NEEDS = ['stopped', 'signin', 'attention', 'unreadable', 'overdue', 'due', 'gap'];
 const FRESH = ['never', 'not_started'];
-function groupOf(r) { return NEEDS.includes(r.state) ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok'; }
+// A first shell of a provider (r.shell, from providers.json, which
+// core/tests/test_signin_watch.py holds to its site's NOT_MAPPED) opens the
+// site for a sign-in and downloads nothing yet. A run that downloads stops
+// there at once, so its account is never carried on with Continue, never
+// in a round of Get new for all (queueTargets), and stands with what is not
+// started, whatever its last run left. Its step after a sign-in is Record
+// steps (afterSignIn).
+function groupOf(r) {
+  return r.shell ? 'new' : NEEDS.includes(r.state) ? 'needs' : FRESH.includes(r.state) ? 'new' : 'ok';
+}
 // Whether a stopped account is carried on with Continue. Not after a Resume
 // that stopped because no run read the list to its end, since only a run
 // that lists carries on from that, and Continue would stop there again (#124).
-function continues(r) { return r.state === 'stopped' && r.last_outcome !== 'unlisted'; }
+function continues(r) { return r.state === 'stopped' && r.last_outcome !== 'unlisted' && !r.shell; }
 function present(r) {
   const n = noun(r), latest = when(r.newest);
   // When the last run ended, from the panel's own log first, then the time
@@ -162,6 +171,10 @@ function present(r) {
     act: {label: 'Get new', run: 'all', primary: true}});
   if (!r.runnable) return {chip: {cls: 'bad', text: "Can't run"}, say: 'PaperPull does not recognize this folder. Open it to see what to do.', act: {label: 'Open', nav: true}};
   if (r.needs_setup) return {chip: {cls: 'bad', text: 'Needs setup'}, say: 'Run setup-all (setup-all.command on a Mac, setup-all.bat on Windows) in the PaperPull folder, then reload this page.', act: {label: 'Open', nav: true}};
+  if (r.shell) return {chip: {cls: 'plain', text: 'Not built yet'},
+    say: 'PaperPull cannot get documents from ' + r.provider + ' yet. Sign in, then record your steps to one ' +
+      'document, so it can be built.',
+    act: {label: 'Sign in', run: 'login', primary: true}};
   if (r.marked_done) return {chip: {cls: 'ok', text: 'Marked done'},
     say: 'Marked done on ' + when(r.marked_done) + '. That ends with its next run, or within two weeks.',
     act: {label: 'Get new', run: 'all'}};
@@ -353,8 +366,9 @@ async function loadAccounts() {
 // -- every account -------------------------------------------------------------------
 function queueTargets() {
   // A gap a whole run could not fill is left out (r.settled, #149). Its row
-  // still offers Look for them.
-  return (ROWS || []).filter(r => r.runnable && !r.needs_setup && !r.running && !r.settled && (
+  // still offers Look for them. A first shell downloads nothing, so a round
+  // would only pause there (groupOf).
+  return (ROWS || []).filter(r => r.runnable && !r.needs_setup && !r.running && !r.settled && !r.shell && (
     (r.state === 'stopped' && !(r.last_run && r.last_run.redownload)) ||
     ['overdue', 'due', 'gap', 'never'].includes(r.state)));
 }
@@ -538,7 +552,7 @@ function renderAccount() {
   $('a-crumb').textContent = r.provider + (whoOf(r) ? ' · ' + whoOf(r) : '');
   const p = present(r);
   const saved = scopeSaved();
-  const again = r.state === 'stopped' && Boolean(r.last_run && r.last_run.redownload);
+  const again = !r.shell && r.state === 'stopped' && Boolean(r.last_run && r.last_run.redownload);
   const stoppedHere = continues(r) && !again;
   let html = '<div class="head" style="align-items:center">' + mono(r, true) +
     '<div><h1 id="a-title" tabindex="-1">' + esc(r.provider) + '</h1><p>' + esc(subOf(r)) + ' · ' +
@@ -552,23 +566,22 @@ function renderAccount() {
   // Another account beside this one names its debugging port (#90). Said, never refused.
   if (r.shared_port) html += '<p class="callout warn" style="margin-bottom:20px">' + esc(r.shared_port.say) + '</p>';
   const band = {stopped: 'info', attention: 'attention', unreadable: 'bad', overdue: 'due', due: 'due', gap: 'gap', current: 'ok'}[r.state] || '';
+  const whileSo = r.shell ? 'while you record your steps' : 'while documents download';
   const loginSay = SERVER
-    ? 'Opens ' + whose(r.provider) + " sign-in page in the sign-in window, docked beside this page. You type your password there and PaperPull never sees it. Leave it signed in while documents download."
-    : 'Opens ' + r.provider + ' in its own browser window. You type your password there and PaperPull never sees it. Leave the window open while documents download.';
+    ? 'Opens ' + whose(r.provider) + " sign-in page in the sign-in window, docked beside this page. You type your password there and PaperPull never sees it. Leave it signed in " + whileSo + '.'
+    : 'Opens ' + r.provider + ' in its own browser window. You type your password there and PaperPull never sees it. Leave the window open ' + whileSo + '.';
   // Until it has run, or after a run that found nobody signed in, signing
   // in is the step to take, so it carries the weight and Get new does not.
   const signFirst = ['not_started', 'signin'].includes(r.state);
-  html += '<div class="cols"><div class="main-col"><section class="card" aria-labelledby="getdocs">' +
-    '<div class="band ' + band + '"><span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span><span class="say">' +
-    esc(p.say) + '</span>' + (stoppedHere ? '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' +
-    esc(keyOf(r)) + '">' + PLAY + 'Continue where it stopped</button>' : '') +
-    (again && !SERVER && !inSample() ? '<button type="button" class="btn btn-p starts" data-do="restore" data-key="' + esc(keyOf(r)) + '">Restore the rest</button>' : '') +
-    '</div>' + toCheckList(r) + gapList(r) +
-    '<div class="steps"><h2 id="getdocs" style="margin-bottom:18px">Get your documents</h2>' +
-    '<div class="step"><div class="stepnum' + (signFirst ? ' on' : '') + '">1</div><div class="body"><h3>Sign in to ' + esc(r.provider) + '</h3><p id="steplogin">' +
-    esc(loginSay) + '</p><button type="button" class="btn ' + (signFirst ? 'btn-p' : 'btn-s') + ' starts" data-do="run" data-action="login" data-key="' +
-    esc(keyOf(r)) + '">' + sv(P.lock) + 'Open sign-in window</button></div></div>' +
-    '<div class="step"><div class="stepnum' + (signFirst ? '' : ' on') + '">2</div><div class="body"><h3>Get new documents</h3><p>Saves every ' + noun(r) +
+  // A first shell downloads nothing yet, so its second step is a recording of
+  // one trip to a document, which Get help holds, and it has no dates to pick.
+  const second = r.shell
+    ? '<div class="step"><div class="stepnum' + (signFirst ? '' : ' on') + '">2</div><div class="body"><h3>Record steps</h3><p>' +
+      'PaperPull cannot get documents from ' + esc(r.provider) + ' yet. Once you are signed in, Record steps watches while ' +
+      'you click your way to one document and saves what you clicked, never what you type, for a problem report that helps ' +
+      'build it.</p><div class="row-actions" style="margin-top:18px"><button type="button" class="btn ' + (signFirst ? 'btn-s' : 'btn-p') +
+      ' starts" data-do="record" data-key="' + esc(keyOf(r)) + '">Record steps</button></div></div></div>'
+    : '<div class="step"><div class="stepnum' + (signFirst ? '' : ' on') + '">2</div><div class="body"><h3>Get new documents</h3><p>Saves every ' + noun(r) +
     ' you do not have yet. Nothing downloads twice, even PDFs you deleted after moving them elsewhere.' +
     (!SERVER ? ' To get those back, use Restore deleted files under More.' : '') + '</p>' +
     '<fieldset><legend>Which dates</legend><div class="seg">' +
@@ -584,7 +597,18 @@ function renderAccount() {
     '<button type="button" class="link starts" data-do="run" data-action="pilot" data-key="' + esc(keyOf(r)) + '">Try the newest few first</button>' +
     '<span class="sep-dot" aria-hidden="true">·</span>' +
     '<button type="button" class="link starts" data-do="run" data-action="discover" data-key="' + esc(keyOf(r)) + '">Check what\'s there</button></div>' +
-    '</div></div></div></section></div>';
+    '</div></div>';
+  html += '<div class="cols"><div class="main-col"><section class="card" aria-labelledby="getdocs">' +
+    '<div class="band ' + band + '"><span class="chip ' + p.chip.cls + '">' + esc(p.chip.text) + '</span><span class="say">' +
+    esc(p.say) + '</span>' + (stoppedHere ? '<button type="button" class="btn btn-p starts" data-do="run" data-action="resume" data-key="' +
+    esc(keyOf(r)) + '">' + PLAY + 'Continue where it stopped</button>' : '') +
+    (again && !SERVER && !inSample() ? '<button type="button" class="btn btn-p starts" data-do="restore" data-key="' + esc(keyOf(r)) + '">Restore the rest</button>' : '') +
+    '</div>' + toCheckList(r) + gapList(r) +
+    '<div class="steps"><h2 id="getdocs" style="margin-bottom:18px">Get your documents</h2>' +
+    '<div class="step"><div class="stepnum' + (signFirst ? ' on' : '') + '">1</div><div class="body"><h3>Sign in to ' + esc(r.provider) + '</h3><p id="steplogin">' +
+    esc(loginSay) + '</p><button type="button" class="btn ' + (signFirst ? 'btn-p' : 'btn-s') + ' starts" data-do="run" data-action="login" data-key="' +
+    esc(keyOf(r)) + '">' + sv(P.lock) + 'Open sign-in window</button></div></div>' +
+    second + '</div></section></div>';
   html += '<aside class="side-col"><section class="card pad" aria-labelledby="latest"><h2 id="latest" class="section-title">Newest documents</h2>' +
     (r.latest.length ? '<ul class="files">' + r.latest.map(f => '<li>' + sv(P.file, 16) + '<span class="nm" title="' + esc(f.name) + '">' +
       esc(f.name) + '</span></li>').join('') + '</ul>' : '<p class="hint">Nothing saved yet.</p>') +
@@ -594,9 +618,11 @@ function renderAccount() {
     (r.runs.length ? '<ul class="runs">' + r.runs.map(runLine).join('') + '</ul>' :
       '<p class="hint">No runs yet. Runs you start here are listed.</p>') + '</section></aside></div>';
   $('a-body').innerHTML = html;
-  for (const el of document.querySelectorAll('input[name=dates]')) el.addEventListener('change', onScope);
-  for (const id of ['year', 'start', 'end']) $(id).addEventListener('change', onScope);
-  onScope();
+  if (!r.shell) {
+    for (const el of document.querySelectorAll('input[name=dates]')) el.addEventListener('change', onScope);
+    for (const id of ['year', 'start', 'end']) $(id).addEventListener('change', onScope);
+    onScope();
+  }
   lockStarts();
 }
 // What the last run set aside, each with its file when there is one and a
@@ -792,6 +818,7 @@ function startRun(r, action, opts) {
   // above all. One account at a time, and this is the one now.
   endSignInWait();
   Object.assign(RUN, {state: 'running', app, account, provider: r.provider, kind: r.kind, who: whoOf(r), action,
+    shell: Boolean(r.shell),
     scope: s, again, lines: [], result: null, saved: null, code: null, refused: '', found: null, step: 0, total: 0,
     connected: false, now: '', failure: false, startedAt: new Date(), endedAt: null, outcome: null, savedIn: '', then: opts.then || null,
     queue: Boolean(opts.queue), onDone: opts.onDone || null, sink: opts.sink ? $(opts.sink) : null, stopped: false});
@@ -1007,12 +1034,24 @@ const RERUN = {all: ['Get new documents', 'Saves every document you do not have 
   // Each of these is started from a dialog of its own, which the step opens.
   diagnose: ['Make a support report', 'Reads the page and saves a file with no account details', 'support'],
   record: ['Record steps for support', 'Watches while you click your way to a document', 'record'],
+  // A first shell's step, the same recording, which is how it gets built.
+  build: ['Record steps', 'Watches while you click your way to one document, so PaperPull can be built for it', 'record'],
   restore: ['Restore deleted files', 'Downloads again the PDFs you deleted, for the dates you choose', 'restore']};
+// The run a sign-in is followed by, or the run this page offers again. A
+// sign-in pressed on the page of a run that found nobody signed in is
+// followed by that run (run.then), and any other sign-in by Get new. A first
+// shell of a provider (groupOf) downloads nothing yet, so whatever its
+// sign-in was pressed for, its step is Record steps, unless that was a
+// support report. Get new or Continue there would only stop again and leave
+// the account offering Continue. Its words (thenSay), its step (rerunStep)
+// and whether it starts by itself (signinNext) all come from here.
+function afterSignIn(run) {
+  const src = run.action === 'login' ? run.then || {action: 'all', scope: {}, again: false} : run;
+  return run.shell && src.action !== 'diagnose' ? {action: 'build', scope: {}, again: false} : src;
+}
 function rerunStep(run, key, num, after) {
-  // A sign-in pressed on the page of a run that found nobody signed in is
-  // followed by that run (run.then), and any other sign-in by Get new. A
-  // run with no step of its own here gets none, rather than another run.
-  const src = run.action === 'login' ? run.then || {action: 'all', scope: {}} : run;
+  // A run with no step of its own here gets none, rather than another run.
+  const src = afterSignIn(run);
   const action = src.again ? 'restore' : src.action, s = src.scope || {};
   if (!RERUN[action]) return '';
   const dates = (s.year ? ' data-year="' + esc(s.year) + '"' : '') + (s.start ? ' data-start="' + esc(s.start) + '"' : '') +
@@ -1052,7 +1091,7 @@ function signinNext(run) {
   const held = it ? rowByKey(it.key) : null;
   if (held && held.app === run.app && held.account === run.account) return {action: it.action, scope: it.scope, again: false, round: it};
   if (QUEUE && !QUEUE.finished) return null;
-  const src = run.then || {action: 'all', scope: {}, again: false};
+  const src = afterSignIn(run);
   return src.again || !RERUN[src.action] || RERUN[src.action][2] ? null : src;
 }
 function endSignInWait() {
@@ -1108,7 +1147,7 @@ function signInWaitEnded(wait, how) {
 // What a sign-in that opened its window says to do next, in the words of
 // the step its page offers, or nothing when it offers none.
 function thenSay(run) {
-  const src = run.then || {action: 'all'}, words = (RERUN[src.again ? 'restore' : src.action] || [''])[0];
+  const src = afterSignIn(run), words = (RERUN[src.again ? 'restore' : src.action] || [''])[0];
   return words ? ', then ' + words.charAt(0).toLowerCase() + words.slice(1) : '';
 }
 function runOutcome() {
@@ -1123,8 +1162,10 @@ function runOutcome() {
   // Continue picks up a run that downloads. A Discover that stopped is
   // pressed again, since it was asked only to see what is there, and a
   // restore that stopped is chosen again for the dates it did not reach.
-  const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again;
-  const recheck = RUN.action === 'discover';
+  // A first shell has nothing to carry on with or check again, however its
+  // run ended (afterSignIn).
+  const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again && !RUN.shell;
+  const recheck = RUN.action === 'discover' && !RUN.shell;
   const next = RUN.again ? AGAIN_LEFT : downloads ? 'Continue picks up where it stopped'
     : recheck ? 'Check again when you are ready' : 'Nothing was lost';
   if (RUN.refused) return {tone: 'bad', title: 'This run did not start', say: RUN.refused, clean: false};
@@ -1160,6 +1201,17 @@ function runOutcome() {
     say: whose(who) + ' window was on a sign-in page or a security check, so this support report read nothing useful. ' +
       'Sign in, leave the window on the page that has your documents, then make the report again.',
     clean: false, signin: true, first: true, rerun: true, report: true};
+  // A first shell's run that lists or downloads stops as soon as it is asked
+  // for the list, which it cannot read yet, and says so in its details.
+  // Continue or the same run again would only stop there too, so its step is
+  // Record steps (afterSignIn), with no sign-in before it, as its window was
+  // open for the run to stop at all.
+  if (RUN.shell && RUN_ACTIONS_WITH_DATES.includes(RUN.action) && code === '0' && res && res.stopped) {
+    return {tone: 'info', title: who + ' is not built yet',
+      say: 'PaperPull cannot get documents from ' + who + ' yet, so nothing was downloaded and nothing was lost. ' +
+        'To help build it, sign in in its window if you have not, then record your steps to one document.',
+      clean: false, signin: false, rerun: true};
+  }
   // Why it stopped, when the run knows (core run_reporting.stop_reason),
   // and so whose it is to fix. Each says that nothing saved is lost, and
   // only a stop that a sign-in can fix offers one. Whose it is is said

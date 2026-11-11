@@ -48,8 +48,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   says you are signed in. A shell's own words after its sign-in window
   opens name Record steps, not Try the newest few first, and the panel
   starts no run by itself once a shell's sign-in is done, since a shell
-  has nothing to download. The panel's own next step after a sign-in is
-  still Get new, which for a shell says it is not built yet. Scalable Capital
+  has nothing to download. The panel names Record steps after a shell's
+  sign-in too, and leaves a shell out of Get new for all. Scalable Capital
   on port 9309, Consorsbank on 9310, the person's own Edge or Chrome first.
 - **A sign-in starts its run by itself once it is done (#200).** Open sign-in
   window used to end with the person coming back to the panel to press
@@ -217,6 +217,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Rename or a Move goes on that account. Contributed by @JasperDale420 (#193).
 
 ### Fixed
+- **A provider's first shell no longer stops a round of Get new for all.**
+  After any sign-in the panel's own next step was Get new. A first shell,
+  which opens its site for a sign-in and downloads nothing yet, stops there
+  and leaves its account stopped partway, so the account offered Continue
+  and every round of Get new for all paused at it, as the Bank of America
+  shell of #121 did. Now `gui/providers.json` marks a shell, and a census
+  holds that mark to the site's own NOT_MAPPED. The panel names Record
+  steps after a shell's sign-in, after a run of it that stopped, and on its
+  page in place of Get new documents. A shell is left out of Get new for
+  all, is never offered Continue, and stands under Not started as Not built
+  yet. The tester guide, `docs/testing-a-provider.md`, names the panel's
+  buttons as they read on screen, More, then Get help, then Record steps,
+  and Add a provider, Open sign-in window and Try the newest few first.
 - **Chase no longer tries, on every run, statements it can never take (#191).**
   When its document API answered nothing, the fallback read a business
   account's documents off the page, with no card and no document id, and
