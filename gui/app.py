@@ -3931,6 +3931,8 @@ async def api_history_import(request: Request):
     # asks whether an import holds it just before it counts itself running
     # (_start_run), so the two never overlap. A run reads progress.json when
     # it starts and writes it as it goes, over what an import wrote.
+    if _UPDATE_RESTARTING:
+        raise HTTPException(409, _RESTARTING_SAYS)
     if not _IMPORTING.acquire(blocking=False):
         raise HTTPException(409, "An import is already going. Wait for it to finish.")
     if _RUNNING:
@@ -4642,6 +4644,8 @@ async def api_review_names(request: Request):
     if set(body) - {"app", "account"}:
         raise HTTPException(400, "a Review Names list holds only app and account")
     app_name, account = asked["app"], asked["account"]
+    if _UPDATE_RESTARTING:
+        raise HTTPException(409, _RESTARTING_SAYS)
     if _IMPORTING.locked():
         raise HTTPException(409, "A history file is being imported. Review names once it "
                                  "has finished.")
@@ -4942,8 +4946,9 @@ def _start_run(app: str, account: str, action: str, scope_flags, redownload=Fals
         # the page puts under "This run did not start" rather than read the
         # done code as a run that began and failed. The code stays 1, so a
         # queue still counts it as not done.
-        if _IMPORTING.locked():
-            why = "A history file is being imported. Run this once it has finished."
+        if _UPDATE_RESTARTING or _IMPORTING.locked():
+            why = (_RESTARTING_SAYS if _UPDATE_RESTARTING
+                   else "A history file is being imported. Run this once it has finished.")
             yield _event(why)
             yield _event(why, "refused")
             yield _event(1, "done")
@@ -6285,13 +6290,17 @@ def _update_state() -> dict:
 
 def _update_check() -> dict:
     """Ask GitHub once, because the person pressed the button."""
-    s = _read_settings()
-    if s.get("update_check") is not True:
+    if _read_settings().get("update_check") is not True:
         raise HTTPException(409, "The update check is off. Turn it on in Settings first.")
     try:
         rel = updater.check_latest(VERSION)
     except updater.UpdateError as e:
         raise HTTPException(502, str(e))
+    # Read again, since the answer can take seconds and the settings may have
+    # been saved meanwhile. A check turned off while it waited keeps nothing.
+    s = _read_settings()
+    if s.get("update_check") is not True:
+        raise HTTPException(409, "The update check was turned off, so its answer was not kept.")
     s["update_checked_at"] = time.time()
     s["update_latest"] = {"version": rel["version"], "installable": bool(rel["asset"])}
     try:
@@ -6309,7 +6318,7 @@ def api_update():
 
 
 @app.post("/api/update/setting", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
-                                               Depends(_updates_offered)])
+                                               Depends(_updates_offered), Depends(_not_in_sample)])
 async def api_update_setting(request: Request):
     """Turn the check on or off. Neither asks anybody anything."""
     try:
@@ -6331,7 +6340,7 @@ async def api_update_setting(request: Request):
 
 
 @app.post("/api/update/check", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
-                                             Depends(_updates_offered)])
+                                             Depends(_updates_offered), Depends(_not_in_sample)])
 async def api_update_check():
     """The person pressed Check github.com for an update. The only route
     that asks GitHub whether a newer version exists."""
@@ -6339,7 +6348,7 @@ async def api_update_check():
 
 
 @app.post("/api/update/install", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
-                                               Depends(_updates_offered)])
+                                               Depends(_updates_offered), Depends(_not_in_sample)])
 def api_update_install():
     """Download the new version and prove it is genuine. Nothing is replaced
     until the person presses restart."""
@@ -6366,17 +6375,48 @@ def _exit_soon() -> None:
     threading.Thread(target=go, daemon=True).start()
 
 
-@app.post("/api/update/restart", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
-                                               Depends(_updates_offered)])
-def api_update_restart():
+def _what_an_exit_would_cut() -> str:
+    """Why the panel must not exit now, or "". Every run the panel started
+    stays in _RUNS until it has been noted, a Rename, a Move and Review Names
+    included, and a history import holds _IMPORTING (api_finishing)."""
     if _RUNS or _RUNNING:
-        raise HTTPException(409, "a download is running. Wait for it to finish, or stop it, "
-                                 "then restart to update.")
+        return ("A download, a Rename or a Move is going on. Wait for it to finish, "
+                "or stop the download, then restart to update.")
+    if _IMPORTING.locked():
+        return "A history file is being imported. Restart to update once it has finished."
+    return ""
+
+
+# Set once the update is about to stop the panel, so no run, Review Names or
+# history import starts in the second before it does.
+_UPDATE_RESTARTING = False
+_RESTARTING_SAYS = "PaperPull is restarting to update. Start this again once it has opened."
+
+
+@app.post("/api/update/restart", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
+                                               Depends(_updates_offered), Depends(_not_in_sample)])
+def api_update_restart():
+    global _UPDATE_RESTARTING
+    why = _what_an_exit_would_cut()
+    if why:
+        raise HTTPException(409, why)
+
+    def last_look() -> str:
+        # The staged app was checked again first, which takes a while, so
+        # ask again, with new starts already held off while asking.
+        global _UPDATE_RESTARTING
+        _UPDATE_RESTARTING = True
+        why = _what_an_exit_would_cut()
+        if why:
+            _UPDATE_RESTARTING = False
+        return why
     try:
-        updater.INSTALL.restart()
+        updater.INSTALL.restart(last_look)
     except updater.UpdateError as e:
+        _UPDATE_RESTARTING = False
         raise HTTPException(409, str(e))
     except OSError as e:
+        _UPDATE_RESTARTING = False
         raise HTTPException(500, "could not start the update: %s" % e)
     _exit_soon()
     return {"restarting": True}

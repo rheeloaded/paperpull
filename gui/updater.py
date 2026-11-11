@@ -44,20 +44,23 @@ a session of its own) and writes what it did to
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
 import platform
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import tempfile
 import threading
 import urllib.error
-import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Callable, Optional
+
+from paperpull_core.urls import is_safe_url
 
 REPO = "rheeloaded/paperpull"
 API_LATEST = "https://api.github.com/repos/%s/releases/latest" % REPO
@@ -72,10 +75,17 @@ NOTES_SHOWN = 4000
 _VERSION = re.compile(r"^v?(\d{1,4})\.(\d{1,4})\.(\d{1,4})$")
 _TAG = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")
 _DMG = re.compile(r"^PaperPull-\d{1,4}\.\d{1,4}\.\d{1,4}-(arm64|x86_64)\.dmg$")
-# Where a redirect from a release download may go. GitHub serves the file from
-# its own storage hosts.
-_HOSTS = ("github.com", "api.github.com")
-_HOST_SUFFIXES = (".githubusercontent.com",)
+# The hosts a request or a redirect may reach, each exactly. The release
+# list is api.github.com, a disk image's address is github.com, and GitHub
+# serves its bytes from release-assets.githubusercontent.com (measured on
+# v0.63.0), objects.githubusercontent.com before that. Not any other host
+# under githubusercontent.com, which also serves anybody's raw files.
+_HOSTS = ("github.com", "api.github.com",
+          "release-assets.githubusercontent.com", "objects.githubusercontent.com")
+# macOS keeps its root certificates here, the ones its own curl trusts. The
+# Python inside the app is python-build-standalone's, which is not sure to
+# find them by itself, so they are added to whatever it finds.
+_MAC_ROOTS = "/etc/ssl/cert.pem"
 
 
 class UpdateError(Exception):
@@ -113,11 +123,12 @@ def bundle_path(gui_dir: Optional[Path] = None) -> Optional[Path]:
 
 def offered(executable: Optional[str] = None) -> bool:
     """Whether this copy should offer the check at all. The Store edition
-    runs from a Microsoft Store package and updates through the Store."""
+    runs from a Microsoft Store package and updates through the Store. A
+    copy that cannot tell is not offered it."""
     try:
         from paperpull_core.browser import _in_a_store_package
     except ImportError:
-        return True
+        return False
     return not _in_a_store_package(executable or sys.executable)
 
 
@@ -142,9 +153,9 @@ def can_install(app: Optional[Path]) -> tuple[bool, str]:
 # -- talking to GitHub ------------------------------------------------------
 
 def _host_ok(url: str) -> bool:
-    p = urllib.parse.urlparse(url)
-    host = (p.hostname or "").lower()
-    return p.scheme == "https" and (host in _HOSTS or host.endswith(_HOST_SUFFIXES))
+    """An https address on one of GitHub's hosts, read the way the shared
+    check reads every address (paperpull_core.urls)."""
+    return is_safe_url(url, _HOSTS, subdomains=False)
 
 
 class _Redirects(urllib.request.HTTPRedirectHandler):
@@ -154,14 +165,29 @@ class _Redirects(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def _tls() -> ssl.SSLContext:
+    """Certificates checked as always, with the Mac's own roots added."""
+    ctx = ssl.create_default_context()
+    if sys.platform == "darwin" and os.path.isfile(_MAC_ROOTS):
+        try:
+            ctx.load_verify_locations(cafile=_MAC_ROOTS)
+        except (OSError, ssl.SSLError):
+            pass
+    return ctx
+
+
 def _open(url: str, timeout: float = 20):
     if not _host_ok(url):
         raise UpdateError("refusing to fetch from somewhere that is not GitHub")
-    opener = urllib.request.build_opener(_Redirects)
+    opener = urllib.request.build_opener(_Redirects, urllib.request.HTTPSHandler(context=_tls()))
     req = urllib.request.Request(url, headers={
         "Accept": "application/vnd.github+json",
         "User-Agent": "PaperPull-update-check"})
     return opener.open(req, timeout=timeout)
+
+
+# What a request can end in besides an answer: refused, cut short, timed out.
+_NET_ERRORS = (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError)
 
 
 def fetch_json(url: str) -> dict:
@@ -169,7 +195,7 @@ def fetch_json(url: str) -> dict:
     try:
         with _open(url) as r:
             raw = r.read(2 * 1024 * 1024 + 1)
-    except (urllib.error.URLError, OSError, TimeoutError) as e:
+    except _NET_ERRORS as e:
         raise UpdateError("could not reach GitHub: %s" % getattr(e, "reason", e))
     if len(raw) > 2 * 1024 * 1024:
         raise UpdateError("GitHub's answer was larger than expected")
@@ -241,7 +267,7 @@ def download(asset: dict, dest: Path, progress: Callable[[int, int], None] = Non
         if h.hexdigest() != asset["sha256"]:
             raise UpdateError("the download does not match the checksum GitHub recorded")
         part.replace(dest)
-    except (urllib.error.URLError, OSError, TimeoutError) as e:
+    except _NET_ERRORS as e:
         raise UpdateError("the download failed: %s" % getattr(e, "reason", e))
     finally:
         part.unlink(missing_ok=True)
@@ -279,6 +305,8 @@ def stage_app(dmg: Path, work: Path, target: Path) -> None:
             shutil.rmtree(target)
         p = _run(["/usr/bin/ditto", str(src), str(target)])
         if p.returncode != 0:
+            # A disk that filled up leaves part of an app behind.
+            shutil.rmtree(target, ignore_errors=True)
             raise UpdateError("the app could not be copied out of the disk image")
     finally:
         _run(["/usr/bin/hdiutil", "detach", "-force", str(mnt)], timeout=60)
@@ -318,9 +346,11 @@ for _ in $(seq 1 120); do
   alive || break
   sleep 0.5
 done
+HERE="$(cd "$(dirname "$0")" && pwd)"
 if alive; then
   echo "the panel did not exit, leaving the installed app alone"
   rm -rf "$NEW"
+  [ -n "$HERE" ] && rm -rf "$HERE"
   exit 1
 fi
 rm -rf "$BAK"
@@ -329,16 +359,19 @@ if mv "$OLD" "$BAK"; then
     rm -rf "$BAK"
     echo "replaced"
   else
-    mv "$BAK" "$OLD"
     rm -rf "$NEW"
-    echo "could not put the new app in place, the old one is back"
+    if mv "$BAK" "$OLD"; then
+      echo "could not put the new app in place, the old one is back"
+    else
+      echo "could not put the new app in place, and the old one could not be put back, it is at $BAK"
+    fi
   fi
 else
   rm -rf "$NEW"
   echo "could not move the installed app aside, nothing changed"
 fi
-open "$OLD"
-rm -rf "$(cd "$(dirname "$0")" && pwd)"
+[ -d "$OLD" ] && open "$OLD"
+[ -n "$HERE" ] && rm -rf "$HERE"
 """
 
 
@@ -357,6 +390,15 @@ def _is_inside(pid: int, app: Path) -> bool:
     return (p.stdout or "").strip().startswith(str(app) + "/")
 
 
+def _parent_of(pid: int) -> int:
+    """The parent of process `pid`, or 0 when it cannot be read."""
+    try:
+        p = _run(["/bin/ps", "-o", "ppid=", "-p", str(pid)], timeout=10)
+        return int((p.stdout or "").strip() or 0)
+    except Exception:
+        return 0
+
+
 def start_swap(current_app: Path, staged_app: Path, work: Path, pid: Optional[int] = None) -> None:
     """Start the script that replaces the app after this process is gone."""
     script = work / "swap.sh"
@@ -364,8 +406,17 @@ def start_swap(current_app: Path, staged_app: Path, work: Path, pid: Optional[in
     script.chmod(0o700)
     backup = current_app.parent / ".PaperPull.old.app"
     waits = [str(pid or os.getpid())]
-    if pid is None and _is_inside(os.getppid(), current_app):
-        waits.append(str(os.getppid()))  # the native window quits just after the panel
+    if pid is None:
+        # The host that started the panel and the window around it quit just
+        # after it (gui/mac_host.py, packaging/macos/launcher.m). The swap
+        # waits for each of them that runs from this app, so macOS opens the
+        # new app rather than bring the closing one forward.
+        up = os.getppid()
+        for _ in range(4):
+            if not _is_inside(up, current_app):
+                break
+            waits.append(str(up))
+            up = _parent_of(up)
     subprocess.Popen(
         ["/bin/bash", str(script), " ".join(waits), str(current_app),
          str(staged_app), str(backup), str(log_path())],
@@ -403,7 +454,7 @@ class Install:
                     "error": self.error, "version": self.version}
 
     def busy(self) -> bool:
-        return self.phase in ("downloading", "checking")
+        return self.phase in ("downloading", "checking", "restarting")
 
     def start(self, current: str, app: Path, arch: Optional[str] = None) -> None:
         with self._lock:
@@ -421,7 +472,7 @@ class Install:
         self.done, self.total = done, total
 
     def _go(self, current: str, app: Path, arch: Optional[str]):
-        work = None
+        work = staged = None
         try:
             # Read the release again rather than trust anything kept from the
             # last check.
@@ -439,27 +490,33 @@ class Install:
             staged = staged_path(app)
             stage_app(dmg, work, staged)
             dmg.unlink(missing_ok=True)   # 135 MB nobody needs now
-            try:
-                verify_app(staged, app, rel["version"])
-            except Exception:
-                shutil.rmtree(staged, ignore_errors=True)
-                raise
+            verify_app(staged, app, rel["version"])
             with self._lock:
                 self.work, self.staged, self.phase = work, staged, "ready"
-            work = None  # swap.sh is written into it at restart
+            work = staged = None  # swap.sh is written into work at restart
         except UpdateError as e:
             self._fail(str(e))
-        except (OSError, subprocess.SubprocessError) as e:
+        except Exception as e:
+            # Whatever went wrong, the page must not wait on "downloading"
+            # for good, and a press of Try again must be able to start over.
             self._fail("the update could not be prepared: %s" % e)
         finally:
+            if staged is not None:
+                shutil.rmtree(staged, ignore_errors=True)
             if work is not None:
                 shutil.rmtree(work, ignore_errors=True)
 
-    def restart(self) -> None:
-        """Hand over to the swap script. The caller then exits the process."""
+    def restart(self, last_look: Optional[Callable[[], str]] = None) -> None:
+        """Hand over to the swap script. The caller then exits the process.
+
+        Only one press gets this far, since the phase leaves "ready" at once.
+        `last_look`, asked once the staged app has been checked again, names
+        anything that must not be cut off by the exit, and then nothing is
+        started."""
         with self._lock:
             if self.phase != "ready" or not self.staged or not self.staged.is_dir():
                 raise UpdateError("no update is ready")
+            self.phase = "restarting"
             work, app, staged, version = self.work, self.app, self.staged, self.version
         try:
             verify_app(staged, app, version)
@@ -468,7 +525,21 @@ class Install:
             with self._lock:
                 self.reset()
             raise
-        start_swap(app, staged, work)
+        except Exception:
+            with self._lock:
+                self.phase = "ready"
+            raise
+        why = last_look() if last_look else ""
+        if why:
+            with self._lock:
+                self.phase = "ready"
+            raise UpdateError(why)
+        try:
+            start_swap(app, staged, work)
+        except Exception:
+            with self._lock:
+                self.phase = "ready"
+            raise
 
 
 INSTALL = Install()

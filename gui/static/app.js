@@ -2932,7 +2932,7 @@ const DO = {
   'upd-toggle': () => updSetting(!(UPD && UPD.enabled)),
   'upd-check': () => updCheck(),
   'upd-install': () => updInstall(),
-  'upd-restart': () => updRestart(),
+  'upd-restart': el => { el.disabled = true; updRestart(); },
   'upd-later': () => { UPD_HIDDEN = true; updRender(); },
   'dock-close': () => closeDock(),
   'dismiss-notice': () => notice('', ''),
@@ -3080,6 +3080,7 @@ async function tmGo() {
   // Until now the panel answered only what the page needed to draw itself
   // behind the dialog, so the page reads everything again.
   await load();
+  updLoad();
   if (unsaved) notice('Your answer to the terms could not be saved, so they will be shown again next time. ' + unsaved.message, 'warn');
 }
 // Updates (gui/updater.py). Opening the page asks nobody: it reads what the
@@ -3137,17 +3138,19 @@ function updRender() {
     text = 'Downloading PaperPull ' + (inst.version || '') + ' from github.com… ' + pct + '%';
   } else if (inst.phase === 'checking') {
     text = 'Checking that PaperPull ' + (inst.version || '') + ' is the genuine release…';
+  } else if (inst.phase === 'restarting') {
+    text = 'PaperPull is closing to put version ' + (inst.version || '') + ' in place…';
   } else if (inst.phase === 'ready') {
     text = 'PaperPull ' + (inst.version || '') + ' is ready. PaperPull closes and opens again to finish.';
     html = btn('upd-restart', 'Restart and update', 'btn-p');
     tone = 'ok';
   } else if (inst.phase === 'error') {
     text = 'The update did not install: ' + (inst.error || 'something went wrong') + ' Nothing was changed.';
-    html = (UPD.can_install ? btn('upd-install', 'Try again') : '') + link;
+    html = (UPD.can_install ? btn('upd-install', 'Try the download from github.com again') : '') + link;
     tone = 'warn';
   } else if (UPD.newer && !UPD_HIDDEN) {
     text = 'PaperPull ' + UPD.latest + ' is available. You have ' + UPD.current + '.';
-    html = (UPD.can_install ? btn('upd-install', 'Update now', 'btn-p') : '') + link + btn('upd-later', 'Later');
+    html = (UPD.can_install ? btn('upd-install', 'Download from github.com', 'btn-p') : '') + link + btn('upd-later', 'Later');
   }
   txt.textContent = text;
   btns.innerHTML = html;
@@ -3155,6 +3158,7 @@ function updRender() {
   bar.hidden = !text;
   // Settings: the switch, and the one button that asks github.com.
   const st = $('updstatus');
+  if ($('g-updcard')) $('g-updcard').hidden = false;
   if (st) {
     st.textContent = UPD.enabled ? (UPD.newer ? 'PaperPull ' + UPD.latest + ' is available. You have ' + UPD.current + '.'
         : 'You have PaperPull ' + UPD.current + '. The check is on, and asks only when you press the button.')

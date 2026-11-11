@@ -93,6 +93,12 @@ def test_only_github_hosts_are_allowed():
     assert ok("https://api.github.com/repos/x/y")
     assert ok("https://github.com/x/y/releases/download/v1/a.dmg")
     assert ok("https://objects.githubusercontent.com/abc")
+    assert ok("https://release-assets.githubusercontent.com/abc")
+    assert not ok("https://raw.githubusercontent.com/someone/x/main/PaperPull.dmg")
+    assert not ok("https://gist.githubusercontent.com/x")
+    assert not ok("https://evil.example\\.github.com/x")     # a browser goes to evil.example
+    assert not ok("https://user@github.com/x")
+    assert not ok("https://github.com:8443/x")
     assert not ok("http://github.com/x")                     # not TLS
     assert not ok("https://github.com.evil.example/x")
     assert not ok("https://evilgithubusercontent.com/x")    # no dot before the suffix
@@ -458,3 +464,160 @@ def test_the_server_edition_has_no_update_endpoints(panel, monkeypatch):
         with pytest.raises(fastapi.HTTPException) as e:
             app_module._desktop_only()
         assert e.value.status_code == 404
+
+
+# -- what the review of #206 found -----------------------------------------
+
+def test_the_macs_own_root_certificates_are_added(monkeypatch):
+    """The app's Python is python-build-standalone's, which is not sure to
+    find the Mac's roots by itself, and every request goes to github.com."""
+    loaded = []
+
+    class Ctx:
+        def load_verify_locations(self, cafile=None):
+            loaded.append(cafile)
+    monkeypatch.setattr(updater.ssl, "create_default_context", lambda: Ctx())
+    monkeypatch.setattr(updater.sys, "platform", "darwin")
+    monkeypatch.setattr(updater.os.path, "isfile", lambda p: p == updater._MAC_ROOTS)
+    updater._tls()
+    assert loaded == [updater._MAC_ROOTS]
+    loaded.clear()
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+    updater._tls()
+    assert loaded == []
+
+
+def test_an_answer_cut_short_is_a_failed_check(monkeypatch):
+    import http.client
+
+    class Cut(_Resp):
+        def read(self, *a):
+            raise http.client.IncompleteRead(b"{")
+    monkeypatch.setattr(updater, "_open", lambda url, timeout=20: Cut(b""))
+    with pytest.raises(updater.UpdateError):
+        updater.fetch_json(updater.API_LATEST)
+
+
+def test_a_failed_install_never_leaves_the_page_waiting(tmp_path, monkeypatch):
+    """Anything at all going wrong ends as an error the page can show, and
+    Try again starts over."""
+    calls = []
+
+    def broken(*a, **k):
+        calls.append(1)
+        raise ValueError("assets was not a list")
+    monkeypatch.setattr(updater, "check_latest", broken)
+    inst = updater.Install()
+    for _ in range(2):
+        inst.start("0.60.1", tmp_path / "PaperPull.app")
+        deadline = time.time() + 5
+        while inst.busy() and time.time() < deadline:
+            time.sleep(0.02)
+        assert inst.snapshot()["phase"] == "error"
+    assert len(calls) == 2
+
+
+def test_a_half_copied_app_is_not_left_behind(tmp_path, monkeypatch):
+    dmg, work, target = tmp_path / "a.dmg", tmp_path / "work", tmp_path / ".PaperPull.new.app"
+
+    def run(cmd, timeout=300):
+        if cmd[0].endswith("hdiutil") and cmd[1] == "attach":
+            (work / "mnt" / "PaperPull.app").mkdir(parents=True)
+        if cmd[0].endswith("ditto"):
+            (target / "Contents").mkdir(parents=True)      # a disk that filled up
+            return subprocess.CompletedProcess(cmd, 1, "", "No space left on device")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(updater, "_run", run)
+    with pytest.raises(updater.UpdateError):
+        updater.stage_app(dmg, work, target)
+    assert not target.exists()
+
+
+def test_the_store_check_fails_closed(monkeypatch):
+    monkeypatch.setitem(sys.modules, "paperpull_core.browser", None)
+    assert updater.offered("/Applications/PaperPull.app/Contents/MacOS/python3") is False
+
+
+def test_a_check_turned_off_while_it_waited_keeps_nothing(panel, monkeypatch):
+    """The answer takes seconds, and settings saved meanwhile are not undone."""
+    _setting(True)
+
+    def slow(url):
+        data = app_module._read_settings()
+        data["update_check"] = False
+        data["apps_root"] = "kept"
+        app_module._write_settings(data)
+        return release("0.61.0", updater.architecture())
+    monkeypatch.setattr(updater, "fetch_json", slow)
+    with pytest.raises(fastapi.HTTPException) as e:
+        _check()
+    assert e.value.status_code == 409
+    saved = app_module._read_settings()
+    assert saved["update_check"] is False and saved["apps_root"] == "kept"
+    assert "update_latest" not in saved
+
+
+def test_nothing_restarts_during_a_history_import(panel):
+    assert app_module._IMPORTING.acquire(blocking=False)
+    try:
+        with pytest.raises(fastapi.HTTPException) as e:
+            app_module.api_update_restart()
+    finally:
+        app_module._IMPORTING.release()
+    assert e.value.status_code == 409 and "import" in e.value.detail
+
+
+def _ready(tmp_path):
+    app, staged = tmp_path / "PaperPull.app", tmp_path / ".PaperPull.new.app"
+    app.mkdir()
+    staged.mkdir()
+    inst = updater.Install()
+    inst.phase, inst.app, inst.staged, inst.work, inst.version = "ready", app, staged, tmp_path, "0.61.0"
+    return inst, app, staged
+
+
+def test_a_run_started_while_the_staged_app_was_checked_stops_the_restart(tmp_path, monkeypatch):
+    inst, app, staged = _ready(tmp_path)
+    swapped = []
+    monkeypatch.setattr(updater, "start_swap", lambda *a: swapped.append(a))
+    monkeypatch.setattr(updater, "verify_app", lambda *a: None)
+    with pytest.raises(updater.UpdateError) as e:
+        inst.restart(lambda: "A Rename is going on.")
+    assert "Rename" in str(e.value)
+    assert swapped == [] and inst.phase == "ready" and staged.is_dir() and app.is_dir()
+
+
+def test_a_second_press_of_restart_is_refused(tmp_path, monkeypatch):
+    inst, app, staged = _ready(tmp_path)
+    swapped, second = [], []
+    monkeypatch.setattr(updater, "start_swap", lambda *a: swapped.append(a))
+
+    def verify(*a):
+        # The second press arrives while the first is still checking.
+        try:
+            inst.restart()
+        except updater.UpdateError as e:
+            second.append(str(e))
+    monkeypatch.setattr(updater, "verify_app", verify)
+    inst.restart()
+    assert len(swapped) == 1 and second == ["no update is ready"]
+    assert inst.phase == "restarting"
+
+
+def test_the_swap_waits_for_the_host_and_the_window_too(tmp_path, monkeypatch):
+    app = tmp_path / "PaperPull.app"
+    ancestors = {100: 50, 50: 1}
+    monkeypatch.setattr(updater.os, "getppid", lambda: 100)
+    monkeypatch.setattr(updater, "_is_inside", lambda pid, a: pid in ancestors)
+    monkeypatch.setattr(updater, "_parent_of", lambda pid: ancestors.get(pid, 0))
+    started = []
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda args, **k: started.append(args))
+    updater.start_swap(app, tmp_path / ".PaperPull.new.app", tmp_path)
+    assert started[0][2].split() == [str(updater.os.getpid()), "100", "50"]
+
+
+def test_the_update_routes_that_change_anything_are_refused_in_the_sample():
+    for route in ("/api/update/setting", "/api/update/check", "/api/update/install",
+                  "/api/update/restart"):
+        r = next(r for r in app_module.app.routes if getattr(r, "path", "") == route)
+        assert app_module._not_in_sample in [d.call for d in r.dependant.dependencies], route

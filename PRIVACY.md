@@ -35,17 +35,24 @@ a machine at home, has a page of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md)
   button.** The check is off until you turn it on in Settings, and turning it
   on sends nothing. It only shows a button, **Check github.com for an
   update**. Nothing is asked at launch or in the background. Each press sends
-  one request to `api.github.com` for this project's newest release, which
+  one request to `api.github.com` for this project's newest release. It
   carries no account, no document and no identifier of yours beyond what any
-  web request reveals, such as your IP address. On a Mac installed from the
-  disk image, if a newer version exists, pressing **Update now** downloads
-  that release's disk image from `github.com`. The new app is checked
-  against the SHA-256 GitHub recorded for it and must be signed by the same
-  Apple Team ID as the app you are running, or nothing is replaced. It goes
-  in place only when you press **Restart and update**. On Windows the panel
-  only tells you a new version exists and links to the release page. The
-  Microsoft Store edition updates through the Store and PaperPull Server
-  through `docker compose pull`, so neither shows the button.
+  web request reveals, such as your IP address, and its User-Agent says it is
+  PaperPull's update check.
+- **GitHub again, to download a newer version, only when you press that
+  button.** On a Mac installed from the disk image, once a check has found a
+  newer version, pressing **Download from github.com** asks `api.github.com`
+  for that release once more, then downloads its disk image for your Mac's
+  kind of processor from `github.com`, which hands the file over from
+  GitHub's own file host, `release-assets.githubusercontent.com`. The new app
+  must match the SHA-256 GitHub recorded for it and be signed by the same
+  Apple Team ID as the app you are running, or nothing is replaced. macOS
+  checks the new app the way it checks any app, which can ask Apple about
+  its signature. It goes in place only when you press **Restart and
+  update**. On Windows the panel only tells you a new version exists and
+  links to the release page. The Microsoft Store edition updates through the
+  Store and PaperPull Server through `docker compose pull`, so neither shows
+  any of this.
 
 Nothing else. There is no crash reporting, no usage
 statistics, no analytics, and no account with this project. The program has

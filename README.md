@@ -760,11 +760,12 @@ apps click nothing at all. See
 No. There is no PaperPull account, no PaperPull cloud and no telemetry, so
 no crash reports and no usage statistics. The program contacts only the
 providers you sign in to, plus, only if you agree, a browser download when
-your computer has no usable browser, and, each time you press **Check
-github.com for an update** in Settings, GitHub's release list to see whether
-a newer version exists. That check is off until you turn it on and never
-runs by itself (Mac: it can then install the update for you; elsewhere it
-only tells you).
+your computer has no usable browser. If you turn the update check on in
+Settings, each press of **Check github.com for an update** asks GitHub's
+release list whether a newer version exists, and it never asks by itself.
+On a Mac installed from the disk image, **Download from github.com** then
+downloads the new version from GitHub, checks it, and installs it when you
+say so. Elsewhere the panel links to the release page.
 PaperPull Server also fetches Chrome from Google, and Chrome itself talks
 to Google as any Chrome does. See
 [PRIVACY.md](PRIVACY.md) and [PRIVACY-SERVER.md](PRIVACY-SERVER.md).

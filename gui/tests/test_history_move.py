@@ -303,6 +303,32 @@ def test_no_run_starts_while_an_import_writes_the_histories(panel, tmp_path, mon
     assert app_module._RUNNING == set()
 
 
+def test_no_run_or_import_starts_once_an_update_restarts_the_panel(panel, tmp_path, monkeypatch):
+    """The panel stops a moment after Restart and update, and a run, a
+    Review Names list or an import started in that moment would be cut off
+    partway (gui/updater.py)."""
+    old = old_computer(tmp_path)
+    data = export()
+    _use(old)
+    monkeypatch.setattr(app_module, "setup_needed", lambda meta: "")
+    monkeypatch.setattr(app_module, "_UPDATE_RESTARTING", True)
+
+    def never(*a, **k):
+        raise AssertionError("a run was started while the panel restarts")
+    monkeypatch.setattr(app_module.subprocess, "Popen", never)
+
+    async def said(answer):
+        return "".join([c if isinstance(c, str) else c.decode() async for c in answer.body_iterator])
+
+    text = asyncio.run(said(app_module._start_run("Bank Statements", "primary", "pilot", [])))
+    assert "restarting to update" in text and "event: done" in text
+    assert app_module._RUNNING == set()
+    _use(tmp_path / "new")
+    with pytest.raises(fastapi.HTTPException) as e:
+        bring(data)
+    assert e.value.status_code == 409 and "restarting to update" in e.value.detail
+
+
 def test_no_import_starts_while_another_import_runs(panel, tmp_path):
     old_computer(tmp_path)
     data = export()

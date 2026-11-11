@@ -14,13 +14,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Settings has an Updates card, off until you turn it on. Turning it on
   sends nothing. It shows **Check github.com for an update**, and each press
   asks GitHub's release list once. Nothing is asked at launch or in the
-  background. On a Mac installed from the disk image, **Update now**
-  downloads the release's disk image. The new app has to match the SHA-256
-  GitHub recorded and carry the running app's Apple Team ID, checked again
-  just before the swap, or nothing is replaced. It goes in place when you
-  press **Restart and update**. Elsewhere the panel links to the release
-  page. The Microsoft Store edition and PaperPull Server show none of it.
-  PRIVACY.md and the README now name this one request.
+  background. On a Mac installed from the disk image, **Download from
+  github.com** downloads the release's disk image. The new app has to match
+  the SHA-256 GitHub recorded and carry the running app's Apple Team ID,
+  checked again just before the swap, or nothing is replaced. It goes in
+  place when you press **Restart and update**. Elsewhere the panel links to
+  the release page. The Microsoft Store edition and PaperPull Server show
+  none of it. PRIVACY.md and the README name each request it sends.
+  Contributed by @JasperDale420. Before merging, the requests go only to
+  GitHub's own hosts, read by the shared address check, and the Mac's own
+  root certificates are added to what the app's Python trusts. Restart and
+  update also waits for a history import, and nothing new starts once it
+  has begun. A check turned off while it waited keeps nothing, a failed
+  download can be tried again, a half-copied app is removed, and the swap
+  waits for the window to close before it opens the new app.
 
 ## [0.63.0] - 2026-11-11
 
