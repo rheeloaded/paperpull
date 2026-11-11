@@ -10,6 +10,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
+- Renault Bank direkt recording and diagnosis setup (#172), with a separate browser profile and port. Document discovery and downloads await a recording from an account holder.
 - **An update check that asks only when you press its button (#146).**
   Settings has an Updates card, off until you turn it on. Turning it on
   sends nothing. It shows **Check github.com for an update**, and each press
