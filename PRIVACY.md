@@ -31,7 +31,23 @@ a machine at home, has a page of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md)
   cannot ask, so there it only says so and gives the line to run. Nobody who
   signs in with Edge, Chrome or another browser of their own is offered this.
 
-Nothing else. There is no update check, no crash reporting, no usage
+- **GitHub, to ask whether a newer version exists, only when you press the
+  button.** The check is off until you turn it on in Settings, and turning it
+  on sends nothing. It only shows a button, **Check github.com for an
+  update**. Nothing is asked at launch or in the background. Each press sends
+  one request to `api.github.com` for this project's newest release, which
+  carries no account, no document and no identifier of yours beyond what any
+  web request reveals, such as your IP address. On a Mac installed from the
+  disk image, if a newer version exists, pressing **Update now** downloads
+  that release's disk image from `github.com`. The new app is checked
+  against the SHA-256 GitHub recorded for it and must be signed by the same
+  Apple Team ID as the app you are running, or nothing is replaced. It goes
+  in place only when you press **Restart and update**. On Windows the panel
+  only tells you a new version exists and links to the release page. The
+  Microsoft Store edition updates through the Store and PaperPull Server
+  through `docker compose pull`, so neither shows the button.
+
+Nothing else. There is no crash reporting, no usage
 statistics, no analytics, and no account with this project. The program has
 no server of its own to talk to.
 

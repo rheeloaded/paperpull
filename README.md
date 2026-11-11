@@ -758,9 +758,13 @@ apps click nothing at all. See
 ### Does any of my information go to PaperPull?
 
 No. There is no PaperPull account, no PaperPull cloud and no telemetry, so
-no crash reports, no usage statistics and no update check. The program
-contacts only the providers you sign in to, plus, once and only if you
-agree, a browser download when your computer has no usable browser.
+no crash reports and no usage statistics. The program contacts only the
+providers you sign in to, plus, only if you agree, a browser download when
+your computer has no usable browser, and, each time you press **Check
+github.com for an update** in Settings, GitHub's release list to see whether
+a newer version exists. That check is off until you turn it on and never
+runs by itself (Mac: it can then install the update for you; elsewhere it
+only tells you).
 PaperPull Server also fetches Chrome from Google, and Chrome itself talks
 to Google as any Chrome does. See
 [PRIVACY.md](PRIVACY.md) and [PRIVACY-SERVER.md](PRIVACY-SERVER.md).

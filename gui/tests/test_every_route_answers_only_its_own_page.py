@@ -329,6 +329,17 @@ ROUTES = {
     # Accepting the terms writes the answer to the settings file.
     ("POST", "/api/terms"): dict(body={"accepted": app_module.TERMS_VERSION},
                                  desktop="changes", server="changes"),
+    # Updates (gui/updater.py). Saying yes or no to the check writes the
+    # settings file. The check itself asks GitHub only after a yes, so with
+    # none given it reads nothing and answers from the settings. Installing
+    # and restarting both refuse when there is nothing newer to install, which
+    # is the state here, so neither is seen changing anything. None of them
+    # exist on the server.
+    ("GET", "/api/update"): dict(desktop="reads", server="reads"),
+    ("POST", "/api/update/setting"): dict(body={"check": False}, desktop="changes", server="reads"),
+    ("POST", "/api/update/check"): dict(body={}, desktop="reads", server="reads"),
+    ("POST", "/api/update/install"): dict(body={}, desktop="reads", server="reads"),
+    ("POST", "/api/update/restart"): dict(body={}, desktop="reads", server="reads"),
     ("GET", "/"): dict(page=True, desktop="reads", server="reads"),
     ("GET", "/favicon.ico"): dict(page=True, desktop="reads", server="reads"),
     ("GET", "/login"): dict(page=True, desktop="reads", server="reads"),

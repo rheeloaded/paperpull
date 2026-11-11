@@ -43,6 +43,7 @@ REPO = Path(__file__).resolve().parents[2]
 # person set should carry.
 FOR_THE_INTERNET = {
     ("packaging/build_windows.py", "fetch"): "downloads Python and get-pip.py for the Windows build",
+    ("gui/updater.py", "_open"): "the opt-in update check and its download, both from github.com",
 }
 
 # Each reads the proxy settings for every request it sends.

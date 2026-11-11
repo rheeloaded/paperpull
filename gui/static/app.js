@@ -2929,6 +2929,11 @@ const DO = {
   'tm-go': () => tmGo(),
   'request': el => openRequest(el.dataset.kind, el.id === 'w-request' ? W.search.trim() : ''),
   'rq-close': () => $('dlg-request').close(),
+  'upd-toggle': () => updSetting(!(UPD && UPD.enabled)),
+  'upd-check': () => updCheck(),
+  'upd-install': () => updInstall(),
+  'upd-restart': () => updRestart(),
+  'upd-later': () => { UPD_HIDDEN = true; updRender(); },
   'dock-close': () => closeDock(),
   'dismiss-notice': () => notice('', ''),
   'find-clear': () => clearFind(),
@@ -3077,8 +3082,92 @@ async function tmGo() {
   await load();
   if (unsaved) notice('Your answer to the terms could not be saved, so they will be shown again next time. ' + unsaved.message, 'warn');
 }
+// Updates (gui/updater.py). Opening the page asks nobody: it reads what the
+// panel already knows. The check is off until the person turns it on in
+// Settings, and turning it on asks nobody either. The one request is the one
+// Check github.com for an update starts. A Mac installed from the disk image
+// can then download and check the new version, and waits to be told to
+// restart. Everything else is pointed at the release page. Neither PaperPull
+// Server nor the Store edition shows any of this.
+let UPD = null;
+let UPD_HIDDEN = false;
+let UPD_TIMER = null;
+const UPD_ERR = 'Could not do that. ';
+function updHide() { if ($('g-updcard')) $('g-updcard').hidden = true; if ($('updatebar')) $('updatebar').hidden = true; }
+async function updLoad() {
+  if (SERVER) { updHide(); return; }
+  try { UPD = await getJSON('/api/update'); }
+  catch (e) { updHide(); return; }
+  updRender();
+}
+async function updCheck() {
+  $('updmsg').textContent = 'Asking github.com…';
+  try { UPD = await postJSON('/api/update/check', {}); }
+  catch (e) { $('updmsg').textContent = e.message; return; }
+  UPD_HIDDEN = false;
+  $('updmsg').textContent = UPD.newer ? '' : 'PaperPull is up to date.';
+  updRender();
+}
+async function updSetting(on) {
+  try { UPD = await postJSON('/api/update/setting', {check: on}); }
+  catch (e) { notice(UPD_ERR + e.message, 'warn'); return; }
+  $('updmsg').textContent = '';
+  updRender();
+}
+async function updInstall() {
+  try { UPD = await postJSON('/api/update/install', {}); }
+  catch (e) { notice(UPD_ERR + e.message, 'warn'); return; }
+  updRender();
+}
+async function updRestart() {
+  try { await postJSON('/api/update/restart', {}); }
+  catch (e) { notice(UPD_ERR + e.message, 'warn'); updLoad(); return; }
+  $('updatetext').textContent = 'PaperPull is closing and will open again in a moment. You can close this tab.';
+  $('updatebtns').innerHTML = '';
+}
+function updRender() {
+  if (SERVER || !UPD) return;
+  const bar = $('updatebar'), txt = $('updatetext'), btns = $('updatebtns');
+  const inst = UPD.install || {};
+  const link = '<a class="btn btn-s btn-sm" href="' + esc(UPD.page) + '" target="_blank" rel="noopener">What’s new</a>';
+  const btn = (act, label, cls) => '<button class="btn ' + (cls || 'btn-s') + ' btn-sm" type="button" data-do="' + act + '">' + label + '</button>';
+  let text = '', html = '', tone = '';
+  if (inst.phase === 'downloading') {
+    const pct = inst.total ? Math.floor(100 * inst.done / inst.total) : 0;
+    text = 'Downloading PaperPull ' + (inst.version || '') + ' from github.com… ' + pct + '%';
+  } else if (inst.phase === 'checking') {
+    text = 'Checking that PaperPull ' + (inst.version || '') + ' is the genuine release…';
+  } else if (inst.phase === 'ready') {
+    text = 'PaperPull ' + (inst.version || '') + ' is ready. PaperPull closes and opens again to finish.';
+    html = btn('upd-restart', 'Restart and update', 'btn-p');
+    tone = 'ok';
+  } else if (inst.phase === 'error') {
+    text = 'The update did not install: ' + (inst.error || 'something went wrong') + ' Nothing was changed.';
+    html = (UPD.can_install ? btn('upd-install', 'Try again') : '') + link;
+    tone = 'warn';
+  } else if (UPD.newer && !UPD_HIDDEN) {
+    text = 'PaperPull ' + UPD.latest + ' is available. You have ' + UPD.current + '.';
+    html = (UPD.can_install ? btn('upd-install', 'Update now', 'btn-p') : '') + link + btn('upd-later', 'Later');
+  }
+  txt.textContent = text;
+  btns.innerHTML = html;
+  bar.className = 'notice' + (tone ? ' ' + tone : '');
+  bar.hidden = !text;
+  // Settings: the switch, and the one button that asks github.com.
+  const st = $('updstatus');
+  if (st) {
+    st.textContent = UPD.enabled ? (UPD.newer ? 'PaperPull ' + UPD.latest + ' is available. You have ' + UPD.current + '.'
+        : 'You have PaperPull ' + UPD.current + '. The check is on, and asks only when you press the button.')
+      : 'You have PaperPull ' + UPD.current + '. The check is off.';
+    $('updtoggle').textContent = UPD.enabled ? 'Turn the check off' : 'Turn the check on';
+    $('updcheck').hidden = !UPD.enabled;
+  }
+  clearTimeout(UPD_TIMER);
+  if (inst.phase === 'downloading' || inst.phase === 'checking') UPD_TIMER = setTimeout(updLoad, 700);
+}
 applyTheme();
 serverPage();
 placeMove(false);
 load();
 if (TERMS_DUE) openTerms();
+updLoad();
