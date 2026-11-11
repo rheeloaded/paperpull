@@ -63,7 +63,10 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
 [#53](https://github.com/rheeloaded/paperpull/issues/53),
-[#54](https://github.com/rheeloaded/paperpull/issues/54)):
+[#54](https://github.com/rheeloaded/paperpull/issues/54)), and Scalable Capital and Consorsbank
+are first shells waiting for a tester to Record a trip to a document
+([#170](https://github.com/rheeloaded/paperpull/issues/170),
+[#178](https://github.com/rheeloaded/paperpull/issues/178)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -89,6 +92,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`chasebusiness`](apps/chasebusiness) | Chase Business (business document center) | Business checking and business card statements, up to seven years | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 10 checking statements and the business card's first statement saved on full runs.** One profile so far, so a debit account's statements are untested. Seven kinds of control pressed through the guard, real Edge/Chrome |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements, Coinbase One Card statements, tax forms, gain and loss reports | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 66 statements and 2 tax documents saved on a full run.** Each month's own PDF button on the Statements page pressed once and the download taken only from Coinbase's statements bucket, and tax PDFs from the list calls the Taxes page makes, nothing pressed. One Card statements from the Credit Card tab, each row's own PDF button pressed once, 13 saved on a full run on one account |
+| [`consorsbank`](apps/consorsbank) | Consorsbank | Statements, securities documents, tax certificates | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/consorsbank/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document. Requested in [#178](https://github.com/rheeloaded/paperpull/issues/178) |
 | [`costco`](apps/costco) | Costco Wholesale | Receipts, in-warehouse, gas, pharmacy and costco.com orders | **Written from a member's recording and run against their account, 34 purchases back to July 2024** ([#47](https://github.com/rheeloaded/paperpull/issues/47)). Each receipt names its part of Costco, Warehouse or Gas Station, for a file name pattern ([#60](https://github.com/rheeloaded/paperpull/issues/60)). One membership so far, so a second Pilot is welcome. Two tabs, quarters walked, the warehouse receipt is a dialog rendered with printToPDF, real Edge/Chrome |
 | [`discoverbank`](apps/discoverbank) | Discover Bank | Checking and savings statements | **Contributed by [@appchamp](https://github.com/appchamp), 100 checking and 100 savings statements saved on a full run** ([#151](https://github.com/rheeloaded/paperpull/pull/151)). The statements page's own list call for each account its account menu holds, read from inside the page, nothing clicked but the inactivity dialog's keep-alive. A list of exactly 100 statements, which looks like the most one answer holds, may have older statements this app cannot reach, and the run says so. Money market and CD accounts are untested |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Capital One is moving these accounts onto its own site. A card that has moved is read there by the [`capitalone`](apps/capitalone) app ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
@@ -128,6 +132,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
+| [`scalable`](apps/scalable) | Scalable Capital | Statements, securities documents, tax certificates | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/scalable/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document, and a second recording that switches to a child's sub-account. Requested in [#170](https://github.com/rheeloaded/paperpull/issues/170) |
 | [`schwab`](apps/schwab) | Charles Schwab | Statements, tax forms, letters, trade confirmations | Ported by [@davidrudnick](https://github.com/davidrudnick); fresh live pilot pending |
 | [`sdge`](apps/sdge) | SDG&E (San Diego Gas & Electric) | Monthly bills, about two years online | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 8 bills saved on a full run.** Each bill fetched by its own address from Billing History, nothing clicked. One account per run, the one selected on the site |
 | [`shelbycounty`](apps/shelbycounty) | Shelby County Trustee (Memphis, TN) | Property tax receipts, one per payment, and the current tax notice while a balance is due | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 17 receipts across 16 tax years saved on a full run.** A public lookup with no sign-in, the parcel ID goes in config.json. The page builds each PDF itself and the app keeps it, one guarded press per document |
@@ -892,8 +897,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **eighty-seven** apps pass their tests, the eighty-two that are
-  supported and the five still waiting for a tester, 35,564 of them
+- ✅ All **eighty-nine** apps pass their tests, the eighty-two that are
+  supported, the five still waiting for a tester and the Scalable Capital
+  and Consorsbank shells, 35,564 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).

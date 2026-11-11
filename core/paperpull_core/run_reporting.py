@@ -43,9 +43,16 @@ def under_panel() -> bool:
     return bool(os.environ.get(MARK_ENV, ""))
 
 
-def after_sign_in() -> str:
+def after_sign_in(record: bool = False) -> str:
     """What to do once signed in, in the words of where the run is: the
-    panel's button under the panel, the command in a terminal."""
+    panel's button under the panel, the command in a terminal.
+
+    `record` is for a first shell of a provider, which downloads nothing
+    yet, so the step after signing in is a recording of one trip to a
+    document. Record steps sits in Get help, under More."""
+    if record:
+        return ("press Record steps (More, then Get help)" if os.environ.get(MARK_ENV, "")
+                else "run record")
     return "press Try the newest few first" if os.environ.get(MARK_ENV, "") else "run the pilot"
 
 

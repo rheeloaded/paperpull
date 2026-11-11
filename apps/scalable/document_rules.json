@@ -1,0 +1,92 @@
+{
+  "_comment": "Editable rules mapping Scalable Capital document titles to filename summaries. Case-insensitive regexes matched against the title, checked in order: tax, then statement. Taken from DKB's rules, whose Postfach subjects (Kontoauszug, Abrechnung Kauf, Depotauszug, Ertragsabrechnung, Kosteninformation, Jahressteuerbescheinigung) a German bank's or broker's mailbox is likeliest to share. Repair once the app is built from a recording of a real documents page (#170).",
+  "tax_rules": [
+    {
+      "pattern": "jahressteuerbescheinigung",
+      "summary": "Jahressteuerbescheinigung"
+    },
+    {
+      "pattern": "verlustbescheinigung",
+      "summary": "Verlustbescheinigung"
+    },
+    {
+      "pattern": "freistellungsauftrag",
+      "summary": "Freistellungsauftrag"
+    },
+    {
+      "pattern": "ertr(ae|ä)gnisaufstellung",
+      "summary": "Ertraegnisaufstellung"
+    },
+    {
+      "pattern": "steuerbescheinigung|steuer",
+      "summary": "Steuerbescheinigung"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "kreditkarten?abrechnung|kreditkarte",
+      "summary": "Kreditkartenabrechnung"
+    },
+    {
+      "pattern": "depotauszug|depot\\s*auszug|verm(oe|ö)gensaufstellung",
+      "summary": "Depotauszug"
+    },
+    {
+      "pattern": "^verkauf\\b|abrechnung\\s+verkauf|wertpapier\\w*\\s+verkauf",
+      "summary": "Wertpapierabrechnung Verkauf"
+    },
+    {
+      "pattern": "^kauf\\b|abrechnung\\s+(kauf|sparplan)|wertpapier\\w*\\s+kauf",
+      "summary": "Wertpapierabrechnung Kauf"
+    },
+    {
+      "pattern": "wertpapierabrechnung|\\babrechnung\\s+wkn",
+      "summary": "Wertpapierabrechnung"
+    },
+    {
+      "pattern": "ertragsabrechnung|dividende|aussch(ue|ü)ttung",
+      "summary": "Ertragsabrechnung"
+    },
+    {
+      "pattern": "kapitalma(ss|ß)nahme",
+      "summary": "Kapitalmassnahme"
+    },
+    {
+      "pattern": "fondssparpl(ae|ä)n|sparplan",
+      "summary": "Sparplanabrechnung"
+    },
+    {
+      "pattern": "kosteninformation|ex-?ante|ex-?post",
+      "summary": "Kosteninformation"
+    },
+    {
+      "pattern": "rechnungsabschluss",
+      "summary": "Rechnungsabschluss"
+    },
+    {
+      "pattern": "vollmacht",
+      "summary": "Vollmacht"
+    },
+    {
+      "pattern": "einlagensicherung",
+      "summary": "Informationsbogen Einlagensicherung"
+    },
+    {
+      "pattern": "kontoauszug",
+      "summary": "Kontoauszug"
+    },
+    {
+      "pattern": "preis-?\\s*und\\s*leistung",
+      "summary": "Preis- und Leistungsverzeichnis"
+    },
+    {
+      "pattern": "bedingungen|vertrag|vereinbarung",
+      "summary": "Vertragsinformation"
+    },
+    {
+      "pattern": "mitteilung|information|schreiben",
+      "summary": "Mitteilung"
+    }
+  ]
+}

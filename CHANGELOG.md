@@ -35,6 +35,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   a document arriving mid-run cannot move a later link onto its neighbor,
   and a control such as "Weitere Dokumente laden" stops the run as paging
   does. See [local testing](apps/ing/README.md#local-test-before-a-pr).
+- **Scalable Capital and Consorsbank, first shells for a tester (#170,
+  #178, from #169).** Add one from the panel, sign in with Open sign-in
+  window, and press Record steps (More, then Get help) for one trip to a
+  document. That recording is what the real app is built from. Each shell
+  opens its sign-in page, de.scalable.capital/secure-login or Consorsbank's
+  sign-in form, in a browser profile of its own and does nothing more. It
+  presses nothing on the provider's pages and acts only on scalable.capital
+  or consorsbank.de. Discover, Pilot and Run All say it is not built yet
+  and stop, and Resume says nothing has been listed yet, so nothing is
+  listed or downloaded. Login names a sign-in page or a check and never
+  says you are signed in. A shell's own words after its sign-in window
+  opens name Record steps, not Try the newest few first, and the panel
+  starts no run by itself once a shell's sign-in is done, since a shell
+  has nothing to download. The panel's own next step after a sign-in is
+  still Get new, which for a shell says it is not built yet. Scalable Capital
+  on port 9309, Consorsbank on 9310, the person's own Edge or Chrome first.
 - **A sign-in starts its run by itself once it is done (#200).** Open sign-in
   window used to end with the person coming back to the panel to press
   Get new. Now the panel watches the sign-in window's tabs, their address

@@ -249,6 +249,12 @@ def announce(start: str) -> None:
         site = _this_runs_site()
         if site is None:
             return
+        # A first shell of a provider, whose site says it is not mapped yet,
+        # downloads nothing, so no run follows its sign-in. A Get new started
+        # here would only stop and leave the account offering Continue. The
+        # step after its sign-in is a recording, which the person starts.
+        if getattr(site, "NOT_MAPPED", ""):
+            return
         plan = plan_for(start, site.URLS, getattr(site, "LOGIN_URL_MARKERS", ()) or ())
         if plan is not None:
             print(marked(PLAN_PREFIX, plan), flush=True)
