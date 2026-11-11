@@ -245,6 +245,12 @@ NOT_A_LIST = {
     ("consorsbank", "NotBuilt"):
         "a first shell, which lists and downloads nothing until it is built, so no list "
         "read again changes it",
+    ("cibc", "NotBuilt"):
+        "a first shell, which lists and downloads nothing until it is built, so no list "
+        "read again changes it",
+    ("mbna", "NotBuilt"):
+        "a first shell, which lists and downloads nothing until it is built, so no list "
+        "read again changes it",
     ("fedex", "NeedsPerson"):
         "something only the account holder may do, connecting Billing Online among them",
     ("venmo", "ProfileChanged"):

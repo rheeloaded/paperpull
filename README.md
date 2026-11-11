@@ -63,10 +63,12 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
 [#53](https://github.com/rheeloaded/paperpull/issues/53),
-[#54](https://github.com/rheeloaded/paperpull/issues/54)), and Scalable Capital and Consorsbank
-are first shells waiting for a tester to Record a trip to a document
+[#54](https://github.com/rheeloaded/paperpull/issues/54)), and Scalable Capital, Consorsbank,
+CIBC and MBNA are first shells waiting for a tester to Record a trip to a document
 ([#170](https://github.com/rheeloaded/paperpull/issues/170),
-[#178](https://github.com/rheeloaded/paperpull/issues/178)):
+[#178](https://github.com/rheeloaded/paperpull/issues/178),
+[#204](https://github.com/rheeloaded/paperpull/issues/204),
+[#205](https://github.com/rheeloaded/paperpull/issues/205)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -90,6 +92,7 @@ are first shells waiting for a tester to Record a trip to a document
 | [`cetera`](apps/cetera) | Cetera (AdviceWorks) | Brokerage account statements and quarterly performance reports, every account the client portal lists | **Built and run on a contributor's own account, 56 statements across four accounts and 5 reports listed.** The portal's own statement and report lists asked from inside the signed-in page, each PDF fetched the same way, nothing clicked |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
 | [`chasebusiness`](apps/chasebusiness) | Chase Business (business document center) | Business checking and business card statements, up to seven years | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 10 checking statements and the business card's first statement saved on full runs.** One profile so far, so a debit account's statements are untested. Seven kinds of control pressed through the guard, real Edge/Chrome |
+| [`cibc`](apps/cibc) | CIBC (Canadian Imperial Bank of Commerce) | Bank account, credit card and line of credit statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/cibc/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document, and a second recording for a credit card or line of credit whose statements open somewhere else. Requested in [#204](https://github.com/rheeloaded/paperpull/issues/204) |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements, Coinbase One Card statements, tax forms, gain and loss reports | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 66 statements and 2 tax documents saved on a full run.** Each month's own PDF button on the Statements page pressed once and the download taken only from Coinbase's statements bucket, and tax PDFs from the list calls the Taxes page makes, nothing pressed. One Card statements from the Credit Card tab, each row's own PDF button pressed once, 13 saved on a full run on one account |
 | [`consorsbank`](apps/consorsbank) | Consorsbank | Statements, securities documents, tax certificates | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/consorsbank/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document. Requested in [#178](https://github.com/rheeloaded/paperpull/issues/178) |
@@ -115,6 +118,7 @@ are first shells waiting for a tester to Record a trip to a document
 | [`github`](apps/github) | GitHub | Payment receipts (Pro, Copilot, Actions, Sponsors and the rest) | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#43](https://github.com/rheeloaded/paperpull/issues/43).** Receipt links fetched or printed, nothing clicked |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every statement on both of his accounts, a credit card's named as one ([#35](https://github.com/rheeloaded/paperpull/issues/35)) |
 | [`ibkr`](apps/ibkr) | Interactive Brokers | Monthly Activity Statements | **Contributed by [@tylerverry](https://github.com/tylerverry), 60 of 61 months saved on a full run.** The Statements page's own Activity Statement dialog, Monthly chosen and each month's own Download PDF button pressed once, and nothing else is clicked. Regional hosts `.com`, `.co.uk` and `.ie` |
+| [`mbna`](apps/mbna) | MBNA (Canada, credit cards) | Credit card statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/mbna/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a statement. Requested in [#205](https://github.com/rheeloaded/paperpull/issues/205) |
 | [`meijer`](apps/meijer) | Meijer | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked but its two tabs and an in-store receipt's own icon |
 | [`myecp`](apps/myecp) | MILITARY STAR (Exchange Credit Program) | Card statements | **Built on the maintainer's own account, 25 statements back to 2023.** The MyECP statements list and download from inside the page, nothing clicked |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
@@ -902,9 +906,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **eighty-nine** apps pass their tests, the eighty-two that are
-  supported, the five still waiting for a tester and the Scalable Capital
-  and Consorsbank shells, 38,158 of them
+- ✅ All **ninety-one** apps pass their tests, the eighty-two that are
+  supported, the five still waiting for a tester and the Scalable Capital,
+  Consorsbank, CIBC and MBNA shells, 38,158 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).

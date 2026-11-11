@@ -234,7 +234,7 @@ def test_the_first_shells_here_say_nothing_to_watch(providers, monkeypatch, caps
     """Every app whose site says it is not mapped yet, through announce
     itself with that app's own site the one imported."""
     shells = sorted(n for n, s in providers.items() if getattr(s, "NOT_MAPPED", ""))
-    assert {"consorsbank", "scalable"} <= set(shells)
+    assert {"cibc", "consorsbank", "mbna", "scalable"} <= set(shells)
     monkeypatch.setenv("PAPERPULL_RUN_MARK", "ab" * 16)
     for name in shells:
         site = providers[name]
@@ -254,7 +254,7 @@ def test_every_first_shell_is_one_the_panel_knows(providers):
     assert sorted(cards) == sorted(providers)
     shells = {n for n, s in providers.items() if getattr(s, "NOT_MAPPED", "")}
     marked = {slug for slug, card in cards.items() if card.get("shell") is True}
-    assert {"consorsbank", "scalable"} <= shells and marked == shells
+    assert {"cibc", "consorsbank", "mbna", "scalable"} <= shells and marked == shells
     assert all(card.get("shell", False) in (True, False) for card in cards.values())
     assert all(cards[slug].get("tested", True) is False for slug in marked)
 

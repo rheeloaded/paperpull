@@ -1,0 +1,56 @@
+{
+  "_comment": "Editable rules mapping CIBC document titles to filename summaries. Case-insensitive regexes matched against the title, checked in order: tax, then statement. Written for the titles a Canadian bank's statements and tax slips are likeliest to carry, in English and French. Repair once the app is built from a recording of a real statements page (#204).",
+  "tax_rules": [
+    {
+      "pattern": "\\bT5008\\b",
+      "summary": "T5008 Tax Slip"
+    },
+    {
+      "pattern": "\\bT5\\b",
+      "summary": "T5 Tax Slip"
+    },
+    {
+      "pattern": "\\bT4RSP\\b",
+      "summary": "T4RSP Tax Slip"
+    },
+    {
+      "pattern": "\\bT4RIF\\b",
+      "summary": "T4RIF Tax Slip"
+    },
+    {
+      "pattern": "(rrsp|fhsa)\\s+contribution\\s+receipt",
+      "summary": "Contribution Receipt"
+    },
+    {
+      "pattern": "tax\\s+(slip|form|document|receipt)s?|feuillets?\\s+(d'|d’)?imp[oô]t",
+      "summary": "Tax Document"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "credit\\s+card|\\bvisa\\b|mastercard|carte\\s+de\\s+cr[ée]dit",
+      "summary": "Credit Card Statement"
+    },
+    {
+      "pattern": "line\\s+of\\s+credit|marge\\s+de\\s+cr[ée]dit",
+      "summary": "Line of Credit Statement"
+    },
+    {
+      "pattern": "chequing|checking|savings|compte\\s+(de\\s+)?(ch[èe]ques|[ée]pargne)",
+      "summary": "Account Statement"
+    },
+    {
+      "pattern": "statements?\\b|\\brelev[ée]s?\\b",
+      "summary": "Account Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "fee\\s+schedule",
+    "marketing",
+    "\\boffers?\\b",
+    "cheque\\s+image"
+  ]
+}
