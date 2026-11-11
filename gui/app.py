@@ -48,7 +48,7 @@ from pathlib import Path
 
 import run_result
 
-from anyio import sleep as async_sleep, to_thread
+from anyio import from_thread, sleep as async_sleep, to_thread
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
@@ -6400,23 +6400,37 @@ def api_update_restart():
     why = _what_an_exit_would_cut()
     if why:
         raise HTTPException(409, why)
+    held = []   # this press set _UPDATE_RESTARTING, and only it may clear it
+
+    def hold() -> str:
+        # On the event loop, where every run, Review Names list and import
+        # checks _UPDATE_RESTARTING and claims itself with nothing awaited
+        # between, so none can slip in between this look and the hold.
+        global _UPDATE_RESTARTING
+        if _UPDATE_RESTARTING:
+            return "PaperPull is already restarting to update."
+        why = _what_an_exit_would_cut()
+        if not why:
+            _UPDATE_RESTARTING = True
+            held.append(True)
+        return why
 
     def last_look() -> str:
         # The staged app was checked again first, which takes a while, so
-        # ask again, with new starts already held off while asking.
-        global _UPDATE_RESTARTING
-        _UPDATE_RESTARTING = True
-        why = _what_an_exit_would_cut()
-        if why:
-            _UPDATE_RESTARTING = False
-        return why
+        # look again now.
+        try:
+            return from_thread.run_sync(hold)
+        except RuntimeError:   # called straight, not from the server's worker thread
+            return hold()
     try:
         updater.INSTALL.restart(last_look)
     except updater.UpdateError as e:
-        _UPDATE_RESTARTING = False
+        if held:
+            _UPDATE_RESTARTING = False
         raise HTTPException(409, str(e))
-    except OSError as e:
-        _UPDATE_RESTARTING = False
+    except Exception as e:
+        if held:
+            _UPDATE_RESTARTING = False
         raise HTTPException(500, "could not start the update: %s" % e)
     _exit_soon()
     return {"restarting": True}

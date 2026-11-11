@@ -42,9 +42,10 @@ a machine at home, has a page of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md)
 - **GitHub again, to download a newer version, only when you press that
   button.** On a Mac installed from the disk image, once a check has found a
   newer version, pressing **Download from github.com** asks `api.github.com`
-  for that release once more, then downloads its disk image for your Mac's
-  kind of processor from `github.com`, which hands the file over from
-  GitHub's own file host, `release-assets.githubusercontent.com`. The new app
+  for the newest release once more, then downloads its disk image for your
+  Mac's kind of processor from `github.com`, which hands the file over from
+  one of GitHub's own file hosts, `release-assets.githubusercontent.com` or
+  `objects.githubusercontent.com`, and from no other host. The new app
   must match the SHA-256 GitHub recorded for it and be signed by the same
   Apple Team ID as the app you are running, or nothing is replaced. macOS
   checks the new app the way it checks any app, which can ask Apple about

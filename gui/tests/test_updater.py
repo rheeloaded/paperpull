@@ -616,6 +616,55 @@ def test_the_swap_waits_for_the_host_and_the_window_too(tmp_path, monkeypatch):
     assert started[0][2].split() == [str(updater.os.getpid()), "100", "50"]
 
 
+def _ready_to_restart(tmp_path, monkeypatch):
+    """The panel's one install, ready, with the swap and the exit stubbed."""
+    app, staged = tmp_path / "PaperPull.app", tmp_path / ".PaperPull.new.app"
+    app.mkdir()
+    staged.mkdir()
+    inst = updater.INSTALL
+    inst.phase, inst.app, inst.staged, inst.work, inst.version = "ready", app, staged, tmp_path, "0.61.0"
+    swapped, exits = [], []
+    monkeypatch.setattr(updater, "verify_app", lambda *a: None)
+    monkeypatch.setattr(updater, "start_swap", lambda *a: swapped.append(a))
+    monkeypatch.setattr(app_module, "_exit_soon", lambda: exits.append(1))
+    monkeypatch.setattr(app_module, "_UPDATE_RESTARTING", False)
+    return swapped, exits
+
+
+def test_a_second_press_never_lifts_the_hold_of_the_first(panel, tmp_path, monkeypatch):
+    """Two tabs on one panel. The first press is about to stop it, so the
+    second is refused, and runs stay held off until it stops."""
+    swapped, exits = _ready_to_restart(tmp_path, monkeypatch)
+    assert app_module.api_update_restart() == {"restarting": True}
+    assert app_module._UPDATE_RESTARTING is True and len(swapped) == 1 and exits == [1]
+    with pytest.raises(fastapi.HTTPException) as e:
+        app_module.api_update_restart()
+    assert e.value.status_code == 409
+    assert app_module._UPDATE_RESTARTING is True and len(swapped) == 1
+
+
+def test_the_last_look_is_taken_on_the_event_loop(panel, tmp_path, monkeypatch):
+    """As the server runs it, from a worker thread, the last look and the
+    hold happen on the event loop, where a run checks and claims itself."""
+    import anyio
+    swapped, exits = _ready_to_restart(tmp_path, monkeypatch)
+    loop_threads, look_threads = [], []
+    real_hold = app_module._what_an_exit_would_cut
+
+    def watched():
+        look_threads.append(threading.get_ident())
+        return real_hold()
+    monkeypatch.setattr(app_module, "_what_an_exit_would_cut", watched)
+
+    async def main():
+        loop_threads.append(threading.get_ident())
+        return await anyio.to_thread.run_sync(app_module.api_update_restart)
+    assert asyncio.run(main()) == {"restarting": True}
+    # The first look is the route's own, in the worker; the last, the loop's.
+    assert look_threads[0] != loop_threads[0] and look_threads[-1] == loop_threads[0]
+    assert app_module._UPDATE_RESTARTING is True and len(swapped) == 1
+
+
 def test_the_update_routes_that_change_anything_are_refused_in_the_sample():
     for route in ("/api/update/setting", "/api/update/check", "/api/update/install",
                   "/api/update/restart"):
