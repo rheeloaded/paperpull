@@ -29,6 +29,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   download can be tried again, a half-copied app is removed, and the swap
   waits for the window to close before it opens the new app.
 
+### Changed
+- **A recording keeps a Canadian bank's words for its accounts.** `Chequing`,
+  `cheque` and `cheques` come through a recording, a Diagnose file or a
+  failure file as `Checking` and `checks` do, for the CIBC and MBNA shells
+  (#204, #205). Like `Checking`, `Chequing` names a kind of account, so a
+  title or a control that can name something still writes it as its shape.
+
 ### Fixed
 - **ING no longer takes the notice that nothing matches for an empty list
   (#203).** A Postbox or archive with no document shows "Zu Ihrer Suche
@@ -44,6 +51,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   stops the run there. If your archive is empty in ING, set `read_archive`
   to `false` and runs leave it out. Diagnose says when the list on screen
   shows only the notice.
+- **The website's note for Optum Bank reads as a sentence again.** Its
+  PROVIDERS row ran its credit on into "whose full run saved", which the
+  site's note began with once the credit was taken out. A test now holds
+  every credit in PROVIDERS.md to a sentence of its own, as Discover Bank's
+  and ING's rows needed in 0.62.0 and 0.63.0.
 
 ## [0.63.0] - 2026-11-11
 

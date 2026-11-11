@@ -51,6 +51,15 @@ def test_any_other_word_leaves_as_its_shape():
     assert W.shape(LETTERS) == "aaaaaaaaaaaaa"
 
 
+def test_a_canadian_banks_words_come_through_as_an_american_banks_do():
+    """CIBC and MBNA write Chequing and cheques where an American bank
+    writes Checking and checks (#204, #205). Like Checking, Chequing names a
+    kind of account, so a string that can name something keeps neither."""
+    assert W.shape("Chequing ...0400") == "Chequing ...9999"
+    assert W.shape("Cheque") == "Cheque" and W.shape("cheques") == "cheques"
+    assert W.shape_label("Chequing") == W.shape_label("Checking") == "aaaaaaaa"
+
+
 def test_every_digit_is_a_9_whatever_it_sits_beside():
     assert W.shape("Checking ...0400") == "Checking ...9999"
     assert W.shape("March 2031") == "March 9999"
