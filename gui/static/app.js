@@ -1162,8 +1162,10 @@ function runOutcome() {
   // Continue picks up a run that downloads. A Discover that stopped is
   // pressed again, since it was asked only to see what is there, and a
   // restore that stopped is chosen again for the dates it did not reach.
-  const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again;
-  const recheck = RUN.action === 'discover';
+  // A first shell has nothing to carry on with or check again, however its
+  // run ended (afterSignIn).
+  const downloads = ['pilot', 'all', 'resume'].includes(RUN.action) && !RUN.again && !RUN.shell;
+  const recheck = RUN.action === 'discover' && !RUN.shell;
   const next = RUN.again ? AGAIN_LEFT : downloads ? 'Continue picks up where it stopped'
     : recheck ? 'Check again when you are ready' : 'Nothing was lost';
   if (RUN.refused) return {tone: 'bad', title: 'This run did not start', say: RUN.refused, clean: false};

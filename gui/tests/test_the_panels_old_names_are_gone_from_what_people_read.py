@@ -115,19 +115,40 @@ def test_no_doc_names_a_control_the_panel_stopped_showing():
 GUIDE = REPO / "docs" / "testing-a-provider.md"
 GUIDE_GONE = ["**more**", "**Record**", "**Login**", "**Pilot**", "**App** list", "**add a provider**",
               "**Diagnose**", "Diagnose file", "Pilot runs", "pressing Record and", "press Record and"]
-GUIDE_SAYS = ["Add a provider", "Continue", "Set up", "Not built yet", "Record steps", "Get new documents",
-              "Open sign-in window", "More", "Get help", "Stop recording", "Try the newest few first"]
+# Each name the guide puts in bold, with the place on the page that shows it,
+# so a control renamed or moved fails here rather than matching some other
+# string that happens to hold the same words.
+GUIDE_SAYS = [
+    ("Add a provider", "index.html", "Add a provider</button>"),
+    ("Continue", "index.html", 'id="w-next2">Continue</button>'),
+    ("Set up", "index.html", 'id="w-create">Set up</button>'),
+    ("Not started", "app.js", "' : '') + '><summary>Not started ('"),
+    ("Not built yet", "app.js", "text: 'Not built yet'"),
+    ("Get new documents", "app.js", "sv(P.download, 18, 2.2) + 'Get new documents</button>"),
+    ("Open sign-in window", "app.js", "sv(P.lock) + 'Open sign-in window</button>"),
+    ("Back to", "app.js", "'\">Back to ' + esc(RUN.provider) + '</a>'"),
+    ("More", "app.js", "DOTS + 'More</button>"),
+    ("Get help", "app.js", "menuItem('support', k, P.report, 'Get help'"),
+    ("Record steps", "index.html", 'data-do="rc-go">Record steps</button>'),
+    ("Record steps", "app.js", "' starts\" data-do=\"record\" data-key=\"' + esc(keyOf(r)) + '\">Record steps</button>"),
+    ("Technical details", "app.js", "<summary>Technical details"),
+    ("Stop recording", "app.js", "STOP + 'Stop recording</button>"),
+    ("Try the newest few first", "app.js", ">Try the newest few first</button>"),
+]
 
 
 def test_the_tester_guide_names_each_control_as_the_panel_shows_it():
     text = " ".join(GUIDE.read_text(encoding="utf-8").split())
-    page = (STATIC / "app.js").read_text(encoding="utf-8") + (STATIC / "index.html").read_text(encoding="utf-8")
+    page = {name: (STATIC / name).read_text(encoding="utf-8") for name in ("app.js", "index.html")}
     assert not [old for old in GUIDE_GONE if old in text]
-    for name in GUIDE_SAYS:
+    for name, where, shown in GUIDE_SAYS:
         assert "**%s**" % name in text, name
-        assert name in page, name
+        assert page[where].count(shown) == 1, (name, where, shown)
+    # Record steps is in Get help, which is under More on the provider's
+    # page, and the sign-in leaves the panel on another page first.
+    assert "**Back to** and the provider's name" in text
     assert "**More**, then **Get help**" in text
-    assert text.index("**Get help**") < text.index("2. Click **Record steps**")
+    assert text.index("**Get help**") < text.index("2. In Get help, click **Record steps**")
 
 
 def test_a_folder_with_no_config_is_told_what_mends_it(tmp_path):

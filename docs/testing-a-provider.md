@@ -95,14 +95,16 @@ window of its own on a Mac. Everything from here happens in that panel.
 ## Add the provider
 
 1. Click **Add a provider** on the Accounts page. The first time you open
-   PaperPull it asks which folder your documents go in, then shows the same
-   list by itself.
-2. Click the one you are testing, then **Continue**, then **Set up**. If it
-   is not in the list, it does not exist yet, so
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself.
+2. Click the one you are testing, then **Continue**, then the **Set up**
+   button, which says how many you chose. If it is not in the list, it does
+   not exist yet, so
    [open an issue](https://github.com/rheeloaded/paperpull/issues/new/choose)
    asking for it and somebody will build the shell for you to test.
 3. PaperPull goes back to Accounts, where the provider now has a row of its
-   own. Click its name to open its page.
+   own. Click its name to open its page. If other providers there have run
+   already, it is under **Not started**, which opens with a click.
 
 PaperPull makes a folder for it, downloads the browser pieces it needs, and
 tells you when it is ready. The first provider takes a few minutes. Every one
@@ -131,11 +133,14 @@ Do not close it and do not go back to the control panel yet.
 
 ## Record one trip to a document
 
-1. In the control panel, on the provider's page, click **More**, then
-   **Get help**. A provider that is not built yet has a **Record steps**
-   button on its page as well, which opens the same place.
-2. Click **Record steps**.
-3. The panel prints a short notice saying what is being recorded. Read it.
+1. Back in the control panel, the sign-in left it on a page of its own.
+   Click **Back to** and the provider's name to return to the provider's
+   page, then click **More**, then **Get help**. A provider that is not
+   built yet also has a **Record steps** button on both of those pages,
+   which opens the same place.
+2. In Get help, click **Record steps**.
+3. The panel prints a short notice saying what is being recorded, under
+   **Technical details**. Read it.
 4. Go back to the browser window and **click your way to one document**, the
    way you always do. Pick the year, open the bill history, click the
    download link, whatever your provider asks for. Do it once, at your normal

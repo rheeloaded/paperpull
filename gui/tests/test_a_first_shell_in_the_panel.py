@@ -212,6 +212,21 @@ def test_a_shells_run_that_stopped_offers_record_steps_never_continue(panel, act
     assert panel.evaluate("() => document.querySelector('#r-body [data-action=\"resume\"]')") is None
 
 
+@pytest.mark.parametrize("action", ["all", "pilot", "resume", "discover"])
+@pytest.mark.parametrize("code, result", [("stopped", None), ("lost", None), ("130", None), ("1", None),
+                                          ("1", {"stopped": 1, "stop": "page"}),
+                                          ("1", {"stopped": 1, "stop": "needs_you"})])
+def test_no_ending_of_a_shells_run_offers_continue_or_check_again(panel, action, code, result):
+    """Nothing on the panel starts a run that downloads for a shell now, and
+    should one end some other way than its own stop, still nothing offers to
+    carry it on."""
+    panel.evaluate("([app, action, code, result]) => ended(app, action, code, {result})",
+                   [SHELL, action, code, result])
+    steps = _steps(panel)
+    assert not [s for s in steps if s[1] in ("run:resume", "run:discover", "run:all", "run:pilot")], steps
+    assert not panel.evaluate("() => RUN.outcome.resume || RUN.outcome.recheck")
+
+
 def test_a_built_providers_run_that_stopped_still_offers_continue(panel):
     panel.evaluate("() => ended(%s, 'all', '0', {result: {stopped: 1}})" % json.dumps(BUILT))
     assert panel.evaluate("() => RUN.outcome.title") == "Stopped before finishing"
