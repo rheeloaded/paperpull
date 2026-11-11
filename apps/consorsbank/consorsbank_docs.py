@@ -13,7 +13,7 @@ been listed yet, and nothing is listed or downloaded. A recording of one
 trip to a document is what the real app is built from
 (docs/testing-a-provider.md).
 
-READ-ONLY: this build presses nothing on the bank's pages. It never pays,
+READ-ONLY. This build presses nothing on the bank's pages. It never pays,
 transfers money, buys or sells, or changes any account setting. Everything
 stays on this machine. Nothing is sent to any external service.
 

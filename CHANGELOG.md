@@ -42,12 +42,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   opens its sign-in page, de.scalable.capital/secure-login or Consorsbank's
   sign-in form, in a browser profile of its own and does nothing more. It
   presses nothing on the provider's pages and acts only on scalable.capital
-  or consorsbank.de, and Discover, Pilot, Run All and Resume say it is not
-  built yet and stop, so nothing is listed or downloaded. Login names a
-  sign-in page or a check and never says you are signed in. The sign-in
-  window of a shell names Record steps as the next step, not Try the
-  newest few first, and the panel starts no run by itself once a shell's
-  sign-in is done, since a shell has nothing to download. Scalable Capital
+  or consorsbank.de. Discover, Pilot and Run All say it is not built yet
+  and stop, and Resume says nothing has been listed yet, so nothing is
+  listed or downloaded. Login names a sign-in page or a check and never
+  says you are signed in. A shell's own words after its sign-in window
+  opens name Record steps, not Try the newest few first, and the panel
+  starts no run by itself once a shell's sign-in is done, since a shell
+  has nothing to download. The panel's own next step after a sign-in is
+  still Get new, which for a shell says it is not built yet. Scalable Capital
   on port 9309, Consorsbank on 9310, the person's own Edge or Chrome first.
 - **A sign-in starts its run by itself once it is done (#200).** Open sign-in
   window used to end with the person coming back to the panel to press

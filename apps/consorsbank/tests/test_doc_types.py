@@ -76,6 +76,15 @@ def test_bank_and_broker_titles_classify(title, category, summary):
     "Persönliche Daten", "E-Mail ändern", "Passwort ändern", "Gerät verwalten", "Adresse",
     "Als gelesen markieren", "Löschen", "Archivieren", "Abmelden", "Open a new account",
     "Settings", "Mark as read", "Log out", "Logout",
+    # What the review of the first build found the guard let through
+    "Verlustbescheinigung anfordern", "Kinderdepot öffnen", "Unterkonto öffnen",
+    "Girokonto öffnen", "Open a child account", "Open Junior Depot", "Open savings account",
+    "Open an investment account", "Open credit line", "Open overdraft", "Open position",
+    "Kontoauszüge per Post bestellen", "Switch to paper statements",
+    "Duplikat Kontoauszug anfordern", "Request a statement", "Dokumente unterschreiben",
+    "Sign document", "Upload document", "Dokument hochladen", "Steuer-ID hinterlegen",
+    "Steuerdaten aktualisieren", "Postbox freischalten", "Kopie anfordern", "Lock card",
+    "Close account",
     "PDF herunterladen | Überweisung",
 ])
 def test_trading_moving_money_and_changing_the_account_are_never_safe(name):
@@ -90,6 +99,9 @@ def test_trading_moving_money_and_changing_the_account_are_never_safe(name):
     "Abrechnung Sparplan", "Kosteninformation", "Jahressteuerbescheinigung",
     "Steuerbescheinigung 2025", "Verlustbescheinigung", "Erträgnisaufstellung",
     "Dokument öffnen", "Anzeigen", "Mehr anzeigen", "Archiv", "View statement",
+    "Open", "Öffnen", "View", "Anzeigen", "PDF anzeigen", "Dokument öffnen", "Open statement", "Open document",
+    "Depotauszug öffnen", "Kontoauszug öffnen", "Wertpapierabrechnung",
+    "Wertpapierdokumente", "Open card statement",
     "Kreditkartenabrechnung", "Finanzreport",
 ])
 def test_reading_a_document_is_safe(name):
@@ -105,7 +117,8 @@ def test_a_label_that_is_nothing_but_a_trade_is_refused(name):
 
 
 @pytest.mark.parametrize("name", ["Übersicht", "Watchlist", "Märkte", "Overview", "Markets",
-                                  "Hilfe", "Depot 1111"])
+                                  "Hilfe", "Depot 1111", "Open Watchlist", "Watchlist öffnen",
+                                  "Open trading view", "Depot anzeigen", "View portfolio"])
 def test_a_control_that_names_no_document_is_refused(name):
     """The allowlist, which refuses whatever names no document, however
     harmless it reads."""

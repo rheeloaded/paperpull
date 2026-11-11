@@ -15,7 +15,7 @@ echo   3. LEAVE THAT BROWSER WINDOW OPEN - do not close it.
 echo   4. Then press Record steps in the panel and click to one document.
 if not "%~1"=="" echo      For this account, add  --account %~1
 echo.
-echo READ-ONLY: this first build presses nothing on the broker's pages.
+echo READ-ONLY. This first build presses nothing on the broker's pages.
 echo It never buys or sells, moves money, or changes any setting.
 echo.
 rem This app's own Python when setup.bat made one. Otherwise, in a

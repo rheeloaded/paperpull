@@ -129,10 +129,24 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"als\s+gelesen|gelesen\s+markier|\bfreistellungsauftrag\s+(erteilen|anlegen|(ae|ä)ndern)|"
     r"\babmeld|\bpasswort|\bkennwort|\bger(ae|ä)t|\badresse\b|\be-?mail\b|"
     r"\btelefon|\bhandynummer|pers(oe|ö)nliche\s+daten|\beinstellung|"
+    # Ordering, requesting, signing, uploading and entering data, German.
+    # A loss certificate asked for closes the year's loss pot, and a paper
+    # copy or a duplicate can carry a fee. "Papier" at a word's start only,
+    # since every Wertpapierabrechnung holds it.
+    r"anforder|bestell|unterschreib|unterzeichn|\bsignier|hochlad|aktualisier|"
+    r"hinterleg|freischalt|\bbeauftrag|\bper\s+post\b|\bpapier|duplikat|\bkopie|"
+    r"zweitschrift|\b\w*(konto|depot)\s+(er)?(oe|ö)ffnen|"
+    # Opening anything but a document, requesting, signing, uploading,
+    # paper and copies, credit and cards, English.
+    r"\bopen\b[\w\s-]{0,30}?\b(accounts?|depots?|portfolios?|cards?|overdraft|"
+    r"positions?|loans?|savings|investments?)\b(?!\s+(statements?|documents?))|"
+    r"\brequest|\bupload|\bsign\b|\be-?sign|\bpaper\b|\bcop(y|ies)\b|\bduplicate|"
+    r"\block\b|\bunlock|\breplac|\bactivat|overdraft|credit\s+(line|limit|increase)|"
+    r"\bloans?\b|\bborrow|\bmargin\b|"
+    r"\bclose\s+(my\s+|the\s+|this\s+|an?\s+)?(account|depot|portfolio|card)|"
     # Money moving and trading, English
     r"transfer\b|\bwire\b|\bpay\b|payment|\bdeposit|withdraw|\bbuy\b|\bsell\b|"
     r"\btrade\b|savings\s+plan|\bsubscri|\binvite|"
-    r"\bopen\s+(a\s+|an\s+)?(new\s+)?(account|depot|portfolio)|"
     r"\badd\s+(a\s+)?(child|account|depot|portfolio)|"
     # Word boundaries on both sides of the verb stems, so "Credit" and
     # "Exchange" stay allowed.
@@ -144,7 +158,11 @@ FORBIDDEN_CONTROL_RE = re.compile(
 # What a document control may look like. A control must match this AND not
 # match the blocklist.
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"(herunterladen|download|\bpdf\b|\banzeigen\b|(oe|ö)ffnen|\bview\b|\bopen\b|"
+    # "Open", "Öffnen", "View" and "Anzeigen" alone are a document's own
+    # button. Beside any other word they need a document's word too, since
+    # "Kinderdepot öffnen" and "Open a child account" open an account.
+    r"(herunterladen|download|\bpdf\b|^\s*anzeigen\s*$|^\s*(oe|ö)ffnen\s*$|"
+    r"^\s*view\s*$|^\s*open\s*$|"
     r"postfach|mailbox|\binbox\b|dokument|document|kontoauszug|ausz(ue|ü)ge|"
     r"abrechnung|depotauszug|steuer|\btax\b|ertr(ae|ä)gnis|verlustbescheinigung|"
     r"kosteninformation|mitteilung|statement|\bconfirmations?\b|\barchiv\b|"
