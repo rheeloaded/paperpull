@@ -213,6 +213,36 @@ def test_a_marked_plan_line_is_what_a_run_under_the_panel_says(monkeypatch, caps
     assert plan["start"] == "https://bank.example/login" and plan["dedicated"] is True
 
 
+def test_a_first_shell_says_nothing_to_watch(monkeypatch, capsys):
+    """A shell downloads nothing yet, so a Get new after its sign-in would
+    only stop and leave the account offering Continue. The same site with
+    NOT_MAPPED empty, as a built app's is, says its plan."""
+    site = type(sys)("bank_site")
+    site.URLS = {"login": "https://bank.example/login", "documents": "https://bank.example/docs"}
+    site.LOGIN_URL_MARKERS = ["/login"]
+    site.NOT_MAPPED = "Bank is not built yet."
+    monkeypatch.setitem(sys.modules, "bank_site", site)
+    monkeypatch.setenv("PAPERPULL_RUN_MARK", "ab" * 16)
+    watch.announce("https://bank.example/login")
+    assert capsys.readouterr().out == ""
+    site.NOT_MAPPED = ""
+    watch.announce("https://bank.example/login")
+    assert capsys.readouterr().out.startswith(watch.PLAN_PREFIX)
+
+
+def test_the_first_shells_here_say_nothing_to_watch(providers, monkeypatch, capsys):
+    """Every app whose site says it is not mapped yet, through announce
+    itself with that app's own site the one imported."""
+    shells = sorted(n for n, s in providers.items() if getattr(s, "NOT_MAPPED", ""))
+    assert {"consorsbank", "scalable"} <= set(shells)
+    monkeypatch.setenv("PAPERPULL_RUN_MARK", "ab" * 16)
+    for name in shells:
+        site = providers[name]
+        monkeypatch.setattr(watch, "_this_runs_site", lambda site=site: site)
+        watch.announce(site.URLS["login"])
+        assert capsys.readouterr().out == "", name
+
+
 def test_a_run_from_a_terminal_says_nothing(monkeypatch, capsys):
     monkeypatch.delenv("PAPERPULL_RUN_MARK", raising=False)
     watch.announce("https://bank.example/login")

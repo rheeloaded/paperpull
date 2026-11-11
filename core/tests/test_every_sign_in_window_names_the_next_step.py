@@ -65,3 +65,23 @@ def test_the_button_it_names_is_the_panels(monkeypatch):
     assert run_reporting.after_sign_in() == "press " + m.group(1)
     monkeypatch.delenv(run_reporting.MARK_ENV)
     assert run_reporting.after_sign_in() == "run the pilot"
+
+
+def test_a_first_shell_names_the_panels_record_button_where_it_is(monkeypatch):
+    """A first shell of a provider downloads nothing, so its window says to
+    record one trip instead. The button, the sheet it is on and the menu
+    that opens the sheet are named as the panel names them."""
+    html = (REPO / "gui" / "static" / "index.html").read_text(encoding="utf-8")
+    js = (REPO / "gui" / "static" / "app.js").read_text(encoding="utf-8")
+    sheet = re.search(r'<dialog id="dlg-support".*?</dialog>', html, re.S)
+    assert sheet, "index.html has the Get help sheet"
+    assert re.search(r'<h2 id="sp-title">Get help</h2>', sheet.group(0))
+    assert re.search(r'data-do="rc-go">Record steps</button>', sheet.group(0))
+    assert re.search(r"menuItem\('support', k, P\.report, 'Get help',", js)
+    assert "'More</button>" in js
+    monkeypatch.setenv(run_reporting.MARK_ENV, "0" * 32)
+    said = run_reporting.after_sign_in(record=True)
+    assert said == "press Record steps (More, then Get help)"
+    assert not any(w in said.lower() for w in TERMINAL_WORDS)
+    monkeypatch.delenv(run_reporting.MARK_ENV)
+    assert run_reporting.after_sign_in(record=True) == "run record"

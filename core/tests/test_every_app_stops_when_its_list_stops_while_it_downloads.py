@@ -239,6 +239,12 @@ NOT_A_LIST = {
     ("bofa", "ListCut"):
         "in a download, one statement's own PDF the page could not ask for. The list "
         "read again raises ListUnread",
+    ("scalable", "NotBuilt"):
+        "a first shell, which lists and downloads nothing until it is built, so no list "
+        "read again changes it",
+    ("consorsbank", "NotBuilt"):
+        "a first shell, which lists and downloads nothing until it is built, so no list "
+        "read again changes it",
     ("fedex", "NeedsPerson"):
         "something only the account holder may do, connecting Billing Online among them",
     ("venmo", "ProfileChanged"):
