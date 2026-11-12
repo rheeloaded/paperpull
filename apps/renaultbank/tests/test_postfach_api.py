@@ -65,11 +65,14 @@ global.fetch = async (path, options) => {
   const first = mode==='other-attachments' ? [attachment('a1'),
    {binaryDataId:'p1',filename:'foto.jpg',extension:'jpg'},
    {binaryDataId:'p2',filename:'Brief.PDF'}, {binaryDataId:'p3',filename:'scan'},
-   {binaryDataId:'p4',filename:'renamed.pdf',extension:'docx'}] : [attachment('a1')];
+   {binaryDataId:'p4',filename:'renamed.pdf',extension:'docx'},
+   {binaryDataId:'p5',filename:'Vertrag',extension:'application/pdf'},
+   {binaryDataId:'p6',filename:'bild.png'}] : [attachment('a1')];
   data={korrespondenznachrichten:body.offset===0 ?
    [message('m1',first,{anzahlNachrichtenAusKorrespondenz:2})] : [message('m2')],
    jwt:'INVENTED_MESSAGE_JWT'};
   if (mode==='no-thread-count') delete data.korrespondenznachrichten[0].anzahlNachrichtenAusKorrespondenz;
+  if (mode==='zero-thread-count' && body.offset!==0) data.korrespondenznachrichten[0].anzahlNachrichtenAusKorrespondenz=0;
  } else if (path.includes('/messageThread/')) {
   if(options.headers.jwtDocId!=='INVENTED_MESSAGE_JWT') throw new Error('missing message token');
   data={jwt:'INVENTED_THREAD_JWT',korrespondenznachrichten:
@@ -146,15 +149,23 @@ def test_incomplete_or_repeated_pages_stop_the_whole_listing(mode):
 
 def test_attachments_that_are_not_pdfs_are_left_out_and_counted():
     """A photo in a message was listed, and its download, never a PDF,
-    stopped every run at it. An attachment is a PDF by its extension field
-    where it has one and by its name where it has none."""
+    stopped every run at it. One is left out only when what it says of
+    itself names another type and nothing names a PDF, since a PDF left out
+    is missing from a list called whole while a file taken that is not one
+    fails alone."""
     result = run_bridge("other-attachments")["collected"]
     assert result["ok"], result
     taken = sorted(r["item_id"].rsplit(":", 1)[1] for r in result["rows"]
                    if r["item_id"].startswith("attachment:m1:"))
-    assert taken == ["a1", "p2"]
-    assert result["summary"]["other_attachments"] == 3
-    assert result["summary"]["attachments"] == 3
+    assert taken == ["a1", "p2", "p3", "p4", "p5"]
+    assert result["summary"]["other_attachments"] == 2
+    assert result["summary"]["attachments"] == 6
+
+
+def test_a_message_with_a_thread_count_of_nought_is_a_message_alone():
+    result = run_bridge("zero-thread-count")["collected"]
+    assert result["ok"], result
+    assert result["summary"]["messages"] == 3
 
 
 def test_expired_session_is_identified_without_returning_tokens():
@@ -214,6 +225,9 @@ def test_normalized_metadata_files_by_kind_and_keeps_only_account_suffix():
     ("2026-02-28T23:30:00", "2026-02-28"),           # no zone, taken as it is
     ("2026-02-28", "2026-02-28"),
     ("28.02.2026", "2026-02-28"),
+    ("2026-02-28 23:30:00z", "2026-03-01"),          # a space and a small z
+    ("9999-12-31T23:30:00Z", ""),                    # past the last day there is
+    ("0001-01-01T00:30:00+01:00", ""),
 ])
 def test_a_timestamp_is_dated_by_its_day_in_berlin(stamp, day):
     """A message's receivedTimestamp was dated by its UTC day, so one that

@@ -82,8 +82,9 @@ def message(name, at="2031-03-02T08:00:00Z", subject="Information", files=(), ol
 class Bank:
     """What the bank answers. A name in `refuse` answers that status, an
     endpoint by its name (liefereDokumenteZuKunden, messages, ...) or a
-    file by its document's name. A document in `not_pdf` answers a sign-in
-    page instead of its PDF. `ids` says how long an id lasts, "always"
+    file by its document's name. A document in `not_pdf` answers an HTML
+    page instead of its PDF, and once the document in `signs_out` is asked
+    for, the bank answers as signed out from then on. `ids` says how long an id lasts, "always"
     keeps the document's own name and "session" changes it with
     `new_session`."""
 
@@ -95,6 +96,7 @@ class Bank:
         self.sent = []
         self.refuse = {}
         self.not_pdf = set()
+        self.signs_out = None
         self.ids = "always"
         self.session = 1
         self.asked = []
@@ -182,6 +184,12 @@ class Bank:
         self.fetched.append(name)
         if name in self.refuse:
             return route.fulfill(status=self.refuse[name], content_type="text/html", body="no")
+        if name == self.signs_out:
+            self.refuse = {endpoint: 401 for endpoint in (
+                "liefereBerechtigteKunden", "liefereDokumenteZuKunden", "messageCount",
+                "messages", "messageThread", "documentUpload", "messageAttachmentDownload",
+                "downloadTicket")}
+            return route.fulfill(status=200, content_type="text/html", body="<html>Anmelden</html>")
         if name in self.not_pdf:
             return route.fulfill(status=200, content_type="text/html", body="<html>Anmelden</html>")
         return route.fulfill(status=200, content_type="application/pdf", body=pdf_of(name))
@@ -371,6 +379,25 @@ def test_a_signed_out_answer_stops_the_run_with_nothing_recorded_against_it(home
     assert home.bank.fetched == []
     assert home.on_disk() == []
     assert "Completed" not in home.states().values()
+
+
+def test_a_sign_in_page_in_place_of_a_pdf_stops_the_run_when_the_list_answers_signed_out(home):
+    """A sign-in page served with 200 in place of the PDF says nothing a
+    file can tell. The list is read again, and its answer as signed out
+    stops the run there, rather than fail every document after it one by
+    one."""
+    home.bank.inbox = [document("P3", "Kontoauszug 3/2031", "2031-04-02"),
+                       document("P2", "Kontoauszug 2/2031", "2031-03-02"), document("P1")]
+    home.run("--discover")
+    home.bank.signs_out = "P3"
+    with pytest.raises(SystemExit) as stop:
+        home.run("--resume")
+    assert stop.value.code == 0
+    said = " ".join(home.capsys.readouterr().out.split())
+    assert "Your session has expired" in said
+    assert home.bank.fetched == ["P3"]
+    assert home.on_disk() == []
+    assert set(home.states().values()) <= {"Discovered"}
 
 
 # -- the list is whole or it is not called whole --------------------------------

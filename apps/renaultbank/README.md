@@ -52,11 +52,14 @@ has ended stops the run. The app never signs in or answers a prompt.
 - Incoming and sent messages are read page by page to their declared
   count, and the older messages of a thread too. Each PDF attachment is
   listed once. A message with no attachment is counted and said, and its
-  own text is not saved. An attachment that is not a PDF (a photo or a
-  Word file, say) is left out, counted and said. A postbox of a linked
-  outside provider is not supported and stops Discover with that said.
-- A missing field, a page given twice, a total that changes or a history
-  that stops short stops Discover before any of the list is recorded.
+  own text is not saved. An attachment whose extension or file name names
+  another type and nothing names a PDF (a photo or a Word file, say) is
+  left out, counted and said. A postbox of a linked outside provider is
+  not supported and stops Discover with that said.
+- A document without its id, title or date, a message without its id,
+  time or thread count, a customer without the field that says whether it
+  has messages, a page given twice, a total that changes or a history that
+  stops short stops Discover before any of the list is recorded.
 - A document's PDF is staged with `datasharing/documentUpload`, which
   prepares a document the bank already holds and sends no file. A message
   attachment uses `messageAttachmentDownload` and a download ticket. Both
@@ -72,8 +75,10 @@ Documents are told apart as DKB's are, by kind, date, the last four of the
 account and the whole title, and a stored id is a hint the list is checked
 against. Documents alike that cannot be told apart fail rather than be
 saved as each other. A document whose PDF does not come (an HTTP error,
-no ticket, an answer that is not a PDF) fails alone, and the run goes on
-and the next run asks for it again. Progress and indexes stay on this
+no ticket, an answer that is not a PDF) has the list read again. If the
+list answers as signed out, the run stops there. If it still answers,
+that document fails alone, the run goes on, and the next run asks for it
+again. Progress and indexes stay on this
 computer, and a document saved once is remembered even after its file is
 deleted.
 

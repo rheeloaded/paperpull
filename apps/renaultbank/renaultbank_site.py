@@ -383,13 +383,19 @@ async (args) => {
     const items = new Map(), rows = [], rowIds = new Set();
     const summary = {documents: 0, messages: 0, attachments: 0, text_only_messages: 0,
                      other_attachments: 0, customers: 0, pages: 0};
-    // An attachment is taken only when it says it is a PDF, by its extension
-    // field where it has one and by its file name where it has none. Any
-    // other file (a photo, a Word file) is left out and counted, since its
-    // download would never be a PDF.
+    // An attachment is left out, and counted, only when what it says of
+    // itself names another type and nothing it says names a PDF (a photo or
+    // a Word file, whose download is never a PDF). Either its extension
+    // field ("pdf", ".pdf", "application/pdf") or its file name saying PDF
+    // takes it, and so does one that says nothing either way. A file taken
+    // that is not a PDF fails alone at download, while a PDF left out would
+    // be missing from a list called whole.
     const isPdf = (file) => {
       const extension = typeof file.extension === "string" ? file.extension.trim() : "";
-      return extension ? /^\.?pdf$/i.test(extension) : /\.pdf$/i.test(String(file.filename).trim());
+      const name = String(file.filename).trim();
+      const suffix = (name.match(/\.([a-z][a-z0-9]{1,4})$/i) || [])[1] || "";
+      if (/pdf/i.test(extension) || /^pdf$/i.test(suffix)) return true;
+      return !extension && !suffix;
     };
     const eligible = await ask(core + "liefereBerechtigteKunden?institut=BANK");
     const customers = array(eligible.kundeMitHauptKategorieZaehlerListe, "customers");
@@ -481,7 +487,7 @@ async (args) => {
             // Read as one when missing, a thread's older messages were never
             // asked for while the list was still called whole.
             const parts = m.anzahlNachrichtenAusKorrespondenz;
-            if (!Number.isSafeInteger(parts) || parts < 1) fail("incomplete message metadata");
+            if (!Number.isSafeInteger(parts) || parts < 0) fail("incomplete message metadata");
             ids.add(id); addMessage(m, result.jwt);
             if (parts > 1) {
               const thread = await ask(messages + "messageThread/" + segment(id), undefined, {jwtDocId: result.jwt});
@@ -596,7 +602,7 @@ def _berlin(when):
     return u + timedelta(hours=2 if start <= u < end else 1)
 
 
-_STAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2})?)(\.\d+)?(Z|[+-]\d{2}:?\d{2})$")
+_STAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[Tt ](\d{2}:\d{2}(?::\d{2})?)(\.\d+)?([Zz]|[+-]\d{2}:?\d{2})$")
 
 
 def parse_date(value):
@@ -609,15 +615,15 @@ def parse_date(value):
     stamp = _STAMP_RE.match(value)
     if stamp:
         zone = stamp.group(4)
-        if zone == "Z":
+        if zone in ("Z", "z"):
             zone = "+00:00"
         elif ":" not in zone:
             zone = zone[:3] + ":" + zone[3:]
         try:
             when = datetime.fromisoformat(stamp.group(1) + "T" + stamp.group(2) + zone)
-        except ValueError:
+            return _berlin(when).strftime("%Y-%m-%d")
+        except (ValueError, OverflowError):
             return ""
-        return _berlin(when).strftime("%Y-%m-%d")
     for fmt, pattern in (("%Y-%m-%d", r"^\d{4}-\d{2}-\d{2}(?!\d)"),
                          ("%d.%m.%Y", r"^\d{2}\.\d{2}\.\d{4}(?!\d)"),
                          ("%Y%m%d", r"^\d{8}(?!\d)")):
@@ -715,11 +721,18 @@ def download_document(page, title, date, out_path, occurrence=0, item_hint="",
     try:
         result = _execute(page, "download", stop=NoFile, id=row["item_id"])
         data = intake.decode(result["data"], validate=True)
+        why = "" if data.startswith(b"%PDF-") else "not a PDF (%d bytes)" % len(data)
     except (NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
-        log.warning("no PDF for one %s of %s: %s", category, date, e)
-        return ""
-    if not data.startswith(b"%PDF-"):
-        log.warning("not a PDF for one %s of %s (%d bytes)", category, date, len(data))
+        why = str(e) or type(e).__name__
+    if why:
+        log.warning("no PDF for one %s of %s: %s", category, date, why)
+        # A sign-in page served in place of the PDF, or a redirect to one,
+        # says nothing this app can tell from a file the bank will not give.
+        # The list is the proof, so it is read again here, and an answer as
+        # signed out (SessionExpired) or a list that stops (ListStopped) ends
+        # the run with nothing recorded against this document. Only a list
+        # that still answers makes this one document's failure.
+        listed_rows(page, config, fresh=True)
         return ""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

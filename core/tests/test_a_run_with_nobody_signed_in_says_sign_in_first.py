@@ -49,19 +49,36 @@ def _raises_not_signed_in(statement, name):
             and [getattr(arg, "id", None) for arg in statement.exc.args] == ["cdp_url", name])
 
 
+_EXITS = (ast.Return, ast.Break, ast.Continue, ast.Raise)
+
+
+def _may_leave(statements):
+    """Whether any of these statements can leave the handler before the
+    raise, a return, break, continue or another raise anywhere in them."""
+    return any(isinstance(node, _EXITS) for s in statements for node in ast.walk(s))
+
+
 def attach_reports_not_signed_in(src):
-    """The attach is a statement of a try's own body, and that try's
-    `except Exception as e` raises not_signed_in(cdp_url, e) as a statement
-    of its own body. Both directly, never inside a nested block, since an
-    inner try or a branch there can swallow the failure."""
+    """The attach is a statement of a try's own body, and that try's first
+    handler, `except Exception as e`, raises not_signed_in(cdp_url, e) as a
+    statement of its own body with nothing before it that can leave, and
+    no `finally` returns. Both directly, never inside a nested block, since
+    an inner try, a branch, an earlier handler, an early return or a
+    returning `finally` can swallow the failure."""
     for block in ast.walk(ast.parse(src)):
         if not isinstance(block, ast.Try) or not any(_is_attach(s) for s in block.body):
             continue
-        for handler in block.handlers:
-            if (isinstance(handler.type, ast.Name) and handler.type.id == "Exception"
-                    and handler.name
-                    and any(_raises_not_signed_in(s, handler.name) for s in handler.body)):
-                return True
+        if not block.handlers or _may_leave(block.finalbody):
+            continue
+        handler = block.handlers[0]
+        if not (isinstance(handler.type, ast.Name) and handler.type.id == "Exception"
+                and handler.name):
+            continue
+        for at, statement in enumerate(handler.body):
+            if _raises_not_signed_in(statement, handler.name):
+                if not _may_leave(handler.body[:at]):
+                    return True
+                break
     return False
 
 
@@ -104,7 +121,35 @@ try:
 except Exception as error:
     raise not_signed_in(cdp_url, other)
 """,
-], ids=["inner_try", "in_a_branch", "another_exception"])
+    # An earlier handler takes the failure first.
+    """
+try:
+    browser = chromium.connect_over_cdp(cdp_url)
+except ConnectionError:
+    browser = None
+except Exception as error:
+    raise not_signed_in(cdp_url, error)
+""",
+    # The handler may return before it raises.
+    """
+try:
+    browser = chromium.connect_over_cdp(cdp_url)
+except Exception as error:
+    if quiet:
+        return None
+    raise not_signed_in(cdp_url, error)
+""",
+    # A returning finally swallows the raise.
+    """
+try:
+    browser = chromium.connect_over_cdp(cdp_url)
+except Exception as error:
+    raise not_signed_in(cdp_url, error)
+finally:
+    return browser
+""",
+], ids=["inner_try", "in_a_branch", "another_exception", "earlier_handler",
+        "early_return", "returning_finally"])
 def test_attach_check_refuses_a_failure_that_can_be_swallowed(source):
     assert not attach_reports_not_signed_in(source)
 

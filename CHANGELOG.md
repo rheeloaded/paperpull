@@ -20,12 +20,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   messages of each thread. Each document's tokens and download tickets stay
   in the page, and nothing is pressed. Before merging, a document whose PDF
   does not come (an HTTP error for that one file, no ticket, or an answer
-  that is not a PDF) fails alone and the run goes on, where it had ended
-  every run at that document so nothing older was ever saved. Attachments
-  that are not PDFs are left out and counted, a missing field stops the
-  listing rather than read as nothing there, and a message is dated by its
-  day in Berlin, not in UTC. Whether the bank marks a document read when
-  its PDF is fetched has not been checked yet.
+  that is not a PDF) fails alone and the run goes on, once the list read
+  again still answers, where it had ended every run at that document so
+  nothing older was ever saved. A list that answers as signed out still
+  stops the run there. Attachments that name another type than PDF are
+  left out and counted, a customer or message missing the field that says
+  whether it has messages or a thread stops the listing rather than read
+  as having none, and a message is dated by its day in Berlin, not in UTC.
+  Whether the bank marks a document read when its PDF is fetched has not
+  been checked yet.
 
 ## [0.65.0] - 2026-11-12
 
