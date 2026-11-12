@@ -530,9 +530,9 @@ class App:
             self.write_failure("read the eob list", "a row had no claim number")
         if alike or unread:
             print("  So the list is not taken as whole. Everything else on it is kept.")
-        else:
-            # The whole list is in, and only now may a Resume that carries on
-            # from it call the run finished (paperpull_core.listing).
+        # The whole list is in, and only now may a Resume that carries on
+        # from it call the run finished (paperpull_core.listing).
+        if not (alike or unread):
             listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
