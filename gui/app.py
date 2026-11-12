@@ -6237,32 +6237,45 @@ async def api_terms(request: Request):
 # -- updates -----------------------------------------------------------------
 #
 # The panel can ask GitHub whether a newer PaperPull exists, and on a Mac
-# installed from the disk image, install it (gui/updater.py). PRIVACY.md says
-# the program contacts nothing unless the person asked, so nothing here runs
-# at launch or in the background. The check is off until the person turns it
-# on in Settings, and turning it on asks nobody: it shows the button that does.
-# The one request is the one that button starts, and the button says it
-# contacts github.com. The Store edition updates through the Store and
-# PaperPull Server through docker compose pull, so neither is offered any of
-# this (updater.offered, _desktop_only).
+# installed from the disk image or on Windows installed by setup.exe, install
+# it (gui/updater.py). PRIVACY.md says the program contacts nothing unless the
+# person asked, so nothing here runs at launch or in the background. The check
+# is off until the person turns it on in Settings, and turning it on asks
+# nobody. It only shows the button that does. The one request is the one that
+# button starts, and the button says it contacts github.com. PaperPull Server
+# asks the same way and installs nothing, since a container cannot replace its
+# own image, so the page gives the steps that take the new one (_desktop_only
+# on install and restart). The Store edition updates through the Store, so it
+# is offered none of this (updater.offered).
 
 _update_ability = {}
 
 
 def _updates_offered() -> None:
-    """Refuse the update routes where updates come some other way."""
-    _desktop_only()
+    """Refuse the update routes in the Store edition, which the Store updates."""
     if not updater.offered():
         raise HTTPException(404, "this edition updates through the Microsoft Store")
+
+
+def _update_edition() -> str:
+    """server, mac, windows, portable or other, for what the page offers."""
+    return "server" if server_mode.enabled() else updater.edition()
+
+
+def _release_kind() -> str:
+    """Which release file would install this copy. None does on the server."""
+    return "" if server_mode.enabled() else updater.install_kind()
 
 
 def _can_install_here() -> tuple:
     """Whether this copy could replace itself. Asking codesign is slow enough
     to do once."""
-    app_dir = updater.bundle_path()
-    key = str(app_dir)
+    if server_mode.enabled():
+        return False, ""
+    where, kind = updater.install_location(), updater.install_kind()
+    key = (kind, str(where))
     if key not in _update_ability:
-        _update_ability[key] = updater.can_install(app_dir)
+        _update_ability[key] = updater.can_install(where, kind)
     return _update_ability[key]
 
 
@@ -6277,6 +6290,7 @@ def _update_state() -> dict:
     checked = s.get("update_checked_at") if enabled else 0
     return {
         "current": VERSION,
+        "edition": _update_edition(),
         "enabled": enabled,
         "checked_at": checked if isinstance(checked, (int, float)) else 0,
         "newer": newer,
@@ -6293,7 +6307,7 @@ def _update_check() -> dict:
     if _read_settings().get("update_check") is not True:
         raise HTTPException(409, "The update check is off. Turn it on in Settings first.")
     try:
-        rel = updater.check_latest(VERSION)
+        rel = updater.check_latest(VERSION, kind=_release_kind())
     except updater.UpdateError as e:
         raise HTTPException(502, str(e))
     # Read again, since the answer can take seconds and the settings may have
@@ -6348,7 +6362,8 @@ async def api_update_check():
 
 
 @app.post("/api/update/install", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
-                                               Depends(_updates_offered), Depends(_not_in_sample)])
+                                               Depends(_desktop_only), Depends(_updates_offered),
+                                               Depends(_not_in_sample)])
 def api_update_install():
     """Download the new version and prove it is genuine. Nothing is replaced
     until the person presses restart."""
@@ -6357,18 +6372,22 @@ def api_update_install():
         raise HTTPException(409, "PaperPull is up to date")
     if not state["can_install"]:
         raise HTTPException(409, state["why"] or "this copy cannot update itself")
-    updater.INSTALL.start(VERSION, updater.bundle_path())
+    updater.INSTALL.start(VERSION, updater.install_location(), kind=updater.install_kind())
     return _update_state()
 
 
 def _exit_soon() -> None:
     """Stop this panel a moment from now, after the answer has gone out. A
     page streaming a run can hold a graceful stop open, so there is a second,
-    harder stop behind it."""
+    harder stop behind it. On Windows os.kill ends a process at once with the
+    signal's number as its exit code, and a terminal can keep the window of a
+    program that did not end with 0 open, so there it ends with 0."""
     import signal
 
     def go():
         time.sleep(1.0)
+        if sys.platform == "win32":
+            os._exit(0)
         os.kill(os.getpid(), signal.SIGINT)
         time.sleep(4.0)
         os._exit(0)
@@ -6394,7 +6413,8 @@ _RESTARTING_SAYS = "PaperPull is restarting to update. Start this again once it 
 
 
 @app.post("/api/update/restart", dependencies=[Depends(_same_origin_only), Depends(_terms_first),
-                                               Depends(_updates_offered), Depends(_not_in_sample)])
+                                               Depends(_desktop_only), Depends(_updates_offered),
+                                               Depends(_not_in_sample)])
 def api_update_restart():
     global _UPDATE_RESTARTING
     why = _what_an_exit_would_cut()

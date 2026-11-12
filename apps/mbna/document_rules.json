@@ -1,0 +1,17 @@
+{
+  "_comment": "Editable rules mapping MBNA document titles to filename summaries. Case-insensitive regexes matched against the title. A credit card's monthly statements, in English and French. Repair once the app is built from a recording of a real statements page (#205).",
+  "tax_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "statements?\\b|\\brelev[ée]s?\\b",
+      "summary": "Credit Card Statement"
+    }
+  ],
+  "skip_patterns": [
+    "privacy\\s+(notice|policy)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "\\boffers?\\b"
+  ]
+}

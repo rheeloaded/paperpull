@@ -28,10 +28,21 @@ code in `server/` and `gui/server_mode.py`.
   Downloading it fetches it from GitHub's container registry (`ghcr.io`).
   Building it yourself downloads its parts from Debian, the Python Package
   Index and Google.
+- **GitHub, to ask whether a newer version exists, only when you press the
+  button.** The check is off until you turn it on in Settings, and turning
+  it on sends nothing. Each press of **Check github.com for an update**
+  sends one request from the server to `api.github.com` for this project's
+  newest release. It carries no account, no document and no identifier of
+  yours beyond what any web request reveals, such as the server's IP
+  address, and its User-Agent says it is PaperPull's update check. Nothing
+  is asked at the start or in the background. The server downloads nothing
+  from it and never updates itself, since a container cannot replace its
+  own image. It shows the steps that take the new one, which you run
+  yourself (see "Updating" in [SERVER.md](SERVER.md)).
 
-Nothing else. There is no update check of PaperPull's own, no crash
-reporting, no usage statistics, no analytics, and no account with this
-project. The project runs no server of its own for it to talk to.
+Nothing else. There is no crash reporting, no usage statistics, no
+analytics, and no account with this project. The project runs no server of
+its own for it to talk to.
 
 ## What stays on the server
 

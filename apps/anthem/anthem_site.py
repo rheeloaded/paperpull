@@ -644,15 +644,45 @@ def _title_name(name: str) -> str:
                     for w in s.split())
 
 
+def _human_name(value) -> str:
+    """A name as text, from any shape Anthem gives one in. A string is
+    itself. A FHIR HumanName, {given: [...], family}, is its given names and
+    then its family name, or its `text` when it has neither, and a given or
+    family name may come as one text or a list of them. A list of names is
+    each distinct name, joined. Anything else, or any part that is not text,
+    gives nothing, so no list or dict is ever written into a name."""
+    def texts(part) -> List[str]:
+        part = [part] if isinstance(part, str) else part if isinstance(part, list) else []
+        return [p for p in part if isinstance(p, str)]
+
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        parts = texts(value.get("given")) + texts(value.get("family"))
+        name = " ".join(p.strip() for p in parts if p.strip())
+        if not name and isinstance(value.get("text"), str):
+            name = value["text"].strip()
+        return name
+    if isinstance(value, list):
+        names: List[str] = []
+        for v in value:
+            name = _human_name(v) if isinstance(v, (str, dict)) else ""
+            if name and name.lower() not in [n.lower() for n in names]:
+                names.append(name)
+        return ", ".join(names)
+    return ""
+
+
 def _patient_name(row: dict) -> str:
-    """Patient name for one summary row, or "". Confirmed path is patient.name;
-    older shapes (a bare string, or first/last fields) are fallbacks."""
+    """Patient name for one summary row, or "". Confirmed path is patient.name,
+    a FHIR HumanName or a list of them. Older shapes (a bare string, or
+    first/last fields) are fallbacks."""
     for k in _PATIENT_KEYS:
         v = row.get(k)
         if isinstance(v, str) and v.strip():
             return _clean_patient(v)
         if isinstance(v, dict):
-            name = _first_key(v, ["name", "fullName", "displayName"])[1]
+            name = _human_name(_first_key(v, ["name", "fullName", "displayName"])[1])
             if name:
                 return _clean_patient(name)
             fn = _first_key(v, ["firstName", "first", "givenName"])[1]
@@ -666,10 +696,28 @@ def _patient_name(row: dict) -> str:
     return ""
 
 
+def _claim_number_entry(row: dict) -> Optional[dict]:
+    """The claim[0].identifier entry whose type is "claimNumber", or None."""
+    claim = row.get("claim")
+    if isinstance(claim, list) and claim and isinstance(claim[0], dict):
+        for e in claim[0].get("identifier") or []:
+            if isinstance(e, dict) and e.get("type") == "claimNumber":
+                return e
+    return None
+
+
 def _claim_number(row: dict) -> str:
-    """The human claim number. Confirmed path: claim[0].identifier[*].value -
-    a FHIR identifier array; the claim number is the entry whose value has both
-    letters and digits. Falls back to top-level candidate keys."""
+    """The human claim number. Confirmed path: the claim[0].identifier entry
+    of type "claimNumber", whose `display` is the number and whose `value` is
+    an opaque token made new on every call, so never the number. Older shapes
+    carried the number as a value: the entry whose value has both letters and
+    digits, else the last value of the claim number's shape. Falls back to
+    top-level candidate keys, held to the same shape."""
+    entry = _claim_number_entry(row)
+    if entry is not None:
+        shown = str(entry.get("display") or "").strip()
+        if _CLAIMNUM_RE.fullmatch(shown):
+            return shown
     claim = row.get("claim")
     if isinstance(claim, list) and claim and isinstance(claim[0], dict):
         idents = claim[0].get("identifier")
@@ -681,10 +729,23 @@ def _claim_number(row: dict) -> str:
                 if (_CLAIMNUM_RE.fullmatch(sv) and re.search(r"[A-Za-z]", sv)
                         and re.search(r"\d", sv)):
                     return sv
-            if values:
+            if values and _CLAIMNUM_RE.fullmatch(str(values[-1])):
                 return str(values[-1])
+    # A top-level key is held to the claim number's shape as well, so a token
+    # moved there is never kept as the claim number.
     _, v = _first_key(row, _CLAIMID_KEYS)
-    return str(v).strip() if v else ""
+    v = str(v).strip() if v else ""
+    return v if _CLAIMNUM_RE.fullmatch(v) else ""
+
+
+def _claim_ref(row: dict, claim_id: str) -> str:
+    """What eob.v1.download takes as claimId for this row: the claimNumber
+    entry's token where the row has one (the site itself sends it), else the
+    claim number. Spent in the page at once and never stored."""
+    entry = _claim_number_entry(row)
+    if entry is not None and entry.get("value"):
+        return str(entry["value"])
+    return claim_id
 
 
 def _doc_kind(row: dict) -> str:
@@ -699,6 +760,27 @@ def _doc_kind(row: dict) -> str:
     return "EOB Check" if re.search(r"check", str(kind_val or ""), re.I) else "EOB"
 
 
+# What a Pharmacy statement for a month comes with, and nothing more. It has
+# no claim, no patient and no sequence number.
+_STATEMENT_KEYS = frozenset({"identifier", "created", "name"})
+
+
+def _statement_day(row: dict, claim_type: str) -> str:
+    """The day a Pharmacy statement for a period is known by, as YYYY-MM-DD,
+    or "" for any other row. Only a Pharmacy row holding its identifier, its
+    date and its name and nothing else is such a statement. A row of another
+    claim type, or one carrying anything more, is a claim, and one whose
+    claim number cannot be read is refused as before, never taken for a
+    statement and asked for with no claim."""
+    if claim_type != "Pharmacy" or set(row) != _STATEMENT_KEYS:
+        return ""
+    if not isinstance(row.get("identifier"), str) or not row["identifier"].strip():
+        return ""
+    if not isinstance(row.get("name"), str) or not isinstance(row.get("created"), str):
+        return ""
+    return _checked_date(_iso_from_value(row["created"]), "")
+
+
 def _extract_row(row: dict, claim_type: str) -> Optional[dict]:
     """Pull (claimId, eobId, date, docKind, patient, seq) out of one summary row.
 
@@ -708,6 +790,20 @@ def _extract_row(row: dict, claim_type: str) -> Optional[dict]:
     """
     eob_id = row.get("identifier") or _first_key(row, _EOBID_KEYS)[1]
     claim_id = _claim_number(row)
+    day = "" if claim_id else _statement_day(row, claim_type)
+    if day:
+        # A statement for a period (Pharmacy sends one a month) has no claim.
+        # It is known by its date, and asked for with an empty claimId.
+        return {
+            "claim_id": day.replace("-", ""),
+            "claim_ref": "",
+            "eob_id": str(eob_id),
+            "date": day,
+            "doc_kind": "Statement",
+            "claim_type": claim_type,
+            "patient": "",
+            "seq": 0,
+        }
     if not claim_id or not eob_id:
         log.error(
             "An EOB summary row is missing a claim number (%s) or eob id (%s). "
@@ -724,6 +820,7 @@ def _extract_row(row: dict, claim_type: str) -> Optional[dict]:
         seq = 0
     return {
         "claim_id": str(claim_id).strip(),
+        "claim_ref": _claim_ref(row, str(claim_id).strip()),
         "eob_id": str(eob_id),
         "date": _iso_from_value(date_val),
         "doc_kind": _doc_kind(row),
@@ -750,13 +847,19 @@ def parse_doc_id(doc_id: str):
     document type the app does not serve. The claim number is validated to the
     alphanumeric shape Anthem uses, which also refuses any path or query
     metacharacter. A trailing sequence number is optional for backward
-    compatibility with identities written before it was added.
+    compatibility with identities written before it was added. A statement
+    is Pharmacy's alone and is known by a day that exists, as YYYYMMDD.
     """
     m = re.fullmatch(
-        r"(Medical|Pharmacy|Chiropractic)\|([A-Za-z0-9]{6,30})\|(EOB Check|EOB)(?:\|(\d{1,4}))?",
+        r"(Medical|Pharmacy|Chiropractic)\|([A-Za-z0-9]{6,30})\|(EOB Check|EOB|Statement)(?:\|(\d{1,4}))?",
         str(doc_id or "").strip())
     if not m:
         return None
+    if m.group(3) == "Statement":
+        day = m.group(2)
+        if m.group(1) != "Pharmacy" or not re.fullmatch(r"\d{8}", day) \
+                or not _checked_date("%s-%s-%s" % (day[:4], day[4:6], day[6:]), ""):
+            return None
     return m.group(1), m.group(2), m.group(3), int(m.group(4) or 0)
 
 
@@ -764,7 +867,9 @@ def _summary_rows(page, claim_type: str, start: str, end: str) -> List[dict]:
     """The current session's raw EOB summary rows for one claim type.
 
     Primes the captured auth headers if missing, and re-primes once if the token
-    has gone stale (401). Raises SessionExpired if it still cannot authenticate.
+    has gone stale (401). Raises SessionExpired if it still cannot authenticate,
+    and ListingIncomplete, saying its status alone, for any other answer but
+    200, which is a list that did not come rather than an empty one.
     """
     arg = {"claimType": claim_type, "start": start, "end": end}
     res = page.evaluate(_SUMMARY_JS, arg) or {}
@@ -777,8 +882,7 @@ def _summary_rows(page, claim_type: str, start: str, end: str) -> List[dict]:
             "Anthem would not authenticate an EOB listing "
             f"(status {status}); the signed-in session is no longer valid")
     if status != 200:
-        log.info("eob.v1.summary for %s returned %s", claim_type, status)
-        return []
+        raise ListingIncomplete("status %s" % status)
     return _walk_for_list(res.get("body"))
 
 
@@ -788,14 +892,36 @@ def _date_window(days: int = DEFAULT_LOOKBACK_DAYS) -> Tuple[str, str]:
     return (today - timedelta(days=days)).isoformat(), today.isoformat()
 
 
+class Collected(list):
+    """The EOBs a listing kept, newest first, as a list, and what it could
+    not keep. `alike` holds each identity two or more statements gave, with
+    how many gave it, kept by none of them since nothing tells which
+    statement is which. `unread` holds (claim type, day) for each row that
+    was no document this app can keep, a claim whose claim number could not
+    be read, with "" for a day that could not be read either. `unlisted`
+    holds each claim type whose own list did not come. The app judges which
+    of them the run would have taken, and those leave the list not whole."""
+
+    def __init__(self, rows=(), alike: Optional[dict] = None, unread=(), unlisted=()):
+        super().__init__(rows)
+        self.alike = dict(alike or {})
+        self.unread = list(unread)
+        self.unlisted = list(unlisted)
+
+
 def collect_documents(page) -> List[dict]:
     """Every EOB Anthem holds, across all three claim types, newest first.
 
-    Returns dicts {title, date, account, href, doc_id}. The identity
-    (doc_id = claimType|claimId|docKind|seq) is stable and human-meaningful; the
-    opaque eobId is deliberately NOT part of it and is fetched fresh at download.
+    Returns dicts {title, date, account, href, doc_id}, as a Collected. The
+    identity (doc_id = claimType|claimId|docKind|seq) is stable and
+    human-meaningful. The opaque eobId is deliberately NOT part of it and is
+    fetched fresh at download. Two statements of one claim type and one date
+    give one identity, so neither is kept, each is named in the log, and the
+    Collected says so in `alike`. A row whose claim number cannot be read is
+    logged and counted in `unread`, and a claim type whose list did not come
+    in `unlisted`.
     """
-    rows: List[dict] = []
+    rows = Collected()
     seen = set()
     if not is_anthem_owned_page(page):
         log.warning("The open tab is not on Anthem. Sign in at anthem.com and "
@@ -813,21 +939,49 @@ def collect_documents(page) -> List[dict]:
         except SessionExpired:
             raise
         except Exception as e:
-            log.info("summary for %s failed: %s", claim_type,
-                     str(e).splitlines()[0][:80])
+            # A claim type whose list did not come is not an empty one. It
+            # is named by its claim type and how it failed, never by any
+            # words the page gave.
+            rows.unlisted.append(claim_type)
+            log.warning("Anthem's %s EOB list did not come (%s)", claim_type,
+                        str(e) if isinstance(e, ListingIncomplete) else type(e).__name__)
             continue
         kept = 0
+        found = []
         for r in raw:
             row = _extract_row(r, claim_type)
-            if not row:
-                continue
-            doc_id = make_doc_id(row["claim_type"], row["claim_id"],
-                                 row["doc_kind"], row["seq"])
-            if doc_id in seen:
+            if row:
+                found.append(row)
+            else:
+                # Logged by _extract_row, and counted with its day where that
+                # can be read, so the run says it could not read the whole
+                # list rather than end clean.
+                day = _checked_date(_iso_from_value(_first_key(r, _DATE_KEYS)[1]), "")
+                rows.unread.append((claim_type, day))
+        ids = [make_doc_id(row["claim_type"], row["claim_id"], row["doc_kind"], row["seq"])
+               for row in found]
+        statements: dict = {}
+        for row, doc_id in zip(found, ids):
+            if row["doc_kind"] == "Statement":
+                statements[doc_id] = statements.get(doc_id, 0) + 1
+        for doc_id, n in sorted(statements.items()):
+            if n > 1:
+                rows.alike[doc_id] = n
+                log.warning("Anthem lists %d %s statements dated %s, which all give the "
+                            "identity %s. Nothing tells them apart, so none of them is "
+                            "fetched", n, claim_type, doc_id.split("|")[1], doc_id)
+        for row, doc_id in zip(found, ids):
+            if doc_id in rows.alike or doc_id in seen:
                 continue
             seen.add(doc_id)
-            kind_label = "" if row["doc_kind"] == "EOB" else " Check"
+            kind_label = " Check" if row["doc_kind"] == "EOB Check" else ""
             title = f"{claim_type} Explanation of Benefits{kind_label}"
+            if row["doc_kind"] == "Statement":
+                # A statement has no claim; its date already rides in the filename.
+                account = f"{claim_type} statement"
+            else:
+                account = (f"{_title_name(row['patient'])} - " if row["patient"] else "") \
+                          + f"{claim_type} claim {row['claim_id']}"
             rows.append({
                 "title": title,
                 "date": row["date"],
@@ -835,8 +989,7 @@ def collect_documents(page) -> List[dict]:
                 # engine suffixes into the filename summary. The patient keeps one
                 # family member's EOBs distinguishable; the claim number keeps two
                 # claims that share a date distinct and stable across runs.
-                "account": (f"{_title_name(row['patient'])} - " if row["patient"] else "")
-                           + f"{claim_type} claim {row['claim_id']}",
+                "account": account,
                 "href": "",          # deliberately empty: never a URL
                 "doc_id": doc_id,
             })
@@ -864,27 +1017,43 @@ def _looks_like_login_html(body: bytes) -> bool:
 
 
 def resolve_eob_id(page, claim_type: str, claim_id: str, doc_kind: str,
-                   seq: int = 0) -> Optional[str]:
-    """The CURRENT opaque eobId for a (claimType, claimId, docKind, seq) document.
+                   seq: int = 0) -> Optional[Tuple[str, str]]:
+    """The CURRENT (eobId, claimId) a (claimType, claimId, docKind, seq)
+    document is downloaded with.
 
-    Looked up fresh every time rather than trusted from storage: the eobId is a
-    per-session token, so a stored one would go stale. Matches on the stable
-    identity; if the sequence number no longer lines up, falls back to the first
-    document of that claim and kind. Returns None if it is no longer listed.
+    Looked up fresh every time rather than trusted from storage: the eobId and
+    the claim's token are per-call tokens, so stored ones would go stale.
+    Matches on the stable identity; if the sequence number no longer lines up,
+    falls back to the first document of that claim and kind. Returns None if
+    it is no longer listed or its claim type's list did not come, and for a
+    statement of a date two or more listed statements have, since nothing
+    tells which one it is. Says which in the log.
     """
     start, end = _date_window()
     matches = []
-    for r in _summary_rows(page, claim_type, start, end):
+    try:
+        listed = _summary_rows(page, claim_type, start, end)
+    except ListingIncomplete as e:
+        log.warning("Anthem's %s EOB list did not come (%s), so the %s is not fetched",
+                    claim_type, e, doc_kind)
+        return None
+    for r in listed:
         row = _extract_row(r, claim_type)
         if not row:
             continue
         if row["claim_id"] == claim_id and row["doc_kind"] == doc_kind:
-            matches.append((row["seq"], row["eob_id"]))
+            matches.append((row["seq"], (row["eob_id"], row["claim_ref"])))
     if not matches:
+        log.warning("Anthem no longer lists a %s %s for claim %s",
+                    claim_type, doc_kind, claim_id)
         return None
-    for s, eob_id in matches:
+    if doc_kind == "Statement" and len(matches) > 1:
+        log.warning("Anthem lists %d %s statements dated %s. Nothing tells them apart, "
+                    "so none of them is fetched", len(matches), claim_type, claim_id)
+        return None
+    for s, found in matches:
         if s == seq:
-            return eob_id
+            return found
     return matches[0][1]
 
 
@@ -907,12 +1076,12 @@ def download_document(page, doc_id: str, out_path) -> bool:
         raise SessionExpired("the Anthem tab is no longer open on Anthem")
     if not prime_session(page):
         raise SessionExpired("could not capture Anthem's session for a download")
-    eob_id = resolve_eob_id(page, claim_type, claim_id, doc_kind, seq)
-    if eob_id is None:
-        log.warning("Anthem no longer lists a %s %s for claim %s",
-                    claim_type, doc_kind, claim_id)
+    found = resolve_eob_id(page, claim_type, claim_id, doc_kind, seq)
+    if found is None:
+        # resolve_eob_id has said why, no longer listed or not one statement.
         return False
-    arg = {"claimId": claim_id, "claimType": claim_type, "eobId": eob_id}
+    eob_id, claim_ref = found
+    arg = {"claimId": claim_ref, "claimType": claim_type, "eobId": eob_id}
     try:
         res = intake.evaluate(page, _DOWNLOAD_JS, arg) or {}
     except Exception as e:
@@ -1559,5 +1728,258 @@ def render_letter(page, subject: str, body: str, date: str = "") -> Optional[byt
            ".body{font-size:13px;line-height:1.5}"
            "</style></head><body>"
            f"{head}<h1>{safe_subject}</h1><div class='body'>{body}</div>"
+           "</body></html>")
+    return render_html_to_pdf(page, doc)
+
+
+# ---------------------------------------------------------------------------
+# Claims summaries: the claims list (not the EOB Center), which Anthem exports
+# only as a CSV for a start and an end date. The export is asked for by POST,
+# as the site asks for it (a GET of it answers 500); it reads the claims list
+# and changes nothing. One summary is kept for each of the calendar years
+# before this one, once CLAIMS_SETTLE_DAYS have passed since it ended, and one
+# for the current year to date, each month a run sees, and each is filed as a
+# PDF table with its CSV beside it.
+# ---------------------------------------------------------------------------
+
+# How many calendar years back the claims list is asked for, the current one
+# included. A year whose answer holds no claim files nothing (_export_csv).
+CLAIMS_SUMMARY_YEARS = 6
+
+# How many days after a year ends its summary is filed. Claims for a year
+# keep arriving after it ends, and a year's summary is filed once and never
+# again, so until then it waits, and a run in January leaves the year just
+# ended for later. The year to date covers it meanwhile.
+CLAIMS_SETTLE_DAYS = 90
+
+_CLAIMS_EXPORT_JS = r"""async (a) => {
+  const h = window.__eobHeaders;
+  if (!h) return {status: 0, noauth: true};
+  const input = {start: a.start, end: a.end, sort: ['-end'], mediaType: 'csv', filters: []};
+  const r = await fetch('https://membersecure-polaris.anthem.com/api/claims/trpc/claims.v1.summaryDownload', {
+    method: 'POST',
+    headers: Object.assign({'Accept': 'application/json', 'Content-Type': 'application/json'}, h),
+    body: JSON.stringify(input)});
+  const ct = r.headers.get('content-type') || '';
+  if (!/json/i.test(ct)) return {status: r.status, html: true};
+  // The CSV arrives base64-encoded at result.data.file. An answer with no
+  // file there hands back null, never an empty file, so it is not taken for
+  // a year with no claim.
+  const j = await ppJson(r);
+  const d = (j && j.result && j.result.data) || {};
+  return {status: r.status,
+          type: (typeof d.type === 'string') ? d.type : null,
+          file: (typeof d.file === 'string') ? d.file : null};
+}"""
+
+# What the export's answer names its file, as the run it was built from saw
+# it. A file named any other way is refused, never read as a claims list.
+_CSV_TYPE = re.compile(r"text/csv\s*(;.*)?", re.I)
+
+
+def _today():
+    """The day a run asks for its claims summaries by, which a test sets."""
+    from datetime import date
+    return date.today()
+
+
+def _files_from(year: int):
+    """The first day a year's claims summary is filed, CLAIMS_SETTLE_DAYS
+    after the year ended."""
+    from datetime import date, timedelta
+    return date(year, 12, 31) + timedelta(days=CLAIMS_SETTLE_DAYS)
+
+
+def claims_summary_key(period: str) -> str:
+    """The record a period's claims summary is kept under."""
+    return "claims:" + period
+
+
+def claims_summary_periods(today=None) -> List[dict]:
+    """The periods a claims summary is asked for, newest first. The current
+    year to date comes first, known by its month so each month a run sees
+    keeps its own, then each of the calendar years before it, back to
+    CLAIMS_SUMMARY_YEARS in all, that ended at least CLAIMS_SETTLE_DAYS ago."""
+    today = today or _today()
+    periods = [{"period": "%d-%02d" % (today.year, today.month),
+                "start": "%d-01-01" % today.year, "end": today.isoformat(),
+                "label": "Claims Summary %d Year to Date" % today.year,
+                "date": today.isoformat()}]
+    for year in range(today.year - 1, today.year - CLAIMS_SUMMARY_YEARS, -1):
+        if today < _files_from(year):
+            continue
+        periods.append({"period": str(year), "start": "%d-01-01" % year,
+                        "end": "%d-12-31" % year, "label": "Claims Summary %d" % year,
+                        "date": "%d-12-31" % year})
+    return periods
+
+
+def claims_summaries_waiting(today=None) -> List[dict]:
+    """Each year that has ended whose claims summary is not filed yet, since
+    CLAIMS_SETTLE_DAYS have not passed, newest first, with the day it is
+    filed from."""
+    today = today or _today()
+    return [{"period": str(year), "label": "Claims Summary %d" % year,
+             "files_from": _files_from(year).isoformat()}
+            for year in range(today.year - 1, today.year - CLAIMS_SUMMARY_YEARS, -1)
+            if today < _files_from(year)]
+
+
+def _csv_table(text: str) -> List[List[str]]:
+    import csv
+    import io
+    return [row for row in csv.reader(io.StringIO(text or "")) if any(c.strip() for c in row)]
+
+
+def _is_claims_header(row: List[str]) -> bool:
+    """Whether a CSV row is the claims list's own header, the one naming
+    each claim's number."""
+    return any(c.strip().lower() == "claim number" for c in row)
+
+
+def _ask_export(page, arg: dict, period: str) -> dict:
+    """One answer of the export, with anything that goes wrong in the page a
+    ListingIncomplete, as _prime_and_fetch has it, never an escape."""
+    try:
+        res = intake.evaluate(page, _CLAIMS_EXPORT_JS, arg)
+    except Exception as e:
+        # Named by how it failed alone, never by any words the page gave.
+        raise ListingIncomplete(f"the claims summary for {period} could not be fetched "
+                                f"({type(e).__name__})")
+    if not isinstance(res, dict):
+        raise ListingIncomplete(f"the claims summary for {period} came back as nothing "
+                                "this reads")
+    return res
+
+
+def _export_csv(res: dict, period: str) -> Optional[Tuple[bytes, str]]:
+    """The CSV of one answer of the export that Anthem gave with status 200,
+    as (its bytes, its text), or None for a period that holds no claim.
+
+    Raises ListingIncomplete for an answer with no file, a file not named a
+    CSV, one that does not decode, or one that is not the claims list, so a
+    year whose list did not come is never taken for an empty one."""
+    file, kind = res.get("file"), res.get("type")
+    if not isinstance(file, str):
+        raise ListingIncomplete(f"the claims summary for {period} came with no file")
+    if not isinstance(kind, str) or not _CSV_TYPE.fullmatch(kind.strip()):
+        raise ListingIncomplete(f"the claims summary for {period} came as a file that "
+                                "is not named a CSV")
+    try:
+        data = intake.decode("".join(file.split()), validate=True)
+        text = data.decode("utf-8-sig", "replace")
+        table = _csv_table(text)
+    except Exception as e:
+        raise ListingIncomplete(f"the claims summary for {period} could not be read "
+                                f"({type(e).__name__})")
+    # Unconfirmed live. What the export answers for a year that holds no
+    # claim was not seen. An empty file, one of blank lines alone, and the
+    # claims list's header row alone are each taken for such a year, and
+    # anything else that is not the claims list is refused.
+    if not table:
+        return None
+    if not _is_claims_header(table[0]):
+        raise ListingIncomplete(f"the claims summary for {period} is not the claims list")
+    if len(table) == 1:
+        return None
+    return data, text
+
+
+class Summaries(list):
+    """The claims summaries a listing read, as a list, with `refused`, the
+    label of each period whose answer was not the claims list."""
+
+    def __init__(self, rows=(), refused=()):
+        super().__init__(rows)
+        self.refused = list(refused)
+
+
+def _period_summary(page, p: dict) -> Optional[dict]:
+    """One period's claims summary as a filing row carrying its CSV, or None
+    for a period that holds no claim. Raises SessionExpired when Anthem will
+    not authenticate the export, and ListingIncomplete when it refuses the
+    period, answers no file or anything but the claims list, or the page
+    fails, so a year whose list did not come is never taken for an empty
+    one."""
+    arg = {"start": p["start"], "end": p["end"]}
+    res = _ask_export(page, arg, p["period"])
+    if res.get("noauth") or res.get("status") in (401, 403):
+        if prime_session(page, force=True):
+            res = _ask_export(page, arg, p["period"])
+    status = res.get("status")
+    if res.get("noauth") or res.get("html") or status in (401, 403):
+        raise SessionExpired("Anthem would not authenticate the claims list "
+                             f"(status {status})")
+    if status != 200:
+        raise ListingIncomplete(
+            f"the claims summary for {p['period']} could not be fetched (status {status})")
+    got = _export_csv(res, p["period"])
+    if got is None:
+        return None
+    data, text = got
+    return {
+        "doc_id": "ClaimsSummary|" + p["period"],
+        "key": claims_summary_key(p["period"]),
+        "label": p["label"],
+        "folder_attr": "claims_summaries",
+        "date": p["date"],
+        "csv": text,
+        # The CSV as Anthem handed it over, saved beside the PDF.
+        "csv_bytes": data,
+    }
+
+
+def list_claims_summaries(page, today=None, skip=(), pause=None) -> List[dict]:
+    """Every period's claims summary that holds a claim, as a filing row
+    carrying its CSV, in a Summaries. A period whose answer is refused, as
+    _period_summary refuses one, is named in the log and in `refused`, and
+    the periods that did come are kept. SessionExpired stops it at once.
+
+    A period whose record key is in `skip`, one already saved, is not asked
+    for, and `pause()` is called between two asks, as the app paces its
+    other calls."""
+    rows = Summaries()
+    if not is_anthem_owned_page(page):
+        raise SessionExpired("the Anthem tab is no longer open on Anthem")
+    if not prime_session(page):
+        raise SessionExpired("could not capture Anthem's session for the claims list")
+    asked = 0
+    for p in claims_summary_periods(today):
+        if claims_summary_key(p["period"]) in skip:
+            continue
+        if asked and pause is not None:
+            pause()
+        asked += 1
+        try:
+            row = _period_summary(page, p)
+        except ListingIncomplete as e:
+            rows.refused.append(p["label"])
+            log.warning("%s did not come as the claims list (%s)", p["label"], e)
+            continue
+        if row is not None:
+            rows.append(row)
+    log.info("Anthem: %d claims summar%s", len(rows), "y" if len(rows) == 1 else "ies")
+    return rows
+
+
+def render_claims_summary(page, label: str, csv_text: str) -> Optional[bytes]:
+    """One claims summary's CSV as a filed PDF table, every column and claim,
+    each cell escaped and rendered with all network blocked."""
+    import html as _html
+    table = _csv_table(csv_text)
+    if not table:
+        return None
+    head = "".join("<th>%s</th>" % _html.escape(c) for c in table[0])
+    body = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % _html.escape(c) for c in row)
+                   for row in table[1:])
+    doc = ("<html><head><meta charset='utf-8'><style>"
+           "body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111}"
+           "h1{font-size:16px;margin:0 0 10px}"
+           "table{border-collapse:collapse;width:100%;font-size:7px}"
+           "th,td{border:1px solid #bbb;padding:2px 3px;text-align:left;vertical-align:top}"
+           "th{background:#eee}"
+           "</style></head><body>"
+           f"<h1>{_html.escape(label)}</h1>"
+           f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
            "</body></html>")
     return render_html_to_pdf(page, doc)

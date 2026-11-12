@@ -257,14 +257,16 @@ def check_file(path, what: str = "The downloaded file", limit: Optional[int] = N
 # A page fetches a document with the session's cookies and hands it back as
 # base64, and Response.arrayBuffer() holds the whole answer before a single
 # byte can be counted. These read it a piece at a time instead and stop at
-# the limit. A snippet that reads a body calls ppRead(response) or
-# ppBlob(blob) in place of arrayBuffer(), and ppText(response) or
-# ppJson(response) in place of text() and json() where the text is the
-# document, a page an app prints or the letters it renders. ppRefused(e)
-# says whether an error a snippet caught is one of these refusing, which it
-# throws on rather than taking for an answer that did not parse. A snippet
-# that reads any of them is run through evaluate() below, which puts these
-# in front of it with the limit of the moment.
+# the limit. An answer a page's own fetch gives with no body stream at all,
+# as Anthem's member portal does, offers no way to read it in pieces, so it
+# alone is read whole and then held to the limit. A snippet that reads a
+# body calls ppRead(response) or ppBlob(blob) in place of arrayBuffer(), and
+# ppText(response) or ppJson(response) in place of text() and json() where
+# the text is the document, a page an app prints or the letters it renders.
+# ppRefused(e) says whether an error a snippet caught is one of these
+# refusing, which it throws on rather than taking for an answer that did not
+# parse. A snippet that reads any of them is run through evaluate() below,
+# which puts these in front of it with the limit of the moment.
 #
 # A page's own scripts can change fetch and every reader under it, so a
 # provider's page that meant to could still hand back more. decode() then
@@ -281,6 +283,14 @@ _READ_JS = r"""
     if (said > ppLimit) {
       try { if (r.body) await r.body.cancel(); } catch (e) {}
       throw ppOver(said);
+    }
+    // A page's own fetch can answer with no body stream at all (undefined,
+    // where an answer with no body has null). That answer is read whole and
+    // then held to the limit, since it offers no way to read it in pieces.
+    if (r.body === undefined) {
+      const whole = new Uint8Array(await r.arrayBuffer());
+      if (whole.byteLength > ppLimit) throw ppOver(whole.byteLength);
+      return whole;
     }
     if (!r.body) return new Uint8Array(0);
     const reader = r.body.getReader();

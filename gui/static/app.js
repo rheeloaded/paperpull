@@ -3086,20 +3086,31 @@ async function tmGo() {
 // Updates (gui/updater.py). Opening the page asks nobody: it reads what the
 // panel already knows. The check is off until the person turns it on in
 // Settings, and turning it on asks nobody either. The one request is the one
-// Check github.com for an update starts. A Mac installed from the disk image
-// can then download and check the new version, and waits to be told to
-// restart. Everything else is pointed at the release page. Neither PaperPull
-// Server nor the Store edition shows any of this.
+// Check github.com for an update starts. A Mac installed from the disk image,
+// and Windows installed by setup.exe, can then download and check the new
+// version, and wait to be told to restart. PaperPull Server is given the
+// steps that take the new image, since a container cannot replace its own.
+// Every other copy is pointed at the release page. The Store edition shows
+// none of it, since the panel answers it nothing.
 let UPD = null;
 let UPD_HIDDEN = false;
 let UPD_TIMER = null;
 const UPD_ERR = 'Could not do that. ';
+const SERVER_IMAGE = 'ghcr.io/rheeloaded/paperpull-server';
 function updHide() { if ($('g-updcard')) $('g-updcard').hidden = true; if ($('updatebar')) $('updatebar').hidden = true; }
 async function updLoad() {
-  if (SERVER) { updHide(); return; }
   try { UPD = await getJSON('/api/update'); }
   catch (e) { updHide(); return; }
   updRender();
+}
+// The steps of "Updating" in SERVER.md, for the version found.
+function updServerSteps(v) {
+  return '<ol class="small">' +
+    '<li>In <code>compose.yaml</code>, or <code>compose.https.yaml</code> if you use that one, change the <code>image:</code> line that names <code>paperpull-server</code> to <code>image: ' + SERVER_IMAGE + ':' + esc(v) + '</code>. A line that ends in <code>:latest</code> stays as it is.</li>' +
+    '<li>In the folder that holds that file, run <code>docker compose pull</code>.</li>' +
+    '<li>Then run <code>docker compose up -d</code>.</li></ol>' +
+    '<p class="hint">With <code>compose.https.yaml</code>, add <code>-f compose.https.yaml</code> to both commands. A NAS’s Docker app does the same from its project page. The image is published a little after the release, so if the pull says the version is not found, try again later. An image you build yourself is built again from the new release instead. Your accounts, sign-ins and documents are in the volumes and stay. A release can also bring new lines for the compose file, and its notes name them. ' +
+    '<a href="https://github.com/rheeloaded/paperpull/blob/main/SERVER.md#updating-backing-up-and-removing" target="_blank" rel="noopener">Updating, in SERVER.md</a></p>';
 }
 async function updCheck() {
   $('updmsg').textContent = 'Asking github.com…';
@@ -3123,13 +3134,17 @@ async function updInstall() {
 async function updRestart() {
   try { await postJSON('/api/update/restart', {}); }
   catch (e) { notice(UPD_ERR + e.message, 'warn'); updLoad(); return; }
-  $('updatetext').textContent = 'PaperPull is closing and will open again in a moment. You can close this tab.';
+  $('updatetext').textContent = UPD && UPD.edition === 'windows'
+    ? 'PaperPull is closing. The installer shows its progress, then PaperPull opens again in a new window. You can close this tab.'
+    : 'PaperPull is closing and will open again in a moment. You can close this tab.';
   $('updatebtns').innerHTML = '';
 }
 function updRender() {
-  if (SERVER || !UPD) return;
+  if (!UPD) return;
   const bar = $('updatebar'), txt = $('updatetext'), btns = $('updatebtns');
   const inst = UPD.install || {};
+  const win = UPD.edition === 'windows';
+  const name = SERVER ? 'PaperPull Server ' : 'PaperPull ';
   const link = '<a class="btn btn-s btn-sm" href="' + esc(UPD.page) + '" target="_blank" rel="noopener">What’s new</a>';
   const btn = (act, label, cls) => '<button class="btn ' + (cls || 'btn-s') + ' btn-sm" type="button" data-do="' + act + '">' + label + '</button>';
   let text = '', html = '', tone = '';
@@ -3139,18 +3154,25 @@ function updRender() {
   } else if (inst.phase === 'checking') {
     text = 'Checking that PaperPull ' + (inst.version || '') + ' is the genuine release…';
   } else if (inst.phase === 'restarting') {
-    text = 'PaperPull is closing to put version ' + (inst.version || '') + ' in place…';
+    text = win ? 'PaperPull is closing so its installer can put version ' + (inst.version || '') + ' in place…'
+      : 'PaperPull is closing to put version ' + (inst.version || '') + ' in place…';
   } else if (inst.phase === 'ready') {
-    text = 'PaperPull ' + (inst.version || '') + ' is ready. PaperPull closes and opens again to finish.';
+    text = win ? 'PaperPull ' + (inst.version || '') + ' is ready. PaperPull closes, its installer runs, and PaperPull opens again when it is done.'
+      : 'PaperPull ' + (inst.version || '') + ' is ready. PaperPull closes and opens again to finish.';
     html = btn('upd-restart', 'Restart and update', 'btn-p');
     tone = 'ok';
   } else if (inst.phase === 'error') {
-    text = 'The update did not install: ' + (inst.error || 'something went wrong') + ' Nothing was changed.';
+    // The panel's reasons start in lower case and end without a full stop,
+    // and some are two sentences, so each is said as sentences of its own.
+    const why = (inst.error || 'something went wrong').replace(/\.$/, '');
+    text = 'The update did not install. ' + why.charAt(0).toUpperCase() + why.slice(1) + '. Nothing was changed.';
     html = (UPD.can_install ? btn('upd-install', 'Try the download from github.com again') : '') + link;
     tone = 'warn';
   } else if (UPD.newer && !UPD_HIDDEN) {
-    text = 'PaperPull ' + UPD.latest + ' is available. You have ' + UPD.current + '.';
-    html = (UPD.can_install ? btn('upd-install', 'Download from github.com', 'btn-p') : '') + link + btn('upd-later', 'Later');
+    text = name + UPD.latest + ' is available. You have ' + UPD.current + '.' +
+      (SERVER ? ' Settings, under Updates, has the steps that take it.' : '');
+    html = (UPD.can_install ? btn('upd-install', 'Download from github.com', 'btn-p') : '') +
+      (SERVER ? '<a class="btn btn-s btn-sm" href="#/settings">The steps</a>' : '') + link + btn('upd-later', 'Later');
   }
   txt.textContent = text;
   btns.innerHTML = html;
@@ -3159,12 +3181,24 @@ function updRender() {
   // Settings: the switch, and the one button that asks github.com.
   const st = $('updstatus');
   if ($('g-updcard')) $('g-updcard').hidden = false;
+  if (SERVER && $('updhint')) $('updhint').textContent = 'PaperPull Server can ask github.com, where its releases are published, ' +
+    'whether a newer version exists. It is off until you turn it on, and even then it asks only when you press the button, ' +
+    'never on its own. The request goes from this server and carries nothing about you or your accounts beyond what any ' +
+    'request reveals, such as the server’s address. A container cannot replace its own image, so when there is a newer ' +
+    'one this card gives the steps that take it.';
   if (st) {
-    st.textContent = UPD.enabled ? (UPD.newer ? 'PaperPull ' + UPD.latest + ' is available. You have ' + UPD.current + '.'
-        : 'You have PaperPull ' + UPD.current + '. The check is on, and asks only when you press the button.')
-      : 'You have PaperPull ' + UPD.current + '. The check is off.';
+    st.textContent = UPD.enabled ? (UPD.newer ? name + UPD.latest + ' is available. You have ' + UPD.current + '.'
+        : 'You have ' + name + UPD.current + '. The check is on, and asks only when you press the button.')
+      : 'You have ' + name + UPD.current + '. The check is off.';
     $('updtoggle').textContent = UPD.enabled ? 'Turn the check off' : 'Turn the check on';
     $('updcheck').hidden = !UPD.enabled;
+  }
+  // What to do with a newer version this copy cannot install itself.
+  const how = $('updhow');
+  if (how) {
+    const newer = UPD.enabled && UPD.newer && !UPD.can_install;
+    how.innerHTML = !newer ? '' : SERVER ? updServerSteps(UPD.latest) : (UPD.why ? '<p class="hint">' + esc(UPD.why) + '</p>' : '');
+    how.hidden = !how.innerHTML;
   }
   clearTimeout(UPD_TIMER);
   if (inst.phase === 'downloading' || inst.phase === 'checking') UPD_TIMER = setTimeout(updLoad, 700);

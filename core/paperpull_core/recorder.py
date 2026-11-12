@@ -57,7 +57,10 @@ Before the account holder is signed in. start() checks the page is on
 the provider's own host, that the app does not think it is signed out,
 and that there is no password field on it. A recorder that can be
 switched on at a sign-in screen is a keylogger with good intentions, so
-this one cannot be.
+this one cannot be. Consorsbank keeps a sign-in window in every page and
+draws it only when asked, so counting it refused every page of the bank
+(#178). A site module like that one sets PASSWORD_FIELD, and only the
+fields its pages draw are counted.
 
 HOW A CONTROL IS NAMED
 
@@ -165,6 +168,8 @@ aria-modal aria-live aria-pressed aria-checked aria-owns aria-sort
 _SHAPE_MAX_NODES = 300
 _SHAPE_MAX_SIBLINGS = 25
 _SHAPE_MAX_DEPTH = 80
+# The deepest an app may ask a JSON answer's keys to be kept (Recorder).
+_JSON_DEPTH_MOST = 8
 _SHAPE_TARGET_DEPTH = 3
 # Steps that carry one. A recording is fourteen steps as a rule, and one
 # that runs to hundreds does not need a picture of every page.
@@ -610,6 +615,15 @@ def clean_structure(raw) -> Optional[dict]:
             "truncated": cut[0] or not has_target(root)}
 
 
+# The password fields the backstop counts. Every one in the page, unless a
+# provider's site module sets PASSWORD_FIELD to DRAWN_PASSWORD_FIELD because
+# its pages keep a sign-in window they never draw, as Consorsbank's do
+# (#178). Then only the fields the page draws with a box are counted. Any
+# other value is the strict one, so a site module cannot switch it off.
+PASSWORD_FIELD = "input[type='password']"
+DRAWN_PASSWORD_FIELD = "input[type='password']:visible"
+
+
 class Recorder:
     """One recording, on one page, of one person's path to a document."""
 
@@ -617,12 +631,20 @@ class Recorder:
                  is_safe_url: Callable[[str], bool],
                  looks_signed_out: Optional[Callable] = None,
                  is_safe_control: Optional[Callable[[str], bool]] = None,
-                 provider: str = "", words=None, include_html: bool = False):
+                 provider: str = "", words=None, include_html: bool = False,
+                 password_field: str = PASSWORD_FIELD, json_depth: int = 3):
         self.page = page
         self._is_safe_url = is_safe_url
         self._looks_signed_out = looks_signed_out
         self._is_safe_control = is_safe_control
+        self._password_field = (DRAWN_PASSWORD_FIELD if password_field == DRAWN_PASSWORD_FIELD
+                                else PASSWORD_FIELD)
         self._include_html = include_html
+        # How many levels of a JSON answer's keys are kept. A GraphQL answer
+        # spends three on data, the query and its list before the fields of
+        # one item, so an app on GraphQL asks for more (Scalable Capital,
+        # #170). Keys only, each through the word list, and never a value.
+        self._json_depth = max(3, min(int(json_depth or 3), _JSON_DEPTH_MOST))
         self.provider = provider
         # The app's own words on top of the fixed list, its name and its
         # site module's, so "PayPal" in an address reads as itself.
@@ -658,7 +680,9 @@ class Recorder:
             except Exception:
                 pass
         try:
-            if self.page.locator("input[type='password']").count() > 0:
+            # Every field in the page, or for a provider that keeps a sign-in
+            # window it never draws, the fields the page draws (#178).
+            if self.page.locator(self._password_field).count() > 0:
                 return ("there is a password field on this page, so recording "
                         "will not start here. Finish signing in first.")
         except Exception:
@@ -954,9 +978,14 @@ class Recorder:
 
     def _on_navigated(self, frame) -> None:
         try:
-            if frame != self.page.main_frame:
-                return
+            first = frame == self.page.main_frame
         except Exception:
+            return
+        if not first:
+            # A tab the provider opened, where a document is often shown.
+            # Its address was never written down, which left a recording
+            # saying a tab opened and not what it showed (#170).
+            self._opened_tab_navigated(frame)
             return
         step = self._current()
         if step is not None:
@@ -964,6 +993,18 @@ class Recorder:
             step["effect"]["landed_on"] = shape_url(
                 frame.url or "", self.words, query=not self._include_html)[:200]
         self._install()
+
+    def _opened_tab_navigated(self, frame) -> None:
+        try:
+            opened = any(frame == p.main_frame for p in self._watched if p is not self.page)
+            url = frame.url or ""
+        except Exception:
+            return
+        step = self._current()
+        if not opened or step is None or not url or url == "about:blank":
+            return
+        step["effect"]["opened_tab_landed_on"] = shape_url(
+            url, self.words, query=not self._include_html)[:200]
 
     def _on_new_tab(self, page) -> None:
         step = self._current()
@@ -1122,7 +1163,7 @@ class Recorder:
         signal, a balance is not. A key is shaped like any other word,
         because an object keyed by account number is a thing that
         exists."""
-        if depth > 3:
+        if depth > self._json_depth:
             return "..."
         if isinstance(obj, dict):
             out = {}
@@ -1462,14 +1503,17 @@ def _wait_for_stop(page, stop_file, say) -> None:
 
 
 def record_session(page, site, diagnostics_dir, provider: str = "",
-                   owner: str = "", say=print, *, include_html: bool = False) -> Optional[str]:
+                   owner: str = "", say=print, *, include_html: bool = False,
+                   json_depth: int = 3) -> Optional[str]:
     """Start a recording on `page`, wait for the person, write the file.
 
     `site` is the app's own site module, for the two host checks and its
     control guard. Returns the path written, or None if it refused or
     recorded no step, so an app never ends an empty one as a saved file.
     With include_html, record HTML response metadata without bodies or query
-    values, and omit navigation query strings from step effects."""
+    values, and omit navigation query strings from step effects. With
+    json_depth, keep that many levels of a JSON answer's keys, at most
+    _JSON_DEPTH_MOST, never a value."""
     from .redact import set_private_words
     from .words import write_shaped
     from pathlib import Path
@@ -1489,7 +1533,9 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
                    is_safe_url=site.is_safe_url,
                    looks_signed_out=getattr(site, "looks_signed_out", None),
                    is_safe_control=getattr(site, "is_safe_control", None),
-                   provider=provider, words=words, include_html=include_html)
+                   provider=provider, words=words, include_html=include_html,
+                   password_field=getattr(site, "PASSWORD_FIELD", PASSWORD_FIELD),
+                   json_depth=json_depth)
     why = rec.refusal()
     if why:
         say("Not recording, because %s." % why)

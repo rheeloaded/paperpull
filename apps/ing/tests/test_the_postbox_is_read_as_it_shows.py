@@ -8,6 +8,7 @@ import copy
 import inspect
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -280,48 +281,36 @@ def test_a_list_not_read_whole_stops(seen, said):
         site._read_area(page, "postbox", {})
 
 
-@pytest.mark.parametrize("source,where", [("postbox", "the Postbox"),
-                                          ("archive", "the Postbox archive")])
-def test_a_list_showing_only_the_notice_is_not_read_as_empty(source, where):
-    """ING's notice that nothing matches is the same for an empty list and
-    for a search or filter that finds nothing (#203)."""
-    page = Page(url=site.URLS["archive" if source == "archive" else "documents"],
-                areas={source: EMPTY})
-    area = site._read_area(page, source, {}, navigate=False)
-    assert area["only_notice"] is True
-    assert area["rows"] == area["candidates"] == [] and area["undated"] == 0
-    page.areas[source] = look(row(base=site.URLS["archive" if source == "archive"
-                                                  else "documents"]))
-    assert site._read_area(page, source, {}, navigate=False)["only_notice"] is False
-    # Where a document is taken, the same list stops the run.
-    stop = site.NotShownEmpty(source, site.named(source))
-    assert str(stop) == f"{where} shows no document, only ING's notice that nothing matches"
-    assert stop.source == source and isinstance(stop, site.ListStopped)
+@pytest.mark.parametrize("start,again", [(POSTBOX, True), (OBLIGO, False), (ARCHIVE, False)])
+def test_an_empty_list_opened_by_its_address_is_read_whole_with_nothing_in_it(start, again):
+    """Opened by its own address, a list is under ING's default filter, the
+    widest it has, with no search, so its notice that nothing matches shows
+    it empty (MelleD, #203)."""
+    page = Page(url=start, areas={"postbox": EMPTY})
+    area = site._read_area(page, "postbox", {}, again=again)
+    assert area["rows"] == [] and area["undated"] == 0
+    assert page.gotos == [POSTBOX]
 
 
-def test_a_listing_leaves_out_a_list_showing_only_the_notice_and_names_it():
-    page = Page(areas={"postbox": look(row()), "archive": EMPTY})
-    rows = site._all_rows(page, {"read_archive": True}, fresh=True)
-    assert [r["source"] for r in rows] == ["postbox"]
-    assert site.not_shown_empty() == ["archive"]
-    assert site._listing["rows"] == rows
-    page.areas["archive"] = look(row("a1", base=ARCHIVE, date="31.01.2019"))
-    rows = site._all_rows(page, {"read_archive": True}, fresh=True)
-    assert [r["source"] for r in rows] == ["postbox", "archive"]
-    assert site.not_shown_empty() == []
-    page.areas["postbox"] = EMPTY
-    rows = site._all_rows(page, {"read_archive": True}, fresh=True)
-    assert [r["source"] for r in rows] == ["archive"]
-    assert site.not_shown_empty() == ["postbox"]
+@pytest.mark.parametrize("navigate", [True, False])
+def test_the_notice_on_a_list_as_it_stands_is_not_taken_for_an_empty_list(navigate):
+    """The list on screen may carry a search or filter of the person's own,
+    which ING keeps on a page whose address carries its session id, and a
+    filter that finds nothing shows the same notice."""
+    page = Page(url=POSTBOX + ";jsessionid=0?3", areas={"postbox": EMPTY})
+    with pytest.raises(site.NotShownEmpty, match="only right after this app opens it"):
+        site._read_area(page, "postbox", {}, navigate=navigate)
+    assert page.gotos == []
 
 
-def test_a_listing_that_stops_leaves_no_list_named_from_the_one_before():
-    page = Page(areas={"postbox": look(row()), "archive": EMPTY})
-    site._all_rows(page, {"read_archive": True}, fresh=True)
-    page.areas["postbox"] = look(row(), pagination=1)
-    with pytest.raises(site.ListStopped):
-        site._all_rows(page, {"read_archive": True}, fresh=True)
-    assert site.not_shown_empty() == []
+def test_each_list_is_opened_by_its_own_address_with_no_session_id():
+    """ING keeps a search or filter only for an address that carries the
+    session id it adds, so the address a list is opened by carries none."""
+    for source, address in site._AREAS.items():
+        parts = urlsplit(address)
+        assert parts.scheme == "https" and parts.hostname == site.HOST
+        assert ";" not in parts.path and not parts.query and not parts.fragment
+        assert site._list_area(address) == source
 
 
 def test_rows_alike_are_told_apart_only_by_their_place():

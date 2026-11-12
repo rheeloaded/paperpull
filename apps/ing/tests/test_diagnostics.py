@@ -112,10 +112,11 @@ def test_diagnose_says_when_the_list_on_screen_shows_only_the_notice(app, monkey
     out = " ".join(capsys.readouterr().out.split())
     assert page.looks == [False]
     assert "Rows collected: 0 " in out
-    assert ("The list on screen shows only ING's notice that nothing matches, which ING shows "
-            "for an empty list and for a search or filter that finds nothing.") in out
+    assert ("The list on screen shows only ING's notice that nothing matches. A run opens "
+            "the list by its own address first, which clears any search or filter, and "
+            "reads the notice as an empty list only then.") in out
     report = json.loads((app.paths.diagnostics / "diagnose-documents.json").read_text())
-    assert report["lists_showing_only_the_notice"] == 1 and "collect_error" not in report
+    assert report["only_the_notice"] is True and "collect_error" not in report
 
 
 def test_diagnose_failure_is_reported_and_not_a_success(app, monkeypatch, capsys):

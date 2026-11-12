@@ -63,10 +63,12 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
 [#53](https://github.com/rheeloaded/paperpull/issues/53),
-[#54](https://github.com/rheeloaded/paperpull/issues/54)), and Scalable Capital and Consorsbank
-are first shells waiting for a tester to Record a trip to a document
+[#54](https://github.com/rheeloaded/paperpull/issues/54)), and Scalable Capital, Consorsbank,
+CIBC and MBNA are first shells waiting for a tester to Record a trip to a document
 ([#170](https://github.com/rheeloaded/paperpull/issues/170),
-[#178](https://github.com/rheeloaded/paperpull/issues/178)):
+[#178](https://github.com/rheeloaded/paperpull/issues/178),
+[#204](https://github.com/rheeloaded/paperpull/issues/204),
+[#205](https://github.com/rheeloaded/paperpull/issues/205)):
 
 | App | Provider | Documents | Notes |
 |-----|----------|-----------|-------|
@@ -90,6 +92,7 @@ are first shells waiting for a tester to Record a trip to a document
 | [`cetera`](apps/cetera) | Cetera (AdviceWorks) | Brokerage account statements and quarterly performance reports, every account the client portal lists | **Built and run on a contributor's own account, 56 statements across four accounts and 5 reports listed.** The portal's own statement and report lists asked from inside the signed-in page, each PDF fetched the same way, nothing clicked |
 | [`chase`](apps/chase) | Chase (credit cards) | Card statements | Real Edge/Chrome; per-card accordions + year picker |
 | [`chasebusiness`](apps/chasebusiness) | Chase Business (business document center) | Business checking and business card statements, up to seven years | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 10 checking statements and the business card's first statement saved on full runs.** One profile so far, so a debit account's statements are untested. Seven kinds of control pressed through the guard, real Edge/Chrome |
+| [`cibc`](apps/cibc) | CIBC (Canadian Imperial Bank of Commerce) | Bank account, credit card and line of credit statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/cibc/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document, and a second recording for a credit card or line of credit whose statements open somewhere else. Requested in [#204](https://github.com/rheeloaded/paperpull/issues/204) |
 | [`citi`](apps/citi) | Citi (credit cards) | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
 | [`coinbase`](apps/coinbase) | Coinbase | Monthly account statements, Coinbase One Card statements, tax forms, gain and loss reports | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 66 statements and 2 tax documents saved on a full run.** Each month's own PDF button on the Statements page pressed once and the download taken only from Coinbase's statements bucket, and tax PDFs from the list calls the Taxes page makes, nothing pressed. One Card statements from the Credit Card tab, each row's own PDF button pressed once, 13 saved on a full run on one account |
 | [`consorsbank`](apps/consorsbank) | Consorsbank | Statements, securities documents, tax certificates | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/consorsbank/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document. Requested in [#178](https://github.com/rheeloaded/paperpull/issues/178) |
@@ -115,6 +118,7 @@ are first shells waiting for a tester to Record a trip to a document
 | [`github`](apps/github) | GitHub | Payment receipts (Pro, Copilot, Actions, Sponsors and the rest) | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#43](https://github.com/rheeloaded/paperpull/issues/43).** Receipt links fetched or printed, nothing clicked |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | Statements, tax forms | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every statement on both of his accounts, a credit card's named as one ([#35](https://github.com/rheeloaded/paperpull/issues/35)) |
 | [`ibkr`](apps/ibkr) | Interactive Brokers | Monthly Activity Statements | **Contributed by [@tylerverry](https://github.com/tylerverry), 60 of 61 months saved on a full run.** The Statements page's own Activity Statement dialog, Monthly chosen and each month's own Download PDF button pressed once, and nothing else is clicked. Regional hosts `.com`, `.co.uk` and `.ie` |
+| [`mbna`](apps/mbna) | MBNA (Canada, credit cards) | Credit card statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/mbna/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a statement. Requested in [#205](https://github.com/rheeloaded/paperpull/issues/205) |
 | [`meijer`](apps/meijer) | Meijer | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked but its two tabs and an in-store receipt's own icon |
 | [`myecp`](apps/myecp) | MILITARY STAR (Exchange Credit Program) | Card statements | **Built on the maintainer's own account, 25 statements back to 2023.** The MyECP statements list and download from inside the page, nothing clicked |
 | [`mypay`](apps/mypay) | DFAS myPay | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
@@ -293,7 +297,7 @@ on the desktop.
 | Signing in | a browser window on your desktop | a browser screen the server shows in your browser |
 | New documents | folders on your computer | folders on the server, and copied into Paperless-ngx's consume folder if you mount it |
 | Who can reach it | only your computer | your home network, behind a password you choose |
-| Updates | the next installer, or the Store | the new version in `compose.yaml`, then `docker compose pull` and `docker compose up -d` |
+| Updates | from Settings, the next installer, or the Store | the new version in `compose.yaml`, then `docker compose pull` and `docker compose up -d` |
 | Price | free, or the Store edition | free |
 
 Getting it running takes three steps, and [SERVER.md](SERVER.md) has the
@@ -764,9 +768,11 @@ providers you sign in to, plus, only if you agree, a browser download when
 your computer has no usable browser. If you turn the update check on in
 Settings, each press of **Check github.com for an update** asks GitHub's
 release list whether a newer version exists, and it never asks by itself.
-On a Mac installed from the disk image, **Download from github.com** then
-downloads the new version from GitHub, checks it, and installs it when you
-say so. Elsewhere the panel links to the release page.
+On a Mac installed from the disk image, or on Windows installed with
+`setup.exe`, **Download from github.com** then downloads the new version
+from GitHub, checks it, and installs it when you say so. PaperPull Server
+asks the same way and gives the steps that take the new image. Elsewhere
+the panel links to the release page.
 PaperPull Server also fetches Chrome from Google, and Chrome itself talks
 to Google as any Chrome does. See
 [PRIVACY.md](PRIVACY.md) and [PRIVACY-SERVER.md](PRIVACY-SERVER.md).
@@ -872,14 +878,22 @@ Microsoft Store or [paperpull.net](https://paperpull.net). See
 
 ### How do I update?
 
-PaperPull never checks for a new version of itself. GitHub's **Watch**
-button, set to releases, tells you when one comes out. On Windows, run the
-new installer over the old one, and the Store edition updates through the
-Store. On a Mac, drag the new version into Applications. On PaperPull
-Server, run `docker compose pull` and then `docker compose up -d`. Your
-documents and history are left as they are, and so are the desktop app's
-sign-ins. On the server, the restart can sign you out of a provider that
-keeps its session only while the browser runs.
+PaperPull checks for a new version only if you turn the check on in
+Settings, under Updates, and then only when you press **Check github.com
+for an update**. GitHub's **Watch** button, set to releases, also tells you
+when one comes out. On a Mac installed from the disk image, or on Windows
+installed with `setup.exe`, **Download from github.com** fetches the new
+version, checks it is the release GitHub published and signed by the same
+publisher, and puts it in place when you press **Restart and update**. You
+can also run the new installer over the old one on Windows, or drag the
+new version into Applications on a Mac. The portable zip is replaced by
+unzipping the new one, and the Store edition updates through the Store. On
+PaperPull Server, write the new version in the `image:` line of
+`compose.yaml`, then run `docker compose pull` and `docker compose up -d`,
+the steps the server's own update check gives too. Your documents and
+history are left as they are, and so are the desktop app's sign-ins. On
+the server, the restart can sign you out of a provider that keeps its
+session only while the browser runs.
 
 ## Contributing a provider
 
@@ -903,9 +917,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **eighty-nine** apps pass their tests, the eighty-two that are
-  supported, the five still waiting for a tester and the Scalable Capital
-  and Consorsbank shells, 38,158 of them
+- ✅ All **ninety-one** apps pass their tests, the eighty-two that are
+  supported, the five still waiting for a tester and the Scalable Capital,
+  Consorsbank, CIBC and MBNA shells, 39,463 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).

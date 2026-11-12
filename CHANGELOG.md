@@ -7,7 +7,137 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.65.0] - 2026-11-12
+
+The update check now installs on Windows too, and PaperPull Server gives
+the steps that take the new image. Anthem downloads its EOBs again after
+Anthem changed how it lists them, and files a claims summary for each
+year. Consorsbank's Record starts once you are signed in, ING reads an
+empty Postbox as empty again, and a recording keeps more of what a
+document holds.
+
+### Added
+- **Anthem claims summaries (#211).** Anthem now files its claims list, which
+  is not the EOB Center, as one claims summary for each of the five years
+  before this one and one for the current year to date each month a run
+  sees. Each is a PDF table in Claims Summaries with Anthem's own CSV beside
+  it. Run All, Resume and `--claims-summaries` take them. Anthem exports the
+  list only by POST, as its own page asks for it, and that one POST reads
+  the list for two dates and changes nothing. Contributed by @riordan.
+  Before merging, each year is read on its own. One whose answer has no
+  file, is not the claims list, or fails in the page is named and counted as
+  failed rather than read as a year with no claim, the years that came are
+  saved, and the next run asks for it again. A year is filed only
+  once 90 days have passed since it ended, since its claims keep arriving
+  after it ends, and a run in January names the year just ended as waiting.
+  Each CSV is written with its PDF and listed in the summary's record, so a
+  Rename or a Move takes it along, and it is never written again once
+  deleted. A summary saved before is not asked for again, the asks are paced
+  as the app's other calls are, and a test pins every value the POST sends.
+- **The update check on Windows and on PaperPull Server.** On Windows
+  installed with `setup.exe`, **Download from github.com** now downloads the
+  release's installer, which has to match the SHA-256 GitHub recorded, carry
+  a valid signature by PaperPull's publisher from Microsoft's ID Verified
+  code signing, and say it is the new version. The copy you run has to carry
+  that same signature, or nothing is downloaded. **Restart and update**
+  checks the installer again, then closes PaperPull, runs the installer with
+  only its progress showing, in the folder you installed it in, and opens
+  PaperPull again when it is done. It refuses while another PaperPull
+  program runs from that folder, such as a download started in a terminal,
+  which the installer would close. If the installer fails, it opens again
+  with its usual window so you can finish the install. A script waits for
+  PaperPull to exit and checks the installer's SHA-256 one last time while
+  it holds the file, and if that script never starts, PaperPull stays open.
+  It writes what it did to `update.log` in `AppData\Roaming\PaperPull`. Where an
+  organization lets PowerShell run only its restricted commands, the panel
+  says so and points to the release page. The portable zip says a
+  newer version exists and how to take it. PaperPull Server asks the same
+  way and gives the steps that take the new image, the `image:` line in
+  `compose.yaml`, `docker compose pull` and `docker compose up -d`, since a
+  container cannot replace its own image. The Microsoft Store edition still
+  updates through the Store and shows none of it. PRIVACY.md,
+  PRIVACY-SERVER.md, SERVER.md and the README say so, and the README's
+  answer to "How do I update?" no longer says PaperPull never checks.
+
+### Changed
+- **A recording says where a tab the provider opened landed, and Scalable's
+  recording keeps what its documents hold (#170).** A document shown in a
+  tab of its own was noted only as a tab that opened. Its address is now
+  written as its shape, as the first tab's is. An app may ask a recording
+  to keep a JSON answer's keys deeper than four levels, at most eight, and
+  Scalable Capital asks for seven, since its mailbox is a GraphQL answer
+  whose documents sit four levels down. Keys only, through the word list,
+  and never a value.
+- **ING reads an empty Postbox or archive as empty again, right after it
+  opens the list itself (#203).** In 0.64.0 a list that showed only ING's
+  notice that nothing matches was left out and the run stopped at its end,
+  since a search or filter that finds nothing shows the same notice. @MelleD
+  then checked on their account that ING keeps a search or filter only
+  while the address carries the session id it adds, and that a list opened
+  by its own address is under the default filter, the widest ING has, every
+  account, every document type and the longest period it offers, ten years
+  back. The app opens each list by its own address before it reads it, so
+  the notice right after that shows the list empty. A run with an empty archive
+  finishes clean again without `read_archive` set to `false`. If you set it
+  to `false` for an empty archive on 0.64.0's advice, set it back to `true`,
+  or the archive stays unread once documents arrive there. Read as it
+  stands, as Diagnose reads it, the notice is still not taken for an empty
+  list, and Diagnose says so. The README names sub-accounts behind a tab in
+  ING's newer web banking as not read yet.
+
+### Fixed
+- **Anthem's claim tokens, patient names, Pharmacy statements and the
+  letters listing (#210).** Anthem's EOB summary now gives each claim number
+  beside an opaque token made new on every listing. The app took the token
+  for the claim number, so every EOB got an identity the guard refused and
+  none could be downloaded. An EOB is known by its claim number again, a
+  download asks with the token the current listing gives, and the token is
+  never stored. A patient's name, now a FHIR HumanName, is read whole rather
+  than written into the filename as Python prints it. A monthly Pharmacy
+  statement, which has no claim, is kept by its date. Anthem's page answers
+  some calls with no body stream at all, which the core read as an empty
+  answer, so the letters list stopped. The core now reads such an answer
+  whole and holds it to the same limit. Contributed by @riordan. Before
+  merging, the EOB records an older version kept by a token, which failed
+  on every run and wrote a failure file each time, are set down as No Longer
+  Listed, and one ever downloaded is never touched. Two statements of one
+  date are both left unfetched and named, in a listing and in a Download
+  again, and the list is not taken as whole, rather than one kept under the
+  other's identity. Only Pharmacy's own statement row is taken for a
+  statement, so a claim whose claim key moved is refused as before, never
+  fetched with no claim. A claim number is held to its shape wherever it is
+  read from, so a token in its place is never kept. A patient's name sent as
+  a list of HumanNames is read as the names it holds.
+- **An Anthem EOB list that was not read whole no longer ends the run
+  clean.** A row whose claim number cannot be read was passed over with only
+  a line in the log, and a claim type whose list answered an error, or failed
+  in the page, was read as empty. Either way the list was called whole, so an
+  EOB Anthem listed could go missing with nothing to say so. Now each counts
+  as failed, Discover names it by its claim type, a failure file is written,
+  and the list is not taken as whole. A row or a pair of statements outside
+  the run's dates is not counted, since the run would not take it anyway.
+  The rest of the list is kept as before.
+- **Consorsbank's Record no longer asks you to sign in on every page once
+  you are signed in (#178).** Consorsbank keeps its sign-in window in every
+  page, the bank's own included, and draws it only when it is asked for.
+  The app and the recorder counted every password field in the page, so
+  each of the bank's pages read as signed out and Record never started.
+  For Consorsbank both count only a password field the page draws now.
+  Its sign-in address is still refused before its form is drawn, and its
+  sign-in window once drawn still stops Record. Every other app counts
+  every password field as before, and a census holds that to the apps
+  named with a reason. Diagnose for Consorsbank says how many password
+  fields the page draws beside how many it holds.
+
+## [0.64.0] - 2026-11-11
+
+PaperPull can now ask github.com whether a newer version exists, only when
+you press its button, and the check is off until you turn it on. On a Mac
+installed from the disk image it can then download the new version, check
+that it is the release GitHub published and signed by the same publisher,
+and install it when you say so. CIBC and MBNA have first shells for a tester
+to record, ING no longer reads its notice that nothing matches as an empty
+list, and a recording keeps a Canadian bank's words for its accounts.
 
 ### Added
 - Renault Bank direkt Postfach and archive PDFs, plus message attachments across accessible bank customers (#172). Uses the observed Atruvia API from inside the browser, with pagination, thread history and DKB-style identity and recovery. Pilot tested on one contributor’s account, including an archive document and a message attachment; a repeated Pilot saved no duplicates.
@@ -25,10 +155,32 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Contributed by @JasperDale420. Before merging, the requests go only to
   GitHub's own hosts, read by the shared address check, and the Mac's own
   root certificates are added to what the app's Python trusts. Restart and
-  update also waits for a history import, and nothing new starts once it
-  has begun. A check turned off while it waited keeps nothing, a failed
+  update also refuses during a history import, and nothing new starts once
+  it has begun. A check turned off while it waited keeps nothing, a failed
   download can be tried again, a half-copied app is removed, and the swap
   waits for the window to close before it opens the new app.
+- **CIBC and MBNA, first shells for a tester (#204, #205).** Add one from
+  the panel, sign in with Open sign-in window, and press Record steps
+  (More, then Get help) for one trip to a document. That recording is what
+  the real app is built from. Each shell opens its sign-in page in a
+  browser profile of its own and does nothing more. CIBC's is CIBC Online
+  Banking's sign-on page, and MBNA's is the address mbna.ca's own Login
+  links lead to, which hands over to the sign-in on authentication.mbna.ca.
+  It presses nothing on the provider's pages and acts only on
+  cibconline.cibc.com or mbna.ca. Discover, Pilot and Run All say it is
+  not built yet and stop, and Resume says nothing has been listed yet, so
+  nothing is listed or downloaded. Login names a sign-in page or a check
+  and never says you are signed in. The panel names Record steps after a
+  shell's sign-in, starts no run by itself once it is done, and leaves a
+  shell out of Get new for all. The guards read English and French. CIBC
+  on port 9311, MBNA on 9312, the person's own Edge or Chrome first.
+
+### Changed
+- **A recording keeps a Canadian bank's words for its accounts.** `Chequing`,
+  `cheque` and `cheques` come through a recording, a Diagnose file or a
+  failure file as `Checking` and `checks` do, for the CIBC and MBNA shells
+  (#204, #205). Like `Checking`, `Chequing` names a kind of account, so a
+  title or a control that can name something still writes it as its shape.
 
 ### Fixed
 - **ING no longer takes the notice that nothing matches for an empty list
@@ -45,6 +197,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   stops the run there. If your archive is empty in ING, set `read_archive`
   to `false` and runs leave it out. Diagnose says when the list on screen
   shows only the notice.
+- **The website's note for Optum Bank reads as a sentence again.** Its
+  PROVIDERS row ran its credit on into "whose full run saved", which the
+  site's note began with once the credit was taken out. A test now holds
+  every credit in PROVIDERS.md to a sentence of its own, as Discover Bank's
+  and ING's rows needed in 0.62.0 and 0.63.0.
 
 ## [0.63.0] - 2026-11-11
 

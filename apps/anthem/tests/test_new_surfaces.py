@@ -3,6 +3,7 @@ after the EOB collector. All data here is SYNTHETIC (JANE DOE, made-up coverage
 keys). These cover the pure filing logic and the read-only safety contracts;
 the browser-facing fetch is validated by the live pilot.
 """
+import re
 import sys
 from pathlib import Path
 
@@ -164,11 +165,34 @@ def test_reading_letters_never_marks_them_read():
     change a read flag in the portal."""
     # the collector only GETs the messages list; there is no open/mark-read POST
     assert "securemessage" in SRC
+    # The one POST the file may hold is the claims-list export, held to what it
+    # sends by test_the_only_post_is_the_claims_list_export below.
+    checked = SRC.replace(site._CLAIMS_EXPORT_JS, "")
     for mutating in ("markRead", "markAsRead", "setRead", "readReceipt",
                      "method: 'POST'", 'method:"POST"', "method: 'PUT'"):
-        assert mutating not in SRC, mutating
+        assert mutating not in checked, mutating
     # is_read is only ever READ off the message, never written back
     assert 'm.get("isRead")' in SRC
+
+
+def test_the_only_post_is_the_claims_list_export():
+    """Anthem exports the claims list only by POST (a GET of it answers 500).
+    That POST reads the list: it names the export procedure and nothing else,
+    and sends only the dates and the export's own options."""
+    js = site._CLAIMS_EXPORT_JS
+    # Every method that changes something, quoted any way and in any case,
+    # and every method given at all, is this one POST.
+    changing = re.compile(r"""[`'"]\s*(post|put|patch|delete)\s*[`'"]""", re.I)
+    assert changing.findall(SRC) == changing.findall(js) == ["POST"]
+    assert len(re.findall(r"\bmethod\s*:", SRC)) == len(re.findall(r"\bmethod\s*:", js)) == 1
+    assert re.findall(r"api/claims/trpc/([\w.]+)", js) == ["claims.v1.summaryDownload"]
+    # What it sends, every value pinned. The dates are the only values that
+    # come from outside the code, and the app hands it dates alone
+    # (test_claims_summary_answers holds the request as the page sends it).
+    sent = re.search(r"const input = \{(.*?)\};", js).group(1)
+    assert sent == "start: a.start, end: a.end, sort: ['-end'], mediaType: 'csv', filters: []"
+    assert js.count("body:") == 1 and "body: JSON.stringify(input)" in js
+    assert re.findall(r"\ba\.(\w+)", js) == ["start", "end"]
 
 
 def test_letter_keys_are_per_message():

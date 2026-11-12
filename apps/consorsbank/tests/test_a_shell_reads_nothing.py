@@ -67,11 +67,13 @@ class Locator:
 
 
 class Page:
-    """A stand-in for a tab. `password` is how many password fields it has,
-    `text` what its body says."""
+    """A stand-in for a tab. `password` is how many password fields it
+    shows, `hidden` how many it holds and never draws, as the sign-in window
+    Consorsbank keeps in every page, and `text` what its body says."""
 
-    def __init__(self, url, password=0, text="Overview", title="Banking"):
+    def __init__(self, url, password=0, text="Overview", title="Banking", hidden=0):
         self.url, self.password, self.text, self._title = url, password, text, title
+        self.hidden = hidden
         self.asked = Asked()
 
     def __getattr__(self, name):
@@ -89,7 +91,9 @@ class Page:
 
     def locator(self, selector):
         if "password" in selector:
-            return Locator(self, selector, self.password)
+            # Playwright's :visible keeps the fields the page draws.
+            return Locator(self, selector,
+                           self.password + (0 if ":visible" in selector else self.hidden))
         if selector == "body":
             return Locator(self, selector, 1, self.text)
         return Locator(self, selector, 1, "Postbox")
@@ -349,6 +353,23 @@ def test_record_will_not_start_on_the_sign_in_address_before_its_form_is_drawn()
     assert signed_in.refusal() is None
 
 
+def test_the_sign_in_window_every_page_keeps_is_no_sign_in_page():
+    """Consorsbank keeps its sign-in window in every page, the bank's own
+    included, and draws it only when asked. A tester signed in on the bank
+    was told to sign in on each page, and Record never started (#178)."""
+    bank = Page("https://www.consorsbank.de/web/a", hidden=1)
+    assert not site.looks_signed_out(bank)
+    rec = Recorder(bank, is_safe_url=site.is_safe_url, looks_signed_out=site.looks_signed_out,
+                   is_safe_control=site.is_safe_control, provider="Consorsbank",
+                   password_field=site.PASSWORD_FIELD)
+    assert rec.refusal() is None
+    # The sign-in address is one whatever the page draws, and a field the
+    # page shows still is.
+    assert site.looks_signed_out(Page("https://www.consorsbank.de/home?showEVLoginForm=true",
+                                      hidden=1))
+    assert site.looks_signed_out(Page("https://www.consorsbank.de/web/a", password=1, hidden=1))
+
+
 def _app(tmp_path, *argv):
     args = app_mod.build_parser().parse_args([*argv, "--config", str(_config(tmp_path))])
     return app_mod.App(args)
@@ -410,8 +431,12 @@ def test_diagnose_never_writes_the_account_holders_name(tmp_path, capsys, monkey
 
 
 def test_the_survey_reads_the_open_page_and_does_nothing_on_it():
-    page = Page("https://www.consorsbank.de/a/b?accountId=12345#top")
+    page = Page("https://www.consorsbank.de/a/b?accountId=12345#top", hidden=1)
     report = site.survey(page, dwell_ms=0)
+    # The field in the page and the one it shows apart, which a tester's
+    # survey could not tell (#178).
+    assert report["pages"][0]["password_fields"] == 1
+    assert report["pages"][0]["visible_password_fields"] == 0
     assert not [a for a in page.asked if a[0] in PRESSES or a[0] in ("goto", "on")], page.asked
     summary = report["pages"][0]
     assert summary["on_site"] is True

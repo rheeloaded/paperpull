@@ -606,6 +606,34 @@ def test_a_page_read_declared_too_large_is_refused_before_it_is_read(page, serve
     assert sent.bytes.get("said", 0) < 100 * MiB, sent.bytes
 
 
+_NO_STREAM_READ_JS = r"""async (u) => {
+  // A provider's page can put its own fetch in front of the browser's, one
+  // whose answer has no body stream at all (r.body is undefined, not null).
+  const of = window.fetch;
+  window.fetch = async (...a) => {
+    const r = await of(...a);
+    Object.defineProperty(r, 'body', {value: undefined});
+    return r;
+  };
+  const r = await fetch(u);
+  return (await ppRead(r)).length;
+}"""
+
+
+def test_a_page_whose_fetch_gives_no_body_stream_is_still_read_whole(page, server, small):
+    """An answer with no body stream is read whole, not taken for an empty
+    one, which a JSON reader then fails on as though the answer were cut."""
+    base, _ = server
+    assert intake.evaluate(page, _NO_STREAM_READ_JS, base + "/doc?n=%d" % (512 * 1024)) \
+        == 512 * 1024
+
+
+def test_a_page_whose_fetch_gives_no_body_stream_is_still_held_to_the_limit(page, server, small):
+    base, _ = server
+    with pytest.raises(intake.TooLarge):
+        intake.evaluate(page, _NO_STREAM_READ_JS, base + "/doc?length=0&n=%d" % (3 * MiB))
+
+
 def test_delivery_asks_once_and_presses_nothing_after_a_refusal(page, server, small, tmp_path):
     base, _ = server
     pressed = []

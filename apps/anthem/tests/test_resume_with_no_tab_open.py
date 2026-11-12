@@ -182,8 +182,9 @@ def fake_anthem(server, monkeypatch):
     # check_session reads the page it is handed for a check and for a sign-out.
     for name in ("detect_security_challenge", "looks_signed_out"):
         monkeypatch.setattr(site, name, noted(getattr(site, name)))
-    for name in ("list_member_documents", "list_id_cards", "list_letters"):
-        monkeypatch.setattr(site, name, lambda page: [])
+    for name in ("list_member_documents", "list_id_cards", "list_letters",
+                 "list_claims_summaries"):
+        monkeypatch.setattr(site, name, lambda page, *_a, **_kw: [])
     from playwright.sync_api import Page
     real_wait, real_wait_for = Page.wait_for_timeout, Page.wait_for_selector
     monkeypatch.setattr(Page, "wait_for_timeout", lambda self, ms: real_wait(self, min(ms, 200)))

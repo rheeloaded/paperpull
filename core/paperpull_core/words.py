@@ -189,6 +189,7 @@ payoff autopay recurring scheduled overdue balance balances amount amounts total
 totals subtotal minimum maximum max fee fees charge charges charged credit credits
 credited debit debits debited deposit deposits deposited withdrawal withdrawals
 withdraw transfer transfers transferred wire wires ach eft check checks checking
+cheque cheques chequing
 savings saving money market cd cds ira iras roth rollover hsa fsa brokerage
 retirement pension annuity annuities investment investments invest investing
 investor investors portfolio portfolios position positions holding holdings asset

@@ -43,9 +43,12 @@ class FakeFrame:
 class FakePage:
     """Enough of a Playwright page to drive the recorder."""
 
-    def __init__(self, url="https://bank.example/accounts", passwords=0):
+    def __init__(self, url="https://bank.example/accounts", passwords=0, hidden=0):
+        """`passwords` are the password fields the page shows, `hidden`
+        those it holds and never draws, as a sign-in window kept for later."""
         self.url = url
         self._passwords = passwords
+        self._hidden = hidden
         self.handlers = {}
         self.bindings = {}
         self.evaluated = []
@@ -55,7 +58,10 @@ class FakePage:
         self.removed = []
 
     def locator(self, sel):
-        return FakeLocator(self._passwords if "password" in sel else 0)
+        if "password" not in sel:
+            return FakeLocator(0)
+        # Playwright's :visible keeps the fields the page draws.
+        return FakeLocator(self._passwords + (0 if ":visible" in sel else self._hidden))
 
     def expose_binding(self, name, fn):
         self.bindings[name] = fn
@@ -123,6 +129,54 @@ def test_a_password_field_on_the_page_refuses_the_recording():
     with pytest.raises(RuntimeError, match="password"):
         r.start()
     assert page.bindings == {}, "nothing may be installed on a sign-in page"
+
+
+def test_a_password_field_the_page_never_draws_still_refuses_by_default():
+    """The backstop counts every password field in the page. One kept out of
+    sight may be the next step of a sign-in, so it refuses."""
+    assert "password" in Recorder(FakePage(hidden=1), is_safe_url=safe).refusal()
+
+
+def test_a_provider_that_keeps_a_window_undrawn_has_only_drawn_fields_counted():
+    """Consorsbank keeps its sign-in window in every page, the bank's own
+    included, and draws it only when asked. Counting that field refused
+    every page a tester was signed in on (#178). Its site module asks for
+    only the fields the page draws, and one drawn beside it still refuses."""
+    drawn = recorder.DRAWN_PASSWORD_FIELD
+    page = FakePage(hidden=1)
+    r = Recorder(page, is_safe_url=safe, password_field=drawn)
+    assert r.refusal() is None
+    r.start()
+    assert "__ppRecorderPost" in page.bindings
+    shown = FakePage(passwords=1, hidden=1)
+    assert "password" in Recorder(shown, is_safe_url=safe, password_field=drawn).refusal()
+
+
+@pytest.mark.parametrize("value", ["", "input[type='text']", "input[type='password'] >> nth=9",
+                                   None])
+def test_no_site_module_can_switch_the_backstop_off(value):
+    """Only the drawn fields are a choice. Anything else counts every one."""
+    r = Recorder(FakePage(hidden=1), is_safe_url=safe, password_field=value)
+    assert "password" in r.refusal()
+
+
+def test_a_session_counts_the_password_fields_its_site_module_names(tmp_path, monkeypatch):
+    import types
+    from paperpull_core import recorder as mod
+    monkeypatch.setattr(mod, "_wait_for_stop", lambda page, stop, say: None)
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    said = []
+    strict = types.SimpleNamespace(is_safe_url=safe, looks_signed_out=lambda p: False)
+    assert mod.record_session(FakePage(hidden=1), strict, tmp_path / "a", provider="Bank",
+                              owner="", say=said.append) is None
+    assert any("Not recording" in s for s in said)
+    said.clear()
+    drawn = types.SimpleNamespace(is_safe_url=safe, looks_signed_out=lambda p: False,
+                                  PASSWORD_FIELD=mod.DRAWN_PASSWORD_FIELD)
+    mod.record_session(FakePage(hidden=1), drawn, tmp_path / "b", provider="Bank",
+                       owner="", say=said.append)
+    assert not any("Not recording" in s for s in said), said
 
 
 def test_a_page_off_the_providers_site_refuses_the_recording():
@@ -469,6 +523,34 @@ def test_a_new_tab_is_noted_with_whether_it_left_the_provider():
     page.emit("page", FakePage(url="https://docs.vendor.example/x"))
     assert r.steps[0]["effect"]["new_tab"] is True
     assert r.steps[0]["effect"]["new_tab_off_host"] is True
+
+
+def test_a_tab_the_provider_opened_says_where_it_landed_as_a_shape():
+    """A document is often shown in a tab of its own, and a recording that
+    said only that a tab opened left out where (#170)."""
+    r, page = rec()
+    page.fire({"action": "click", "locator": {"how": "role", "role": "listitem"},
+               "label": "", "at": 1})
+    tab = FakePage(url="about:blank")
+    page.emit("page", tab)
+    tab.main_frame.url = "https://bank.example/documents/48213977?token=Zorvexquill"
+    tab.emit("framenavigated", tab.main_frame)
+    landed = r.steps[0]["effect"]["opened_tab_landed_on"]
+    assert landed.startswith("https://bank.example/documents/99999999")
+    assert "48213977" not in landed and "Zorvexquill" not in landed
+    assert "landed_on" not in r.steps[0]["effect"], "the first tab did not move"
+
+
+def test_an_app_may_ask_for_deeper_answer_keys_and_never_a_value():
+    deep = {"data": {"documentMailbox": {"documents": [{"id": "Zorvexquill",
+                                                      "date": "2031-03-04"}]}}}
+    default = Recorder(FakePage(), is_safe_url=safe)._json_shape(deep)
+    assert default["data"]["documentMailbox"]["documents"][1] == "..."
+    asked = Recorder(FakePage(), is_safe_url=safe, json_depth=7)._json_shape(deep)
+    assert asked["data"]["documentMailbox"]["documents"][1] == {"id": "str", "date": "str"}
+    assert "Zorvexquill" not in json.dumps(asked) and "2031" not in json.dumps(asked)
+    capped = Recorder(FakePage(), is_safe_url=safe, json_depth=99)
+    assert capped._json_depth == 8
 
 
 # -- stopping ------------------------------------------------------------------

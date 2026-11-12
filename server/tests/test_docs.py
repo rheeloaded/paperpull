@@ -200,3 +200,23 @@ def test_the_places_the_sandbox_check_points_to_are_there():
     assert "Synology should work the same way" not in text
     flat = " ".join(text.split())
     assert "starts with `[sandbox]`" in flat and "self-test's `sandbox` line" in flat
+
+
+def test_the_update_steps_the_panel_gives_are_the_pages():
+    """The server's update check gives the steps of "Updating" in SERVER.md
+    with the new version filled in, and the anchor it links to is that
+    heading's. Either drifting from the other sends somebody to the wrong
+    command."""
+    text = (REPO / "SERVER.md").read_text(encoding="utf-8")
+    flat = " ".join(text.split())
+    js = (REPO / "gui" / "static" / "app.js").read_text(encoding="utf-8")
+    steps = js[js.index("function updServerSteps(v)"):]
+    steps = steps[:steps.index("\n}\n")]
+    assert "\n## Updating, backing up and removing\n" in text
+    assert "SERVER.md#updating-backing-up-and-removing" in steps
+    for command in ("docker compose pull", "docker compose up -d", "-f compose.https.yaml"):
+        assert "`%s`" % command in flat and "<code>%s</code>" % command in steps, command
+    assert "the panel gives these same steps" in flat
+    image = re.search(r"^\s+image: (ghcr\.io/[\w/-]+):\d+\.\d+\.\d+$",
+                      (SERVER / "compose.yaml").read_text(encoding="utf-8"), re.M).group(1)
+    assert "const SERVER_IMAGE = '%s';" % image in js

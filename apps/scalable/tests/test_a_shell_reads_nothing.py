@@ -391,6 +391,18 @@ def test_a_recording_that_saved_nothing_says_so_to_the_panel(tmp_path, monkeypat
     assert stop.value.code == run_reporting.NOTHING_RECORDED
 
 
+def test_a_recording_keeps_the_fields_of_a_graphql_answers_documents(tmp_path, monkeypatch):
+    """Scalable's mailbox is a GraphQL answer whose documents sit four levels
+    down, past what a recording keeps by default (#170)."""
+    import paperpull_core.recorder as recorder
+    asked = []
+    monkeypatch.setattr(recorder, "record_session", lambda *a, **k: asked.append(k) or "x")
+    app = _app(tmp_path, "--record")
+    monkeypatch.setattr(app_mod.App, "page", lambda self: Page("https://de.scalable.capital/a"))
+    app.cmd_record()
+    assert asked and asked[0]["json_depth"] == 7
+
+
 def test_diagnose_never_writes_the_account_holders_name(tmp_path, capsys, monkeypatch):
     """"Bill" is an ordinary word on the fixed list, so only the owner's
     name being private keeps it out."""

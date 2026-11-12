@@ -515,6 +515,14 @@ documents to Paperless".
   release, and then the two commands alone update it. With
   `compose.https.yaml`, add `-f compose.https.yaml` to both commands. Its
   `caddy` image line names Caddy's version, which you update the same way.
+  To hear of a new release from the server itself, turn on the check under
+  Updates in Settings. Each press of **Check github.com for an update**
+  asks GitHub once, and when a newer release exists the panel gives these
+  same steps with its version filled in. A release's image is published a
+  little after the release, so a pull that says the version is not found
+  works when tried again later. The server never updates itself, since a
+  container cannot replace its own image and is never given the Docker
+  socket that could.
   A newer release's compose files can also bring new settings, such as the
   ones that keep the container to what it needs (see "Nothing more than it
   needs" in [SECURITY-SERVER.md](SECURITY-SERVER.md)), and a new image line

@@ -53,8 +53,9 @@ def _rows():
     return {r["app"]: r for r in app_module.account_rows()}
 
 
-def test_the_cards_mark_the_two_shells_and_nothing_else():
-    assert sorted(s for s, c in CARDS.items() if c.get("shell") is True) == ["consorsbank", "scalable"]
+def test_the_cards_mark_the_four_shells_and_nothing_else():
+    assert sorted(s for s, c in CARDS.items() if c.get("shell") is True) == \
+        ["cibc", "consorsbank", "mbna", "scalable"]
 
 
 def test_each_row_says_whether_it_is_a_shell(root):

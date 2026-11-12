@@ -112,21 +112,12 @@ class ListStopped(Exception):
 
 
 class NotShownEmpty(ListStopped):
-    """A list that shows no document, only ING's notice that nothing matches
-    ("Zu Ihrer Suche können keine Dokumente angezeigt werden"). ING shows
-    the same notice for an empty list and for a search or filter that finds
-    nothing (#203), so it does not show the list empty.
-
-    A listing leaves such a list out, reads the other, and names it
-    (_all_rows, not_shown_empty), and Discover does not call it whole. This
-    is raised only where a document is taken and its list, or one it may
-    have moved to, shows only the notice. Like any list that stops while
-    the documents are taken, it stops the run at once. `source` is the
-    list, "postbox" or "archive"."""
-
-    def __init__(self, source: str, where: str):
-        super().__init__(f"{where} shows no document, only ING's notice that nothing matches")
-        self.source = source
+    """A list that shows only ING's notice that nothing matches, read as it
+    stood rather than right after this app opened it by its own address.
+    The notice is the same for a search or filter that finds nothing, and
+    ING keeps a search or filter only on a page whose address carries the
+    session id it adds (MelleD, #203), so the notice read any other way does
+    not show the list empty."""
 
 
 class NotToldApart(Exception):
@@ -312,13 +303,20 @@ def ensure_statements(page) -> bool:
     return goto_documents(page)
 
 
-def _open_area(page, source: str, again: bool = False) -> None:
+def _open_area(page, source: str, again: bool = False) -> bool:
     """Have `source`'s list on screen, opening its own address when another
-    page is shown, and always when `again`. A tab signed out raises
-    SessionExpired, and an address that lands anywhere else ListStopped."""
+    page is shown, and always when `again`, and answer whether it opened it.
+    A tab signed out raises SessionExpired, and an address that lands
+    anywhere else ListStopped.
+
+    The address is the list's own, with no session id and no query (_AREAS).
+    Opened so, ING shows the list under its default filter, the widest it
+    has (the whole period it offers, every account, every document type),
+    with no search, whatever was set in the window before (MelleD, #203)."""
     if looks_signed_out(page):
         raise SessionExpired("ING shows its sign-in page")
-    if again or _list_area(page.url or "") != source:
+    opened = again or _list_area(page.url or "") != source
+    if opened:
         try:
             page.goto(_AREAS[source], wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(1500)
@@ -331,6 +329,7 @@ def _open_area(page, source: str, again: bool = False) -> None:
         raise SessionExpired("ING shows its sign-in page")
     if _list_area(page.url or "") != source:
         raise ListStopped("the Postbox address opened another page")
+    return opened
 
 
 # How long ING keeps an idle tab signed in is not measured yet. This app
@@ -427,13 +426,13 @@ _ROW_LIMIT = 5000
 _MAX_LINKS = 4
 _READING = {
     # ING's notice that nothing matches, "Zu Ihrer Suche können keine
-    # Dokumente angezeigt werden", or one like it. It is read only inside the
-    # list's own box (wrapper). A count or "keine neuen Nachrichten"
-    # elsewhere on the page, such as a header's unread badge, says nothing
-    # of the list, and no new documents is not no documents. ING shows this
-    # notice for an empty list and for a search or filter that finds nothing
-    # alike, so it never shows a list empty (NotShownEmpty). It tells such a
-    # list from a page this app does not read at all.
+    # Dokumente angezeigt werden", or one like it, which stands for the
+    # rows of a list that has none. It is read only inside the list's own
+    # box (wrapper). A count or "keine neuen Nachrichten" elsewhere on the
+    # page, such as a header's unread badge, says nothing of the list, and
+    # no new documents is not no documents. The notice is the same for a
+    # search or filter that finds nothing, so it shows a list empty only
+    # right after this app opened the list by its own address (_read_area).
     "emptyText": (r"\bkeine\s+(?:dokumente|nachrichten|einträge|eintraege|mitteilungen)\s+"
                   r"(?:angezeigt|vorhanden|gefunden)|"
                   r"\b(?:postbox|postfach|archiv) ist leer|"
@@ -608,11 +607,6 @@ def _safe_download(href: str) -> bool:
 SKIPS = ("unread", "no_link", "unclear", "refused")
 
 
-def named(source: str) -> str:
-    """A list as a sentence names it, "the Postbox" or "the Postbox archive"."""
-    return "the Postbox archive" if source == "archive" else "the Postbox"
-
-
 def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool = True,
                scroll: bool = True, again: bool = False) -> dict:
     """One list, "postbox" or "archive", read whole or not at all.
@@ -622,20 +616,23 @@ def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool 
     more than one, or a link this app does not follow. Rows alike in type,
     subject and date are told apart by their place among those alike
     (rank), which is all the page says of them. The rest, with a date,
-    are its documents. Anything not read whole raises ListStopped. A list
-    that shows only ING's notice that nothing matches comes back with no
-    rows and only_notice set, since that notice is the same for a filter
-    that finds nothing, and is never read as an empty list. With `again`,
-    the list is opened by its own address even when it is on screen
-    already."""
+    are its documents. Anything not read whole raises ListStopped. With
+    `again`, the list is opened by its own address even when it is on
+    screen already.
+
+    A list with no rows that shows ING's notice that nothing matches is
+    read as empty only when this read opened it by its own address, which
+    clears any search or filter (_open_area). Read as it stood, the notice
+    may be a filter that finds nothing, and raises NotShownEmpty."""
+    opened = False
     if navigate:
-        _open_area(page, source, again=again)
+        opened = _open_area(page, source, again=again)
     elif looks_signed_out(page):
         raise SessionExpired("ING shows its sign-in page")
     elif _list_area(page.url or "") != source:
         raise ListStopped("the page on screen is not the Postbox")
     seen = _look(page, scroll)
-    where = named(source)
+    where = "the Postbox archive" if source == "archive" else "the Postbox"
     if seen["truncated"]:
         raise ListStopped(f"{where} shows more rows than this app reads at once")
     if not seen["settled"]:
@@ -661,10 +658,10 @@ def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool 
             skip = ""
         candidates.append(dict(r, date=date, date_text=r["date"], skip=skip,
                                sig=_digest(r["kind"], r["subject"], r["date"])[:16]))
-    if not candidates and seen["empty"]:
-        return {"rows": [], "candidates": [], "undated": 0,
-                "skipped": dict.fromkeys(SKIPS, 0), "only_notice": True}
-    if not candidates:
+    if not candidates and seen["empty"] and not opened:
+        raise NotShownEmpty(f"{where} shows only ING's notice that nothing matches, which "
+                            "shows the list empty only right after this app opens it")
+    if not candidates and not seen["empty"]:
         raise ListStopped(f"{where} showed no rows this app reads"
                           + (" (read_archive: false leaves the archive out)"
                              if source == "archive" else ""))
@@ -687,7 +684,7 @@ def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool 
         else:
             rows.append(c)
     return {"rows": rows, "candidates": candidates, "undated": undated_rows,
-            "skipped": passed, "only_notice": False}
+            "skipped": passed}
 
 
 _IBAN_RE = re.compile(r"\bDE\d{2}(?:\s?\d){18}\b")
@@ -750,11 +747,8 @@ def _all_rows(page, config: Optional[dict] = None, fresh: bool = False,
     """The Postbox, and its archive unless read_archive is false, read whole
     or not at all. A part that cannot be read raises ListStopped (or
     SessionExpired), so no listing missing a part is ever kept or called
-    whole. A list that shows only ING's notice that nothing matches is left
-    out instead (NotShownEmpty), the other is read, and the list left out
-    is named in not_shown_empty(), so the run that took this listing does
-    not call it whole. With navigate false only the list on screen is read,
-    as it stands, for Diagnose, and nothing is kept for a download.
+    whole. With navigate false only the list on screen is read, as it
+    stands, for Diagnose, and nothing is kept for a download.
 
     A row with no date this app can read cannot be keyed, so it is left out
     and counted (undated), for Discover to say, as are the rows passed over
@@ -765,7 +759,7 @@ def _all_rows(page, config: Optional[dict] = None, fresh: bool = False,
     if (navigate and not fresh and _listing.get("rows") is not None
             and _listing.get("key") == key and now - _listing.get("at", 0) < LISTING_SECONDS):
         return _listing["rows"]
-    _listing.update(undated=0, skipped=dict.fromkeys(SKIPS, 0), not_shown_empty=[])
+    _listing.update(undated=0, skipped=dict.fromkeys(SKIPS, 0))
     if navigate:
         _listing.pop("rows", None)
         sources = ["postbox", "archive"] if key[1] else ["postbox"]
@@ -780,21 +774,13 @@ def _all_rows(page, config: Optional[dict] = None, fresh: bool = False,
     rows: List[dict] = []
     undated_rows = 0
     passed = dict.fromkeys(SKIPS, 0)
-    left_out: List[str] = []
     for source in sources:
         # A listing opens each list by its own address, never the view the
         # person left on screen, which may hold a search or a filter of
-        # their own (ING's notice that nothing matches asks to check "Ihre
-        # Suche oder die Filterkriterien"), so a filtered list is never read
-        # as the whole.
+        # their own (ING's empty notice asks to check "Ihre Suche oder die
+        # Filterkriterien"), so a filtered list is never read as the whole.
         area = _read_area(page, source, config, navigate=navigate, scroll=navigate,
                           again=navigate)
-        if area["only_notice"]:
-            # The same notice stands for an empty list and for a search or
-            # filter that finds nothing (#203), so this list is not read as
-            # empty. It is left out, and named, and the other is read.
-            left_out.append(source)
-            continue
         rows += [_row_of(c, source, serial) for c in area["rows"]]
         undated_rows += area["undated"]
         for k, n in area["skipped"].items():
@@ -804,18 +790,10 @@ def _all_rows(page, config: Optional[dict] = None, fresh: bool = False,
     if undated_rows:
         log.warning("%d document(s) carry no date this app can read, so they are left out",
                     undated_rows)
-    _listing.update(undated=undated_rows, skipped=passed, not_shown_empty=left_out)
+    _listing.update(undated=undated_rows, skipped=passed)
     if navigate:
         _listing.update(rows=rows, at=now, key=key)
     return rows
-
-
-def not_shown_empty() -> List[str]:
-    """The lists the last listing left out, "postbox" or "archive", because
-    each showed no document, only ING's notice that nothing matches, which
-    is the same for an empty list and for a search or filter that finds
-    nothing. A listing that left one out is not the whole list."""
-    return [s for s in (_listing.get("not_shown_empty") or []) if s in _AREAS]
 
 
 def undated() -> int:
@@ -845,14 +823,6 @@ def listed_rows(page, config: Optional[dict] = None, fresh: bool = False,
             if r["category"] in wanted]
 
 
-def lists_alike(page, title: str, date: str, account: str, *, category: str,
-                config: Optional[dict] = None) -> bool:
-    """Whether a recent listing shows a row of this document's kind, title,
-    date and account, as resolve_item looks for it."""
-    return any(r["title"] == title and r["date"] == date and r["account"] == account
-               and filed_category(r) == category for r in listed_rows(page, config))
-
-
 def collect_documents(page, keep=None, config: Optional[dict] = None,
                       navigate: bool = True) -> List[dict]:
     """Every PDF the Postbox and its archive list, newest first. `keep` is
@@ -867,10 +837,9 @@ def collect_documents(page, keep=None, config: Optional[dict] = None,
 
 
 def answers_its_list(page) -> bool:
-    """Whether the Postbox shows its list, a table or ING's notice that
-    nothing matches, so a banking address alone is never taken for a
-    session that reads. The notice shows a signed-in Postbox, though not
-    that it is empty (NotShownEmpty). SessionExpired when ING shows its sign-in page, and ListStopped
+    """Whether the Postbox shows its list, a table or the words of an empty
+    one, so a banking address alone is never taken for a session that
+    reads. SessionExpired when ING shows its sign-in page, and ListStopped
     when the Postbox shows neither."""
     if looks_signed_out(page):
         raise SessionExpired("ING shows its sign-in page")
@@ -942,11 +911,6 @@ def _fresh_href(page, row: dict, config: Optional[dict]) -> str:
     can lead to its neighbor's PDF."""
     source = row["source"]
     area = _read_area(page, source, config, again=True)
-    if area["only_notice"]:
-        # The list held this document a moment ago and now shows only ING's
-        # notice that nothing matches, which a filter set in ING shows too.
-        # Every later document would read the same list, so the run stops.
-        raise NotShownEmpty(source, named(source))
     alike = [c for c in area["candidates"] if c["sig"] == row["sig"]]
     if not alike:
         raise RuntimeError("the Postbox no longer lists this document")
@@ -1072,13 +1036,6 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins,
                        config=config)
-    left_out = not_shown_empty()
-    if row is None and left_out:
-        # The listing left out a list that showed only ING's notice that
-        # nothing matches, and the document may be in it, so it is not
-        # called gone, and the run stops (NotShownEmpty).
-        source = client_hint if client_hint in left_out else left_out[0]
-        raise NotShownEmpty(source, named(source))
     if row is None:
         raise RuntimeError("the Postbox no longer lists this document")
     for _attempt in range(2):

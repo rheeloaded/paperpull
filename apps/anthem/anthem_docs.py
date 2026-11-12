@@ -157,6 +157,57 @@ def told_apart_by(record: dict) -> str:
     return renaming.told_apart_by(record)
 
 
+TOKEN_ID_NOTE = ("Kept by an older version under a token Anthem makes new on every listing, "
+                 "which could never be downloaded. The EOB is listed by its claim number now")
+
+
+def retire_token_records(progress, discovery) -> int:
+    """Set down the EOB records an older version kept by a token, and answer
+    how many.
+
+    Until #210 the claim number was read from the claim's identifier value.
+    Once Anthem put an opaque token there ("e_" and hex, made new on every
+    listing), every EOB was recorded as Medical|e_...|EOB|n, an id the guard
+    (anthem_site.parse_doc_id) refuses. Each run then took every such record
+    from discovery.json, failed on it and wrote a failure file, for good, and
+    each listing added more, since the token is new each time. The same EOB
+    is listed now by the claim number shown beside its token, under an id of
+    its own. Only a record whose id names a claim type this app knows and
+    that the guard refuses is set down, in whichever store holds it, and
+    only while each store leaves it Discovered, Failed or with no state at
+    all. A record either store says was downloaded, or holds a file for, is
+    never touched. No Longer Listed is not a failure and the panel has
+    nothing left to take for it, as Chase's retire_menu_rows does for its
+    menu rows.
+    """
+    retired = 0
+    may_go = (State.DISCOVERED.value, State.FAILED.value, None, "")
+    for key in list(dict.fromkeys(list(discovery.data) + list(progress.data))):
+        recs = [r for r in (discovery.get(key), progress.get(key)) if r is not None]
+        if not all(isinstance(r, dict) for r in recs):
+            continue
+        # Each store that names an id names the same one.
+        ids = [r.get("document_id") for r in recs if r.get("document_id")]
+        if not ids or not all(isinstance(i, str) and i == ids[0] for i in ids):
+            continue
+        doc_id = ids[0]
+        if (doc_id.split("|")[0] not in site.CLAIM_TYPES
+                or site.parse_doc_id(doc_id) is not None):
+            continue
+        if any(r.get("downloaded_ok") or r.get("pdf_path") or r.get("state") not in may_go
+               for r in recs):
+            continue
+        prog = progress.get(key)
+        if prog is not None:
+            notes = "; ".join(x for x in (prog.get("notes"), TOKEN_ID_NOTE)
+                              if x and isinstance(x, str))
+            progress.update(key, {"state": State.NO_LONGER_LISTED.value, "notes": notes}, save=False)
+        if discovery.get(key) is not None:
+            discovery.update(key, {"state": State.NO_LONGER_LISTED.value}, save=False)
+        retired += 1
+    return retired
+
+
 class App:
     _journal = None
     _requests = None
@@ -183,6 +234,9 @@ class App:
         for store in (self.progress, self.discovery):
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
+        if retire_token_records(self.progress, self.discovery):
+            self.progress.save(backup=True)
+            self.discovery.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
@@ -453,9 +507,13 @@ class App:
         for d in raw:
             n_new += self._record_statement_doc(d)
         self.discovery.save()
+        # What the list held that this run would take and could not keep
+        # leaves the list not whole (_say_what_the_list_left).
+        left = self._say_what_the_list_left(raw)
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
-        listing.read_whole(self)
+        if not left:
+            listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:
@@ -478,9 +536,76 @@ class App:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
 
+    def _would_take(self, claim_type: str, day: Optional[str]) -> bool:
+        """Whether this run would take an EOB of this claim type and day, as
+        _record_statement_doc records one and _select offers it. A day of
+        None is held to nothing, for a whole claim type or a day that could
+        not be read, since nothing says it is outside the run's dates."""
+        title = f"{claim_type} Explanation of Benefits"
+        if doc_types.should_skip(title, self.rules):
+            return False
+        category = doc_types.classify_document(title, self.rules)[0]
+        if not doc_types.wanted(category, self.config):
+            return False
+        # A --type run is not a scoped one (paperpull_core.listing), so the
+        # list it reads is noted whole for every run after it, and what it
+        # could not read is counted whatever --type it asked for.
+        return day is None or self._in_dates(day)
+
+    def _say_what_the_list_left(self, raw) -> bool:
+        """Say what the EOB list held that this run would take and could not
+        keep, count it for the run's summary, and answer whether there was
+        any, which leaves the list not whole. Each is named by its claim type
+        and day alone. What lies outside the run's dates or kinds is passed
+        over, since the run would not take it anyway.
+
+        Statements of one claim type and one date give one identity and
+        nothing tells which is which, so none of them is fetched, and the
+        run's summary counts them for the panel (run_reporting, "alike"). A
+        row whose claim number could not be read, and a claim type whose
+        list did not come, are EOBs this run cannot keep, so each counts as
+        failed and the run does not end clean."""
+        def iso(day):
+            return "%s-%s-%s" % (day[:4], day[4:6], day[6:])
+
+        alike = {doc_id: n for doc_id, n in (getattr(raw, "alike", None) or {}).items()
+                 if self._would_take(doc_id.split("|")[0], iso(doc_id.split("|")[1]))}
+        unread = [(claim_type, day) for claim_type, day in (getattr(raw, "unread", None) or [])
+                  if self._would_take(claim_type, day or None)]
+        unlisted = [claim_type for claim_type in (getattr(raw, "unlisted", None) or [])
+                    if self._would_take(claim_type, None)]
+        if alike:
+            self.stats["alike"] = sum(alike.values())
+        for doc_id, n in sorted(alike.items()):
+            claim_type, day = doc_id.split("|")[:2]
+            print(f"  !! Anthem lists {n} {claim_type} statements dated {iso(day)}, which "
+                  "nothing here tells apart, so this run fetches none of them.")
+            if (self.progress.get(Document(document_id=doc_id).key) or {}).get("downloaded_ok"):
+                print("     The statement of that date an earlier run saved is kept as it is.")
+        if unread:
+            self.stats["failed"] += len(unread)
+            for claim_type in sorted({t for t, _day in unread}):
+                count = sum(1 for t, _day in unread if t == claim_type)
+                print(f"  !! {count} {claim_type} EOB row{'s' if count != 1 else ''} could not "
+                      "be read, since no claim number was found. The log names the fields it had.")
+        if unlisted:
+            self.stats["failed"] += len(unlisted)
+            for claim_type in unlisted:
+                print(f"  !! Anthem's {claim_type} EOB list did not come, so its EOBs were not "
+                      "listed this run.")
+        if unread:
+            self.write_failure("read the eob list", "a row had no claim number")
+        elif unlisted:
+            self.write_failure("read the eob list", "a claim type list was not read")
+        if alike or unread or unlisted:
+            print("  So the list is not taken as whole. Everything else on it is kept.")
+        return bool(alike or unread or unlisted)
+
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
-        docs = [d for d in docs if self._in_scope(d)]
+        # A record set down by retire_token_records is never offered again,
+        # by a Download again either.
+        docs = [d for d in docs if d.state != State.NO_LONGER_LISTED.value and self._in_scope(d)]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
@@ -758,12 +883,13 @@ class App:
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
         # "Fetch everything" also pulls the other document surfaces - member
-        # documents across all coverage years, the ID cards, and the Letters -
-        # each its own read-only member API.
+        # documents across all coverage years, the ID cards, the Letters and
+        # the claims summaries - each its own read-only member API.
         if others:
             self.cmd_documents()
             self.cmd_id_cards()
             self.cmd_letters()
+            self.cmd_claims_summaries()
         self._stop_if_eobs_unread()
 
     def _stop_if_eobs_unread(self) -> None:
@@ -786,13 +912,20 @@ class App:
               f"then run Resume.")
         self.stats["failed"] += 1
 
-    def _save_collected(self, kind: str, rows: List[dict], fetch_fn) -> None:
+    def _save_collected(self, kind: str, rows: List[dict], fetch_fn, beside=None) -> None:
         """Shared save loop for the API-fetched surfaces (member documents, ID
         cards, letters). Each row is filing metadata; `fetch_fn(page, row)`
         returns the PDF bytes on demand. Dedupe by the row's delete-safe key,
         validate the PDF, file it in its folder and index it. A document already
         downloaded once is never re-fetched (the sticky downloaded_ok marker),
-        so this hooks straight into fetch-only-new."""
+        so this hooks straight into fetch-only-new.
+
+        `beside(row)` gives the files kept beside a document's PDF, as
+        (ending, bytes), the CSV of a claims summary. Each is written with the
+        PDF and named as it is, and the record lists them with it, as
+        Wealthfront lists a tax form's workbook, so a Rename or a Move takes
+        them along. Like the PDF, one is written only when its document is
+        saved, never again once deleted."""
         from datetime import date
         if not rows:
             print(f"  No {kind} to download.")
@@ -850,11 +983,28 @@ class App:
             # day were " (2)" apart, and Rename offered the second an ending.
             out_path = unique_path(folder, filename, self.config["max_path_length"],
                                    distinguisher=told_apart_by(record))
+            companions: List[Path] = []
+            written: List[Path] = []
             try:
+                written.append(out_path)
                 out_path.write_bytes(pdf)
+                for ending, data in (beside(r) if beside is not None else ()):
+                    path = unique_path(out_path.parent, out_path.stem + ending,
+                                       self.config["max_path_length"])
+                    written.append(path)
+                    path.write_bytes(data)
+                    companions.append(path)
             except Exception as e:
                 log.warning("could not write %s: %s", label, e)
                 self.stats["failed"] += 1
+                # Each name unique_path gave was free, so what is there now
+                # is this attempt's own, and no record names it. It goes, so
+                # the next run's copy takes its name rather than another.
+                for path in written:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
                 continue
             result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"])
             if not result.ok:
@@ -864,6 +1014,13 @@ class App:
                     out_path.replace(quarantine)
                 except OSError:
                     quarantine = out_path
+                # What was written beside it goes with it.
+                for path in companions:
+                    try:
+                        path.replace(unique_path(self.paths.manual_review, path.name,
+                                                 self.config["max_path_length"]))
+                    except OSError:
+                        pass
                 rec = dict(record, state=State.NEEDS_MANUAL_REVIEW.value,
                            pdf_path=str(quarantine), downloaded_ok=False,
                            notes=f"PDF validation failed: {result.reason}")
@@ -875,6 +1032,10 @@ class App:
             rec = dict(record, state=State.COMPLETED.value, downloaded_ok=True,
                        pdf_path=str(out_path), pdf_filename=out_path.name,
                        pdf_size=result.size_bytes)
+            # The record lists every file of the document, what a Rename or a
+            # Move reads and keeps up to date (renaming._invoices_alone).
+            if companions:
+                rec["invoices"] = [{"file": str(p), "kept": True} for p in [out_path] + companions]
             saved_copy.holds(self, key, rec)
             self.progress.update(key, rec)
             self.index_csv.append_rows([{
@@ -894,6 +1055,8 @@ class App:
             if fdate:
                 self.stats["dates"].append(fdate)
             print(f"  Saved: {out_path.name}")
+            for path in companions:
+                print(f"  + beside it: {path.name}")
 
     def cmd_documents(self):
         """Download member documents (plan / authorization / tax) across ALL
@@ -964,6 +1127,60 @@ class App:
             "letters", rows,
             lambda pg, r: site.render_letter(pg, r["label"], r.get("body", ""), r.get("date", "")))
 
+    def cmd_claims_summaries(self):
+        """Download the claims list as one claims summary a year, and one for
+        the current year to date, each a PDF table with its CSV kept beside
+        it. Anthem exports the list only as a CSV; it is read, never changed."""
+        print("\nClaims summaries (the claims list, one a year)...")
+        today = site._today()
+        # A year just ended waits, since its claims keep arriving after it
+        # ends and its summary is filed once (site.CLAIMS_SETTLE_DAYS).
+        for p in site.claims_summaries_waiting(today):
+            print(f"  {p['label']} is filed from {p['files_from']}, "
+                  f"{site.CLAIMS_SETTLE_DAYS} days after its year ended, since claims "
+                  "for a year keep arriving after it ends.")
+        # A summary saved before, or outside the run's dates, is not asked
+        # for again, as _save_collected would pass it over once it came.
+        skip = set()
+        for p in site.claims_summary_periods(today):
+            key = site.claims_summary_key(p["period"])
+            if not self._in_dates(p["date"]):
+                self.stats["skipped_out_of_scope"] += 1
+                skip.add(key)
+                continue
+            rec = self.progress.get(key)
+            if not getattr(self.args, "redownload", False) and rec and (
+                    rec.get("downloaded_ok") or rec.get("state") == State.COMPLETED.value):
+                print(f"  Already downloaded - skipping: {p['label']}")
+                self.stats["skipped_completed"] += 1
+                skip.add(key)
+        page = self._on_its_site()
+        self.check_session(page)
+        try:
+            rows = site.list_claims_summaries(page, today, skip=skip, pause=self._delay)
+        except site.SessionExpired:
+            self._session_expired()
+            return
+        except site.ListingIncomplete as e:
+            self._listing_incomplete(e)
+            return
+        # The CSV is kept beside each summary saved, as Anthem handed it over,
+        # written with its PDF and listed in its record (_save_collected).
+        self._save_collected(
+            "claims summaries", rows,
+            lambda pg, r: site.render_claims_summary(pg, r["label"], r["csv"]),
+            beside=lambda r: [(".csv", r["csv_bytes"])])
+        # A period whose answer was not the claims list is not an empty one.
+        # The periods that came are saved above, and each that did not counts
+        # as failed, so the run does not end clean and the next asks again.
+        refused = list(getattr(rows, "refused", None) or [])
+        if refused:
+            self.stats["failed"] += len(refused)
+            for label in refused:
+                print(f"  !! {label} did not come as the claims list, so it is not saved. "
+                      "The next run asks for it again.")
+            self.write_failure("read the claims summaries", "a claims summary was not read")
+
     def cmd_resume(self):
         self.stats["mode"] = "resume"
         # The EOBs carry on from the list the last run read, which Resume does
@@ -986,6 +1203,7 @@ class App:
             self.cmd_documents()
             self.cmd_id_cards()
             self.cmd_letters()
+            self.cmd_claims_summaries()
         listing.after_resume(self)
 
 
@@ -1229,6 +1447,7 @@ def build_parser() -> argparse.ArgumentParser:
             ("documents", "download member plan / authorization / tax documents (all years)"),
             ("id-cards", "download each member's digital ID / insurance card as a PDF"),
             ("letters", "download secure Message Center letters (read-safe)"),
+            ("claims-summaries", "download the claims list, one PDF table and CSV a year"),
             ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
             ("rename", "rename downloaded files to this app's current naming"),
@@ -1284,6 +1503,9 @@ def main(argv=None):
         elif args.letters:
             app.stats["mode"] = "letters"
             app.cmd_letters()
+        elif args.claims_summaries:
+            app.stats["mode"] = "claims-summaries"
+            app.cmd_claims_summaries()
         elif args.resume:
             app.cmd_resume()
         elif args.verify:
