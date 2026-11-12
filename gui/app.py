@@ -325,6 +325,11 @@ def _looks_like_installs(root: Path) -> int:
 _STATUS_MOD = None
 _EXPORT_MOD = None
 _LAST_EXPORT = None     # path of the spreadsheet this panel wrote last, for Reveal
+# The transactions spreadsheets being built now, by the mark each build's
+# program is given. That program is the panel's own child, which Restart and
+# update would cut off, so the restart waits while any is built
+# (_what_an_exit_would_cut).
+_BUILDING: set = set()
 # Apps with a downloader process alive right now. Removing one of these
 # would pull the folder out from under a run.
 _RUNNING: set = set()
@@ -1220,6 +1225,13 @@ def api_export_transactions(provider: str = "", csv: str = ""):
     async def stream():
         global _LAST_EXPORT
         yield _event("$ export_transactions.py " + " ".join(cmd[3:]))
+        # Checked and claimed with nothing awaited between, as a run is, so
+        # Restart and update either waits for this spreadsheet or comes first
+        # and it never starts (api_update_restart).
+        if _UPDATE_RESTARTING:
+            yield _event(_RESTARTING_SAYS)
+            yield _event(1, "done")
+            return
         # The version goes to the app so that a file it writes says which
         # build wrote it. Every failure file so far has carried an empty
         # version, which is the one field that says what a tester ran.
@@ -1227,43 +1239,47 @@ def api_export_transactions(provider: str = "", csv: str = ""):
         # that only that line, never a provider's folder name it printed,
         # says which file Show and the server's download hand over.
         mark = run_result.new_mark()
-        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
-                   PAPERPULL_VERSION=VERSION, **{run_result.MARK_ENV: mark})
+        _BUILDING.add(mark)
         try:
-            proc = subprocess.Popen(cmd, cwd=str(tool.parent), stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                    encoding="utf-8", errors="replace", bufsize=1, env=env)
-        except Exception as e:
-            yield _event("[failed to start] %s" % e)
-            yield _event(1, "done")
-            return
-        wrote = None
-        try:
-            while True:
-                line = await to_thread.run_sync(proc.stdout.readline)
-                if not line:
-                    break
-                said = run_result.exported(line.rstrip("\r\n"), mark)
-                if said is not None:
-                    wrote = said
-                    continue
-                yield _event(line.rstrip())
-            code = await to_thread.run_sync(proc.wait)
-            # It writes only into the folder it was given, so a path
-            # anywhere else is not its spreadsheet.
-            if code == 0 and wrote and Path(wrote).resolve().parent == apps_root().resolve():
-                _LAST_EXPORT = Path(wrote)
-                yield _event(json.dumps({"path": wrote}), "result")
-            yield _event(code, "done")
+            env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
+                       PAPERPULL_VERSION=VERSION, **{run_result.MARK_ENV: mark})
+            try:
+                proc = subprocess.Popen(cmd, cwd=str(tool.parent), stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                        encoding="utf-8", errors="replace", bufsize=1, env=env)
+            except Exception as e:
+                yield _event("[failed to start] %s" % e)
+                yield _event(1, "done")
+                return
+            wrote = None
+            try:
+                while True:
+                    line = await to_thread.run_sync(proc.stdout.readline)
+                    if not line:
+                        break
+                    said = run_result.exported(line.rstrip("\r\n"), mark)
+                    if said is not None:
+                        wrote = said
+                        continue
+                    yield _event(line.rstrip())
+                code = await to_thread.run_sync(proc.wait)
+                # It writes only into the folder it was given, so a path
+                # anywhere else is not its spreadsheet.
+                if code == 0 and wrote and Path(wrote).resolve().parent == apps_root().resolve():
+                    _LAST_EXPORT = Path(wrote)
+                    yield _event(json.dumps({"path": wrote}), "result")
+                yield _event(code, "done")
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                if proc.stdout:
+                    proc.stdout.close()
         finally:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-            if proc.stdout:
-                proc.stdout.close()
+            _BUILDING.discard(mark)
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -6397,12 +6413,18 @@ def _exit_soon() -> None:
 def _what_an_exit_would_cut() -> str:
     """Why the panel must not exit now, or "". Every run the panel started
     stays in _RUNS until it has been noted, a Rename, a Move and Review Names
-    included, and a history import holds _IMPORTING (api_finishing)."""
+    included, a history import holds _IMPORTING (api_finishing), and a
+    transactions spreadsheet being built is in _BUILDING. On a Mac nothing
+    else would see that last one, since the swap waits only for the panel
+    and the host around it (updater.start_swap)."""
     if _RUNS or _RUNNING:
         return ("A download, a Rename or a Move is going on. Wait for it to finish, "
                 "or stop the download, then restart to update.")
     if _IMPORTING.locked():
         return "A history file is being imported. Restart to update once it has finished."
+    if _BUILDING:
+        return ("A transactions spreadsheet is being built. Restart to update once it "
+                "has finished.")
     return ""
 
 

@@ -2023,3 +2023,68 @@ def test_a_mac_update_leaves_the_temp_folder_alone(tmp_path, monkeypatch):
     inst = updater.Install()
     inst.start("0.60.1", tmp_path, kind="mac")
     assert _finish(inst)["phase"] == "error" and old.is_dir()
+
+
+# -- the transactions spreadsheet and a restart, on any desktop ---------------
+
+_TX_TOOL = r'''
+import sys, time
+from pathlib import Path
+Path(%(began)r).write_text("began")
+print("Reading statements", flush=True)
+deadline = time.time() + 60
+while not Path(%(go)r).exists() and time.time() < deadline:
+    time.sleep(0.05)
+'''
+
+
+def _transactions_tool(tmp_path, monkeypatch):
+    began, go = tmp_path / "began", tmp_path / "go"
+    tool = tmp_path / "export_transactions.py"
+    tool.write_text(_TX_TOOL % {"began": str(began), "go": str(go)}, encoding="utf-8")
+    monkeypatch.setattr(app_module, "_transactions_tool", lambda: tool)
+    monkeypatch.setattr(app_module, "apps_root", lambda: tmp_path)
+    return began, go
+
+
+def test_restart_waits_while_a_transactions_spreadsheet_is_built(panel, tmp_path, monkeypatch):
+    """The spreadsheet is built by a program the panel starts. On a Mac the
+    swap waits only for the panel and the host around it, so a restart
+    would cut the spreadsheet off. Like a download, it is waited for."""
+    import anyio
+    swapped, exits = _ready_to_restart(tmp_path, monkeypatch)
+    began, go = _transactions_tool(tmp_path, monkeypatch)
+
+    async def main():
+        body = app_module.api_export_transactions().body_iterator
+        await body.__anext__()            # the command it runs
+        await body.__anext__()            # the tool's first line, so it is running
+        try:
+            try:
+                await anyio.to_thread.run_sync(app_module.api_update_restart)
+                refused = None
+            except fastapi.HTTPException as e:
+                refused = e
+        finally:
+            go.write_text("go")
+            rest = [part async for part in body]
+        return refused, rest
+    refused, rest = asyncio.run(main())
+    assert began.exists() and any("event: done" in part for part in rest)
+    assert refused is not None and refused.status_code == 409, "the restart cut the spreadsheet off"
+    assert "spreadsheet" in refused.detail
+    assert swapped == [] and exits == [] and app_module._UPDATE_RESTARTING is False
+    # Once it has finished, the restart goes ahead.
+    assert app_module.api_update_restart() == {"restarting": True} and len(swapped) == 1
+
+
+def test_no_spreadsheet_is_built_while_the_panel_restarts_to_update(panel, tmp_path, monkeypatch):
+    began, go = _transactions_tool(tmp_path, monkeypatch)
+    go.write_text("go")
+    monkeypatch.setattr(app_module, "_UPDATE_RESTARTING", True)
+
+    async def consume():
+        return "".join([part async for part in app_module.api_export_transactions().body_iterator])
+    said = asyncio.run(consume())
+    assert not began.exists()
+    assert "restarting to update" in said and "event: done\ndata: 1" in said

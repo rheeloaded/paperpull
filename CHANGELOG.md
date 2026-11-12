@@ -69,6 +69,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   opened in its place, and a new update removes the ones earlier updates
   left in your temp folder, about 55 MB each. Only folders the update made,
   holding nothing but its own files, are removed.
+- **Restart and update waits for a transactions spreadsheet.** Since
+  0.64.0, restarting to update on a Mac while the transactions spreadsheet
+  was being built cut it off, since the restart did not see it. The restart
+  now says a spreadsheet is being built and waits for it, as it waits for a
+  download, and no spreadsheet starts while PaperPull restarts.
 
 ## [0.65.0] - 2026-11-12
 
