@@ -131,18 +131,52 @@ def test_a_password_field_on_the_page_refuses_the_recording():
     assert page.bindings == {}, "nothing may be installed on a sign-in page"
 
 
-def test_a_sign_in_window_the_page_never_shows_does_not_refuse_the_recording():
+def test_a_password_field_the_page_never_draws_still_refuses_by_default():
+    """The backstop counts every password field in the page. One kept out of
+    sight may be the next step of a sign-in, so it refuses."""
+    assert "password" in Recorder(FakePage(hidden=1), is_safe_url=safe).refusal()
+
+
+def test_a_provider_that_keeps_a_window_undrawn_has_only_drawn_fields_counted():
     """Consorsbank keeps its sign-in window in every page, the bank's own
     included, and draws it only when asked. Counting that field refused
-    every page a tester was signed in on (#178). The backstop counts the
-    fields a person can see, and one shown beside it still refuses."""
+    every page a tester was signed in on (#178). Its site module asks for
+    only the fields the page draws, and one drawn beside it still refuses."""
+    drawn = recorder.DRAWN_PASSWORD_FIELD
     page = FakePage(hidden=1)
-    r = Recorder(page, is_safe_url=safe)
+    r = Recorder(page, is_safe_url=safe, password_field=drawn)
     assert r.refusal() is None
     r.start()
     assert "__ppRecorderPost" in page.bindings
     shown = FakePage(passwords=1, hidden=1)
-    assert "password" in Recorder(shown, is_safe_url=safe).refusal()
+    assert "password" in Recorder(shown, is_safe_url=safe, password_field=drawn).refusal()
+
+
+@pytest.mark.parametrize("value", ["", "input[type='text']", "input[type='password'] >> nth=9",
+                                   None])
+def test_no_site_module_can_switch_the_backstop_off(value):
+    """Only the drawn fields are a choice. Anything else counts every one."""
+    r = Recorder(FakePage(hidden=1), is_safe_url=safe, password_field=value)
+    assert "password" in r.refusal()
+
+
+def test_a_session_counts_the_password_fields_its_site_module_names(tmp_path, monkeypatch):
+    import types
+    from paperpull_core import recorder as mod
+    monkeypatch.setattr(mod, "_wait_for_stop", lambda page, stop, say: None)
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    said = []
+    strict = types.SimpleNamespace(is_safe_url=safe, looks_signed_out=lambda p: False)
+    assert mod.record_session(FakePage(hidden=1), strict, tmp_path / "a", provider="Bank",
+                              owner="", say=said.append) is None
+    assert any("Not recording" in s for s in said)
+    said.clear()
+    drawn = types.SimpleNamespace(is_safe_url=safe, looks_signed_out=lambda p: False,
+                                  PASSWORD_FIELD=mod.DRAWN_PASSWORD_FIELD)
+    mod.record_session(FakePage(hidden=1), drawn, tmp_path / "b", provider="Bank",
+                       owner="", say=said.append)
+    assert not any("Not recording" in s for s in said), said
 
 
 def test_a_page_off_the_providers_site_refuses_the_recording():

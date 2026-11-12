@@ -198,6 +198,15 @@ SECURITY_CHALLENGE_MARKERS = [
 # this misses.
 LOGIN_URL_MARKERS = ["showevloginform=true"]
 
+# The password fields that make a page a sign-in page, here and for the
+# core's recorder. Consorsbank keeps its sign-in window in every page, the
+# bank's own included, and draws it only when asked, so a field it never
+# draws read each signed-in page as signed out and Record refused them all
+# (#178). Only the fields the page draws count. The sign-in address is the
+# marker above, so the form drawn late over it is still refused. The core
+# takes this value and no other (recorder.DRAWN_PASSWORD_FIELD).
+PASSWORD_FIELD = "input[type='password']:visible"
+
 RATE_LIMIT_MARKERS = ["zu viele anfragen", "später erneut", "too many requests",
                       "rate limit", "try again later", "temporarily unavailable",
                       "unusual traffic", "http error 429"]
@@ -215,12 +224,7 @@ def looks_signed_out(page) -> bool:
     if not url or any(m in url for m in LOGIN_URL_MARKERS):
         return True
     try:
-        # A field the page shows. Consorsbank keeps its sign-in window in
-        # every page, the bank's own included, and draws it only when asked,
-        # so a field it never shows read each signed-in page as signed out
-        # and Record refused them all (#178). The sign-in address is the
-        # marker above, so the form drawn late over it is still refused.
-        if page.locator("input[type='password']:visible").count() > 0:
+        if page.locator(PASSWORD_FIELD).count() > 0:
             return True
     except Exception:
         return True
@@ -331,8 +335,8 @@ def _page_summary(page) -> dict:
     out["controls"] = controls
     try:
         out["password_fields"] = page.locator("input[type='password']").count()
-        # Those the page shows, which is what looks_signed_out counts (#178).
-        out["visible_password_fields"] = page.locator("input[type='password']:visible").count()
+        # Those the page draws, which is what looks_signed_out counts (#178).
+        out["visible_password_fields"] = page.locator(PASSWORD_FIELD).count()
     except Exception:
         pass
     return out

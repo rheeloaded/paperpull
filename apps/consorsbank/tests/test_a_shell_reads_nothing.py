@@ -360,7 +360,8 @@ def test_the_sign_in_window_every_page_keeps_is_no_sign_in_page():
     bank = Page("https://www.consorsbank.de/web/a", hidden=1)
     assert not site.looks_signed_out(bank)
     rec = Recorder(bank, is_safe_url=site.is_safe_url, looks_signed_out=site.looks_signed_out,
-                   is_safe_control=site.is_safe_control, provider="Consorsbank")
+                   is_safe_control=site.is_safe_control, provider="Consorsbank",
+                   password_field=site.PASSWORD_FIELD)
     assert rec.refusal() is None
     # The sign-in address is one whatever the page draws, and a field the
     # page shows still is.

@@ -4,9 +4,9 @@ Consorsbank keeps its sign-in window in every page, signed in or not. The
 form sits inside web components and is drawn only when the window is asked
 for. This app and the core's recorder counted every password field in the
 page, so a tester signed in on the bank was told on every page to sign in
-first, and Record never started (#178). Both count the fields the
-page shows now. The sign-in address is still refused before its form is
-drawn, and the window once shown is refused.
+first, and Record never started (#178). This app's PASSWORD_FIELD asks
+both for only the fields the page draws. The sign-in address is still
+refused before its form is drawn, and the window once drawn is refused.
 
 A simulated page in Playwright's own Chromium, never the Edge or Chrome on
 this computer, with every name resolved to nowhere so nothing reaches the
@@ -66,10 +66,12 @@ def page():
 
 
 def _refusal(page):
+    """As record_session builds it from this app's site module."""
     return recorder.Recorder(page, is_safe_url=site.is_safe_url,
                              looks_signed_out=site.looks_signed_out,
                              is_safe_control=site.is_safe_control,
-                             provider="Consorsbank").refusal()
+                             provider="Consorsbank",
+                             password_field=site.PASSWORD_FIELD).refusal()
 
 
 def test_record_starts_on_a_bank_page_that_keeps_the_window_unshown(page):

@@ -65,12 +65,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   page, the bank's own included, and draws it only when it is asked for.
   The app and the recorder counted every password field in the page, so
   each of the bank's pages read as signed out and Record never started.
-  Both count only a password field the page shows now. Consorsbank's
-  sign-in address is still refused before its form is drawn, and its
-  sign-in window once shown still stops Record. For every other app,
-  Record now starts on a page that holds a password field it never shows,
-  and still refuses one that shows a field. Diagnose for Consorsbank says
-  how many password fields the page shows beside how many it holds.
+  For Consorsbank both count only a password field the page draws now.
+  Its sign-in address is still refused before its form is drawn, and its
+  sign-in window once drawn still stops Record. Every other app counts
+  every password field as before, and a census holds that to the apps
+  named with a reason. Diagnose for Consorsbank says how many password
+  fields the page draws beside how many it holds.
 
 ## [0.64.0] - 2026-11-11
 

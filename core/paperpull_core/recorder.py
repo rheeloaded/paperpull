@@ -55,11 +55,12 @@ WHERE IT REFUSES TO RUN
 
 Before the account holder is signed in. start() checks the page is on
 the provider's own host, that the app does not think it is signed out,
-and that no password field is shown on it. A recorder that can be
+and that there is no password field on it. A recorder that can be
 switched on at a sign-in screen is a keylogger with good intentions, so
-this one cannot be. A sign-in window a site keeps in every page and
-draws only when asked is not a sign-in screen. Consorsbank keeps one,
-and counting it refused every page of the bank (#178).
+this one cannot be. Consorsbank keeps a sign-in window in every page and
+draws it only when asked, so counting it refused every page of the bank
+(#178). A site module like that one sets PASSWORD_FIELD, and only the
+fields its pages draw are counted.
 
 HOW A CONTROL IS NAMED
 
@@ -612,6 +613,15 @@ def clean_structure(raw) -> Optional[dict]:
             "truncated": cut[0] or not has_target(root)}
 
 
+# The password fields the backstop counts. Every one in the page, unless a
+# provider's site module sets PASSWORD_FIELD to DRAWN_PASSWORD_FIELD because
+# its pages keep a sign-in window they never draw, as Consorsbank's do
+# (#178). Then only the fields the page draws with a box are counted. Any
+# other value is the strict one, so a site module cannot switch it off.
+PASSWORD_FIELD = "input[type='password']"
+DRAWN_PASSWORD_FIELD = "input[type='password']:visible"
+
+
 class Recorder:
     """One recording, on one page, of one person's path to a document."""
 
@@ -619,11 +629,14 @@ class Recorder:
                  is_safe_url: Callable[[str], bool],
                  looks_signed_out: Optional[Callable] = None,
                  is_safe_control: Optional[Callable[[str], bool]] = None,
-                 provider: str = "", words=None, include_html: bool = False):
+                 provider: str = "", words=None, include_html: bool = False,
+                 password_field: str = PASSWORD_FIELD):
         self.page = page
         self._is_safe_url = is_safe_url
         self._looks_signed_out = looks_signed_out
         self._is_safe_control = is_safe_control
+        self._password_field = (DRAWN_PASSWORD_FIELD if password_field == DRAWN_PASSWORD_FIELD
+                                else PASSWORD_FIELD)
         self._include_html = include_html
         self.provider = provider
         # The app's own words on top of the fixed list, its name and its
@@ -660,11 +673,9 @@ class Recorder:
             except Exception:
                 pass
         try:
-            # A field a person can see and type into. Consorsbank keeps its
-            # sign-in window in every page, signed in or not, and draws it
-            # only when asked, so counting every field in the page refused
-            # each of the bank's own pages (#178).
-            if self.page.locator("input[type='password']:visible").count() > 0:
+            # Every field in the page, or for a provider that keeps a sign-in
+            # window it never draws, the fields the page draws (#178).
+            if self.page.locator(self._password_field).count() > 0:
                 return ("there is a password field on this page, so recording "
                         "will not start here. Finish signing in first.")
         except Exception:
@@ -1011,7 +1022,7 @@ class Recorder:
         gathers on a vendor's page is the same as anywhere else: the
         controls pressed, named the way a person reads them. Recording
         still refuses to START outside the provider's own site, and still
-        refuses a page that shows a password field."""
+        refuses a page with a password field on it."""
         if page is None or page in self._watched:
             return
         self._watched.append(page)
@@ -1495,7 +1506,8 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
                    is_safe_url=site.is_safe_url,
                    looks_signed_out=getattr(site, "looks_signed_out", None),
                    is_safe_control=getattr(site, "is_safe_control", None),
-                   provider=provider, words=words, include_html=include_html)
+                   provider=provider, words=words, include_html=include_html,
+                   password_field=getattr(site, "PASSWORD_FIELD", PASSWORD_FIELD))
     why = rec.refusal()
     if why:
         say("Not recording, because %s." % why)
