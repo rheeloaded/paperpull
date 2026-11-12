@@ -101,6 +101,9 @@ def test_a_year_with_a_claim_is_listed(kind):
     ok(b64(HEADER + "\r\n" + CLAIM), "text/csvx"),
     ok(b64(HEADER + "\r\n" + CLAIM), ""),
     ok("not base64 at all!"),
+    # Characters that are not base64 inside one that is, which a loose
+    # decode would drop and read on.
+    ok(b64(HEADER + "\r\n" + CLAIM)[:8] + "!*?#" + b64(HEADER + "\r\n" + CLAIM)[8:]),
     ok(b64(HEADER)[:-2] + "*"),
     ok(b64("No claims were found for these dates")),
     ok(b64("Something went wrong\r\nPlease try again")),
