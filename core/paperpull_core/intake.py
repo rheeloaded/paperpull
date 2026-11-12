@@ -282,6 +282,14 @@ _READ_JS = r"""
       try { if (r.body) await r.body.cancel(); } catch (e) {}
       throw ppOver(said);
     }
+    // A page's own fetch can answer with no body stream at all (undefined,
+    // where an answer with no body has null). That answer is read whole and
+    // then held to the limit, since it offers no way to read it in pieces.
+    if (r.body === undefined) {
+      const whole = new Uint8Array(await r.arrayBuffer());
+      if (whole.byteLength > ppLimit) throw ppOver(whole.byteLength);
+      return whole;
+    }
     if (!r.body) return new Uint8Array(0);
     const reader = r.body.getReader();
     const parts = [];

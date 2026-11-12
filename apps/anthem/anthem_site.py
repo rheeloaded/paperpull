@@ -653,7 +653,13 @@ def _patient_name(row: dict) -> str:
             return _clean_patient(v)
         if isinstance(v, dict):
             name = _first_key(v, ["name", "fullName", "displayName"])[1]
-            if name:
+            if isinstance(name, dict):
+                # A FHIR HumanName: {given: [...], family}.
+                given = name.get("given") or []
+                if isinstance(given, str):
+                    given = [given]
+                name = " ".join([str(g) for g in given] + [str(name.get("family") or "")])
+            if name and str(name).strip():
                 return _clean_patient(name)
             fn = _first_key(v, ["firstName", "first", "givenName"])[1]
             ln = _first_key(v, ["lastName", "last", "familyName"])[1]
@@ -666,10 +672,28 @@ def _patient_name(row: dict) -> str:
     return ""
 
 
+def _claim_number_entry(row: dict) -> Optional[dict]:
+    """The claim[0].identifier entry whose type is "claimNumber", or None."""
+    claim = row.get("claim")
+    if isinstance(claim, list) and claim and isinstance(claim[0], dict):
+        for e in claim[0].get("identifier") or []:
+            if isinstance(e, dict) and e.get("type") == "claimNumber":
+                return e
+    return None
+
+
 def _claim_number(row: dict) -> str:
-    """The human claim number. Confirmed path: claim[0].identifier[*].value -
-    a FHIR identifier array; the claim number is the entry whose value has both
-    letters and digits. Falls back to top-level candidate keys."""
+    """The human claim number. Confirmed path: the claim[0].identifier entry
+    of type "claimNumber", whose `display` is the number and whose `value` is
+    an opaque token made new on every call, so never the number. Older shapes
+    carried the number as a value: the entry whose value has both letters and
+    digits, else the last value of the claim number's shape. Falls back to
+    top-level candidate keys."""
+    entry = _claim_number_entry(row)
+    if entry is not None:
+        shown = str(entry.get("display") or "").strip()
+        if _CLAIMNUM_RE.fullmatch(shown):
+            return shown
     claim = row.get("claim")
     if isinstance(claim, list) and claim and isinstance(claim[0], dict):
         idents = claim[0].get("identifier")
@@ -681,10 +705,20 @@ def _claim_number(row: dict) -> str:
                 if (_CLAIMNUM_RE.fullmatch(sv) and re.search(r"[A-Za-z]", sv)
                         and re.search(r"\d", sv)):
                     return sv
-            if values:
+            if values and _CLAIMNUM_RE.fullmatch(str(values[-1])):
                 return str(values[-1])
     _, v = _first_key(row, _CLAIMID_KEYS)
     return str(v).strip() if v else ""
+
+
+def _claim_ref(row: dict, claim_id: str) -> str:
+    """What eob.v1.download takes as claimId for this row: the claimNumber
+    entry's token where the row has one (the site itself sends it), else the
+    claim number. Spent in the page at once and never stored."""
+    entry = _claim_number_entry(row)
+    if entry is not None and entry.get("value"):
+        return str(entry["value"])
+    return claim_id
 
 
 def _doc_kind(row: dict) -> str:
@@ -708,6 +742,21 @@ def _extract_row(row: dict, claim_type: str) -> Optional[dict]:
     """
     eob_id = row.get("identifier") or _first_key(row, _EOBID_KEYS)[1]
     claim_id = _claim_number(row)
+    if not claim_id and eob_id and "claim" not in row:
+        # A statement for a period (Pharmacy sends one a month) has no claim:
+        # it is known by its date, and asked for with an empty claimId.
+        day = _iso_from_value(row.get("created")).replace("-", "")
+        if re.fullmatch(r"\d{8}", day):
+            return {
+                "claim_id": day,
+                "claim_ref": "",
+                "eob_id": str(eob_id),
+                "date": _iso_from_value(row.get("created")),
+                "doc_kind": "Statement",
+                "claim_type": claim_type,
+                "patient": "",
+                "seq": 0,
+            }
     if not claim_id or not eob_id:
         log.error(
             "An EOB summary row is missing a claim number (%s) or eob id (%s). "
@@ -724,6 +773,7 @@ def _extract_row(row: dict, claim_type: str) -> Optional[dict]:
         seq = 0
     return {
         "claim_id": str(claim_id).strip(),
+        "claim_ref": _claim_ref(row, str(claim_id).strip()),
         "eob_id": str(eob_id),
         "date": _iso_from_value(date_val),
         "doc_kind": _doc_kind(row),
@@ -753,7 +803,7 @@ def parse_doc_id(doc_id: str):
     compatibility with identities written before it was added.
     """
     m = re.fullmatch(
-        r"(Medical|Pharmacy|Chiropractic)\|([A-Za-z0-9]{6,30})\|(EOB Check|EOB)(?:\|(\d{1,4}))?",
+        r"(Medical|Pharmacy|Chiropractic)\|([A-Za-z0-9]{6,30})\|(EOB Check|EOB|Statement)(?:\|(\d{1,4}))?",
         str(doc_id or "").strip())
     if not m:
         return None
@@ -826,8 +876,14 @@ def collect_documents(page) -> List[dict]:
             if doc_id in seen:
                 continue
             seen.add(doc_id)
-            kind_label = "" if row["doc_kind"] == "EOB" else " Check"
+            kind_label = " Check" if row["doc_kind"] == "EOB Check" else ""
             title = f"{claim_type} Explanation of Benefits{kind_label}"
+            if row["doc_kind"] == "Statement":
+                # A statement has no claim; its date already rides in the filename.
+                account = f"{claim_type} statement"
+            else:
+                account = (f"{_title_name(row['patient'])} - " if row["patient"] else "") \
+                          + f"{claim_type} claim {row['claim_id']}"
             rows.append({
                 "title": title,
                 "date": row["date"],
@@ -835,8 +891,7 @@ def collect_documents(page) -> List[dict]:
                 # engine suffixes into the filename summary. The patient keeps one
                 # family member's EOBs distinguishable; the claim number keeps two
                 # claims that share a date distinct and stable across runs.
-                "account": (f"{_title_name(row['patient'])} - " if row["patient"] else "")
-                           + f"{claim_type} claim {row['claim_id']}",
+                "account": account,
                 "href": "",          # deliberately empty: never a URL
                 "doc_id": doc_id,
             })
@@ -864,13 +919,15 @@ def _looks_like_login_html(body: bytes) -> bool:
 
 
 def resolve_eob_id(page, claim_type: str, claim_id: str, doc_kind: str,
-                   seq: int = 0) -> Optional[str]:
-    """The CURRENT opaque eobId for a (claimType, claimId, docKind, seq) document.
+                   seq: int = 0) -> Optional[Tuple[str, str]]:
+    """The CURRENT (eobId, claimId) a (claimType, claimId, docKind, seq)
+    document is downloaded with.
 
-    Looked up fresh every time rather than trusted from storage: the eobId is a
-    per-session token, so a stored one would go stale. Matches on the stable
-    identity; if the sequence number no longer lines up, falls back to the first
-    document of that claim and kind. Returns None if it is no longer listed.
+    Looked up fresh every time rather than trusted from storage: the eobId and
+    the claim's token are per-call tokens, so stored ones would go stale.
+    Matches on the stable identity; if the sequence number no longer lines up,
+    falls back to the first document of that claim and kind. Returns None if
+    it is no longer listed.
     """
     start, end = _date_window()
     matches = []
@@ -879,12 +936,12 @@ def resolve_eob_id(page, claim_type: str, claim_id: str, doc_kind: str,
         if not row:
             continue
         if row["claim_id"] == claim_id and row["doc_kind"] == doc_kind:
-            matches.append((row["seq"], row["eob_id"]))
+            matches.append((row["seq"], (row["eob_id"], row["claim_ref"])))
     if not matches:
         return None
-    for s, eob_id in matches:
+    for s, found in matches:
         if s == seq:
-            return eob_id
+            return found
     return matches[0][1]
 
 
@@ -907,12 +964,13 @@ def download_document(page, doc_id: str, out_path) -> bool:
         raise SessionExpired("the Anthem tab is no longer open on Anthem")
     if not prime_session(page):
         raise SessionExpired("could not capture Anthem's session for a download")
-    eob_id = resolve_eob_id(page, claim_type, claim_id, doc_kind, seq)
-    if eob_id is None:
+    found = resolve_eob_id(page, claim_type, claim_id, doc_kind, seq)
+    if found is None:
         log.warning("Anthem no longer lists a %s %s for claim %s",
                     claim_type, doc_kind, claim_id)
         return False
-    arg = {"claimId": claim_id, "claimType": claim_type, "eobId": eob_id}
+    eob_id, claim_ref = found
+    arg = {"claimId": claim_ref, "claimType": claim_type, "eobId": eob_id}
     try:
         res = intake.evaluate(page, _DOWNLOAD_JS, arg) or {}
     except Exception as e:
