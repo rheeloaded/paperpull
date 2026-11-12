@@ -27,6 +27,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Rename or a Move takes it along, and it is never written again once
   deleted. A summary saved before is not asked for again, the asks are paced
   as the app's other calls are, and a test pins every value the POST sends.
+- **The update check on Windows and on PaperPull Server.** On Windows
+  installed with `setup.exe`, **Download from github.com** now downloads the
+  release's installer, which has to match the SHA-256 GitHub recorded, carry
+  a valid signature by PaperPull's publisher from Microsoft's ID Verified
+  code signing, and say it is the new version. The copy you run has to carry
+  that same signature, or nothing is downloaded. **Restart and update**
+  checks the installer again, then closes PaperPull, runs the installer with
+  only its progress showing, in the folder you installed it in, and opens
+  PaperPull again when it is done, or opens the copy you had if the
+  installer failed. A script waits for PaperPull to exit and checks the
+  installer's SHA-256 one last time while it holds the file, and if that
+  script never starts, PaperPull stays open. It writes what it did to
+  `update.log` in `AppData\Roaming\PaperPull`. The portable zip says a
+  newer version exists and how to take it. PaperPull Server asks the same
+  way and gives the steps that take the new image, the `image:` line in
+  `compose.yaml`, `docker compose pull` and `docker compose up -d`, since a
+  container cannot replace its own image. The Microsoft Store edition still
+  updates through the Store and shows none of it. PRIVACY.md,
+  PRIVACY-SERVER.md, SERVER.md and the README say so, and the README's
+  answer to "How do I update?" no longer says PaperPull never checks.
 
 ### Changed
 - **A recording says where a tab the provider opened landed, and Scalable's

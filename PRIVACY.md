@@ -40,20 +40,30 @@ a machine at home, has a page of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md)
   web request reveals, such as your IP address, and its User-Agent says it is
   PaperPull's update check.
 - **GitHub again, to download a newer version, only when you press that
-  button.** On a Mac installed from the disk image, once a check has found a
-  newer version, pressing **Download from github.com** asks `api.github.com`
-  for the newest release once more, then downloads its disk image for your
-  Mac's kind of processor from `github.com`, which hands the file over from
-  one of GitHub's own file hosts, `release-assets.githubusercontent.com` or
-  `objects.githubusercontent.com`, and from no other host. The new app
-  must match the SHA-256 GitHub recorded for it and be signed by the same
-  Apple Team ID as the app you are running, or nothing is replaced. macOS
-  checks the new app the way it checks any app, which can ask Apple about
-  its signature. It goes in place only when you press **Restart and
-  update**. On Windows the panel only tells you a new version exists and
-  links to the release page. The Microsoft Store edition updates through the
-  Store and PaperPull Server through `docker compose pull`, so neither shows
-  any of this.
+  button.** On a Mac installed from the disk image, or on Windows installed
+  with `setup.exe`, once a check has found a newer version, pressing
+  **Download from github.com** asks `api.github.com` for the newest release
+  once more, then downloads its disk image for your Mac's kind of processor,
+  or its Windows installer, from `github.com`, which hands the file over
+  from one of GitHub's own file hosts, `release-assets.githubusercontent.com`
+  or `objects.githubusercontent.com`, and from no other host. The file must
+  match the SHA-256 GitHub recorded for it, or nothing is replaced. On a Mac
+  the new app must be signed by the same Apple Team ID as the app you are
+  running, and macOS checks it the way it checks any app, which can ask
+  Apple about its signature. On Windows the installer must carry a valid
+  signature by PaperPull's publisher, Bryan Rhee, issued through Microsoft's
+  ID Verified code signing, and say it is the new version, and Windows checks
+  it the way it checks any program, which can ask Microsoft about it. Before
+  anything is downloaded, the copy you run must carry that same signature,
+  or nothing is asked. Nothing goes in place until you press **Restart and
+  update**. On Windows that closes PaperPull, runs the installer with only
+  its progress showing, in the folder you installed it in, and opens
+  PaperPull again when it is done. Every other copy, the portable zip and a
+  checkout among them, only tells you a new version exists and links to the
+  release page. PaperPull Server asks the same way, installs nothing, and
+  tells you the steps that take the new image (see
+  [PRIVACY-SERVER.md](PRIVACY-SERVER.md)). The Microsoft Store edition
+  updates through the Store, so it shows none of this.
 
 Nothing else. There is no crash reporting, no usage
 statistics, no analytics, and no account with this project. The program has

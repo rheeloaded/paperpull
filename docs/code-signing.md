@@ -106,9 +106,11 @@ Concretely, the only sites it contacts are the providers a user signs in to
 themselves, and only when the user starts a run. It does not phone home or
 send telemetry. It asks GitHub whether a newer version exists only when the
 user has turned that check on in Settings and then presses the button for
-it, and never at launch or in the background. On a Mac it downloads a newer
-version from GitHub only when the user then presses the button for that. The
-one other download it may
+it, and never at launch or in the background. On a Mac, and on Windows when
+it was installed with the installer, it downloads a newer version from
+GitHub only when the user then presses the button for that, and on Windows
+it runs the new installer only if it carries the maintainer's Artifact
+Signing signature described above. The one other download it may
 offer is a browser, at sign-in time, only if no usable browser is already on
 the machine, and only after the user agrees on screen. Everything it saves stays
 on the user's own computer.

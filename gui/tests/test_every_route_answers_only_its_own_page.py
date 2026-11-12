@@ -330,13 +330,14 @@ ROUTES = {
     ("POST", "/api/terms"): dict(body={"accepted": app_module.TERMS_VERSION},
                                  desktop="changes", server="changes"),
     # Updates (gui/updater.py). Saying yes or no to the check writes the
-    # settings file. The check itself asks GitHub only after a yes, so with
-    # none given it reads nothing and answers from the settings. Installing
-    # and restarting both refuse when there is nothing newer to install, which
-    # is the state here, so neither is seen changing anything. None of them
-    # exist on the server.
+    # settings file, on the server too, which checks the same way. The check
+    # itself asks GitHub only after a yes, so with none given it reads nothing
+    # and answers from the settings. Installing and restarting both refuse
+    # when there is nothing newer to install, which is the state here, so
+    # neither is seen changing anything. Neither exists on the server, which
+    # gives the steps that take the new image instead.
     ("GET", "/api/update"): dict(desktop="reads", server="reads"),
-    ("POST", "/api/update/setting"): dict(body={"check": False}, desktop="changes", server="reads"),
+    ("POST", "/api/update/setting"): dict(body={"check": False}, desktop="changes", server="changes"),
     ("POST", "/api/update/check"): dict(body={}, desktop="reads", server="reads"),
     ("POST", "/api/update/install"): dict(body={}, desktop="reads", server="reads"),
     ("POST", "/api/update/restart"): dict(body={}, desktop="reads", server="reads"),

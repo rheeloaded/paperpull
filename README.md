@@ -296,7 +296,7 @@ on the desktop.
 | Signing in | a browser window on your desktop | a browser screen the server shows in your browser |
 | New documents | folders on your computer | folders on the server, and copied into Paperless-ngx's consume folder if you mount it |
 | Who can reach it | only your computer | your home network, behind a password you choose |
-| Updates | the next installer, or the Store | the new version in `compose.yaml`, then `docker compose pull` and `docker compose up -d` |
+| Updates | from Settings, the next installer, or the Store | the new version in `compose.yaml`, then `docker compose pull` and `docker compose up -d` |
 | Price | free, or the Store edition | free |
 
 Getting it running takes three steps, and [SERVER.md](SERVER.md) has the
@@ -767,9 +767,11 @@ providers you sign in to, plus, only if you agree, a browser download when
 your computer has no usable browser. If you turn the update check on in
 Settings, each press of **Check github.com for an update** asks GitHub's
 release list whether a newer version exists, and it never asks by itself.
-On a Mac installed from the disk image, **Download from github.com** then
-downloads the new version from GitHub, checks it, and installs it when you
-say so. Elsewhere the panel links to the release page.
+On a Mac installed from the disk image, or on Windows installed with
+`setup.exe`, **Download from github.com** then downloads the new version
+from GitHub, checks it, and installs it when you say so. PaperPull Server
+asks the same way and gives the steps that take the new image. Elsewhere
+the panel links to the release page.
 PaperPull Server also fetches Chrome from Google, and Chrome itself talks
 to Google as any Chrome does. See
 [PRIVACY.md](PRIVACY.md) and [PRIVACY-SERVER.md](PRIVACY-SERVER.md).
@@ -875,14 +877,22 @@ Microsoft Store or [paperpull.net](https://paperpull.net). See
 
 ### How do I update?
 
-PaperPull never checks for a new version of itself. GitHub's **Watch**
-button, set to releases, tells you when one comes out. On Windows, run the
-new installer over the old one, and the Store edition updates through the
-Store. On a Mac, drag the new version into Applications. On PaperPull
-Server, run `docker compose pull` and then `docker compose up -d`. Your
-documents and history are left as they are, and so are the desktop app's
-sign-ins. On the server, the restart can sign you out of a provider that
-keeps its session only while the browser runs.
+PaperPull checks for a new version only if you turn the check on in
+Settings, under Updates, and then only when you press **Check github.com
+for an update**. GitHub's **Watch** button, set to releases, also tells you
+when one comes out. On a Mac installed from the disk image, or on Windows
+installed with `setup.exe`, **Download from github.com** fetches the new
+version, checks it is the release GitHub published and signed by the same
+publisher, and puts it in place when you press **Restart and update**. You
+can also run the new installer over the old one on Windows, or drag the
+new version into Applications on a Mac. The portable zip is replaced by
+unzipping the new one, and the Store edition updates through the Store. On
+PaperPull Server, write the new version in the `image:` line of
+`compose.yaml`, then run `docker compose pull` and `docker compose up -d`,
+the steps the server's own update check gives too. Your documents and
+history are left as they are, and so are the desktop app's sign-ins. On
+the server, the restart can sign you out of a provider that keeps its
+session only while the browser runs.
 
 ## Contributing a provider
 
