@@ -820,6 +820,97 @@ def test_any_other_signature_is_not_the_publishers(change):
     assert not updater.signed_by_publisher(dict(PUBLISHER, **change))
 
 
+# -- who may sign an installer ------------------------------------------------
+#
+# Signing may move from Bryan Rhee to TNE Enterprises LLC, the company behind
+# PaperPull. A copy already installed accepts only the names its own release
+# holds, so the release that accepts both has to come before any move.
+
+SIGNER_NAMES = ("Bryan Rhee", "TNE Enterprises LLC")
+
+
+def _subject(cn, o=None, rest="L=Town, S=State, C=US"):
+    return "CN=%s, O=%s, %s" % (cn, cn if o is None else o, rest)
+
+
+@pytest.mark.parametrize("name", SIGNER_NAMES)
+def test_each_accepted_signer_is_recognized(name):
+    for subject in (_subject(name), _subject(name, rest="L=Another Town, S=State, PostalCode=00000, C=US"),
+                    _subject(name, rest="OU=Signing, C=US")):
+        assert updater.signed_by_publisher(dict(PUBLISHER, subject=subject)), subject
+
+
+def _near_misses(name):
+    other = next(n for n in SIGNER_NAMES if n != name)
+    return [
+        _subject("Someone Else"),                                   # another CN
+        _subject(name, "Someone Else"), _subject("Someone Else", name),
+        _subject(name, other), _subject(other, name),              # CN and O that differ
+        _subject(name, rest="L=Town, S=State, C=GB"),             # not C=US
+        _subject(name, rest="L=Town, S=State"),                   # no C at all
+        "CN=%s, O=%s, C=US" % (name, name),                       # nothing between
+        _subject(name + "."), _subject(name + " Holdings"),       # names that look alike
+        _subject(name.lower()), _subject(name.upper()),
+        _subject(" " + name), _subject(name.replace(" ", "  ")),
+        _subject(name.replace("e", "\u0435")),               # a Cyrillic e
+        _subject(name.replace(" ", ", ")),
+        "O=%s, CN=%s, L=Town, S=State, C=US" % (name, name),
+        "CN=Someone Else, O=Someone Else, L=%s, S=State, C=US" % name,
+        "CN=%s, O=%s, L=Town, S=State, C=US, O=Someone Else" % (name, name),
+    ]
+
+
+@pytest.mark.parametrize("name", SIGNER_NAMES)
+def test_near_misses_of_each_accepted_signer_are_refused(name):
+    for subject in _near_misses(name):
+        assert not updater.signed_by_publisher(dict(PUBLISHER, subject=subject)), subject
+
+
+def test_the_accepted_signers_are_held_in_one_place():
+    assert sorted(re.match(r"^\^CN=(.+?), O=", p.pattern).group(1) for p in updater._SIGNERS) == sorted(SIGNER_NAMES)
+    for name, pattern in zip(SIGNER_NAMES, updater._SIGNERS):
+        assert pattern.pattern == r"^CN=%s, O=%s, .*, C=US$" % (name, name)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+# A certificate subject spelled out in a file, its CN and its O.
+_PINNED = re.compile(r"CN=([^,=\r\n'\"]+), O=([^,=\r\n'\"]+)")
+
+
+def _tracked_files():
+    try:
+        out = subprocess.run(["git", "ls-files", "-z"], cwd=str(REPO_ROOT), capture_output=True,
+                             timeout=60, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip("git cannot list the repository's files")
+    for rel in out.decode("utf-8").split("\0"):
+        if rel and "tests" not in Path(rel).parts:
+            yield rel
+
+
+def test_every_place_that_checks_the_signer_accepts_the_same_two():
+    """A census of the repository, tests left out. Every file that spells
+    out a publisher's certificate subject, or reads a signer at all, names
+    either no publisher or exactly the two this check accepts. The scripts
+    the panel starts name none."""
+    pinned, readers = {}, {}
+    for rel in _tracked_files():
+        try:
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        names = {cn.strip() for cn, o in _PINNED.findall(text) if o.strip() != "Microsoft Corporation"}
+        if names:
+            pinned[rel] = names
+        if "SignerCertificate" in text or "Get-AuthenticodeSignature" in text:
+            readers[rel] = {n for n in SIGNER_NAMES if n in text} | names
+    assert pinned == {"gui/updater.py": set(SIGNER_NAMES)}
+    for rel, names in readers.items():
+        assert names in (set(), set(SIGNER_NAMES)), (rel, names)
+    for script in (updater.INSTALL_PS, updater._SIGNATURE_PS):
+        assert "CN=" not in script and not [n for n in SIGNER_NAMES if n in script]
+
+
 def _installer(where, body=b"installer"):
     setup = where / "PaperPull-0.61.0-setup.exe"
     setup.write_bytes(body)

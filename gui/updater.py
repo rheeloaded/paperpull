@@ -102,13 +102,19 @@ _TAG = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")
 _DMG = re.compile(r"^PaperPull-\d{1,4}\.\d{1,4}\.\d{1,4}-(arm64|x86_64)\.dmg$")
 _SETUP = re.compile(r"^PaperPull-\d{1,4}\.\d{1,4}\.\d{1,4}-setup\.exe$")
 
-# Who signs the Windows installer. Azure Artifact Signing issues a
+# Who may sign the Windows installer, the only signers the update check
+# accepts. Azure Artifact Signing issues a
 # certificate that lasts a few days, from one of Microsoft's ID Verified
 # intermediates, which rotate (AOC CA 03 and 04 and EOC CA 04 so far), and the
 # signature's timestamp keeps it valid after the certificate ends. The subject
 # names the publisher and the city on file, so only its first and last parts
-# are held here.
-_SIGNER = re.compile(r"^CN=Bryan Rhee, O=Bryan Rhee, .*, C=US$")
+# are held here. Signing may move from Bryan Rhee to TNE Enterprises LLC, the
+# company behind PaperPull. A copy already installed accepts only the names
+# its own release holds, so a release that accepts both comes before any move.
+_SIGNERS = (
+    re.compile(r"^CN=Bryan Rhee, O=Bryan Rhee, .*, C=US$"),
+    re.compile(r"^CN=TNE Enterprises LLC, O=TNE Enterprises LLC, .*, C=US$"),
+)
 _ISSUER = re.compile(r"^CN=Microsoft ID Verified CS (AOC|EOC) CA \d{2}, O=Microsoft Corporation, C=US$")
 # Where the installer records the folder it installed in, for its next run.
 # The installer asks for no administrator rights (packaging/build_windows.py),
@@ -673,11 +679,13 @@ def _read_signature(path: Path, what: str) -> dict:
 
 
 def signed_by_publisher(sig: dict) -> bool:
-    """A valid Authenticode signature by PaperPull's publisher, from one of
-    Microsoft's ID Verified intermediates. A valid status means Windows
-    traced the chain to a root it trusts and found the timestamp good."""
+    """A valid Authenticode signature by PaperPull's publisher, one of the
+    signers in _SIGNERS, from one of Microsoft's ID Verified intermediates.
+    A valid status means Windows traced the chain to a root it trusts and
+    found the timestamp good."""
+    subject = str(sig.get("subject") or "")
     return (sig.get("status") == "Valid" and sig.get("type") == "Authenticode"
-            and bool(_SIGNER.match(str(sig.get("subject") or "")))
+            and any(signer.match(subject) for signer in _SIGNERS)
             and bool(_ISSUER.match(str(sig.get("issuer") or ""))))
 
 

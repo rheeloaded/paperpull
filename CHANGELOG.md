@@ -30,6 +30,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Whether the bank marks a document read when its PDF is fetched has not
   been checked yet.
 
+### Changed
+- **The update check also accepts installers signed by TNE Enterprises
+  LLC.** On Windows, an installer signed by TNE Enterprises LLC, the company
+  behind PaperPull, now passes the update check as one signed by Bryan Rhee
+  does, so signing can move to the company later without the copies already
+  installed refusing the update. The signature must still be valid, come
+  from Microsoft's ID Verified code signing and say it is the new version.
+  PRIVACY.md says so.
+
 ### Fixed
 - **The tester steps in the app READMEs name the panel's buttons as it
   shows them.** Twenty-seven app READMEs, the README, CONTRIBUTING.md,

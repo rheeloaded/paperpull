@@ -51,11 +51,12 @@ a machine at home, has a page of its own, [PRIVACY-SERVER.md](PRIVACY-SERVER.md)
   the new app must be signed by the same Apple Team ID as the app you are
   running, and macOS checks it the way it checks any app, which can ask
   Apple about its signature. On Windows the installer must carry a valid
-  signature by PaperPull's publisher, Bryan Rhee, issued through Microsoft's
-  ID Verified code signing, and say it is the new version, and Windows checks
-  it the way it checks any program, which can ask Microsoft about it. Before
-  anything is downloaded, the copy you run must carry that same signature,
-  or nothing is asked. Nothing goes in place until you press **Restart and
+  signature by PaperPull's publisher, Bryan Rhee or TNE Enterprises LLC, the
+  company behind PaperPull, issued through Microsoft's ID Verified code
+  signing, and say it is the new version, and Windows checks it the way it
+  checks any program, which can ask Microsoft about it. Before anything is
+  downloaded, the copy you run must carry such a signature too, or nothing
+  is asked. Nothing goes in place until you press **Restart and
   update**. On Windows that closes PaperPull, runs the installer with only
   its progress showing, in the folder you installed it in, and opens
   PaperPull again when it is done. Every other copy, the portable zip and a
