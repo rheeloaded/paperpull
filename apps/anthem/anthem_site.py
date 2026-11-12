@@ -1866,7 +1866,7 @@ def list_claims_summaries(page, today=None, skip=(), pause=None) -> List[dict]:
         got = _export_csv(res, p["period"])
         if got is None:
             continue
-        _data, text = got
+        data, text = got
         rows.append({
             "doc_id": "ClaimsSummary|" + p["period"],
             "key": claims_summary_key(p["period"]),
@@ -1874,6 +1874,8 @@ def list_claims_summaries(page, today=None, skip=(), pause=None) -> List[dict]:
             "folder_attr": "claims_summaries",
             "date": p["date"],
             "csv": text,
+            # The CSV as Anthem handed it over, saved beside the PDF.
+            "csv_bytes": data,
         })
     log.info("Anthem: %d claims summar%s", len(rows), "y" if len(rows) == 1 else "ies")
     return rows

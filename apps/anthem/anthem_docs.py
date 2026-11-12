@@ -850,13 +850,20 @@ class App:
               f"then run Resume.")
         self.stats["failed"] += 1
 
-    def _save_collected(self, kind: str, rows: List[dict], fetch_fn) -> None:
+    def _save_collected(self, kind: str, rows: List[dict], fetch_fn, beside=None) -> None:
         """Shared save loop for the API-fetched surfaces (member documents, ID
         cards, letters). Each row is filing metadata; `fetch_fn(page, row)`
         returns the PDF bytes on demand. Dedupe by the row's delete-safe key,
         validate the PDF, file it in its folder and index it. A document already
         downloaded once is never re-fetched (the sticky downloaded_ok marker),
-        so this hooks straight into fetch-only-new."""
+        so this hooks straight into fetch-only-new.
+
+        `beside(row)` gives the files kept beside a document's PDF, as
+        (ending, bytes), the CSV of a claims summary. Each is written with the
+        PDF and named as it is, and the record lists them with it, as
+        Wealthfront lists a tax form's workbook, so a Rename or a Move takes
+        them along. Like the PDF, one is written only when its document is
+        saved, never again once deleted."""
         from datetime import date
         if not rows:
             print(f"  No {kind} to download.")
@@ -914,11 +921,28 @@ class App:
             # day were " (2)" apart, and Rename offered the second an ending.
             out_path = unique_path(folder, filename, self.config["max_path_length"],
                                    distinguisher=told_apart_by(record))
+            companions: List[Path] = []
+            written: List[Path] = []
             try:
+                written.append(out_path)
                 out_path.write_bytes(pdf)
+                for ending, data in (beside(r) if beside is not None else ()):
+                    path = unique_path(out_path.parent, out_path.stem + ending,
+                                       self.config["max_path_length"])
+                    written.append(path)
+                    path.write_bytes(data)
+                    companions.append(path)
             except Exception as e:
                 log.warning("could not write %s: %s", label, e)
                 self.stats["failed"] += 1
+                # Each name unique_path gave was free, so what is there now
+                # is this attempt's own, and no record names it. It goes, so
+                # the next run's copy takes its name rather than another.
+                for path in written:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
                 continue
             result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"])
             if not result.ok:
@@ -928,6 +952,13 @@ class App:
                     out_path.replace(quarantine)
                 except OSError:
                     quarantine = out_path
+                # What was written beside it goes with it.
+                for path in companions:
+                    try:
+                        path.replace(unique_path(self.paths.manual_review, path.name,
+                                                 self.config["max_path_length"]))
+                    except OSError:
+                        pass
                 rec = dict(record, state=State.NEEDS_MANUAL_REVIEW.value,
                            pdf_path=str(quarantine), downloaded_ok=False,
                            notes=f"PDF validation failed: {result.reason}")
@@ -939,6 +970,10 @@ class App:
             rec = dict(record, state=State.COMPLETED.value, downloaded_ok=True,
                        pdf_path=str(out_path), pdf_filename=out_path.name,
                        pdf_size=result.size_bytes)
+            # The record lists every file of the document, what a Rename or a
+            # Move reads and keeps up to date (renaming._invoices_alone).
+            if companions:
+                rec["invoices"] = [{"file": str(p), "kept": True} for p in [out_path] + companions]
             saved_copy.holds(self, key, rec)
             self.progress.update(key, rec)
             self.index_csv.append_rows([{
@@ -958,6 +993,8 @@ class App:
             if fdate:
                 self.stats["dates"].append(fdate)
             print(f"  Saved: {out_path.name}")
+            for path in companions:
+                print(f"  + beside it: {path.name}")
 
     def cmd_documents(self):
         """Download member documents (plan / authorization / tax) across ALL
@@ -1065,17 +1102,12 @@ class App:
         except site.ListingIncomplete as e:
             self._listing_incomplete(e)
             return
+        # The CSV is kept beside each summary saved, as Anthem handed it over,
+        # written with its PDF and listed in its record (_save_collected).
         self._save_collected(
             "claims summaries", rows,
-            lambda pg, r: site.render_claims_summary(pg, r["label"], r["csv"]))
-        # The CSV is kept beside each summary saved, as Anthem handed it over.
-        for r in rows:
-            rec = self.progress.get(r["key"]) or {}
-            pdf = Path(rec.get("pdf_path") or "")
-            if rec.get("downloaded_ok") and pdf.is_file():
-                beside = pdf.with_suffix(".csv")
-                if not beside.exists():
-                    beside.write_bytes(r["csv"].encode("utf-8"))
+            lambda pg, r: site.render_claims_summary(pg, r["label"], r["csv"]),
+            beside=lambda r: [(".csv", r["csv_bytes"])])
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"

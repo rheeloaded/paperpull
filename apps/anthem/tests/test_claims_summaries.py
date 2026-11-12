@@ -289,3 +289,116 @@ def test_the_asks_are_paced_as_the_apps_other_calls(build):
     app.cmd_claims_summaries()
     assert len(app.fake_page.asked) > 1
     assert app.paused == len(app.fake_page.asked) - 1
+
+
+# -- the CSV beside each summary ---------------------------------------------
+
+def records(app):
+    return json.loads(Path(app.paths.progress_json).read_text(encoding="utf-8"))
+
+
+def test_the_csv_is_listed_in_its_summarys_record_as_anthem_handed_it_over(build, monkeypatch):
+    with_bom = dict(EXPORTS)
+    with_bom[("2025-01-01", "2025-12-31")] = chr(0xFEFF) + EXPORTS[("2025-01-01", "2025-12-31")]
+    app = build("--claims-summaries")
+    app.fake_page.exports = with_bom
+    app.cmd_claims_summaries()
+    app.progress.save()
+    rec = records(app)["claims:2025"]
+    pdf, csv = (Path(e["file"]) for e in rec["invoices"])
+    assert pdf == Path(rec["pdf_path"]) and pdf.suffix == ".pdf"
+    assert csv == pdf.with_suffix(".csv")
+    assert csv.read_bytes() == with_bom[("2025-01-01", "2025-12-31")].encode("utf-8")
+    assert all(e["kept"] for e in rec["invoices"])
+
+
+@pytest.mark.parametrize("gone", [".csv", ".pdf", "both"])
+def test_a_csv_deleted_after_its_summary_was_saved_is_never_written_again(build, gone):
+    first = build("--claims-summaries")
+    first.cmd_claims_summaries()
+    first.progress.save()
+    folder = Path(first.paths.root) / "Claims Summaries"
+    for p in folder.iterdir():
+        if gone == "both" or p.suffix == gone:
+            p.unlink()
+    left = sorted(p.name for p in folder.iterdir())
+    again = build("--claims-summaries")
+    again.cmd_claims_summaries()
+    assert sorted(p.name for p in folder.iterdir()) == left
+
+
+def test_a_csv_that_cannot_be_written_fails_its_summary_and_the_run_goes_on(build, monkeypatch):
+    real = Path.write_bytes
+
+    def write_bytes(self, data):
+        if self.suffix == ".csv" and "2025" in self.name:
+            raise OSError("invented: the disk is full")
+        return real(self, data)
+    monkeypatch.setattr(Path, "write_bytes", write_bytes)
+    app = build("--claims-summaries")
+    app.cmd_claims_summaries()
+    app.progress.save()
+    assert app.stats["failed"] == 1
+    assert "claims:2025" not in records(app)
+    assert {k for k, r in records(app).items() if r.get("downloaded_ok")} == {
+        "claims:2026-11", "claims:2024"}
+    # Nothing of the failed summary is left behind, so the next run's copy
+    # takes its own name.
+    assert not [n for n in saved(app, "") if "2025" in n]
+    monkeypatch.setattr(Path, "write_bytes", real)
+    again = build("--claims-summaries")
+    again.cmd_claims_summaries()
+    assert "2025-12-31 Anthem Claims Summary 2025.pdf" in saved(again, ".pdf")
+    assert "2025-12-31 Anthem Claims Summary 2025.csv" in saved(again, ".csv")
+
+
+def test_a_summary_that_fails_its_check_takes_its_csv_to_manual_review(build, monkeypatch):
+    monkeypatch.setattr(app_mod.receipt_pdf, "validate_pdf", lambda path, min_bytes: SimpleNamespace(
+        ok=False, reason="invented", size_bytes=0, page_count=0))
+    app = build("--claims-summaries")
+    app.cmd_claims_summaries()
+    assert not list((Path(app.paths.root) / "Claims Summaries").iterdir())
+    review = sorted(p.suffix for p in Path(app.paths.manual_review).iterdir())
+    assert review == [".csv"] * 3 + [".pdf"] * 3
+    assert not any(r.get("invoices") for r in app.progress.data.values())
+
+
+def test_a_rename_takes_each_csv_with_its_summary(build, printed, tmp_path, capsys):
+    """The app's own Rename, under a naming pattern set after the download,
+    moves each CSV with its PDF and the record follows both."""
+    from paperpull_core import storage as core_storage
+    app = build("--claims-summaries")
+    app.cmd_claims_summaries()
+    app.progress.save()
+
+    def on_disk():
+        return {p.read_bytes(): p for p in Path(app.paths.root).rglob("*")
+                if p.is_file() and p.suffix in (".pdf", ".csv") and "Claims Summaries" in p.parts}
+    before = on_disk()
+    assert len(before) == 6
+    cfg = tmp_path / "config.json"
+    config = json.loads(cfg.read_text(encoding="utf-8"))
+    config["filename_pattern"] = "{provider}/{date:yyyy-mm-dd} Renamed[ {kind}]"
+    cfg.write_text(json.dumps(config), encoding="utf-8")
+    try:
+        capsys.readouterr()
+        renamer = app_mod.App(app_mod.build_parser().parse_args(
+            ["--config", str(cfg), "--rename", "--apply"]))
+        renamer.cmd_rename()
+        said = capsys.readouterr().out
+        after = on_disk()
+        assert set(after) == set(before), said
+        for body, path in after.items():
+            assert path != before[body] and "Renamed" in path.name, said
+        for rec in records(renamer).values():
+            pdf, csv = (Path(e["file"]) for e in rec["invoices"])
+            assert pdf.is_file() and csv.is_file() and csv == pdf.with_suffix(".csv")
+            assert Path(rec["pdf_path"]) == pdf
+            assert csv.read_bytes() in [e.encode("utf-8") for e in EXPORTS.values()]
+        again = app_mod.App(app_mod.build_parser().parse_args(
+            ["--config", str(cfg), "--rename", "--apply"]))
+        again.cmd_rename()
+        assert "already named" in capsys.readouterr().out
+        assert on_disk() == after
+    finally:
+        core_storage.set_filename_patterns({})
