@@ -1238,7 +1238,7 @@ def test_the_script_waits_installs_and_opens_paperpull_again(tmp_path, monkeypat
     assert args[:4] == ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL"]
     assert args[4] == "/LOG=" + str(tmp_path / "Roaming" / "PaperPull" / "setup.log")
     assert handed == ""                           # its variables go no further
-    assert _ran(seen, "python.exe")[2] == ["-m", "uvicorn", "--version"]
+    assert not (seen / "python.exe.ran").exists()  # a whole copy is opened, not asked first
     where, handed, args = _ran(seen, "PaperPull.exe")
     assert where == str(app / "PaperPull.exe") and handed == "" and args == [""]
     assert "installed" in log and "opened PaperPull again" in log
@@ -1258,9 +1258,18 @@ def test_brackets_in_a_path_never_start_another_file(tmp_path, monkeypatch, stub
     proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
     log = _after(proc, seen, SETUP, "PaperPull.exe")
     assert _ran(seen, SETUP)[0] == str(setup)
-    assert _ran(seen, "python.exe")[0] == str(app / "python" / "python.exe")
     assert _ran(seen, "PaperPull.exe")[0] == str(app / "PaperPull.exe")
     assert "installed" in log and not setup.parent.exists()
+    # The copy's own Python, asked when the installer never ran.
+    for ran in seen.iterdir():
+        ran.unlink()
+    setup.parent.mkdir()
+    setup.write_bytes(stub_exe)
+    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(0.2).pid)
+    _after(proc, seen, "PaperPull.exe")
+    assert _ran(seen, "python.exe")[0] == str(app / "python" / "python.exe")
+    assert _ran(seen, "python.exe")[2] == ["-m", "uvicorn", "--version"]
+    assert _ran(seen, "PaperPull.exe")[0] == str(app / "PaperPull.exe")
 
 
 def test_the_script_never_runs_an_installer_that_changed(tmp_path, monkeypatch, stub_exe):
@@ -1284,31 +1293,66 @@ def test_the_script_installs_nothing_while_the_panel_stays(tmp_path, monkeypatch
     assert "did not exit" in log and setup.is_file()
 
 
-def test_a_failed_install_opens_paperpull_again_and_keeps_the_installer(tmp_path, monkeypatch, stub_exe):
-    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
-    Path(str(setup) + ".exit").write_text("4")
-    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
-    log = _after(proc, seen, SETUP, "PaperPull.exe")
-    assert "ended with 4" in log and "opened PaperPull again" in log
-    assert _ran(seen, SETUP)[2][0] == "/SILENT" and setup.is_file()
-
-
-def test_a_failed_install_that_broke_paperpull_opens_the_installer_to_finish(tmp_path, monkeypatch, stub_exe):
-    """The installer removes the old Python before it copies the new one and
-    does not put it back. A PaperPull that would not start is not opened,
-    and the installer opens with its usual window instead."""
-    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
-    Path(str(setup) + ".exit").write_text("4")
-    Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
-    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+def _second_run(proc, seen):
+    """The update log once the installer has run a second time."""
     proc.wait(timeout=120)
     deadline = time.time() + 30
     while time.time() < deadline and _ran(seen, SETUP)[2][:1] == ["/SILENT"]:
         time.sleep(0.1)
     log = _after(proc, seen)
-    assert _ran(seen, SETUP)[2] == [""]           # the second time, the usual window
+    time.sleep(1.0)
+    return log
+
+
+@pytest.mark.parametrize("python_starts", [True, False])
+def test_a_failed_install_opens_the_kept_installer_to_finish(tmp_path, monkeypatch, stub_exe, python_starts):
+    """An installer that ran and failed can leave some new files and some
+    old in the folder, and a Python that starts says nothing of the rest.
+    So the kept installer opens again with its usual window, the very file
+    that was checked, brackets and all, and never PaperPull over a copy it
+    may have left half replaced."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe, work_name="paperpull-update-[f]")
+    decoy = tmp_path / "paperpull-update-f"
+    decoy.mkdir()
+    (decoy / SETUP).write_bytes(stub_exe)
+    Path(str(setup) + ".exit").write_text("4")
+    if not python_starts:
+        Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    log = _second_run(proc, seen)
+    where, handed, args = _ran(seen, SETUP)
+    assert where == str(setup) and args == [""]   # the second time, the usual window
     assert not (seen / "PaperPull.exe.ran").exists()
-    assert "installer was opened to finish the update" in log and setup.is_file()
+    assert "ended with 4" in log and "opened with its usual window to finish the update" in log
+    assert setup.is_file()
+
+
+def test_a_successful_install_opens_paperpull_whatever_its_first_start_does(tmp_path, monkeypatch, stub_exe):
+    """The installer succeeded, so the copy is whole. The first start of the
+    new files can be slow while they are scanned, or fail, and PaperPull.exe
+    opens all the same, with a window of its own that says so, instead of
+    nothing at all after the page said PaperPull opens again."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    log = _after(proc, seen, SETUP, "PaperPull.exe")
+    assert _ran(seen, "PaperPull.exe")[0] == str(app / "PaperPull.exe")
+    assert "installed" in log and "opened PaperPull again" in log and "does not start" not in log
+    assert not setup.parent.exists()
+
+
+def test_an_error_before_the_installer_ran_opens_it_for_a_copy_that_does_not_start(
+        tmp_path, monkeypatch, stub_exe):
+    """Something goes wrong before the installer ran, here a panel it cannot
+    read the number of. The copy is the one the person had, and it does not
+    start, so the kept installer opens with its usual window to put it right."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid="not-a-number")
+    log = _after(proc, seen, SETUP)
+    time.sleep(1.0)
+    assert _ran(seen, SETUP)[2] == [""] and not (seen / "PaperPull.exe.ran").exists()
+    assert "stopped" in log and "installer was opened to finish the update" in log
 
 
 _HANDS_OVER = r'''
@@ -1512,19 +1556,19 @@ def test_an_installer_that_was_not_the_one_checked_is_never_opened(tmp_path, mon
 
 
 def test_a_python_that_cannot_even_be_started_counts_as_a_no(tmp_path, monkeypatch, stub_exe):
-    """A file of no bytes where the Python was, as a failed install can leave
-    it. Windows will not start it, and the kept installer opens instead."""
+    """A file of no bytes where the Python was. Windows will not start it,
+    and that is a no like any other. Here the installer was not the one
+    checked, so nothing opens and the log says where to get the installer."""
     seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
-    Path(str(setup) + ".exit").write_text("4")
     (app / "python" / "python.exe").write_bytes(b"")
-    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
-    proc.wait(timeout=120)
-    deadline = time.time() + 30
-    while time.time() < deadline and _ran(seen, SETUP)[2][:1] == ["/SILENT"]:
-        time.sleep(0.1)
+    # A panel that is still there when the script says it is waiting, as a
+    # real one is. This script is over so soon after that, with nothing to
+    # start, that it could end between two of the panel's looks.
+    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(2.0).pid)
     log = _after(proc, seen)
-    assert _ran(seen, SETUP)[2] == [""] and not (seen / "PaperPull.exe.ran").exists()
-    assert "would not start" in log and "installer was opened to finish the update" in log
+    time.sleep(1.0)
+    assert list(seen.iterdir()) == []
+    assert "would not start" in log and "Download the installer from the release page" in log
 
 
 def test_the_script_is_not_put_in_a_process_group_of_its_own(tmp_path, monkeypatch):

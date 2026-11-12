@@ -57,13 +57,13 @@ the installer would close it. A PowerShell script then waits for the panel
 and PaperPull.exe to exit, so no file the installer replaces is in use,
 holds the installer open while it checks its SHA-256 one last time and
 starts it, and runs it with only its progress showing. The installer keeps
-the folder and the shortcuts the person chose. When it ends, the script
-opens PaperPull again. After an installer that failed, it first asks the
-folder's Python to start, since the installer removes the old one before
-it copies the new and does not put it back. If PaperPull would not start,
-the script opens the installer again with its usual window, so the install
-can be finished, and keeps it. It writes what it did to update.log beside
-the panel's settings, in AppData\\Roaming\\PaperPull.
+the folder and the shortcuts the person chose. When it succeeds, the script
+opens PaperPull again. When it fails, the folder can hold some new files and
+some old, so the script keeps the installer and opens it again with its
+usual window, so the install can be finished. When it never ran, the script
+opens the copy the person had, if that copy's Python starts. It writes what
+it did to update.log beside the panel's settings, in
+AppData\\Roaming\\PaperPull.
 """
 from __future__ import annotations
 
@@ -742,12 +742,15 @@ def can_write(folder: Path) -> bool:
 # folder, the shortcuts and the tasks of the install before. Its [Run] entry
 # skips a silent install, so the script opens PaperPull again itself.
 #
-# The installer removes the old packaged Python before it copies the new
-# one, and does not put it back when it fails after that. So before it opens
-# PaperPull, the script asks the Python in the folder to start, and a check
-# that throws or takes a minute counts as a no. If it starts, it opens
-# PaperPull. If not, it opens the kept installer again with its usual window,
-# so the person can finish the install. The installer is kept unless it
+# After the installer succeeds, the script opens PaperPull and waits on
+# nothing else, since the first start of the new files can be slow while
+# they are scanned. After an installer that ran and failed, the folder can
+# hold some new files and some old, so the script opens the kept installer
+# again with its usual window, for the person to finish the install, and
+# never the copy it may have left half replaced. When the installer never
+# ran, the copy is the one the person had, and the script opens it if its
+# Python starts. A check that throws or takes a minute counts as a no, and
+# then the kept installer opens instead. The installer is kept unless it
 # installed, or was not the one checked, and one that was not is never
 # opened. Its folder is removed only when it is one the panel made.
 #
@@ -770,6 +773,8 @@ foreach ($name in @('LOG', 'SETUP', 'APP', 'SHA256', 'VERSION', 'STARTED', 'WAIT
 $work = Split-Path -Parent $setup
 $said = $false
 $closed = $false
+$ran = $false
+$installed = $false
 $keep = $true
 function Say([string]$text) {
   try { Add-Content -LiteralPath $log -Encoding UTF8 -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $text) } catch { }
@@ -783,6 +788,20 @@ function Run([string]$file, [string]$arguments, [bool]$window) {
   return [System.Diagnostics.Process]::Start($info)
 }
 function Reopen {
+  try {
+    if ($installed) {
+      $null = Run (Join-Path $app 'PaperPull.exe') '' $true
+      Say 'opened PaperPull again'
+      return
+    }
+    if ($ran -and (Test-Path -LiteralPath $setup -PathType Leaf)) {
+      $null = Run $setup '' $true
+      Say ('the installer did not finish, so it was opened with its usual window to finish the update, ' + $setup)
+      return
+    }
+  } catch {
+    Say ('could not open it, ' + $_)
+  }
   $works = $false
   try {
     $python = Join-Path (Join-Path $app 'python') 'python.exe'
@@ -834,12 +853,14 @@ try {
     }
     $setupLog = Join-Path (Split-Path -Parent $log) 'setup.log'
     $run = Run $setup ('/SILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /LOG=' + [char]34 + $setupLog + [char]34) $false
+    $ran = $true
   } finally {
     $file.Dispose()
   }
   $run.WaitForExit()
   if ($run.ExitCode -eq 0) {
     Say 'installed'
+    $installed = $true
     $keep = $false
   } else {
     Say ('the installer ended with ' + $run.ExitCode + ', see setup.log beside this file')

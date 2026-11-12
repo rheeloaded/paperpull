@@ -37,12 +37,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   only its progress showing, in the folder you installed it in, and opens
   PaperPull again when it is done. It refuses while another PaperPull
   program runs from that folder, such as a download started in a terminal,
-  which the installer would close. If the installer fails and leaves a
-  PaperPull that does not start, the installer opens again with its usual
-  window so you can finish the install. A script waits for PaperPull to
-  exit and checks the installer's SHA-256 one last time while it holds the
-  file, and if that script never starts, PaperPull stays open. It writes
-  what it did to `update.log` in `AppData\Roaming\PaperPull`. Where an
+  which the installer would close. If the installer fails, it opens again
+  with its usual window so you can finish the install, and PaperPull is
+  never opened over a copy the installer left half done. A script waits for
+  PaperPull to exit and checks the installer's SHA-256 one last time while
+  it holds the file, and if that script never starts, PaperPull stays open.
+  It writes what it did to `update.log` in `AppData\Roaming\PaperPull`. Where an
   organization lets PowerShell run only its restricted commands, the panel
   says so and points to the release page. The portable zip says a
   newer version exists and how to take it. PaperPull Server asks the same
