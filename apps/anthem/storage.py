@@ -46,6 +46,9 @@ SPEC = AppSpec(
         Folder("id_cards", "ID Cards", precreate=False),
         # Secure Message Center letters, one PDF per message. Created on demand.
         Folder("letters", "Letters", precreate=False),
+        # The claims list, one PDF table a year (and the current year to date)
+        # with its CSV beside it. Created on demand.
+        Folder("claims_summaries", "Claims Summaries", precreate=False),
         # Anything recognized but unrouted. Created on demand.
         Folder("other_documents", "Other Documents", precreate=False),
         *INFRASTRUCTURE_FOLDERS,

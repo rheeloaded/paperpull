@@ -29,7 +29,7 @@ import anthem_docs as app_mod
 import anthem_site as site
 from paperpull_core.run_reporting import PREFIX
 
-OTHER_LISTS = ("cmd_documents", "cmd_id_cards", "cmd_letters")
+OTHER_LISTS = ("cmd_documents", "cmd_id_cards", "cmd_letters", "cmd_claims_summaries")
 
 
 class Context:

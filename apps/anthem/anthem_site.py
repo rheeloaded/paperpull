@@ -1619,3 +1619,117 @@ def render_letter(page, subject: str, body: str, date: str = "") -> Optional[byt
            f"{head}<h1>{safe_subject}</h1><div class='body'>{body}</div>"
            "</body></html>")
     return render_html_to_pdf(page, doc)
+
+
+# ---------------------------------------------------------------------------
+# Claims summaries: the claims list (not the EOB Center), which Anthem exports
+# only as a CSV for a start and an end date. The export is asked for by POST,
+# as the site asks for it (a GET of it answers 500); it reads the claims list
+# and changes nothing. One summary is kept for each calendar year that has
+# ended and one for the current year to date, each month a run sees, and each
+# is filed as a PDF table with its CSV beside it.
+# ---------------------------------------------------------------------------
+
+# How many calendar years back the claims list is asked for, the current one
+# included. A year that holds no claim answers an empty file and is skipped.
+CLAIMS_SUMMARY_YEARS = 6
+
+_CLAIMS_EXPORT_JS = r"""async (a) => {
+  const h = window.__eobHeaders;
+  if (!h) return {status: 0, noauth: true};
+  const input = {start: a.start, end: a.end, sort: ['-end'], mediaType: 'csv', filters: []};
+  const r = await fetch('https://membersecure-polaris.anthem.com/api/claims/trpc/claims.v1.summaryDownload', {
+    method: 'POST',
+    headers: Object.assign({'Accept': 'application/json', 'Content-Type': 'application/json'}, h),
+    body: JSON.stringify(input)});
+  const ct = r.headers.get('content-type') || '';
+  if (!/json/i.test(ct)) return {status: r.status, html: true};
+  // The CSV arrives base64-encoded at result.data.file.
+  const j = await ppJson(r);
+  const d = (j && j.result && j.result.data) || {};
+  return {status: r.status, type: d.type || null, file: d.file || ''};
+}"""
+
+
+def claims_summary_periods(today=None) -> List[dict]:
+    """The periods a claims summary is kept for, newest first: the current
+    year to date, known by its month so each month a run sees keeps its own,
+    then each calendar year that has ended."""
+    from datetime import date
+    today = today or date.today()
+    periods = [{"period": "%d-%02d" % (today.year, today.month),
+                "start": "%d-01-01" % today.year, "end": today.isoformat(),
+                "label": "Claims Summary %d Year to Date" % today.year,
+                "date": today.isoformat()}]
+    for year in range(today.year - 1, today.year - CLAIMS_SUMMARY_YEARS, -1):
+        periods.append({"period": str(year), "start": "%d-01-01" % year,
+                        "end": "%d-12-31" % year, "label": "Claims Summary %d" % year,
+                        "date": "%d-12-31" % year})
+    return periods
+
+
+def _csv_table(text: str) -> List[List[str]]:
+    import csv
+    import io
+    return [row for row in csv.reader(io.StringIO(text or "")) if any(c.strip() for c in row)]
+
+
+def list_claims_summaries(page, today=None) -> List[dict]:
+    """Every period's claims summary that holds a claim, as a filing row
+    carrying its CSV. Raises SessionExpired when Anthem will not authenticate
+    the export, and ListingIncomplete when it refuses one, so a refused year
+    is never taken for an empty one."""
+    rows: List[dict] = []
+    if not is_anthem_owned_page(page):
+        raise SessionExpired("the Anthem tab is no longer open on Anthem")
+    if not prime_session(page):
+        raise SessionExpired("could not capture Anthem's session for the claims list")
+    for p in claims_summary_periods(today):
+        arg = {"start": p["start"], "end": p["end"]}
+        res = intake.evaluate(page, _CLAIMS_EXPORT_JS, arg) or {}
+        if res.get("noauth") or res.get("status") in (401, 403):
+            if prime_session(page, force=True):
+                res = intake.evaluate(page, _CLAIMS_EXPORT_JS, arg) or {}
+        status = res.get("status")
+        if res.get("noauth") or res.get("html") or status in (401, 403):
+            raise SessionExpired("Anthem would not authenticate the claims list "
+                                 f"(status {status})")
+        if status != 200:
+            raise ListingIncomplete(
+                f"the claims summary for {p['period']} could not be fetched (status {status})")
+        text = intake.decode(res.get("file") or "").decode("utf-8-sig", "replace")
+        if len(_csv_table(text)) < 2:
+            continue
+        rows.append({
+            "doc_id": "ClaimsSummary|" + p["period"],
+            "key": "claims:" + p["period"],
+            "label": p["label"],
+            "folder_attr": "claims_summaries",
+            "date": p["date"],
+            "csv": text,
+        })
+    log.info("Anthem: %d claims summar%s", len(rows), "y" if len(rows) == 1 else "ies")
+    return rows
+
+
+def render_claims_summary(page, label: str, csv_text: str) -> Optional[bytes]:
+    """One claims summary's CSV as a filed PDF table, every column and claim,
+    each cell escaped and rendered with all network blocked."""
+    import html as _html
+    table = _csv_table(csv_text)
+    if not table:
+        return None
+    head = "".join("<th>%s</th>" % _html.escape(c) for c in table[0])
+    body = "".join("<tr>%s</tr>" % "".join("<td>%s</td>" % _html.escape(c) for c in row)
+                   for row in table[1:])
+    doc = ("<html><head><meta charset='utf-8'><style>"
+           "body{font-family:Arial,Helvetica,sans-serif;margin:0;color:#111}"
+           "h1{font-size:16px;margin:0 0 10px}"
+           "table{border-collapse:collapse;width:100%;font-size:7px}"
+           "th,td{border:1px solid #bbb;padding:2px 3px;text-align:left;vertical-align:top}"
+           "th{background:#eee}"
+           "</style></head><body>"
+           f"<h1>{_html.escape(label)}</h1>"
+           f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+           "</body></html>")
+    return render_html_to_pdf(page, doc)
