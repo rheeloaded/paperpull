@@ -28,6 +28,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   deleted. A summary saved before is not asked for again, the asks are paced
   as the app's other calls are, and a test pins every value the POST sends.
 
+### Changed
+- **A recording says where a tab the provider opened landed, and Scalable's
+  recording keeps what its documents hold (#170).** A document shown in a
+  tab of its own was noted only as a tab that opened. Its address is now
+  written as its shape, as the first tab's is. An app may ask a recording
+  to keep a JSON answer's keys deeper than four levels, at most eight, and
+  Scalable Capital asks for seven, since its mailbox is a GraphQL answer
+  whose documents sit four levels down. Keys only, through the word list,
+  and never a value.
+
 ### Fixed
 - **Anthem's claim tokens, patient names, Pharmacy statements and the
   letters listing (#210).** Anthem's EOB summary now gives each claim number

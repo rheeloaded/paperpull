@@ -793,9 +793,12 @@ class App:
         keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
+        # Scalable lists its mailbox through GraphQL, whose answers keep the
+        # fields of one document four levels down, past the depth a
+        # recording keeps by default (#170). Keys only, never a value.
         if record_session(self.page(), site, self.paths.diagnostics,
                           provider='Scalable Capital',
-                          owner=self.config.get("owner", "")) is None:
+                          owner=self.config.get("owner", ""), json_depth=7) is None:
             raise SystemExit(NOTHING_RECORDED)
 
     # -- summary -----------------------------------------------------------
