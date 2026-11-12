@@ -7,7 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.65.0] - 2026-11-12
+
+The update check now installs on Windows too, and PaperPull Server gives
+the steps that take the new image. Anthem downloads its EOBs again after
+Anthem changed how it lists them, and files a claims summary for each
+year. Consorsbank's Record starts once you are signed in, ING reads an
+empty Postbox as empty again, and a recording keeps more of what a
+document holds.
 
 ### Added
 - **Anthem claims summaries (#211).** Anthem now files its claims list, which
@@ -38,8 +45,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   PaperPull again when it is done. It refuses while another PaperPull
   program runs from that folder, such as a download started in a terminal,
   which the installer would close. If the installer fails, it opens again
-  with its usual window so you can finish the install, and PaperPull is
-  never opened over a copy the installer left half done. A script waits for
+  with its usual window so you can finish the install. A script waits for
   PaperPull to exit and checks the installer's SHA-256 one last time while
   it holds the file, and if that script never starts, PaperPull stays open.
   It writes what it did to `update.log` in `AppData\Roaming\PaperPull`. Where an
