@@ -758,12 +758,13 @@ class App:
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
         # "Fetch everything" also pulls the other document surfaces - member
-        # documents across all coverage years, the ID cards, and the Letters -
-        # each its own read-only member API.
+        # documents across all coverage years, the ID cards, the Letters and
+        # the claims summaries - each its own read-only member API.
         if others:
             self.cmd_documents()
             self.cmd_id_cards()
             self.cmd_letters()
+            self.cmd_claims_summaries()
         self._stop_if_eobs_unread()
 
     def _stop_if_eobs_unread(self) -> None:
@@ -964,6 +965,33 @@ class App:
             "letters", rows,
             lambda pg, r: site.render_letter(pg, r["label"], r.get("body", ""), r.get("date", "")))
 
+    def cmd_claims_summaries(self):
+        """Download the claims list as one claims summary a year, and one for
+        the current year to date, each a PDF table with its CSV kept beside
+        it. Anthem exports the list only as a CSV; it is read, never changed."""
+        print("\nClaims summaries (the claims list, one a year)...")
+        page = self._on_its_site()
+        self.check_session(page)
+        try:
+            rows = site.list_claims_summaries(page)
+        except site.SessionExpired:
+            self._session_expired()
+            return
+        except site.ListingIncomplete as e:
+            self._listing_incomplete(e)
+            return
+        self._save_collected(
+            "claims summaries", rows,
+            lambda pg, r: site.render_claims_summary(pg, r["label"], r["csv"]))
+        # The CSV is kept beside each summary saved, as Anthem handed it over.
+        for r in rows:
+            rec = self.progress.get(r["key"]) or {}
+            pdf = Path(rec.get("pdf_path") or "")
+            if rec.get("downloaded_ok") and pdf.is_file():
+                beside = pdf.with_suffix(".csv")
+                if not beside.exists():
+                    beside.write_bytes(r["csv"].encode("utf-8"))
+
     def cmd_resume(self):
         self.stats["mode"] = "resume"
         # The EOBs carry on from the list the last run read, which Resume does
@@ -986,6 +1014,7 @@ class App:
             self.cmd_documents()
             self.cmd_id_cards()
             self.cmd_letters()
+            self.cmd_claims_summaries()
         listing.after_resume(self)
 
 
@@ -1229,6 +1258,7 @@ def build_parser() -> argparse.ArgumentParser:
             ("documents", "download member plan / authorization / tax documents (all years)"),
             ("id-cards", "download each member's digital ID / insurance card as a PDF"),
             ("letters", "download secure Message Center letters (read-safe)"),
+            ("claims-summaries", "download the claims list, one PDF table and CSV a year"),
             ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
             ("rename", "rename downloaded files to this app's current naming"),
@@ -1284,6 +1314,9 @@ def main(argv=None):
         elif args.letters:
             app.stats["mode"] = "letters"
             app.cmd_letters()
+        elif args.claims_summaries:
+            app.stats["mode"] = "claims-summaries"
+            app.cmd_claims_summaries()
         elif args.resume:
             app.cmd_resume()
         elif args.verify:

@@ -11,6 +11,9 @@ and delete-safe, part of [PaperPull](../../README.md):
 - **ID / insurance cards**, each covered member's digital card, front and back,
   as one PDF per card.
 - **Letters**, every secure Message Center letter, read and unread.
+- **Claims summaries**, the claims list, one a year for each year that has
+  ended and one for the current year to date, each a PDF table with Anthem's
+  CSV kept beside it.
 
 Every one of these is fetched by the portal's own read-only member API from inside
 your signed-in page, **nothing on the page is ever clicked, submitted or
@@ -51,6 +54,10 @@ and message your care team. This tool does none of it. Concretely:
   page. There is no click, no form submit, no dialog confirmation, and the only
   navigation is to a read-only page to capture the session; a test enforces that
   the code never fills, submits, confirms or clicks anything.
+- **One read is asked for by POST.** Anthem exports the claims list only by
+  POST, as its own page does. That call reads the list for two dates and
+  changes nothing, and a test holds it to that procedure and those inputs,
+  as the only POST the app makes.
 - **The guard refuses coverage and account controls outright.** Find care,
   change PCP, refill, appeal, grievance, prior authorization, message, schedule,
   enroll, switch plan, pay premium, go paperless, plus every "change", "update",
@@ -100,6 +107,7 @@ If a run stops saying the session expired or was blocked, sign in again and use
 | `Tax Documents\` | 1095-B health-coverage form, if the account has one (created on demand) |
 | `ID Cards\` | Each covered member's digital ID / insurance card (front and back) as one PDF, named per member (created on demand) |
 | `Letters\` | Secure Message Center letters, one PDF per message (created on demand) |
+| `Claims Summaries\` | The claims list as a PDF table, with its CSV beside it: one for each calendar year that has ended, and one for the current year to date each month a run sees (created on demand) |
 | `Other Documents\` | Anything else recognized but unrouted (created on demand) |
 | `Manual Review\` | Files that failed PDF validation |
 
@@ -111,6 +119,7 @@ fetches **all** of them. Each also has its own command:
 python anthem_docs.py --documents    member documents, all coverage years
 python anthem_docs.py --id-cards      digital ID / insurance cards
 python anthem_docs.py --letters       secure Message Center letters
+python anthem_docs.py --claims-summaries  the claims list, one PDF table and CSV a year
 ```
 
 The member documents span **all coverage periods** the portal exposes, so prior
@@ -137,7 +146,6 @@ this portal.
 
 ### Not captured yet
 
-- **Claims summaries** (the claims list, separate from the EOB Center).
 - **EOB history older than ~24 months**, the EOB API returns nothing for a start
   date older than about 25 months (see below). Member documents, ID cards and
   letters have no such window and come down in full.
