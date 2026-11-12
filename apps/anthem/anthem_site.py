@@ -712,7 +712,7 @@ def _claim_number(row: dict) -> str:
     an opaque token made new on every call, so never the number. Older shapes
     carried the number as a value: the entry whose value has both letters and
     digits, else the last value of the claim number's shape. Falls back to
-    top-level candidate keys."""
+    top-level candidate keys, held to the same shape."""
     entry = _claim_number_entry(row)
     if entry is not None:
         shown = str(entry.get("display") or "").strip()
@@ -731,8 +731,11 @@ def _claim_number(row: dict) -> str:
                     return sv
             if values and _CLAIMNUM_RE.fullmatch(str(values[-1])):
                 return str(values[-1])
+    # A top-level key is held to the claim number's shape as well, so a token
+    # moved there is never kept as the claim number.
     _, v = _first_key(row, _CLAIMID_KEYS)
-    return str(v).strip() if v else ""
+    v = str(v).strip() if v else ""
+    return v if _CLAIMNUM_RE.fullmatch(v) else ""
 
 
 def _claim_ref(row: dict, claim_id: str) -> str:

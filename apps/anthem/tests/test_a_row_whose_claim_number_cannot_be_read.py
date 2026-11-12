@@ -115,3 +115,23 @@ def test_a_run_with_a_row_it_could_not_read_does_not_end_clean(tmp_path, monkeyp
     monkeypatch.setattr(app_mod.App, "page", lambda self: page)
     monkeypatch.setattr(app_mod.App, "check_session", lambda *_a, **_kw: None)
     assert app_mod.main(["--config", str(cfg), "--discover"]) == 1
+
+
+@pytest.mark.parametrize("key", ["claimId", "claimNumber", "claimReferenceNumber"])
+@pytest.mark.parametrize("value", ["e_" + "2e" * 67, "x_" + "5b" * 63, "ABC12", "9000000AA0001-2",
+                                   "9" * 21])
+def test_a_token_at_a_top_level_claim_key_is_no_claim_number(monkeypatch, key, value):
+    """A reshape that moves the token to a top-level claim key leaves the row
+    unread, counted and never a record the guard refuses."""
+    signed_in(monkeypatch)
+    row = {"identifier": "Z_" + "3d" * 95, "created": "2026-03-04", key: value}
+    rows = site.collect_documents(FakePage({"Medical": [row]}))
+    assert list(rows) == []
+    assert rows.unread == {"Medical": 1}
+
+
+def test_a_claim_number_at_a_top_level_key_is_still_read(monkeypatch):
+    signed_in(monkeypatch)
+    row = {"identifier": "Z_" + "3d" * 95, "created": "2026-03-04", "claimId": "9000000AA0001"}
+    (got,) = site.collect_documents(FakePage({"Medical": [row]}))
+    assert got["doc_id"] == "Medical|9000000AA0001|EOB|0"
