@@ -41,7 +41,9 @@ def statement(token, created="2026-03-01", name="Mar 2026 Pharmacy EOB (2026 YTD
     return {"identifier": token, "created": created, "name": name}
 
 
-ONE, TWO, LATER = statement("aa" * 86), statement("bb" * 86), statement("cc" * 86, "2026-04-01")
+ONE, LATER = statement("aa" * 86), statement("cc" * 86, "2026-04-01")
+# Made the same day as ONE, under a name of its own.
+TWO = statement("bb" * 86, name="Feb 2026 Pharmacy EOB (2026 YTD)")
 
 
 # -- the listing -------------------------------------------------------------
@@ -98,12 +100,17 @@ def discover(tmp_path, monkeypatch):
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(config), encoding="utf-8")
 
-    def ran(rows_by_type):
-        app = app_mod.App(app_mod.build_parser().parse_args(["--config", str(cfg), "--discover"]))
+    def ran(rows_by_type, *flags):
+        """Discover, or with flags an app of those flags that has not run."""
+        app = app_mod.App(app_mod.build_parser().parse_args(
+            ["--config", str(cfg), *(flags or ("--discover",))]))
         page = FakePage(rows_by_type)
         app.page = lambda: page
+        app._on_its_site = lambda: page
+        app.fake_page = page
         app.check_session = lambda *_a, **_kw: None
-        app.cmd_discover(quiet=True)
+        if not flags:
+            app.cmd_discover(quiet=True)
         return app
     return ran
 
@@ -176,3 +183,28 @@ def test_a_medical_row_whose_claim_moved_is_never_asked_for_with_no_claim(monkey
 def test_the_guard_takes_a_statement_only_as_pharmacys_of_a_real_day(doc_id):
     assert site.parse_doc_id(doc_id) is None
     assert site.parse_doc_id(STATEMENT) == ("Pharmacy", "20260301", "Statement", 0)
+
+
+@pytest.mark.parametrize("listed", [[ONE, TWO], [TWO, ONE]], ids=["one-first", "two-first"])
+def test_a_download_again_of_a_statement_two_rows_now_give_fetches_neither(discover, tmp_path,
+                                                                           listed):
+    """The statement was saved when Anthem listed one of that date. Now it
+    lists two, and a Download again in either order fetches neither and
+    keeps the record and the file saved before."""
+    first = discover({"Pharmacy": [ONE]})
+    key = "id:" + STATEMENT
+    pdf = tmp_path / "saved before.pdf"
+    pdf.write_bytes(b"%PDF-1.4 invented, saved before")
+    first.progress.update(key, dict(first.discovery.get(key), state="Completed",
+                                    downloaded_ok=True, pdf_path=str(pdf)))
+    first.progress.save()
+
+    again = discover({"Pharmacy": listed}, "--all", "--yes", "--redownload")
+    docs = again._select()
+    assert [d.key for d in docs] == [key]
+    again.process(docs)
+    assert again.fake_page.downloads == []
+    rec = again.progress.get(key)
+    assert rec["downloaded_ok"] is True and rec["pdf_path"] == str(pdf)
+    assert pdf.read_bytes() == b"%PDF-1.4 invented, saved before"
+    assert [p for p in Path(again.paths.root).rglob("*.pdf")] == []
