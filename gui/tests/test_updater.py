@@ -23,6 +23,14 @@ app_module = pytest.importorskip("app")
 fastapi = pytest.importorskip("fastapi")
 
 
+@pytest.fixture(autouse=True)
+def _a_temp_folder_of_its_own(tmp_path_factory, monkeypatch):
+    """Each test's temp folder is its own, so a download's folder lands
+    there and the removal of installers earlier updates kept never looks
+    at this computer's own temp folder."""
+    monkeypatch.setattr(updater.tempfile, "tempdir", str(tmp_path_factory.mktemp("temp")))
+
+
 def release(version="0.61.0", arch="arm64", **over):
     name = "PaperPull-%s-%s.dmg" % (version, arch)
     data = {
@@ -892,7 +900,8 @@ def test_every_place_that_checks_the_signer_accepts_the_same_two():
     """A census of the repository, tests left out. Every file that spells
     out a publisher's certificate subject, or reads a signer at all, names
     either no publisher or exactly the two this check accepts. The scripts
-    the panel starts name none."""
+    the panel starts name none, and the one that runs the installer is
+    handed the panel's own list."""
     pinned, readers = {}, {}
     for rel in _tracked_files():
         try:
@@ -909,6 +918,73 @@ def test_every_place_that_checks_the_signer_accepts_the_same_two():
         assert names in (set(), set(SIGNER_NAMES)), (rel, names)
     for script in (updater.INSTALL_PS, updater._SIGNATURE_PS):
         assert "CN=" not in script and not [n for n in SIGNER_NAMES if n in script]
+    assert updater._signer_env() == {
+        "PAPERPULL_UPDATE_SIGNERS": "\n".join(p.pattern for p in updater._SIGNERS),
+        "PAPERPULL_UPDATE_ISSUER": updater._ISSUER.pattern}
+
+
+def test_the_install_script_is_handed_the_panels_own_signers(tmp_path, monkeypatch):
+    folder = tmp_path / "PaperPull"
+    folder.mkdir()
+    setup, sha = _installer(tmp_path)
+    monkeypatch.setattr(updater.subprocess, "Popen", _Started)
+    _Started.seen.clear()
+    updater.start_installer(folder, setup, sha, "0.61.0", pid=4242)
+    env = _Started.seen[-1]
+    assert env["PAPERPULL_UPDATE_SIGNERS"].split("\n") == [p.pattern for p in updater._SIGNERS]
+    assert env["PAPERPULL_UPDATE_ISSUER"] == updater._ISSUER.pattern
+    assert "'SIGNERS', 'ISSUER'" in updater.INSTALL_PS     # read, then removed like the rest
+
+
+_JUDGE = r"""
+function Get-AuthenticodeSignature([string]$LiteralPath) {
+  [pscustomobject]@{ Status = $case.status; SignatureType = $case.type;
+    SignerCertificate = [pscustomobject]@{ Subject = $case.subject; Issuer = $case.issuer } }
+}
+%(read)s
+%(publisher)s
+$cases = ConvertFrom-Json $env:CASES
+foreach ($case in $cases) {
+  $version = [string]$case.want
+  [string](Publisher $env:CHECKED)
+}
+"""
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="the install script runs in Windows PowerShell")
+def test_the_install_script_judges_a_signature_as_the_panel_does(tmp_path):
+    """The script's own check, run by Windows PowerShell with the panel's
+    signers, answers as signed_by_publisher and the version check do, for
+    each accepted signer, each near miss, and each other way a signature
+    can fail. The file it reads says no version, as a plain file does."""
+    read = "\n".join(re.findall(r"^\$(?:signers|issuer) = .*$", updater.INSTALL_PS, re.M))
+    publisher = re.search(r"^function Publisher\b.*?^}$", updater.INSTALL_PS, re.M | re.S)
+    assert read.count("\n") == 1 and publisher
+    cases = []
+    for name in SIGNER_NAMES:
+        for subject in [_subject(name)] + _near_misses(name):
+            cases.append(dict(PUBLISHER, subject=subject, want=""))
+    for change in ({"status": "NotSigned"}, {"status": "HashMismatch"}, {"type": "Catalog"},
+                   {"issuer": "CN=Microsoft ID Verified CS AOC CA 04, O=Evil, C=US"},
+                   {"issuer": "CN=Microsoft ID Verified CS EOC CA 01, O=Microsoft Corporation, C=US"},
+                   {"issuer": "cn=microsoft id verified cs eoc ca 01, o=microsoft corporation, c=us"},
+                   {"want": "0.61.0"}):
+        cases.append(dict(dict(PUBLISHER, want=""), **change))
+    for case in cases:
+        case["version"] = ""
+    checked = tmp_path / "checked.exe"
+    checked.write_bytes(b"says no version")
+    env = dict(updater._powershell_env(CASES=json.dumps(cases), CHECKED=str(checked)), **updater._signer_env())
+    script = _JUDGE % {"read": read, "publisher": publisher.group(0)}
+    done = subprocess.run([updater._powershell(), "-NoLogo", "-NoProfile", "-NonInteractive",
+                           "-Command", script], capture_output=True, text=True, timeout=120, env=env,
+                          stdin=subprocess.DEVNULL)
+    said = done.stdout.split()
+    assert len(said) == len(cases), done.stderr[-2000:]
+    for case, answer in zip(cases, said):
+        panel = updater.signed_by_publisher(case) and str(case["version"]).strip() == case["want"]
+        assert answer == str(panel), case
+    assert said.count("True") == len(SIGNER_NAMES) + 1
 
 
 def _installer(where, body=b"installer"):
@@ -1237,10 +1313,13 @@ def test_both_scripts_are_one_argument_with_no_double_quote():
 # python.exe. Each writes where it ran from, whether it was handed the
 # script's own variables, and its arguments to a file named after it, and
 # ends with the code in a file beside it, so the script is run exactly as the
-# panel runs it, by PowerShell, with a process to wait for.
+# panel runs it, by PowerShell, with a process to wait for. A file holding
+# several codes gives them one run at a time, and each stub says it is
+# version 0.61.0, as the release's installer does.
 
 _STUB = r'''
 using System; using System.IO; using System.Threading;
+[assembly: System.Reflection.AssemblyInformationalVersion("0.61.0")]
 static class Stub { static int Main(string[] a) {
   string me = System.Reflection.Assembly.GetEntryAssembly().Location;
   string handed = Environment.GetEnvironmentVariable("PAPERPULL_UPDATE_SETUP") ?? "";
@@ -1249,9 +1328,32 @@ static class Stub { static int Main(string[] a) {
   string ms = Environment.GetEnvironmentVariable("STUB_SLEEP_MS");
   if (!string.IsNullOrEmpty(ms)) Thread.Sleep(int.Parse(ms));
   string code = me + ".exit";
-  return File.Exists(code) ? int.Parse(File.ReadAllText(code).Trim()) : 0;
+  if (!File.Exists(code)) return 0;
+  string[] codes = File.ReadAllText(code).Trim().Split(' ');
+  if (codes.Length > 1) File.WriteAllText(code, string.Join(" ", codes, 1, codes.Length - 1));
+  return int.Parse(codes[0]);
 } }
 '''
+
+
+def _signed(subject="CN=TNE Enterprises LLC, O=TNE Enterprises LLC, L=Town, S=State, C=US",
+            issuer="CN=Microsoft ID Verified CS EOC CA 04, O=Microsoft Corporation, C=US",
+            status="Valid"):
+    """Get-AuthenticodeSignature as the script would find it on a release's
+    installer, since no stub here carries the publisher's signature. In
+    PowerShell a function comes before a command of the same name. It notes
+    each file it was asked about."""
+    return ("function Get-AuthenticodeSignature([string]$LiteralPath) {\n"
+            "  Add-Content -LiteralPath (Join-Path $env:STUB_DIR 'signature.asked') -Value $LiteralPath\n"
+            "  [pscustomobject]@{ Status = '%s'; SignatureType = 'Authenticode'; "
+            "SignerCertificate = [pscustomobject]@{ Subject = '%s'; Issuer = '%s' } }\n"
+            "}\n" % (status, subject, issuer))
+
+
+def _as_signed(monkeypatch, **kw):
+    """The script, with the stub installer read as signed by PaperPull's
+    publisher, or by whatever `kw` names."""
+    monkeypatch.setattr(updater, "INSTALL_PS", _signed(**kw) + updater.INSTALL_PS)
 
 
 @pytest.fixture(scope="module")
@@ -1403,6 +1505,7 @@ def test_a_failed_install_opens_the_kept_installer_to_finish(tmp_path, monkeypat
     that was checked, brackets and all, and never PaperPull over a copy it
     may have left half replaced."""
     seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe, work_name="paperpull-update-[f]")
+    _as_signed(monkeypatch)
     decoy = tmp_path / "paperpull-update-f"
     decoy.mkdir()
     (decoy / SETUP).write_bytes(stub_exe)
@@ -1438,6 +1541,7 @@ def test_an_error_before_the_installer_ran_opens_it_for_a_copy_that_does_not_sta
     read the number of. The copy is the one the person had, and it does not
     start, so the kept installer opens with its usual window to put it right."""
     seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    _as_signed(monkeypatch)
     Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
     proc = updater.start_installer(app, setup, sha, "0.61.0", pid="not-a-number")
     log = _after(proc, seen, SETUP)
@@ -1694,3 +1798,228 @@ def test_a_process_list_windows_will_not_give_does_not_stop_the_update(tmp_path,
     monkeypatch.setattr(updater, "programs_running_from", broken)
     inst.restart(lambda: "")
     assert len(started) == 1 and inst.phase == "restarting"
+
+
+# -- what the review of the 0.65.0 install left ------------------------------
+
+def _while_the_installer_runs(seen, setup, then):
+    """Once the installer's silent run has started, moves its file aside as
+    another program of the person's could, then does `then`. The stub sleeps
+    for STUB_SLEEP_MS, so this happens before it ends with its code."""
+    deadline = time.time() + 30
+    while not (seen / (SETUP + ".ran")).exists():
+        assert time.time() < deadline, "the installer never ran"
+        time.sleep(0.05)
+    aside = setup.parent.parent / "aside.exe"
+    while True:
+        try:
+            # A running program can be renamed, once the script lets go of it.
+            updater.os.replace(setup, aside)
+            break
+        except PermissionError:
+            assert time.time() < deadline, "the installer stayed held"
+            time.sleep(0.05)
+    return then()
+
+
+def _ran_once_silently(seen):
+    return _ran(seen, SETUP)[2][:1] == ["/SILENT"]
+
+
+@pytest.mark.parametrize("python_starts", [True, False])
+def test_a_kept_installer_that_went_ends_plainly_and_opens_paperpull(tmp_path, monkeypatch, stub_exe,
+                                                                     python_starts):
+    """The installer ran and failed, and by the time it ended its file was
+    gone. The log says so plainly, and the PaperPull that was running opens
+    again, with nothing else run first, so the person is not left with
+    nothing when its Python does not start either."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    _as_signed(monkeypatch)
+    monkeypatch.setenv("STUB_SLEEP_MS", "1500")
+    Path(str(setup) + ".exit").write_text("4")
+    if not python_starts:
+        Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    _while_the_installer_runs(seen, setup, lambda: None)
+    log = _after(proc, seen, "PaperPull.exe")
+    assert _ran(seen, "PaperPull.exe")[0] == str(app / "PaperPull.exe")
+    assert not (seen / "python.exe.ran").exists() and _ran_once_silently(seen)
+    assert "ended with 4" in log and "no longer where it was kept" in log
+    assert "Download the installer from the release page" in log and "opened PaperPull again" in log
+    assert not setup.parent.exists()
+
+
+def test_a_kept_installer_that_cannot_be_started_ends_plainly_and_opens_paperpull(
+        tmp_path, monkeypatch, stub_exe):
+    """The kept installer is there, the very file that was checked, but
+    another program holds it open to write, as a scanner can, so it cannot
+    start. The log says so, PaperPull opens again, and nothing else runs."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    _as_signed(monkeypatch)
+    monkeypatch.setenv("STUB_SLEEP_MS", "1500")
+    Path(str(setup) + ".exit").write_text("4")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+
+    def hold():
+        setup.write_bytes(stub_exe)
+        return open(setup, "r+b")
+    held = _while_the_installer_runs(seen, setup, hold)
+    try:
+        log = _after(proc, seen, "PaperPull.exe")
+    finally:
+        held.close()
+    assert _ran(seen, "PaperPull.exe")[0] == str(app / "PaperPull.exe")
+    assert not (seen / "python.exe.ran").exists() and _ran_once_silently(seen)
+    assert "could not be opened again" in log and "Download the installer from the release page" in log
+
+
+def test_an_installer_that_cannot_start_at_all_opens_paperpull_and_nothing_else(tmp_path, monkeypatch, stub_exe):
+    """The checked file is not a program Windows will start. Nothing was
+    installed, so the copy is the one the person had, and it opens again
+    without a check of its Python or a second try of the installer."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    _as_signed(monkeypatch)
+    setup.write_bytes(b"not a program")
+    sha = hashlib.sha256(b"not a program").hexdigest()
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    log = _after(proc, seen, "PaperPull.exe")
+    time.sleep(1.0)
+    assert sorted(p.name for p in seen.iterdir()) == ["PaperPull.exe.ran"]
+    assert "the installer could not be started, so nothing was installed" in log
+    assert "opened PaperPull again" in log and not setup.parent.exists()
+
+
+def test_a_kept_installer_that_changed_is_never_opened_again(tmp_path, monkeypatch, stub_exe):
+    """%TEMP% can be written by the person's other programs. A kept
+    installer whose bytes changed while it ran is refused before it would
+    open again, plainly, and PaperPull opens instead."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    _as_signed(monkeypatch)
+    monkeypatch.setenv("STUB_SLEEP_MS", "1500")
+    Path(str(setup) + ".exit").write_text("4")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    _while_the_installer_runs(seen, setup, lambda: setup.write_bytes(stub_exe + b"changed"))
+    log = _after(proc, seen, "PaperPull.exe")
+    time.sleep(1.0)
+    assert _ran_once_silently(seen) and _ran(seen, "PaperPull.exe")[0] == str(app / "PaperPull.exe")
+    assert "changed after it was checked, so it was not opened again" in log
+    assert not setup.parent.exists()
+
+
+@pytest.mark.parametrize("signature", ["none", "someone else"])
+def test_a_kept_installer_not_signed_by_the_publisher_is_never_opened_again(tmp_path, monkeypatch, stub_exe,
+                                                                            signature):
+    """The same bytes, read again just before the installer would open, and
+    its signature checked as the panel checks it. The stub carries none,
+    read by Windows itself, or one by somebody else."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    if signature == "someone else":
+        _as_signed(monkeypatch, subject="CN=Someone Else, O=Someone Else, L=Town, S=State, C=US")
+    Path(str(setup) + ".exit").write_text("4")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    log = _after(proc, seen, SETUP, "PaperPull.exe")
+    time.sleep(1.0)
+    assert _ran_once_silently(seen) and _ran(seen, "PaperPull.exe")[0] == str(app / "PaperPull.exe")
+    assert "no longer signed by the publisher of PaperPull, so it was not opened again" in log
+    assert not setup.parent.exists()
+    if signature == "someone else":
+        assert (seen / "signature.asked").read_text().split("\n")[0] == str(setup)
+
+
+def test_a_kept_installer_that_finishes_the_update_is_removed(tmp_path, monkeypatch, stub_exe):
+    """The installer failed once and opened again, and this time it
+    installed. It is no longer needed, so its folder goes."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    _as_signed(monkeypatch)
+    Path(str(setup) + ".exit").write_text("4 0")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    log = _second_run(proc, seen)
+    assert _ran(seen, SETUP)[2] == [""] and not (seen / "PaperPull.exe.ran").exists()
+    assert "opened with its usual window to finish the update" in log and "finished the update" in log
+    assert not setup.parent.exists()
+
+
+def test_a_kept_installer_paperpull_opened_instead_of_is_removed(tmp_path, monkeypatch, stub_exe):
+    """Something went wrong before the installer ran, and the copy the
+    person had starts, so it opens again and the installer is not needed."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid="not-a-number")
+    log = _after(proc, seen, "python.exe", "PaperPull.exe")
+    time.sleep(1.0)
+    assert not (seen / (SETUP + ".ran")).exists() and (seen / "PaperPull.exe.ran").exists()
+    assert "stopped" in log and "opened PaperPull again" in log
+    assert not setup.parent.exists()
+
+
+def _made(where, name, *files):
+    folder = where / name
+    folder.mkdir()
+    for f in files:
+        (folder / f).write_bytes(b"x")
+    return folder
+
+
+def test_a_new_update_removes_the_installers_earlier_updates_kept(tmp_path, monkeypatch):
+    """Only the folders the updater made, named as tempfile.mkdtemp names
+    them, holding nothing but the files the updater writes there. Anything
+    else in the temp folder is left as it is, a link of the same name too."""
+    temp = Path(updater.tempfile.gettempdir())
+    gone = [_made(temp, "paperpull-update-abc12_yz", "PaperPull-0.60.0-setup.exe", "started"),
+            _made(temp, "paperpull-update-k9m2p0qr", "PaperPull-0.61.0-setup.exe.part"),
+            _made(temp, "paperpull-update-zzzzzzzz")]
+    kept = [_made(temp, "paperpull-update-q1w2e3r4", "PaperPull-0.60.0-setup.exe", "notes.txt"),
+            _made(temp, "paperpull-update-a1b2c3d4", "PaperPull-0.60.0-setup.exe.bak"),
+            _made(temp, "paperpull-update-b1b2c3d4", "PaperPull-0.60.0-arm64.dmg"),
+            _made(temp, "paperpull-update-c1b2c3d4", "swap.sh"),
+            _made(temp, "paperpull-update-mine", "PaperPull-0.60.0-setup.exe"),
+            _made(temp, "paperpull-update-abcdefghi", "PaperPull-0.60.0-setup.exe"),
+            _made(temp, "Paperpull-Update-d1b2c3d4", "PaperPull-0.60.0-setup.exe"),
+            _made(temp, "someone-elses", "PaperPull-0.60.0-setup.exe", "started")]
+    deeper = _made(temp, "paperpull-update-e1b2c3d4", "PaperPull-0.60.0-setup.exe")
+    _made(deeper, "mnt", "PaperPull.app")
+    kept.append(deeper)
+    loose = temp / "PaperPull-0.60.0-setup.exe"
+    loose.write_bytes(b"x")
+    files_before = sorted(str(p) for k in kept for p in k.rglob("*"))
+    link = temp / "paperpull-update-f1b2c3d4"
+    target = _made(tmp_path, "elsewhere", "PaperPull-0.60.0-setup.exe")
+    linked = False
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+        linked = True
+    try:
+        updater.remove_kept_installers()
+        assert [g for g in gone if g.exists()] == []
+        assert sorted(str(p) for k in kept for p in k.rglob("*")) == files_before
+        assert loose.is_file() and (target / "PaperPull-0.60.0-setup.exe").is_file()
+        if linked:
+            assert updater.os.path.lexists(link)
+    finally:
+        if linked:
+            updater.os.rmdir(link)
+
+
+def test_a_new_update_on_windows_starts_by_removing_what_earlier_ones_kept(tmp_path, monkeypatch):
+    temp = Path(updater.tempfile.gettempdir())
+    old = _made(temp, "paperpull-update-old00000", "PaperPull-0.60.0-setup.exe")
+    body = b"installer"
+    monkeypatch.setattr(updater, "this_copy_is_signed", lambda folder: True)
+    monkeypatch.setattr(updater, "check_latest", lambda *a, **k: dict(_windows_rel(body=body), newer=True))
+    monkeypatch.setattr(updater, "_open", lambda url, timeout=20: _Resp(body))
+    monkeypatch.setattr(updater, "verify_installer", lambda *a: None)
+    inst = updater.Install()
+    inst.start("0.60.1", tmp_path, kind="windows")
+    assert _finish(inst)["phase"] == "ready"
+    assert not old.exists() and inst.staged.is_file() and inst.staged.parent.parent == temp
+
+
+def test_a_mac_update_leaves_the_temp_folder_alone(tmp_path, monkeypatch):
+    """A Mac's work folder holds a disk image's mount point, and the swap
+    script removes its own, so a Mac update removes nothing there."""
+    temp = Path(updater.tempfile.gettempdir())
+    old = _made(temp, "paperpull-update-old00000", "PaperPull-0.60.0-setup.exe")
+    monkeypatch.setattr(updater, "check_latest", lambda *a, **k: {"newer": False})
+    inst = updater.Install()
+    inst.start("0.60.1", tmp_path, kind="mac")
+    assert _finish(inst)["phase"] == "error" and old.is_dir()

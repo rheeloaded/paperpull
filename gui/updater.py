@@ -60,10 +60,14 @@ starts it, and runs it with only its progress showing. The installer keeps
 the folder and the shortcuts the person chose. When it succeeds, the script
 opens PaperPull again. When it fails, the folder can hold some new files and
 some old, so the script keeps the installer and opens it again with its
-usual window, so the install can be finished. When it never ran, the script
-opens the copy the person had, if that copy's Python starts. It writes what
-it did to update.log beside the panel's settings, in
-AppData\\Roaming\\PaperPull.
+usual window, so the install can be finished, once its SHA-256 and its
+signature are checked again. When that kept installer is gone, changed or
+will not open, or the installer could not be started at all, the script
+says so and opens the PaperPull that was running. When it never ran, the
+script opens the copy the person had, if that copy's Python starts. It
+writes what it did to update.log beside the panel's settings, in
+AppData\\Roaming\\PaperPull. An installer the update kept goes once it is
+no longer needed, and a new update removes the ones earlier updates kept.
 """
 from __future__ import annotations
 
@@ -75,6 +79,7 @@ import platform
 import re
 import shutil
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
@@ -103,7 +108,8 @@ _DMG = re.compile(r"^PaperPull-\d{1,4}\.\d{1,4}\.\d{1,4}-(arm64|x86_64)\.dmg$")
 _SETUP = re.compile(r"^PaperPull-\d{1,4}\.\d{1,4}\.\d{1,4}-setup\.exe$")
 
 # Who may sign the Windows installer, the only signers the update check
-# accepts. Azure Artifact Signing issues a
+# accepts, here and in the script that runs the installer, which is handed
+# these same patterns (_signer_env). Azure Artifact Signing issues a
 # certificate that lasts a few days, from one of Microsoft's ID Verified
 # intermediates, which rotate (AOC CA 03 and 04 and EOC CA 04 so far), and the
 # signature's timestamp keeps it valid after the certificate ends. The subject
@@ -689,6 +695,13 @@ def signed_by_publisher(sig: dict) -> bool:
             and bool(_ISSUER.match(str(sig.get("issuer") or ""))))
 
 
+def _signer_env() -> dict:
+    """The signers and the issuer the update check accepts, as the script
+    that runs the installer is handed them, one pattern a line."""
+    return {"PAPERPULL_UPDATE_SIGNERS": "\n".join(signer.pattern for signer in _SIGNERS),
+            "PAPERPULL_UPDATE_ISSUER": _ISSUER.pattern}
+
+
 def _sha256_of(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -755,11 +768,21 @@ def can_write(folder: Path) -> bool:
 # they are scanned. After an installer that ran and failed, the folder can
 # hold some new files and some old, so the script opens the kept installer
 # again with its usual window, for the person to finish the install, and
-# never the copy it may have left half replaced. When the installer never
-# ran, the copy is the one the person had, and the script opens it if its
-# Python starts. A check that throws or takes a minute counts as a no, and
-# then the kept installer opens instead. The installer is kept unless it
-# installed, or was not the one checked, and one that was not is never
+# never the copy it may have left half replaced. The kept installer sits in
+# the temp folder, which the person's other programs can write, so it opens
+# again only while it is held and once its SHA-256 and its signature are
+# checked again, by the signers the panel accepts (PAPERPULL_UPDATE_SIGNERS).
+# When it is gone, changed or will not open, the log says so, and the script
+# opens the PaperPull that was running and runs nothing else. So it does
+# when the installer could not be started at all, which installed nothing.
+# When the installer never ran, the copy is the one the person had, and the
+# script opens it if its Python starts. A check that throws or takes a
+# minute counts as a no, and then the kept installer opens instead.
+#
+# The script waits for a kept installer it opened, and once that installs,
+# its folder goes. The folder goes too once nothing needs the installer,
+# after it installed, when PaperPull opened in its place, or when it could
+# not be used, and an installer that was not the one checked is never
 # opened. Its folder is removed only when it is one the panel made.
 #
 # Programs are started through .NET, never Start-Process, which reads a
@@ -773,17 +796,21 @@ $app = $env:PAPERPULL_UPDATE_APP
 $sha256 = $env:PAPERPULL_UPDATE_SHA256
 $version = $env:PAPERPULL_UPDATE_VERSION
 $started = $env:PAPERPULL_UPDATE_STARTED
+$signers = @($env:PAPERPULL_UPDATE_SIGNERS -split [char]10 | Where-Object { $_ })
+$issuer = $env:PAPERPULL_UPDATE_ISSUER
 $waitFor = @($env:PAPERPULL_UPDATE_WAIT -split ' ' | Where-Object { $_ })
 $deadline = (Get-Date).AddSeconds([int]$env:PAPERPULL_UPDATE_WAIT_S)
-foreach ($name in @('LOG', 'SETUP', 'APP', 'SHA256', 'VERSION', 'STARTED', 'WAIT', 'WAIT_S')) {
+foreach ($name in @('LOG', 'SETUP', 'APP', 'SHA256', 'VERSION', 'STARTED', 'SIGNERS', 'ISSUER', 'WAIT', 'WAIT_S')) {
   Remove-Item -Path ('Env:PAPERPULL_UPDATE_' + $name) -ErrorAction SilentlyContinue
 }
 $work = Split-Path -Parent $setup
 $said = $false
 $closed = $false
 $ran = $false
+$unstarted = $false
 $installed = $false
 $keep = $true
+$reopened = $null
 function Say([string]$text) {
   try { Add-Content -LiteralPath $log -Encoding UTF8 -Value ((Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' ' + $text) } catch { }
 }
@@ -795,20 +822,86 @@ function Run([string]$file, [string]$arguments, [bool]$window) {
   $info.WorkingDirectory = Split-Path -Parent $file
   return [System.Diagnostics.Process]::Start($info)
 }
-function Reopen {
+function Hash([IO.Stream]$stream) {
+  $hasher = [Security.Cryptography.SHA256]::Create()
+  return -join ($hasher.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') })
+}
+function Publisher([string]$file) {
+  $signature = Get-AuthenticodeSignature -LiteralPath $file
+  $certificate = $signature.SignerCertificate
+  $subject = [string]$certificate.Subject
+  $named = @($signers | Where-Object { $subject -cmatch $_ })
+  $product = [string][Diagnostics.FileVersionInfo]::GetVersionInfo($file).ProductVersion
+  return ([string]$signature.Status -ceq 'Valid' -and [string]$signature.SignatureType -ceq 'Authenticode' -and
+    $named.Count -gt 0 -and [bool]$issuer -and [string]$certificate.Issuer -cmatch $issuer -and
+    $product.Trim() -ceq $version)
+}
+function OpenKept {
+  if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) {
+    Say ('the installer is no longer where it was kept, so it was not opened again, ' + $setup)
+    return $false
+  }
+  $held = $null
   try {
-    if ($installed) {
-      $null = Run (Join-Path $app 'PaperPull.exe') '' $true
-      Say 'opened PaperPull again'
-      return
+    $held = [IO.File]::Open($setup, 'Open', 'Read', 'Read')
+    if ((Hash $held) -ne $sha256) {
+      Say 'the installer changed after it was checked, so it was not opened again'
+      return $false
     }
-    if ($ran -and (Test-Path -LiteralPath $setup -PathType Leaf)) {
-      $null = Run $setup '' $true
-      Say ('the installer did not finish, so it was opened with its usual window to finish the update, ' + $setup)
-      return
+    if (-not (Publisher $setup)) {
+      Say 'the installer is no longer signed by the publisher of PaperPull, so it was not opened again'
+      return $false
     }
+    $script:reopened = Run $setup '' $true
+    return $true
   } catch {
-    Say ('could not open it, ' + $_)
+    Say ('the installer could not be opened again, ' + $_)
+    return $false
+  } finally {
+    if ($held) { $held.Dispose() }
+  }
+}
+function AwaitKept {
+  try {
+    if ($script:reopened) {
+      $script:reopened.WaitForExit()
+      if ($script:reopened.ExitCode -eq 0) {
+        Say 'the installer finished the update'
+        $script:keep = $false
+      }
+    }
+  } catch { }
+}
+function OpenPaperPull([string]$text) {
+  try {
+    $null = Run (Join-Path $app 'PaperPull.exe') '' $true
+    Say $text
+    return $true
+  } catch {
+    Say ('could not open PaperPull again, ' + $_)
+    return $false
+  }
+}
+function Reopen {
+  if ($installed) {
+    $null = OpenPaperPull 'opened PaperPull again'
+    return
+  }
+  if ($ran) {
+    if (OpenKept) {
+      Say ('the installer did not finish, so it was opened with its usual window to finish the update, ' + $setup)
+      AwaitKept
+      return
+    }
+    $script:keep = $false
+    $null = OpenPaperPull 'opened PaperPull again as the installer left it. Download the installer from the release page and run it to finish the update.'
+    return
+  }
+  if ($unstarted) {
+    Say 'the installer could not be started, so nothing was installed'
+    $script:keep = $false
+    $null = OpenPaperPull 'opened PaperPull again'
+    return
   }
   $works = $false
   try {
@@ -821,19 +914,17 @@ function Reopen {
   } catch {
     Say ('the Python in its folder would not start, ' + $_)
   }
-  try {
-    $exe = Join-Path $app 'PaperPull.exe'
-    if ($works -and (Test-Path -LiteralPath $exe -PathType Leaf)) {
-      $null = Run $exe '' $true
-      Say 'opened PaperPull again'
-    } elseif ($keep -and (Test-Path -LiteralPath $setup -PathType Leaf)) {
-      $null = Run $setup '' $true
+  if ($works -and (Test-Path -LiteralPath (Join-Path $app 'PaperPull.exe') -PathType Leaf)) {
+    if (OpenPaperPull 'opened PaperPull again') { $script:keep = $false }
+  } elseif ($keep) {
+    if (OpenKept) {
       Say ('PaperPull does not start, so its installer was opened to finish the update, ' + $setup)
+      AwaitKept
     } else {
-      Say 'PaperPull does not start. Download the installer from the release page and run it.'
+      Say 'PaperPull does not start, and its installer could not be opened. Download the installer from the release page and run it.'
     }
-  } catch {
-    Say ('could not open PaperPull again, ' + $_)
+  } else {
+    Say 'PaperPull does not start. Download the installer from the release page and run it.'
   }
 }
 try {
@@ -849,21 +940,26 @@ try {
     }
   }
   $closed = $true
-  $file = [IO.File]::Open($setup, 'Open', 'Read', 'Read')
+  $file = $null
+  $run = $null
   try {
-    $hasher = [Security.Cryptography.SHA256]::Create()
-    $have = -join ($hasher.ComputeHash($file) | ForEach-Object { $_.ToString('x2') })
-    if ($have -ne $sha256) {
-      Say 'the installer is not the one the panel checked, so it was not run'
-      $keep = $false
-      Reopen
-      exit 1
+    $file = [IO.File]::Open($setup, 'Open', 'Read', 'Read')
+    if ((Hash $file) -eq $sha256) {
+      $setupLog = Join-Path (Split-Path -Parent $log) 'setup.log'
+      $run = Run $setup ('/SILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /LOG=' + [char]34 + $setupLog + [char]34) $false
+      $ran = $true
     }
-    $setupLog = Join-Path (Split-Path -Parent $log) 'setup.log'
-    $run = Run $setup ('/SILENT /SUPPRESSMSGBOXES /NORESTART /NOCANCEL /LOG=' + [char]34 + $setupLog + [char]34) $false
-    $ran = $true
+  } catch {
+    $unstarted = $true
+    throw
   } finally {
-    $file.Dispose()
+    if ($file) { $file.Dispose() }
+  }
+  if (-not $ran) {
+    Say 'the installer is not the one the panel checked, so it was not run'
+    $keep = $false
+    Reopen
+    exit 1
   }
   $run.WaitForExit()
   if ($run.ExitCode -eq 0) {
@@ -882,7 +978,10 @@ try {
   }
 } finally {
   if (-not $keep -and (Split-Path -Leaf $work) -like 'paperpull-update-*') {
-    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    for ($attempt = 0; $attempt -lt 10 -and (Test-Path -LiteralPath $work); $attempt++) {
+      if ($attempt) { Start-Sleep -Milliseconds 500 }
+      Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
   }
 }
 """
@@ -952,6 +1051,60 @@ def programs_running_from(folder: Path, but=()) -> list:
     return found
 
 
+# How tempfile.mkdtemp names the folder a Windows update downloads into
+# (Install._go), and the only files the updater writes there, the installer
+# while it downloads and once it has, and the file the install script writes
+# once it waits.
+_WORK = re.compile(r"^paperpull-update-[a-z0-9_]{8}$")
+_WORK_FILE = re.compile(r"^(PaperPull-\d{1,4}\.\d{1,4}\.\d{1,4}-setup\.exe(\.part)?|started)$")
+
+
+def _not_a_link(entry: os.DirEntry) -> bool:
+    """True for an entry that is itself a file or a folder, not a link or a
+    junction to one somewhere else."""
+    if entry.is_symlink():
+        return False
+    try:
+        attributes = getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return not attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+
+
+def remove_kept_installers(temp: Optional[Path] = None) -> None:
+    """Remove the installers earlier Windows updates kept in the temp folder.
+    An install that failed keeps its installer for the person to finish the
+    update with, and a panel closed while an update was ready leaves its
+    download, about 55 MB each. Only a folder the updater made is touched,
+    named as tempfile.mkdtemp names it, a folder of its own and not a link,
+    and holding nothing but files the updater writes there. Anything else in
+    the temp folder, and any folder holding anything else, is left as it is."""
+    temp = Path(temp or tempfile.gettempdir())
+    try:
+        entries = list(os.scandir(temp))
+    except OSError:
+        return
+    for entry in entries:
+        if not (_WORK.match(entry.name) and entry.is_dir(follow_symlinks=False) and _not_a_link(entry)):
+            continue
+        try:
+            inside = list(os.scandir(entry.path))
+        except OSError:
+            continue
+        if not all(_WORK_FILE.match(f.name) and f.is_file(follow_symlinks=False) and _not_a_link(f)
+                   for f in inside):
+            continue
+        for f in inside:
+            try:
+                os.unlink(f.path)
+            except OSError:
+                pass
+        try:
+            os.rmdir(entry.path)
+        except OSError:
+            pass
+
+
 OTHERS_SAY = ("Another PaperPull program is running from its folder, such as a download "
               "started in a terminal or a spreadsheet being built. Let it finish or close "
               "it, then restart to update.")
@@ -976,7 +1129,8 @@ def start_installer(folder: Path, setup: Path, sha256: str, version: str,
     env = _powershell_env(PAPERPULL_UPDATE_WAIT=" ".join(waits), PAPERPULL_UPDATE_WAIT_S=str(wait_s),
                           PAPERPULL_UPDATE_SETUP=str(setup), PAPERPULL_UPDATE_SHA256=sha256,
                           PAPERPULL_UPDATE_VERSION=version, PAPERPULL_UPDATE_APP=str(folder),
-                          PAPERPULL_UPDATE_LOG=str(log_path()), PAPERPULL_UPDATE_STARTED=str(started))
+                          PAPERPULL_UPDATE_LOG=str(log_path()), PAPERPULL_UPDATE_STARTED=str(started),
+                          **_signer_env())
     cmd = [_powershell(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", INSTALL_PS]
     # Its own console with no window, and out of any job the panel runs in,
     # where that is allowed, so closing PaperPull's window ends nothing of
@@ -1076,6 +1230,10 @@ class Install:
                 raise UpdateError("that release has no installer for Windows" if kind == "windows"
                                   else "that release has no disk image for this Mac")
             self.version = rel["version"]
+            if kind == "windows":
+                # A new update starts, so the installers earlier ones kept
+                # are no longer needed.
+                remove_kept_installers()
             work = Path(tempfile.mkdtemp(prefix="paperpull-update-"))
             fetched = work / rel["asset"]["name"]
             download(rel["asset"], fetched, self._progress)

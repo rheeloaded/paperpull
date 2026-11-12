@@ -53,6 +53,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   itself. A census in the panel's tests fails on any of the old names, and
   pins each control the READMEs name, and the provider's name as the panel
   writes it, to where the page shows it.
+- **A Windows update that cannot finish opens PaperPull again.** When the
+  installer failed and the copy it kept to finish with was gone or would not
+  open, or the installer could not be started at all, the update went on to
+  check PaperPull's own Python and could end with nothing open. It now says
+  so in `update.log` and opens the PaperPull you had, with nothing else run
+  first.
+- **A kept installer is checked again before it opens.** After a failed
+  install, the installer kept in your temp folder, which other programs can
+  change, opens again only once its SHA-256 and its signature are checked
+  again, while it is held so nothing can change it. One that changed is not
+  opened, `update.log` says why, and PaperPull opens instead.
+- **Installers the update kept are removed.** An installer kept after a
+  failed install is removed once it has finished the update or PaperPull
+  opened in its place, and a new update removes the ones earlier updates
+  left in your temp folder, about 55 MB each. Only folders the update made,
+  holding nothing but its own files, are removed.
 
 ## [0.65.0] - 2026-11-12
 
