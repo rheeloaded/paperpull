@@ -547,8 +547,9 @@ class App:
         category = doc_types.classify_document(title, self.rules)[0]
         if not doc_types.wanted(category, self.config):
             return False
-        if self.args.type and category.lower() != self.args.type.lower():
-            return False
+        # A --type run is not a scoped one (paperpull_core.listing), so the
+        # list it reads is noted whole for every run after it, and what it
+        # could not read is counted whatever --type it asked for.
         return day is None or self._in_dates(day)
 
     def _say_what_the_list_left(self, raw) -> bool:

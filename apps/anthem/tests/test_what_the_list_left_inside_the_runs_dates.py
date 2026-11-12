@@ -159,6 +159,19 @@ def test_a_claim_type_the_run_takes_no_eob_of_is_not_counted(run):
     assert listing.last(app) == listing.COMPLETE
 
 
+@pytest.mark.parametrize("page", [
+    Partly({"Medical": [claim_row()]}, {"Pharmacy": 500}),
+    FakePage({"Medical": [claim_row(), unreadable("2026-05-05")]}),
+], ids=["a claim type's list did not come", "a row it cannot read"])
+def test_a_type_run_that_could_not_read_the_list_never_notes_it_whole(run, page):
+    """--type is not one of the flags that scope a run, so a run asked for
+    one kind still notes the list whole for every run after it. What it
+    could not read is counted whatever kind it asked for."""
+    app = run(page, "--type", "Tax Document")
+    assert app.stats["failed"] == 1
+    assert listing.last(app) == listing.STOPPED
+
+
 # -- only inside the run's dates ---------------------------------------------
 
 PAIR_2025 = [statement("aa" * 86, "2025-01-01"), statement("bb" * 86, "2025-01-01")]
