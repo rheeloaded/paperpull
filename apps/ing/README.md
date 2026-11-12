@@ -66,23 +66,16 @@ ING shows its sign-in page.
 Column headings are not document rows. A list with no document rows shows
 ING's notice that nothing matches, "Zu Ihrer Suche können keine Dokumente
 angezeigt werden", in the list's own box. ING shows the same notice for a
-search or filter that finds nothing, so the app never takes it to show a
-list empty. A list that shows only the notice is left out and named. The
-run takes the other list's documents, records nothing against a document
-listed before from the list left out, and stops at its end rather than
-finish, as a run whose list was not read. A later run takes that document
-once its list shows it again. A row alike to it in the other list waits as
-well, so neither is taken for the other, and so does a document the list
-read no longer shows, since it may have moved to the list left out. The
-rest of the run goes on. A list that shows only the notice while a
-document is taken from it stops the run there, as any list that stops
-does. If your archive is empty in ING, set `read_archive` to `false` and
-runs leave it out. If the Postbox shows only the notice, look at its
-search and filters in ING. The same words anywhere
-else on the page, a count, or "keine neuen Nachrichten" (no new messages,
-which is not no messages) are not taken for the notice. The app opens each
-list by its own address, which is expected to clear a search or filter,
-but whether ING keeps a filter for the whole session has not been checked.
+search or filter that finds nothing. It keeps a search or filter only while
+the address carries the session id ING adds to it, and a list opened by its
+own address, as the app opens each one, is under the default filter, the
+widest ING has (the longest period it offers, every account, every document
+type), with no search. @MelleD checked both on their account (#203). So the notice
+right after the app opened the list shows it empty, and the list is read
+whole with nothing in it. Read as it stands, as Diagnose reads it, the
+notice is not taken for an empty list. The same words anywhere else on the
+page, a count, or "keine neuen Nachrichten" (no new messages, which is not
+no messages) are not taken for the notice.
 
 Some rows are passed over, and Discover says how many and why. These are
 rows the Postbox marks unread when `include_unread` is `false`, rows with
@@ -109,10 +102,7 @@ card, never the whole number and never the subject.
   downloaded too. Whether downloading an unread document marks it read in
   ING has not been checked on a real account, and it may. Set this to
   `false` to leave unread rows alone.
-- `read_archive`, `true` by default. `false` reads the Postbox only. Set it
-  to `false` when your archive is empty in ING, since an empty archive shows
-  only ING's notice that nothing matches, and every run that reads it then
-  stops at its end.
+- `read_archive`, `true` by default. `false` reads the Postbox only.
 - `pilot_count`, how many documents a pilot downloads, 5 by default.
 - `delay_min_seconds` and `delay_max_seconds`, the pause between documents.
 
@@ -155,14 +145,10 @@ The single-account test does not cover every case.
   checked on one account only, and not all document types have been seen.
 - Whether downloading an unread document marks it read (hence
   `include_unread`).
-- A populated archive. An empty archive has been seen. It shows only ING's
-  notice that nothing matches, so a run that reads it stops at its end, and
-  `read_archive: false` leaves it out.
-- An empty list cannot be told from a search or filter that finds nothing,
-  since ING shows the same notice for both. An empty Postbox stops every
-  run at its end until a document arrives.
-- Whether ING keeps a search or filter set in the Postbox after the list's
-  own address is opened again.
+- A populated archive. An empty archive has been seen, and when its layout
+  differs, the run stops there. `read_archive: false` leaves it out.
+- Sub-accounts that ING's newer web banking shows behind a tab in the root
+  account are not read. A run reads the Postbox and archive it opens.
 - A list with paging or a "show more" button stops the run, since nothing is
   pressed. A download link inside a menu is not followed.
 - A link that ING sends on to another host fails.
@@ -199,10 +185,7 @@ steps.
    link, and how many a run would read and why the rest are left out.
 3. `./paperpull --root apps ing discover` reads the Postbox and the archive
    and lists what a run would download, downloading nothing. Compare its
-   count with what the Postbox shows. When your archive is empty in ING,
-   set `read_archive` to `false` first, or Discover lists the Postbox and
-   then stops, since an empty archive shows only ING's notice that nothing
-   matches.
+   count with what the Postbox shows.
 4. `./paperpull --root apps ing pilot` downloads the newest two. Open the
    PDFs and check that they are the right documents, in the right folders.
 5. Run `pilot` again. It must say "Already downloaded and verified" for both

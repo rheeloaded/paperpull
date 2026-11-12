@@ -37,6 +37,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Scalable Capital asks for seven, since its mailbox is a GraphQL answer
   whose documents sit four levels down. Keys only, through the word list,
   and never a value.
+- **ING reads an empty Postbox or archive as empty again, right after it
+  opens the list itself (#203).** In 0.64.0 a list that showed only ING's
+  notice that nothing matches was left out and the run stopped at its end,
+  since a search or filter that finds nothing shows the same notice. @MelleD
+  then checked on their account that ING keeps a search or filter only
+  while the address carries the session id it adds, and that a list opened
+  by its own address is under the default filter, the widest ING has, every
+  account, every document type and the longest period it offers. The app
+  opens each list by its own address before it reads it, so the notice
+  right after that shows the list empty. A run with an empty archive
+  finishes clean again without `read_archive` set to `false`. Read as it
+  stands, as Diagnose reads it, the notice is still not taken for an empty
+  list, and Diagnose says so. The README names sub-accounts behind a tab in
+  ING's newer web banking as not read yet.
 
 ### Fixed
 - **Anthem's claim tokens, patient names, Pharmacy statements and the
