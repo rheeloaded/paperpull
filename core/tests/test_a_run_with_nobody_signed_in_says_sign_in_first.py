@@ -8,6 +8,7 @@ Each app now ends that run through run_reporting.not_signed_in, which says
 it in the words of where it runs and exits NOT_SIGNED_IN, and the panel
 says "Sign in first" over it.
 """
+import ast
 import re
 from pathlib import Path
 
@@ -28,8 +29,46 @@ def test_there_are_apps_to_check():
 def test_every_app_ends_a_run_with_nobody_signed_in_the_same_way(entry):
     src = entry.read_text(encoding="utf-8")
     assert "Could not connect to your signed-in browser" not in src, "said in the core, not in the app"
-    assert re.search(r"connect_over_cdp\(cdp_url\)\n\s*except Exception as e:\n(?:.*\n){0,3}?\s*raise not_signed_in\(cdp_url, e\)\n",
-                     src), "the failed attach ends through not_signed_in"
+    assert attach_reports_not_signed_in(src), "the failed attach ends through not_signed_in"
+
+
+def attach_reports_not_signed_in(src):
+    """Follow the attach's own exception handler, including optional CDP settings."""
+    for block in ast.walk(ast.parse(src)):
+        if not isinstance(block, ast.Try):
+            continue
+        attaches = [call for statement in block.body for call in ast.walk(statement)
+                    if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                    and call.func.attr == "connect_over_cdp" and call.args
+                    and isinstance(call.args[0], ast.Name) and call.args[0].id == "cdp_url"]
+        if not attaches:
+            continue
+        for handler in block.handlers:
+            if not isinstance(handler.type, ast.Name) or handler.type.id != "Exception":
+                continue
+            for node in ast.walk(handler):
+                if (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)
+                        and isinstance(node.exc.func, ast.Name)
+                        and node.exc.func.id == "not_signed_in"
+                        and len(node.exc.args) == 2
+                        and all(isinstance(arg, ast.Name) for arg in node.exc.args)
+                        and [arg.id for arg in node.exc.args] == ["cdp_url", handler.name]):
+                    return True
+    return False
+
+
+def test_attach_check_follows_settings_and_the_same_exception_handler():
+    source = """
+try:
+    browser = chromium.connect_over_cdp(cdp_url, no_defaults=True)
+except Exception as error:
+    cleanup()
+    raise not_signed_in(cdp_url, error)
+"""
+    assert attach_reports_not_signed_in(source)
+    assert not attach_reports_not_signed_in(source.replace("not_signed_in(cdp_url, error)", "error"))
+    assert not attach_reports_not_signed_in(source.replace("connect_over_cdp", "unrelated"))
+
 
 
 def test_under_the_panel_it_names_the_panels_button(monkeypatch, capsys):

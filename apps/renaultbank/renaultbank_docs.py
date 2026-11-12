@@ -1,7 +1,7 @@
 """Renault Bank direkt Postfach downloader.
 
 Uses DKB's shared orchestration for identity, progress, indexing and recovery.
-The Renault-specific API is in renaultbank_site.py and renaultbank_api.js.
+The Renault-specific API is in renaultbank_site.py.
 Mapped from the account holder's technical capture and the public portal client.
 """
 from __future__ import annotations

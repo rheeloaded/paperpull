@@ -18,8 +18,8 @@ import renaultbank_site as site
 
 HARNESS = r"""
 const fs = require('fs');
-const bridge = eval('(' + fs.readFileSync(process.argv[1], 'utf8') + ')');
-const mode = process.argv[2];
+const bridge = eval('(' + fs.readFileSync(0, 'utf8') + ')');
+const mode = process.argv[1];
 global.window = {};
 global.location = {origin: 'https://banking.renault-bank-direkt.de'};
 const requests = [];
@@ -78,17 +78,24 @@ global.fetch = async (path, options) => {
  } else if(path.endsWith('datasharing/downloadTicket')) data={ticketId:'INVENTED_TICKET'};
  else if(path.includes('/ticket/download/')) {
   const bytes=Buffer.from(mode==='not-pdf'?'<html>sign in</html>':'%PDF-1.4\nINVENTED PDF');
+  if (mode==='oversized-stream') {
+   let reads=0;
+   return {status:200,ok:true,headers:{get:()=> 'application/pdf'},
+    body:{getReader:()=>({read:async()=>{ reads++; if(reads>1) throw new Error('read past limit');
+     return {done:false,value:new Uint8Array(2049)}; },cancel:async()=>{}})}};
+  }
   return {status:200,ok:true,headers:{get:()=> 'application/pdf'},
    arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)};
  } else throw new Error('unexpected endpoint');
- return {status:200,ok:true,headers:{get:()=> 'application/json'},json:async()=>data};
+ return {status:200,ok:true,headers:{get:()=> 'application/json'},arrayBuffer:async()=>new TextEncoder().encode(JSON.stringify(data)).buffer};
 };
 (async()=>{
  const collected=await bridge({op:'collect'});
  let downloaded;
- if(collected.ok && ['download','attachment','not-pdf'].includes(mode)){
+ if(collected.ok && ['download','attachment','not-pdf','oversized-stream'].includes(mode)){
   const selected=collected.rows.find(r=>r.item_id.startsWith(mode==='attachment'?'attachment:old':'document:'));
-  downloaded=await bridge({op:'download',id:selected.item_id});
+  try { downloaded=await bridge({op:'download',id:selected.item_id}); }
+  catch(error) { downloaded={refused: error.message.includes('PaperPull refused an answer over its limit')}; }
  }
  console.log(JSON.stringify({collected,downloaded,requests,prepared}));
 })().catch(()=>process.exit(1));
@@ -99,7 +106,8 @@ def run_bridge(mode="collect"):
     node = shutil.which("node")
     if not node:
         pytest.skip("Node is needed to exercise the in-page JavaScript")
-    result = subprocess.run([node, "-e", HARNESS, str(APP / "renaultbank_api.js"), mode],
+    result = subprocess.run([node, "-e", HARNESS, mode],
+                            input=site.intake.reading(site._API_JS, limit=2048 if mode=="oversized-stream" else None),
                             check=True, text=True, capture_output=True, timeout=15)
     return json.loads(result.stdout)
 
@@ -208,3 +216,13 @@ def test_a_pilot_obeys_an_explicit_smaller_download_limit():
     app._pilot_report = lambda docs: None
     app.cmd_pilot()
     assert selected == [1]
+
+
+def test_stream_exceeding_the_limit_stops_before_returning_pdf_bytes():
+    result = run_bridge("oversized-stream")["downloaded"]
+    assert result == {"refused": True}
+
+
+@pytest.mark.parametrize("value", ["2026-03-045", "12026-03-04", "202603045", "04.03.20266"])
+def test_date_tokens_cannot_be_truncated_from_longer_numbers(value):
+    assert site.parse_date(value) == ""
