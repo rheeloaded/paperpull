@@ -878,6 +878,62 @@ def test_windows_reads_a_signature_for_real(tmp_path):
         assert not updater.signed_by_publisher(sig)
 
 
+def _unloadable_security_module(tmp_path) -> Path:
+    """A module folder whose Microsoft.PowerShell.Security cannot load in
+    Windows PowerShell, as PowerShell 7's own cannot."""
+    mods = tmp_path / "Modules"
+    sec = mods / "Microsoft.PowerShell.Security"
+    sec.mkdir(parents=True)
+    (sec / "Microsoft.PowerShell.Security.psd1").write_text(
+        "@{ ModuleVersion = '7.0.0.0'; RootModule = 'not-here.dll'; "
+        "CmdletsToExport = @('Get-AuthenticodeSignature') }\n", encoding="utf-8")
+    return mods
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows reads Authenticode")
+def test_a_panel_opened_from_powershell_7_still_reads_signatures(tmp_path, monkeypatch):
+    """PowerShell 7 gives every program it starts its own module folders.
+    Windows PowerShell then finds PowerShell 7's Security module before its
+    own and cannot load it, so Get-AuthenticodeSignature is missing. Found in
+    the real run of a 0.64.0 install, where a PaperPull.exe opened from a
+    PowerShell 7 window read its own signature as empty and refused every
+    update as unsigned."""
+    notepad = Path(updater.os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "notepad.exe"
+    if not notepad.is_file():
+        pytest.skip("no notepad.exe to read")
+    mods = _unloadable_security_module(tmp_path)
+    monkeypatch.setenv("PSModulePath", str(mods) + ";" + updater.os.environ.get("PSModulePath", ""))
+    assert updater.windows_signature(notepad).get("status") == "Valid"
+
+
+def test_powershell_is_never_handed_the_panels_module_folders(tmp_path, monkeypatch):
+    """Both scripts start Windows PowerShell with no PSModulePath of the
+    panel's, so it finds its own modules, whatever started the panel."""
+    monkeypatch.setenv("PSModulePath", str(tmp_path / "Modules"))
+    given = []
+
+    class _Ran:
+        stdout = "{}"
+
+    def run(cmd, env=None, **kw):
+        given.append(env)
+        return _Ran()
+
+    monkeypatch.setattr(updater.subprocess, "run", run)
+    updater.windows_signature(tmp_path / "x.exe")
+    folder = tmp_path / "PaperPull"
+    folder.mkdir()
+    setup, sha = _installer(tmp_path)
+    _Started.seen.clear()
+    monkeypatch.setattr(updater.subprocess, "Popen", _Started)
+    updater.start_installer(folder, setup, sha, "0.61.0", pid=4321)
+    given += _Started.seen
+    assert len(given) == 2
+    for env in given:
+        assert env.get("PATH")
+        assert not [k for k in env if k.upper() == "PSMODULEPATH"]
+
+
 def _windows_rel(version="0.61.0", body=b"installer"):
     data = release(version)
     data["assets"].append(_setup_asset(version, size=len(body),

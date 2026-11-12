@@ -602,6 +602,18 @@ def _powershell() -> str:
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _BREAKAWAY = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
 
+
+def _powershell_env(**extra: str) -> dict:
+    """The panel's environment for Windows PowerShell, less PSModulePath.
+    PowerShell 7 gives every program it starts its own module folders, so a
+    PaperPull.exe opened from a PowerShell 7 window passes them on. Windows
+    PowerShell then finds PowerShell 7's Security module before its own,
+    cannot load it, and has no Get-AuthenticodeSignature. Given no
+    PSModulePath, it uses its own folders."""
+    env = {k: v for k, v in os.environ.items() if k.upper() != "PSMODULEPATH"}
+    env.update(extra)
+    return env
+
 # A file's Authenticode signature, read the way the release workflow checks it
 # (.github/workflows/build-windows.yml), with the version the file says it
 # is. The file is named by an environment variable, so no path is ever read
@@ -634,7 +646,7 @@ def windows_signature(path: Path) -> dict:
     status, type, subject and issuer, and the version the file says it is.
     {"restricted": True} where PowerShell runs only its restricted
     language, and empty when it could not be read. Replaced in tests."""
-    env = dict(os.environ, PAPERPULL_SIGNED=str(path))
+    env = _powershell_env(PAPERPULL_SIGNED=str(path))
     try:
         p = subprocess.run([_powershell(), "-NoLogo", "-NoProfile", "-NonInteractive",
                             "-Command", _SIGNATURE_PS],
@@ -932,10 +944,10 @@ def start_installer(folder: Path, setup: Path, sha256: str, version: str,
         image = _image_of(up)
         if image and _same_folder(image, folder / "PaperPull.exe"):
             waits.append(str(up))
-    env = dict(os.environ, PAPERPULL_UPDATE_WAIT=" ".join(waits), PAPERPULL_UPDATE_WAIT_S=str(wait_s),
-               PAPERPULL_UPDATE_SETUP=str(setup), PAPERPULL_UPDATE_SHA256=sha256,
-               PAPERPULL_UPDATE_VERSION=version, PAPERPULL_UPDATE_APP=str(folder),
-               PAPERPULL_UPDATE_LOG=str(log_path()), PAPERPULL_UPDATE_STARTED=str(started))
+    env = _powershell_env(PAPERPULL_UPDATE_WAIT=" ".join(waits), PAPERPULL_UPDATE_WAIT_S=str(wait_s),
+                          PAPERPULL_UPDATE_SETUP=str(setup), PAPERPULL_UPDATE_SHA256=sha256,
+                          PAPERPULL_UPDATE_VERSION=version, PAPERPULL_UPDATE_APP=str(folder),
+                          PAPERPULL_UPDATE_LOG=str(log_path()), PAPERPULL_UPDATE_STARTED=str(started))
     cmd = [_powershell(), "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", INSTALL_PS]
     # Its own console with no window, and out of any job the panel runs in,
     # where that is allowed, so closing PaperPull's window ends nothing of
