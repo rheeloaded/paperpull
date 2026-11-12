@@ -9,9 +9,11 @@ certificates and other PDFs from the 1822direkt Postbox. Requested in
 A five-document Pilot saved valid PDFs; the repeated Pilot saved no new
 files. A full download of the whole account has not been run.
 
-Relative to upstream main, this is provider app **92**, raising the number
-of supported providers from **82 to 83**. The template uses CDP port **9313**,
-the next after main’s highest provider port, 9312.
+Counting Renault Bank direkt as supported provider 83, 1822direkt is the
+**84th supported provider** (provider app 93 once both additions are merged).
+This numbering assumes Renault Bank direkt’s PR #212 is merged first; it is
+not yet included in the current upstream main. The template uses CDP port
+**9314**, exactly one above Renault Bank direkt’s **9313**.
 
 ## Sign in and run
 

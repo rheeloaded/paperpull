@@ -17,7 +17,7 @@ empty Postbox as empty again, and a recording keeps more of what a
 document holds.
 
 ### Added
-- **1822direkt, provider app 92 (83rd supported provider).** Downloads paginated Postbox PDFs and, with explicit consent to mark conversations read, conversation attachments. Pilot tested on one account; the repeat saved no duplicates. Uses the next free template port, 9313.
+- **1822direkt, the 84th supported provider after Renault Bank direkt.** Downloads paginated Postbox PDFs and, with explicit consent to mark conversations read, conversation attachments. Pilot tested on one account; the repeat saved no duplicates. Uses CDP port 9314, one above Renault Bank direkt’s 9313; the numbering assumes Renault’s PR #212 is merged first.
 - **Anthem claims summaries (#211).** Anthem now files its claims list, which
   is not the EOB Center, as one claims summary for each of the five years
   before this one and one for the current year to date each month a run

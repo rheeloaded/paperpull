@@ -57,6 +57,8 @@ signed installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Eighty-three providers are supported today, all built on the same pattern.
+With Renault Bank direkt (PR #212) merged first, 1822direkt is the **84th
+supported provider**; the current totals here exclude that pending PR.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),

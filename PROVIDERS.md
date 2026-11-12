@@ -12,6 +12,9 @@ telecoms, payroll systems, and retailers real people actually use.
 
 ## Supported (83, plus five built and waiting for a tester, and four first shells)
 
+1822direkt is the **84th supported provider** when counted after Renault Bank
+direkt (PR #212); the totals above exclude that pending PR.
+
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
 | [`affirm`](apps/affirm) | Affirm | Loan agreements, one per loan; Affirm Money and Card statements not covered | Lender |
