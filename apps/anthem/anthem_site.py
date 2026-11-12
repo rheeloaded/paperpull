@@ -647,16 +647,18 @@ def _title_name(name: str) -> str:
 def _human_name(value) -> str:
     """A name as text, from any shape Anthem gives one in. A string is
     itself. A FHIR HumanName, {given: [...], family}, is its given names and
-    then its family name, or its `text` when it has neither. A list of them
-    is each distinct name, joined. Anything else, or any part that is not
-    text, gives nothing, so no list or dict is ever written into a name."""
+    then its family name, or its `text` when it has neither, and a given or
+    family name may come as one text or a list of them. A list of names is
+    each distinct name, joined. Anything else, or any part that is not text,
+    gives nothing, so no list or dict is ever written into a name."""
+    def texts(part) -> List[str]:
+        part = [part] if isinstance(part, str) else part if isinstance(part, list) else []
+        return [p for p in part if isinstance(p, str)]
+
     if isinstance(value, str):
         return value.strip()
     if isinstance(value, dict):
-        given = value.get("given")
-        given = [given] if isinstance(given, str) else given if isinstance(given, list) else []
-        family = value.get("family")
-        parts = [g for g in given if isinstance(g, str)] + ([family] if isinstance(family, str) else [])
+        parts = texts(value.get("given")) + texts(value.get("family"))
         name = " ".join(p.strip() for p in parts if p.strip())
         if not name and isinstance(value.get("text"), str):
             name = value["text"].strip()

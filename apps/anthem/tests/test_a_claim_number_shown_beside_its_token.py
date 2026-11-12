@@ -200,3 +200,43 @@ def test_no_name_puts_a_list_or_a_dict_into_a_filename(monkeypatch, name):
     for mark in "[]{}'\"":
         assert mark not in row["account"], row["account"]
     assert row["account"].startswith("Dana")
+
+
+@pytest.mark.parametrize("name, read", [
+    ({"given": ["DANA", None, "Q"], "family": "EXAMPLE"}, "DANA Q EXAMPLE"),
+    ({"given": ["Dana"], "family": ["Example", "Sample"]}, "Dana Example Sample"),
+    ([{"given": [None, "Dana"], "family": ["Example"]}], "Dana Example"),
+    ({"text": "Dana Q Example"}, "Dana Q Example"),
+    ([{"text": "Dana Q Example"}, {"given": ["Dana", "Q"], "family": "Example"}], "Dana Q Example"),
+])
+def test_each_part_of_a_human_name_is_read_in_each_shape_it_comes_in(name, read):
+    assert site._patient_name(named(name)) == read
+
+
+# -- an EOB kept before Anthem put a token beside the number -----------------
+
+def old_shape(claim_number=CLAIM_NUMBER, typed=True):
+    """The row as Anthem gave it before the token, the claim number itself
+    in the claimNumber entry's value, with no display."""
+    row = claim_row(claim_number=claim_number)
+    uid, number = row["claim"][0]["identifier"]
+    uid.pop("display")
+    number.pop("display")
+    number["value"] = claim_number
+    if not typed:
+        uid.pop("type")
+        number.pop("type")
+    return row
+
+
+@pytest.mark.parametrize("claim_number", [CLAIM_NUMBER, "2026000000001"])
+@pytest.mark.parametrize("typed", [True, False])
+def test_an_eob_listed_in_the_old_shape_and_the_new_has_one_identity(monkeypatch, claim_number,
+                                                                     typed):
+    """An EOB downloaded while Anthem gave the number as the value still
+    matches its record now the number is the display beside a token."""
+    signed_in(monkeypatch)
+    before = site.collect_documents(FakePage({"Medical": [old_shape(claim_number, typed)]}))
+    now = site.collect_documents(FakePage({"Medical": [claim_row(claim_number=claim_number)]}))
+    assert [r["doc_id"] for r in before] == [r["doc_id"] for r in now] == [
+        "Medical|%s|EOB|2" % claim_number]
