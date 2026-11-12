@@ -17,9 +17,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   it. Run All, Resume and `--claims-summaries` take them. Anthem exports the
   list only by POST, as its own page asks for it, and that one POST reads
   the list for two dates and changes nothing. Contributed by @riordan.
-  Before merging, an answer with no file, a file that is not the claims
-  list, or anything that goes wrong in the page stops the list as
-  incomplete, rather than read as a year with no claim. A year is filed only
+  Before merging, each year is read on its own. One whose answer has no
+  file, is not the claims list, or fails in the page is named and counted as
+  failed rather than read as a year with no claim, the years that came are
+  saved, and the next run asks for it again. A year is filed only
   once 90 days have passed since it ended, since its claims keep arriving
   after it ends, and a run in January names the year just ended as waiting.
   Each CSV is written with its PDF and listed in the summary's record, so a
@@ -43,18 +44,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   merging, the EOB records an older version kept by a token, which failed
   on every run and wrote a failure file each time, are set down as No Longer
   Listed, and one ever downloaded is never touched. Two statements of one
-  date are both left unsaved and named, in a listing and in a Download
+  date are both left unfetched and named, in a listing and in a Download
   again, and the list is not taken as whole, rather than one kept under the
   other's identity. Only Pharmacy's own statement row is taken for a
   statement, so a claim whose claim key moved is refused as before, never
-  fetched with no claim. A patient's name sent as a list of HumanNames is
-  read as the names it holds.
-- **An Anthem EOB row whose claim number cannot be read no longer ends the
-  run clean.** Such a row was passed over with only a line in the log, and
-  the list was called whole, so an EOB Anthem listed could go missing with
-  nothing to say so. Now each counts as failed, Discover says how many of
-  each claim type, a failure file is written, and the list is not taken as
-  whole. The rest of the list is kept as before.
+  fetched with no claim. A claim number is held to its shape wherever it is
+  read from, so a token in its place is never kept. A patient's name sent as
+  a list of HumanNames is read as the names it holds.
+- **An Anthem EOB list that was not read whole no longer ends the run
+  clean.** A row whose claim number cannot be read was passed over with only
+  a line in the log, and a claim type whose list answered an error, or failed
+  in the page, was read as empty. Either way the list was called whole, so an
+  EOB Anthem listed could go missing with nothing to say so. Now each counts
+  as failed, Discover names it by its claim type, a failure file is written,
+  and the list is not taken as whole. A row or a pair of statements outside
+  the run's dates is not counted, since the run would not take it anyway.
+  The rest of the list is kept as before.
 
 ## [0.64.0] - 2026-11-11
 
