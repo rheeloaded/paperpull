@@ -43,11 +43,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   merging, the EOB records an older version kept by a token, which failed
   on every run and wrote a failure file each time, are set down as No Longer
   Listed, and one ever downloaded is never touched. Two statements of one
-  date are both left unsaved and named, and the list is not taken as whole,
-  rather than one kept under the other's identity. Only Pharmacy's own
-  statement row is taken for a statement, so a claim whose claim key moved
-  is refused as before, never fetched with no claim. A patient's name sent
-  as a list of HumanNames is read as the names it holds.
+  date are both left unsaved and named, in a listing and in a Download
+  again, and the list is not taken as whole, rather than one kept under the
+  other's identity. Only Pharmacy's own statement row is taken for a
+  statement, so a claim whose claim key moved is refused as before, never
+  fetched with no claim. A patient's name sent as a list of HumanNames is
+  read as the names it holds.
+- **An Anthem EOB row whose claim number cannot be read no longer ends the
+  run clean.** Such a row was passed over with only a line in the log, and
+  the list was called whole, so an EOB Anthem listed could go missing with
+  nothing to say so. Now each counts as failed, Discover says how many of
+  each claim type, a failure file is written, and the list is not taken as
+  whole. The rest of the list is kept as before.
 
 ## [0.64.0] - 2026-11-11
 
