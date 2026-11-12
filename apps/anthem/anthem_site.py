@@ -673,7 +673,7 @@ def _human_name(value) -> str:
 
 def _patient_name(row: dict) -> str:
     """Patient name for one summary row, or "". Confirmed path is patient.name,
-    a FHIR HumanName or a list of them; older shapes (a bare string, or
+    a FHIR HumanName or a list of them. Older shapes (a bare string, or
     first/last fields) are fallbacks."""
     for k in _PATIENT_KEYS:
         v = row.get(k)
@@ -902,7 +902,7 @@ def collect_documents(page) -> List[dict]:
 
     Returns dicts {title, date, account, href, doc_id}, as a Collected. The
     identity (doc_id = claimType|claimId|docKind|seq) is stable and
-    human-meaningful; the opaque eobId is deliberately NOT part of it and is
+    human-meaningful. The opaque eobId is deliberately NOT part of it and is
     fetched fresh at download. Two statements of one claim type and one date
     give one identity, so neither is kept, each is named in the log, and the
     Collected says so in `alike`.
@@ -1763,10 +1763,10 @@ def claims_summary_key(period: str) -> str:
 
 
 def claims_summary_periods(today=None) -> List[dict]:
-    """The periods a claims summary is asked for, newest first: the current
-    year to date, known by its month so each month a run sees keeps its own,
-    then each of the calendar years before it, back to CLAIMS_SUMMARY_YEARS
-    in all, that ended at least CLAIMS_SETTLE_DAYS ago."""
+    """The periods a claims summary is asked for, newest first. The current
+    year to date comes first, known by its month so each month a run sees
+    keeps its own, then each of the calendar years before it, back to
+    CLAIMS_SUMMARY_YEARS in all, that ended at least CLAIMS_SETTLE_DAYS ago."""
     today = today or _today()
     periods = [{"period": "%d-%02d" % (today.year, today.month),
                 "start": "%d-01-01" % today.year, "end": today.isoformat(),
