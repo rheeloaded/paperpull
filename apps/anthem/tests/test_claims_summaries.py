@@ -154,8 +154,7 @@ def build(tmp_path, monkeypatch, signed_in, printed):
                    "profile_dir": str(tmp_path / "profile"), "cdp_url": "http://127.0.0.1:9",
                    "delay_min_seconds": 0, "delay_max_seconds": 0, "default_start_date": ""})
     monkeypatch.setattr("time.sleep", lambda *_a, **_kw: None)
-    monkeypatch.setattr(site, "claims_summary_periods",
-                        lambda today=None, _real=site.claims_summary_periods: _real(TODAY))
+    monkeypatch.setattr(site, "_today", lambda: TODAY)
 
     def made(*flags):
         cfg = tmp_path / "config.json"
@@ -164,6 +163,13 @@ def build(tmp_path, monkeypatch, signed_in, printed):
         page = FakePage()
         app._on_its_site = lambda: page
         app.check_session = lambda *_a, **_kw: None
+        app.fake_page = page
+        # Each pause between two asks of the export, as the app's own.
+        app.paused = 0
+
+        def delay(factor=1.0):
+            app.paused += 1
+        app._delay = delay
         return app
     return made
 
@@ -211,3 +217,75 @@ def test_run_all_and_resume_take_the_claims_summaries(build, monkeypatch):
     monkeypatch.setattr(app_mod.listing, "after_resume", lambda *a, **kw: None)
     build("--resume").cmd_resume()
     assert taken == [1, 1]
+
+
+# -- a year just ended waits -------------------------------------------------
+
+@pytest.mark.parametrize("today, waits, files_from", [
+    (date(2026, 1, 1), True, "2026-03-31"),
+    (date(2026, 1, 15), True, "2026-03-31"),
+    (date(2026, 3, 30), True, "2026-03-31"),
+    (date(2026, 3, 31), False, None),
+    (date(2026, 11, 11), False, None),
+    (date(2024, 3, 29), True, "2024-03-30"),
+    (date(2024, 3, 30), False, None),
+])
+def test_a_year_is_filed_only_once_90_days_have_passed_since_it_ended(today, waits, files_from):
+    last = str(today.year - 1)
+    periods = [p["period"] for p in site.claims_summary_periods(today)]
+    waiting = site.claims_summaries_waiting(today)
+    assert periods[0] == "%d-%02d" % (today.year, today.month)
+    assert (last in periods) is not waits
+    assert waiting == ([{"period": last, "label": "Claims Summary " + last,
+                         "files_from": files_from}] if waits else [])
+    # The years before it are filed as before, five back in all.
+    assert periods[1 if waits else 2:] == [str(y) for y in range(today.year - 2, today.year - 6, -1)]
+
+
+def test_a_run_in_january_leaves_the_year_just_ended_for_later(build, monkeypatch, capsys):
+    monkeypatch.setattr(site, "_today", lambda: date(2026, 1, 15))
+    app = build("--claims-summaries")
+    app.cmd_claims_summaries()
+    assert ("2025-01-01", "2025-12-31") not in app.fake_page.asked
+    assert saved(app, ".pdf") == ["2024-12-31 Anthem Claims Summary 2024.pdf"]
+    assert "Claims Summary 2025 is filed from 2026-03-31, 90 days after its year ended" \
+        in capsys.readouterr().out
+    app.progress.save()
+
+    monkeypatch.setattr(site, "_today", lambda: date(2026, 3, 31))
+    later = build("--claims-summaries")
+    later.cmd_claims_summaries()
+    assert ("2025-01-01", "2025-12-31") in later.fake_page.asked
+    assert "2025-12-31 Anthem Claims Summary 2025.pdf" in saved(later, ".pdf")
+    assert "is filed from" not in capsys.readouterr().out
+
+
+# -- what is asked for, and how fast -----------------------------------------
+
+def test_a_summary_saved_before_is_not_asked_for_again(build):
+    first = build("--claims-summaries")
+    first.cmd_claims_summaries()
+    first.progress.save()
+    every = list(first.fake_page.asked)
+    assert len(every) == len(site.claims_summary_periods(TODAY))
+    again = build("--claims-summaries")
+    again.cmd_claims_summaries()
+    held = {("2026-01-01", "2026-11-11"), ("2025-01-01", "2025-12-31"), ("2024-01-01", "2024-12-31")}
+    assert again.fake_page.asked == [a for a in every if a not in held]
+    restore = build("--claims-summaries", "--redownload")
+    restore.cmd_claims_summaries()
+    assert restore.fake_page.asked == every
+
+
+def test_a_summary_outside_the_runs_dates_is_not_asked_for(build):
+    app = build("--claims-summaries", "--year", "2024")
+    app.cmd_claims_summaries()
+    assert app.fake_page.asked == [("2024-01-01", "2024-12-31")]
+    assert saved(app, ".pdf") == ["2024-12-31 Anthem Claims Summary 2024.pdf"]
+
+
+def test_the_asks_are_paced_as_the_apps_other_calls(build):
+    app = build("--claims-summaries")
+    app.cmd_claims_summaries()
+    assert len(app.fake_page.asked) > 1
+    assert app.paused == len(app.fake_page.asked) - 1

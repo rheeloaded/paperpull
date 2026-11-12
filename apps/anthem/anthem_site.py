@@ -1681,14 +1681,21 @@ def render_letter(page, subject: str, body: str, date: str = "") -> Optional[byt
 # Claims summaries: the claims list (not the EOB Center), which Anthem exports
 # only as a CSV for a start and an end date. The export is asked for by POST,
 # as the site asks for it (a GET of it answers 500); it reads the claims list
-# and changes nothing. One summary is kept for each calendar year that has
-# ended and one for the current year to date, each month a run sees, and each
-# is filed as a PDF table with its CSV beside it.
+# and changes nothing. One summary is kept for each of the calendar years
+# before this one, once CLAIMS_SETTLE_DAYS have passed since it ended, and one
+# for the current year to date, each month a run sees, and each is filed as a
+# PDF table with its CSV beside it.
 # ---------------------------------------------------------------------------
 
 # How many calendar years back the claims list is asked for, the current one
 # included. A year whose answer holds no claim files nothing (_export_csv).
 CLAIMS_SUMMARY_YEARS = 6
+
+# How many days after a year ends its summary is filed. Claims for a year
+# keep arriving after it ends, and a year's summary is filed once and never
+# again, so until then it waits, and a run in January leaves the year just
+# ended for later. The year to date covers it meanwhile.
+CLAIMS_SETTLE_DAYS = 90
 
 _CLAIMS_EXPORT_JS = r"""async (a) => {
   const h = window.__eobHeaders;
@@ -1715,21 +1722,52 @@ _CLAIMS_EXPORT_JS = r"""async (a) => {
 _CSV_TYPE = re.compile(r"text/csv\s*(;.*)?", re.I)
 
 
-def claims_summary_periods(today=None) -> List[dict]:
-    """The periods a claims summary is kept for, newest first: the current
-    year to date, known by its month so each month a run sees keeps its own,
-    then each calendar year that has ended."""
+def _today():
+    """The day a run asks for its claims summaries by, which a test sets."""
     from datetime import date
-    today = today or date.today()
+    return date.today()
+
+
+def _files_from(year: int):
+    """The first day a year's claims summary is filed, CLAIMS_SETTLE_DAYS
+    after the year ended."""
+    from datetime import date, timedelta
+    return date(year, 12, 31) + timedelta(days=CLAIMS_SETTLE_DAYS)
+
+
+def claims_summary_key(period: str) -> str:
+    """The record a period's claims summary is kept under."""
+    return "claims:" + period
+
+
+def claims_summary_periods(today=None) -> List[dict]:
+    """The periods a claims summary is asked for, newest first: the current
+    year to date, known by its month so each month a run sees keeps its own,
+    then each of the calendar years before it, back to CLAIMS_SUMMARY_YEARS
+    in all, that ended at least CLAIMS_SETTLE_DAYS ago."""
+    today = today or _today()
     periods = [{"period": "%d-%02d" % (today.year, today.month),
                 "start": "%d-01-01" % today.year, "end": today.isoformat(),
                 "label": "Claims Summary %d Year to Date" % today.year,
                 "date": today.isoformat()}]
     for year in range(today.year - 1, today.year - CLAIMS_SUMMARY_YEARS, -1):
+        if today < _files_from(year):
+            continue
         periods.append({"period": str(year), "start": "%d-01-01" % year,
                         "end": "%d-12-31" % year, "label": "Claims Summary %d" % year,
                         "date": "%d-12-31" % year})
     return periods
+
+
+def claims_summaries_waiting(today=None) -> List[dict]:
+    """Each year that has ended whose claims summary is not filed yet, since
+    CLAIMS_SETTLE_DAYS have not passed, newest first, with the day it is
+    filed from."""
+    today = today or _today()
+    return [{"period": str(year), "label": "Claims Summary %d" % year,
+             "files_from": _files_from(year).isoformat()}
+            for year in range(today.year - 1, today.year - CLAIMS_SUMMARY_YEARS, -1)
+            if today < _files_from(year)]
 
 
 def _csv_table(text: str) -> List[List[str]]:
@@ -1791,18 +1829,28 @@ def _export_csv(res: dict, period: str) -> Optional[Tuple[bytes, str]]:
     return data, text
 
 
-def list_claims_summaries(page, today=None) -> List[dict]:
+def list_claims_summaries(page, today=None, skip=(), pause=None) -> List[dict]:
     """Every period's claims summary that holds a claim, as a filing row
     carrying its CSV. Raises SessionExpired when Anthem will not authenticate
     the export, and ListingIncomplete when it refuses one, answers no file or
     anything but the claims list, or the page fails, so a year whose list did
-    not come is never taken for an empty one."""
+    not come is never taken for an empty one.
+
+    A period whose record key is in `skip`, one already saved, is not asked
+    for, and `pause()` is called between two asks, as the app paces its
+    other calls."""
     rows: List[dict] = []
     if not is_anthem_owned_page(page):
         raise SessionExpired("the Anthem tab is no longer open on Anthem")
     if not prime_session(page):
         raise SessionExpired("could not capture Anthem's session for the claims list")
+    asked = 0
     for p in claims_summary_periods(today):
+        if claims_summary_key(p["period"]) in skip:
+            continue
+        if asked and pause is not None:
+            pause()
+        asked += 1
         arg = {"start": p["start"], "end": p["end"]}
         res = _ask_export(page, arg, p["period"])
         if res.get("noauth") or res.get("status") in (401, 403):
@@ -1821,7 +1869,7 @@ def list_claims_summaries(page, today=None) -> List[dict]:
         _data, text = got
         rows.append({
             "doc_id": "ClaimsSummary|" + p["period"],
-            "key": "claims:" + p["period"],
+            "key": claims_summary_key(p["period"]),
             "label": p["label"],
             "folder_attr": "claims_summaries",
             "date": p["date"],

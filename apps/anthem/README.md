@@ -11,9 +11,13 @@ and delete-safe, part of [PaperPull](../../README.md):
 - **ID / insurance cards**, each covered member's digital card, front and back,
   as one PDF per card.
 - **Letters**, every secure Message Center letter, read and unread.
-- **Claims summaries**, the claims list, one a year for each year that has
-  ended and one for the current year to date, each a PDF table with Anthem's
-  CSV kept beside it.
+- **Claims summaries**, the claims list, one a year for each of the five
+  years before this one and one for the current year to date, each a PDF
+  table with Anthem's CSV kept beside it. Claims for a year keep arriving
+  after it ends, and a year's summary is filed once, so a year is filed only
+  once 90 days have passed since it ended. A run in January leaves the year
+  just ended for later and says so, and the year to date covers it until
+  then.
 
 Every one of these is fetched by the portal's own read-only member API from inside
 your signed-in page, **nothing on the page is ever clicked, submitted or
@@ -107,7 +111,7 @@ If a run stops saying the session expired or was blocked, sign in again and use
 | `Tax Documents\` | 1095-B health-coverage form, if the account has one (created on demand) |
 | `ID Cards\` | Each covered member's digital ID / insurance card (front and back) as one PDF, named per member (created on demand) |
 | `Letters\` | Secure Message Center letters, one PDF per message (created on demand) |
-| `Claims Summaries\` | The claims list as a PDF table, with its CSV beside it: one for each calendar year that has ended, and one for the current year to date each month a run sees (created on demand) |
+| `Claims Summaries\` | The claims list as a PDF table, with its CSV beside it. One for each of the five calendar years before this one, filed once 90 days have passed since it ended, and one for the current year to date each month a run sees (created on demand) |
 | `Other Documents\` | Anything else recognized but unrouted (created on demand) |
 | `Manual Review\` | Files that failed PDF validation |
 

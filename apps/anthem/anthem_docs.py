@@ -1033,10 +1033,32 @@ class App:
         the current year to date, each a PDF table with its CSV kept beside
         it. Anthem exports the list only as a CSV; it is read, never changed."""
         print("\nClaims summaries (the claims list, one a year)...")
+        today = site._today()
+        # A year just ended waits, since its claims keep arriving after it
+        # ends and its summary is filed once (site.CLAIMS_SETTLE_DAYS).
+        for p in site.claims_summaries_waiting(today):
+            print(f"  {p['label']} is filed from {p['files_from']}, "
+                  f"{site.CLAIMS_SETTLE_DAYS} days after its year ended, since claims "
+                  "for a year keep arriving after it ends.")
+        # A summary saved before, or outside the run's dates, is not asked
+        # for again, as _save_collected would pass it over once it came.
+        skip = set()
+        for p in site.claims_summary_periods(today):
+            key = site.claims_summary_key(p["period"])
+            if not self._in_dates(p["date"]):
+                self.stats["skipped_out_of_scope"] += 1
+                skip.add(key)
+                continue
+            rec = self.progress.get(key)
+            if not getattr(self.args, "redownload", False) and rec and (
+                    rec.get("downloaded_ok") or rec.get("state") == State.COMPLETED.value):
+                print(f"  Already downloaded - skipping: {p['label']}")
+                self.stats["skipped_completed"] += 1
+                skip.add(key)
         page = self._on_its_site()
         self.check_session(page)
         try:
-            rows = site.list_claims_summaries(page)
+            rows = site.list_claims_summaries(page, today, skip=skip, pause=self._delay)
         except site.SessionExpired:
             self._session_expired()
             return
