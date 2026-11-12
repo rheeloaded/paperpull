@@ -500,9 +500,23 @@ class App:
         for d in raw:
             n_new += self._record_statement_doc(d)
         self.discovery.save()
-        # The whole list is in, and only now may a Resume that carries on
-        # from it call the run finished (paperpull_core.listing).
-        listing.read_whole(self)
+        # Statements of one claim type and one date give one identity, and
+        # nothing tells which is which, so none of them was kept. The list
+        # is then not a whole one, and the run's summary counts them for the
+        # panel (run_reporting, "alike").
+        alike = getattr(raw, "alike", None) or {}
+        if alike:
+            self.stats["alike"] = sum(alike.values())
+            for doc_id, n in sorted(alike.items()):
+                claim_type, day = doc_id.split("|")[:2]
+                print(f"  !! Anthem lists {n} {claim_type} statements dated "
+                      f"{day[:4]}-{day[4:6]}-{day[6:]}, which nothing here tells apart, "
+                      "so none of them is saved.")
+            print("  So the list is not taken as whole. Everything else on it is kept.")
+        else:
+            # The whole list is in, and only now may a Resume that carries on
+            # from it call the run finished (paperpull_core.listing).
+            listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
         if not quiet:

@@ -733,6 +733,27 @@ def _doc_kind(row: dict) -> str:
     return "EOB Check" if re.search(r"check", str(kind_val or ""), re.I) else "EOB"
 
 
+# What a Pharmacy statement for a month comes with, and nothing more. It has
+# no claim, no patient and no sequence number.
+_STATEMENT_KEYS = frozenset({"identifier", "created", "name"})
+
+
+def _statement_day(row: dict, claim_type: str) -> str:
+    """The day a Pharmacy statement for a period is known by, as YYYY-MM-DD,
+    or "" for any other row. Only a Pharmacy row holding its identifier, its
+    date and its name and nothing else is such a statement. A row of another
+    claim type, or one carrying anything more, is a claim, and one whose
+    claim number cannot be read is refused as before, never taken for a
+    statement and asked for with no claim."""
+    if claim_type != "Pharmacy" or set(row) != _STATEMENT_KEYS:
+        return ""
+    if not isinstance(row.get("identifier"), str) or not row["identifier"].strip():
+        return ""
+    if not isinstance(row.get("name"), str) or not isinstance(row.get("created"), str):
+        return ""
+    return _checked_date(_iso_from_value(row["created"]), "")
+
+
 def _extract_row(row: dict, claim_type: str) -> Optional[dict]:
     """Pull (claimId, eobId, date, docKind, patient, seq) out of one summary row.
 
@@ -742,21 +763,20 @@ def _extract_row(row: dict, claim_type: str) -> Optional[dict]:
     """
     eob_id = row.get("identifier") or _first_key(row, _EOBID_KEYS)[1]
     claim_id = _claim_number(row)
-    if not claim_id and eob_id and "claim" not in row:
-        # A statement for a period (Pharmacy sends one a month) has no claim:
-        # it is known by its date, and asked for with an empty claimId.
-        day = _iso_from_value(row.get("created")).replace("-", "")
-        if re.fullmatch(r"\d{8}", day):
-            return {
-                "claim_id": day,
-                "claim_ref": "",
-                "eob_id": str(eob_id),
-                "date": _iso_from_value(row.get("created")),
-                "doc_kind": "Statement",
-                "claim_type": claim_type,
-                "patient": "",
-                "seq": 0,
-            }
+    day = "" if claim_id else _statement_day(row, claim_type)
+    if day:
+        # A statement for a period (Pharmacy sends one a month) has no claim.
+        # It is known by its date, and asked for with an empty claimId.
+        return {
+            "claim_id": day.replace("-", ""),
+            "claim_ref": "",
+            "eob_id": str(eob_id),
+            "date": day,
+            "doc_kind": "Statement",
+            "claim_type": claim_type,
+            "patient": "",
+            "seq": 0,
+        }
     if not claim_id or not eob_id:
         log.error(
             "An EOB summary row is missing a claim number (%s) or eob id (%s). "
@@ -800,13 +820,19 @@ def parse_doc_id(doc_id: str):
     document type the app does not serve. The claim number is validated to the
     alphanumeric shape Anthem uses, which also refuses any path or query
     metacharacter. A trailing sequence number is optional for backward
-    compatibility with identities written before it was added.
+    compatibility with identities written before it was added. A statement
+    is Pharmacy's alone and is known by a day that exists, as YYYYMMDD.
     """
     m = re.fullmatch(
         r"(Medical|Pharmacy|Chiropractic)\|([A-Za-z0-9]{6,30})\|(EOB Check|EOB|Statement)(?:\|(\d{1,4}))?",
         str(doc_id or "").strip())
     if not m:
         return None
+    if m.group(3) == "Statement":
+        day = m.group(2)
+        if m.group(1) != "Pharmacy" or not re.fullmatch(r"\d{8}", day) \
+                or not _checked_date("%s-%s-%s" % (day[:4], day[4:6], day[6:]), ""):
+            return None
     return m.group(1), m.group(2), m.group(3), int(m.group(4) or 0)
 
 
@@ -838,14 +864,28 @@ def _date_window(days: int = DEFAULT_LOOKBACK_DAYS) -> Tuple[str, str]:
     return (today - timedelta(days=days)).isoformat(), today.isoformat()
 
 
+class Collected(list):
+    """The EOBs a listing kept, newest first, as a list. `alike` holds each
+    identity two or more statements gave, with how many gave it. Those are
+    kept by none of them, since nothing tells which statement is which, so
+    the list they came in is not a whole one."""
+
+    def __init__(self, rows=(), alike: Optional[dict] = None):
+        super().__init__(rows)
+        self.alike = dict(alike or {})
+
+
 def collect_documents(page) -> List[dict]:
     """Every EOB Anthem holds, across all three claim types, newest first.
 
-    Returns dicts {title, date, account, href, doc_id}. The identity
-    (doc_id = claimType|claimId|docKind|seq) is stable and human-meaningful; the
-    opaque eobId is deliberately NOT part of it and is fetched fresh at download.
+    Returns dicts {title, date, account, href, doc_id}, as a Collected. The
+    identity (doc_id = claimType|claimId|docKind|seq) is stable and
+    human-meaningful; the opaque eobId is deliberately NOT part of it and is
+    fetched fresh at download. Two statements of one claim type and one date
+    give one identity, so neither is kept, each is named in the log, and the
+    Collected says so in `alike`.
     """
-    rows: List[dict] = []
+    rows = Collected()
     seen = set()
     if not is_anthem_owned_page(page):
         log.warning("The open tab is not on Anthem. Sign in at anthem.com and "
@@ -867,13 +907,22 @@ def collect_documents(page) -> List[dict]:
                      str(e).splitlines()[0][:80])
             continue
         kept = 0
-        for r in raw:
-            row = _extract_row(r, claim_type)
-            if not row:
-                continue
-            doc_id = make_doc_id(row["claim_type"], row["claim_id"],
-                                 row["doc_kind"], row["seq"])
-            if doc_id in seen:
+        found = [row for row in (_extract_row(r, claim_type) for r in raw) if row]
+        ids = [make_doc_id(row["claim_type"], row["claim_id"], row["doc_kind"], row["seq"])
+               for row in found]
+        statements: dict = {}
+        for row, doc_id in zip(found, ids):
+            if row["doc_kind"] == "Statement":
+                statements[doc_id] = statements.get(doc_id, 0) + 1
+        for doc_id, n in sorted(statements.items()):
+            if n > 1:
+                rows.alike[doc_id] = n
+                log.warning("Anthem lists %d %s statements dated %s, which all give the "
+                            "identity %s. Nothing tells them apart, so none of them is "
+                            "saved and the list is not taken as whole",
+                            n, claim_type, doc_id.split("|")[1], doc_id)
+        for row, doc_id in zip(found, ids):
+            if doc_id in rows.alike or doc_id in seen:
                 continue
             seen.add(doc_id)
             kind_label = " Check" if row["doc_kind"] == "EOB Check" else ""
@@ -927,7 +976,9 @@ def resolve_eob_id(page, claim_type: str, claim_id: str, doc_kind: str,
     the claim's token are per-call tokens, so stored ones would go stale.
     Matches on the stable identity; if the sequence number no longer lines up,
     falls back to the first document of that claim and kind. Returns None if
-    it is no longer listed.
+    it is no longer listed, and for a statement of a date two or more listed
+    statements have, since nothing tells which one it is. Says which in the
+    log.
     """
     start, end = _date_window()
     matches = []
@@ -938,6 +989,12 @@ def resolve_eob_id(page, claim_type: str, claim_id: str, doc_kind: str,
         if row["claim_id"] == claim_id and row["doc_kind"] == doc_kind:
             matches.append((row["seq"], (row["eob_id"], row["claim_ref"])))
     if not matches:
+        log.warning("Anthem no longer lists a %s %s for claim %s",
+                    claim_type, doc_kind, claim_id)
+        return None
+    if doc_kind == "Statement" and len(matches) > 1:
+        log.warning("Anthem lists %d %s statements dated %s. Nothing tells them apart, "
+                    "so none of them is fetched", len(matches), claim_type, claim_id)
         return None
     for s, found in matches:
         if s == seq:
@@ -966,8 +1023,7 @@ def download_document(page, doc_id: str, out_path) -> bool:
         raise SessionExpired("could not capture Anthem's session for a download")
     found = resolve_eob_id(page, claim_type, claim_id, doc_kind, seq)
     if found is None:
-        log.warning("Anthem no longer lists a %s %s for claim %s",
-                    claim_type, doc_kind, claim_id)
+        # resolve_eob_id has said why, no longer listed or not one statement.
         return False
     eob_id, claim_ref = found
     arg = {"claimId": claim_ref, "claimType": claim_type, "eobId": eob_id}
