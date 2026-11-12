@@ -867,7 +867,9 @@ def _summary_rows(page, claim_type: str, start: str, end: str) -> List[dict]:
     """The current session's raw EOB summary rows for one claim type.
 
     Primes the captured auth headers if missing, and re-primes once if the token
-    has gone stale (401). Raises SessionExpired if it still cannot authenticate.
+    has gone stale (401). Raises SessionExpired if it still cannot authenticate,
+    and ListingIncomplete, saying its status alone, for any other answer but
+    200, which is a list that did not come rather than an empty one.
     """
     arg = {"claimType": claim_type, "start": start, "end": end}
     res = page.evaluate(_SUMMARY_JS, arg) or {}
@@ -880,8 +882,7 @@ def _summary_rows(page, claim_type: str, start: str, end: str) -> List[dict]:
             "Anthem would not authenticate an EOB listing "
             f"(status {status}); the signed-in session is no longer valid")
     if status != 200:
-        log.info("eob.v1.summary for %s returned %s", claim_type, status)
-        return []
+        raise ListingIncomplete("status %s" % status)
     return _walk_for_list(res.get("body"))
 
 
@@ -892,17 +893,20 @@ def _date_window(days: int = DEFAULT_LOOKBACK_DAYS) -> Tuple[str, str]:
 
 
 class Collected(list):
-    """The EOBs a listing kept, newest first, as a list. `alike` holds each
-    identity two or more statements gave, with how many gave it. Those are
-    kept by none of them, since nothing tells which statement is which.
-    `unread` holds, by claim type, how many rows were no document this app
-    can keep, a claim whose claim number could not be read. Either way the
-    list they came in is not a whole one."""
+    """The EOBs a listing kept, newest first, as a list, and what it could
+    not keep. `alike` holds each identity two or more statements gave, with
+    how many gave it, kept by none of them since nothing tells which
+    statement is which. `unread` holds (claim type, day) for each row that
+    was no document this app can keep, a claim whose claim number could not
+    be read, with "" for a day that could not be read either. `unlisted`
+    holds each claim type whose own list did not come. The app judges which
+    of them the run would have taken, and those leave the list not whole."""
 
-    def __init__(self, rows=(), alike: Optional[dict] = None, unread: Optional[dict] = None):
+    def __init__(self, rows=(), alike: Optional[dict] = None, unread=(), unlisted=()):
         super().__init__(rows)
         self.alike = dict(alike or {})
-        self.unread = dict(unread or {})
+        self.unread = list(unread)
+        self.unlisted = list(unlisted)
 
 
 def collect_documents(page) -> List[dict]:
@@ -914,7 +918,8 @@ def collect_documents(page) -> List[dict]:
     fetched fresh at download. Two statements of one claim type and one date
     give one identity, so neither is kept, each is named in the log, and the
     Collected says so in `alike`. A row whose claim number cannot be read is
-    logged and counted in `unread`.
+    logged and counted in `unread`, and a claim type whose list did not come
+    in `unlisted`.
     """
     rows = Collected()
     seen = set()
@@ -934,8 +939,12 @@ def collect_documents(page) -> List[dict]:
         except SessionExpired:
             raise
         except Exception as e:
-            log.info("summary for %s failed: %s", claim_type,
-                     str(e).splitlines()[0][:80])
+            # A claim type whose list did not come is not an empty one. It
+            # is named by its claim type and how it failed, never by any
+            # words the page gave.
+            rows.unlisted.append(claim_type)
+            log.warning("Anthem's %s EOB list did not come (%s)", claim_type,
+                        str(e) if isinstance(e, ListingIncomplete) else type(e).__name__)
             continue
         kept = 0
         found = []
@@ -944,10 +953,12 @@ def collect_documents(page) -> List[dict]:
             if row:
                 found.append(row)
             else:
-                # Logged by _extract_row, and counted, so the run says it
-                # could not read the whole list rather than end clean.
-                rows.unread[claim_type] = rows.unread.get(claim_type, 0) + 1
-        ids =[make_doc_id(row["claim_type"], row["claim_id"], row["doc_kind"], row["seq"])
+                # Logged by _extract_row, and counted with its day where that
+                # can be read, so the run says it could not read the whole
+                # list rather than end clean.
+                day = _checked_date(_iso_from_value(_first_key(r, _DATE_KEYS)[1]), "")
+                rows.unread.append((claim_type, day))
+        ids = [make_doc_id(row["claim_type"], row["claim_id"], row["doc_kind"], row["seq"])
                for row in found]
         statements: dict = {}
         for row, doc_id in zip(found, ids):
@@ -958,8 +969,7 @@ def collect_documents(page) -> List[dict]:
                 rows.alike[doc_id] = n
                 log.warning("Anthem lists %d %s statements dated %s, which all give the "
                             "identity %s. Nothing tells them apart, so none of them is "
-                            "saved and the list is not taken as whole",
-                            n, claim_type, doc_id.split("|")[1], doc_id)
+                            "fetched", n, claim_type, doc_id.split("|")[1], doc_id)
         for row, doc_id in zip(found, ids):
             if doc_id in rows.alike or doc_id in seen:
                 continue
@@ -1015,13 +1025,19 @@ def resolve_eob_id(page, claim_type: str, claim_id: str, doc_kind: str,
     the claim's token are per-call tokens, so stored ones would go stale.
     Matches on the stable identity; if the sequence number no longer lines up,
     falls back to the first document of that claim and kind. Returns None if
-    it is no longer listed, and for a statement of a date two or more listed
-    statements have, since nothing tells which one it is. Says which in the
-    log.
+    it is no longer listed or its claim type's list did not come, and for a
+    statement of a date two or more listed statements have, since nothing
+    tells which one it is. Says which in the log.
     """
     start, end = _date_window()
     matches = []
-    for r in _summary_rows(page, claim_type, start, end):
+    try:
+        listed = _summary_rows(page, claim_type, start, end)
+    except ListingIncomplete as e:
+        log.warning("Anthem's %s EOB list did not come (%s), so the %s is not fetched",
+                    claim_type, e, doc_kind)
+        return None
+    for r in listed:
         row = _extract_row(r, claim_type)
         if not row:
             continue

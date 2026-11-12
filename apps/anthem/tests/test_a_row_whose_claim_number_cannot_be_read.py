@@ -44,14 +44,15 @@ def test_a_row_with_no_claim_number_is_carried_as_unread(monkeypatch):
     rows = site.collect_documents(FakePage({"Medical": [claim_row(), unreadable()],
                                             "Chiropractic": [unreadable(), unreadable()]}))
     assert [r["doc_id"] for r in rows] == ["Medical|%s|EOB|2" % CLAIM_NUMBER]
-    assert rows.unread == {"Medical": 1, "Chiropractic": 2}
+    assert rows.unread == [("Medical", "2026-03-04"), ("Chiropractic", "2026-03-04"),
+                           ("Chiropractic", "2026-03-04")]
     assert rows.alike == {}
 
 
 def test_a_whole_list_carries_nothing_unread(monkeypatch):
     signed_in(monkeypatch)
     rows = site.collect_documents(FakePage({"Medical": [claim_row()]}))
-    assert rows.unread == {}
+    assert rows.unread == [] and rows.unlisted == []
 
 
 @pytest.fixture
@@ -127,7 +128,7 @@ def test_a_token_at_a_top_level_claim_key_is_no_claim_number(monkeypatch, key, v
     row = {"identifier": "Z_" + "3d" * 95, "created": "2026-03-04", key: value}
     rows = site.collect_documents(FakePage({"Medical": [row]}))
     assert list(rows) == []
-    assert rows.unread == {"Medical": 1}
+    assert rows.unread == [("Medical", "2026-03-04")]
 
 
 def test_a_claim_number_at_a_top_level_key_is_still_read(monkeypatch):

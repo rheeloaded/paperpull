@@ -507,32 +507,12 @@ class App:
         for d in raw:
             n_new += self._record_statement_doc(d)
         self.discovery.save()
-        # Statements of one claim type and one date give one identity, and
-        # nothing tells which is which, so none of them was kept. The list
-        # is then not a whole one, and the run's summary counts them for the
-        # panel (run_reporting, "alike").
-        alike = getattr(raw, "alike", None) or {}
-        if alike:
-            self.stats["alike"] = sum(alike.values())
-            for doc_id, n in sorted(alike.items()):
-                claim_type, day = doc_id.split("|")[:2]
-                print(f"  !! Anthem lists {n} {claim_type} statements dated "
-                      f"{day[:4]}-{day[4:6]}-{day[6:]}, which nothing here tells apart, "
-                      "so none of them is saved.")
-        # A row whose claim number could not be read is an EOB this run
-        # cannot keep, so it counts as failed and the run does not end clean.
-        unread = getattr(raw, "unread", None) or {}
-        if unread:
-            self.stats["failed"] += sum(unread.values())
-            for claim_type, n in sorted(unread.items()):
-                print(f"  !! {n} {claim_type} EOB row{'s' if n != 1 else ''} could not be read, "
-                      "since no claim number was found. The log names the fields it had.")
-            self.write_failure("read the eob list", "a row had no claim number")
-        if alike or unread:
-            print("  So the list is not taken as whole. Everything else on it is kept.")
+        # What the list held that this run would take and could not keep
+        # leaves the list not whole (_say_what_the_list_left).
+        left = self._say_what_the_list_left(raw)
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
-        if not (alike or unread):
+        if not left:
             listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
 
@@ -555,6 +535,70 @@ class App:
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
+
+    def _would_take(self, claim_type: str, day: Optional[str]) -> bool:
+        """Whether this run would take an EOB of this claim type and day, as
+        _record_statement_doc records one and _select offers it. A day of
+        None is held to nothing, for a whole claim type or a day that could
+        not be read, since nothing says it is outside the run's dates."""
+        title = f"{claim_type} Explanation of Benefits"
+        if doc_types.should_skip(title, self.rules):
+            return False
+        category = doc_types.classify_document(title, self.rules)[0]
+        if not doc_types.wanted(category, self.config):
+            return False
+        if self.args.type and category.lower() != self.args.type.lower():
+            return False
+        return day is None or self._in_dates(day)
+
+    def _say_what_the_list_left(self, raw) -> bool:
+        """Say what the EOB list held that this run would take and could not
+        keep, count it for the run's summary, and answer whether there was
+        any, which leaves the list not whole. Each is named by its claim type
+        and day alone. What lies outside the run's dates or kinds is passed
+        over, since the run would not take it anyway.
+
+        Statements of one claim type and one date give one identity and
+        nothing tells which is which, so none of them is fetched, and the
+        run's summary counts them for the panel (run_reporting, "alike"). A
+        row whose claim number could not be read, and a claim type whose
+        list did not come, are EOBs this run cannot keep, so each counts as
+        failed and the run does not end clean."""
+        def iso(day):
+            return "%s-%s-%s" % (day[:4], day[4:6], day[6:])
+
+        alike = {doc_id: n for doc_id, n in (getattr(raw, "alike", None) or {}).items()
+                 if self._would_take(doc_id.split("|")[0], iso(doc_id.split("|")[1]))}
+        unread = [(claim_type, day) for claim_type, day in (getattr(raw, "unread", None) or [])
+                  if self._would_take(claim_type, day or None)]
+        unlisted = [claim_type for claim_type in (getattr(raw, "unlisted", None) or [])
+                    if self._would_take(claim_type, None)]
+        if alike:
+            self.stats["alike"] = sum(alike.values())
+        for doc_id, n in sorted(alike.items()):
+            claim_type, day = doc_id.split("|")[:2]
+            print(f"  !! Anthem lists {n} {claim_type} statements dated {iso(day)}, which "
+                  "nothing here tells apart, so this run fetches none of them.")
+            if (self.progress.get(Document(document_id=doc_id).key) or {}).get("downloaded_ok"):
+                print("     The statement of that date an earlier run saved is kept as it is.")
+        if unread:
+            self.stats["failed"] += len(unread)
+            for claim_type in sorted({t for t, _day in unread}):
+                count = sum(1 for t, _day in unread if t == claim_type)
+                print(f"  !! {count} {claim_type} EOB row{'s' if count != 1 else ''} could not "
+                      "be read, since no claim number was found. The log names the fields it had.")
+        if unlisted:
+            self.stats["failed"] += len(unlisted)
+            for claim_type in unlisted:
+                print(f"  !! Anthem's {claim_type} EOB list did not come, so its EOBs were not "
+                      "listed this run.")
+        if unread:
+            self.write_failure("read the eob list", "a row had no claim number")
+        elif unlisted:
+            self.write_failure("read the eob list", "a claim type list was not read")
+        if alike or unread or unlisted:
+            print("  So the list is not taken as whole. Everything else on it is kept.")
+        return bool(alike or unread or unlisted)
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
