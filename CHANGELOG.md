@@ -7,7 +7,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.64.0] - 2026-11-11
+
+PaperPull can now ask github.com whether a newer version exists, only when
+you press its button, and the check is off until you turn it on. On a Mac
+installed from the disk image it can then download the new version, check
+that it is the release GitHub published and signed by the same publisher,
+and install it when you say so. CIBC and MBNA have first shells for a tester
+to record, ING no longer reads its notice that nothing matches as an empty
+list, and a recording keeps a Canadian bank's words for its accounts.
 
 ### Added
 - **An update check that asks only when you press its button (#146).**
@@ -24,8 +32,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Contributed by @JasperDale420. Before merging, the requests go only to
   GitHub's own hosts, read by the shared address check, and the Mac's own
   root certificates are added to what the app's Python trusts. Restart and
-  update also waits for a history import, and nothing new starts once it
-  has begun. A check turned off while it waited keeps nothing, a failed
+  update also refuses during a history import, and nothing new starts once
+  it has begun. A check turned off while it waited keeps nothing, a failed
   download can be tried again, a half-copied app is removed, and the swap
   waits for the window to close before it opens the new app.
 - **CIBC and MBNA, first shells for a tester (#204, #205).** Add one from
