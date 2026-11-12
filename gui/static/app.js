@@ -3106,10 +3106,10 @@ async function updLoad() {
 // The steps of "Updating" in SERVER.md, for the version found.
 function updServerSteps(v) {
   return '<ol class="small">' +
-    '<li>In <code>compose.yaml</code>, or <code>compose.https.yaml</code> if you use that one, change the <code>image:</code> line to <code>image: ' + SERVER_IMAGE + ':' + esc(v) + '</code>. A line that ends in <code>:latest</code> stays as it is.</li>' +
+    '<li>In <code>compose.yaml</code>, or <code>compose.https.yaml</code> if you use that one, change the <code>image:</code> line that names <code>paperpull-server</code> to <code>image: ' + SERVER_IMAGE + ':' + esc(v) + '</code>. A line that ends in <code>:latest</code> stays as it is.</li>' +
     '<li>In the folder that holds that file, run <code>docker compose pull</code>.</li>' +
     '<li>Then run <code>docker compose up -d</code>.</li></ol>' +
-    '<p class="hint">With <code>compose.https.yaml</code>, add <code>-f compose.https.yaml</code> to both commands. A NAS’s Docker app does the same from its project page. Your accounts, sign-ins and documents are in the volumes and stay. A release can also bring new lines for the compose file, and its notes name them. ' +
+    '<p class="hint">With <code>compose.https.yaml</code>, add <code>-f compose.https.yaml</code> to both commands. A NAS’s Docker app does the same from its project page. The image is published a little after the release, so if the pull says the version is not found, try again later. An image you build yourself is built again from the new release instead. Your accounts, sign-ins and documents are in the volumes and stay. A release can also bring new lines for the compose file, and its notes name them. ' +
     '<a href="https://github.com/rheeloaded/paperpull/blob/main/SERVER.md#updating-backing-up-and-removing" target="_blank" rel="noopener">Updating, in SERVER.md</a></p>';
 }
 async function updCheck() {
@@ -3162,8 +3162,10 @@ function updRender() {
     html = btn('upd-restart', 'Restart and update', 'btn-p');
     tone = 'ok';
   } else if (inst.phase === 'error') {
-    // The panel's reasons are sentences without their full stop.
-    text = 'The update did not install: ' + (inst.error || 'something went wrong').replace(/\.?$/, '.') + ' Nothing was changed.';
+    // The panel's reasons start in lower case and end without a full stop,
+    // and some are two sentences, so each is said as sentences of its own.
+    const why = (inst.error || 'something went wrong').replace(/\.$/, '');
+    text = 'The update did not install. ' + why.charAt(0).toUpperCase() + why.slice(1) + '. Nothing was changed.';
     html = (UPD.can_install ? btn('upd-install', 'Try the download from github.com again') : '') + link;
     tone = 'warn';
   } else if (UPD.newer && !UPD_HIDDEN) {

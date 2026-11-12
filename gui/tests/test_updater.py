@@ -1049,12 +1049,13 @@ def test_on_windows_the_panel_ends_with_0(monkeypatch):
     assert calls == [("exit", 0)]
 
 
-def test_the_page_ends_the_reason_with_a_full_stop():
-    """The panel's reasons end without one, and the page says them inside a
-    sentence of its own."""
+def test_the_page_says_the_reason_as_sentences_of_its_own():
+    """The panel's reasons start in lower case and end without a full stop,
+    and some are two sentences."""
     js = (Path(app_module.__file__).parent / "static" / "app.js").read_text(encoding="utf-8")
-    assert ("'The update did not install: ' + (inst.error || 'something went wrong')"
-            ".replace(/\\.?$/, '.') + ' Nothing was changed.'") in js
+    assert "const why = (inst.error || 'something went wrong').replace(/\\.$/, '');" in js
+    assert ("text = 'The update did not install. ' + why.charAt(0).toUpperCase() + why.slice(1)"
+            " + '. Nothing was changed.';") in js
 
 
 def test_the_page_gives_the_server_the_steps_that_take_the_new_image():
@@ -1068,30 +1069,40 @@ def test_the_page_gives_the_server_the_steps_that_take_the_new_image():
     steps = js[js.index("function updServerSteps(v)"):]
     steps = steps[:steps.index("\n}\n")]
     for step in ("<code>image:</code>", "<code>compose.yaml</code>", "<code>docker compose pull</code>",
-                 "<code>docker compose up -d</code>", "SERVER_IMAGE + ':' + esc(v)"):
+                 "<code>docker compose up -d</code>", "SERVER_IMAGE + ':' + esc(v)",
+                 "names <code>paperpull-server</code>", "try again later"):
         assert step in steps, step
     assert "const SERVER_IMAGE = 'ghcr.io/rheeloaded/paperpull-server';" in js
     compose = (Path(app_module.__file__).resolve().parents[1] / "server" / "compose.yaml").read_text(encoding="utf-8")
     assert re.search(r"^\s+image: ghcr\.io/rheeloaded/paperpull-server:\d+\.\d+\.\d+$", compose, re.M)
 
 
+def test_both_scripts_are_one_argument_with_no_double_quote():
+    """Each script is all of one argument on PowerShell's command line, and a
+    double quote there would end it early."""
+    for script in (updater.INSTALL_PS, updater._SIGNATURE_PS):
+        assert '"' not in script
+
+
 # -- the script that runs the installer, for real ----------------------------
 #
-# Stub programs stand in for setup.exe and PaperPull.exe. Each writes the
-# arguments it was given to a file of its own and ends with the code it is
-# told, so the script is run exactly as the panel runs it, by PowerShell, with
-# a process to wait for.
+# Stub programs stand in for setup.exe, PaperPull.exe and the folder's
+# python.exe. Each writes where it ran from, whether it was handed the
+# script's own variables, and its arguments to a file named after it, and
+# ends with the code in a file beside it, so the script is run exactly as the
+# panel runs it, by PowerShell, with a process to wait for.
 
 _STUB = r'''
 using System; using System.IO; using System.Threading;
 static class Stub { static int Main(string[] a) {
   string me = System.Reflection.Assembly.GetEntryAssembly().Location;
-  File.WriteAllText(Path.Combine(Environment.GetEnvironmentVariable("STUB_DIR"),
-                                 Path.GetFileName(me) + ".ran"), string.Join("\n", a));
+  string handed = Environment.GetEnvironmentVariable("PAPERPULL_UPDATE_SETUP") ?? "";
+  File.WriteAllText(Path.Combine(Environment.GetEnvironmentVariable("STUB_DIR"), Path.GetFileName(me) + ".ran"),
+                    me + "\n" + handed + "\n" + string.Join("\n", a));
   string ms = Environment.GetEnvironmentVariable("STUB_SLEEP_MS");
   if (!string.IsNullOrEmpty(ms)) Thread.Sleep(int.Parse(ms));
-  string code = Environment.GetEnvironmentVariable("STUB_EXIT");
-  return string.IsNullOrEmpty(code) ? 0 : int.Parse(code);
+  string code = me + ".exit";
+  return File.Exists(code) ? int.Parse(File.ReadAllText(code).Trim()) : 0;
 } }
 '''
 
@@ -1112,27 +1123,39 @@ def stub_exe(tmp_path_factory):
     return (where / "stub.exe").read_bytes()
 
 
-def _install_box(tmp_path, monkeypatch, stub_exe, **env):
+def _install_box(tmp_path, monkeypatch, stub_exe, app_name="Install Folder", work_name="paperpull-update-abc"):
     seen = tmp_path / "seen"
     seen.mkdir()
-    app = tmp_path / "Install Folder"
-    app.mkdir()
+    app = tmp_path / app_name
+    (app / "python").mkdir(parents=True)
     (app / "PaperPull.exe").write_bytes(stub_exe)
-    work = tmp_path / "paperpull-update-abc"
+    (app / "python" / "python.exe").write_bytes(stub_exe)
+    work = tmp_path / work_name
     work.mkdir()
     setup = work / "PaperPull-0.61.0-setup.exe"
     setup.write_bytes(stub_exe)
     monkeypatch.setenv("STUB_DIR", str(seen))
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-    for k, v in env.items():
-        monkeypatch.setenv(k, v)
     return seen, app, setup, hashlib.sha256(stub_exe).hexdigest()
 
 
+def _ran(seen, name):
+    """Where the stub of that name ran from, the script variable it was
+    handed, and its arguments."""
+    deadline = time.time() + 10
+    while True:
+        # A stub that runs again writes its file again, and a read in
+        # between can find it empty.
+        lines = (seen / (name + ".ran")).read_text().split("\n")
+        if len(lines) >= 3 or time.time() > deadline:
+            return lines[0], lines[1], lines[2:]
+        time.sleep(0.05)
+
+
 def _after(proc, seen, *names):
-    proc.wait(timeout=90)
-    deadline = time.time() + 20
-    while time.time() < deadline and not all((seen / n).exists() for n in names):
+    proc.wait(timeout=120)
+    deadline = time.time() + 30
+    while time.time() < deadline and not all((seen / (n + ".ran")).exists() for n in names):
         time.sleep(0.1)
     log = Path(updater.os.environ["APPDATA"]) / "PaperPull" / "update.log"
     return log.read_text(encoding="utf-8-sig") if log.exists() else ""
@@ -1145,27 +1168,52 @@ def _panel_for(seconds):
     return p
 
 
+SETUP = "PaperPull-0.61.0-setup.exe"
+
+
 def test_the_script_waits_installs_and_opens_paperpull_again(tmp_path, monkeypatch, stub_exe):
     seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
     panel_proc = _panel_for(1.5)
     t = time.time()
     proc = updater.start_installer(app, setup, sha, "0.61.0", pid=panel_proc.pid)
-    log = _after(proc, seen, "PaperPull-0.61.0-setup.exe.ran", "PaperPull.exe.ran")
+    log = _after(proc, seen, SETUP, "PaperPull.exe")
     assert panel_proc.poll() is not None and time.time() - t >= 1.0
-    args = (seen / "PaperPull-0.61.0-setup.exe.ran").read_text().split("\n")
+    where, handed, args = _ran(seen, SETUP)
     assert args[:4] == ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/NOCANCEL"]
     assert args[4] == "/LOG=" + str(tmp_path / "Roaming" / "PaperPull" / "setup.log")
-    assert (seen / "PaperPull.exe.ran").exists()
+    assert handed == ""                           # its variables go no further
+    assert _ran(seen, "python.exe")[2] == ["-m", "uvicorn", "--version"]
+    where, handed, args = _ran(seen, "PaperPull.exe")
+    assert where == str(app / "PaperPull.exe") and handed == "" and args == [""]
     assert "installed" in log and "opened PaperPull again" in log
     assert not setup.parent.exists()              # it cleans up after itself
+
+
+def test_brackets_in_a_path_never_start_another_file(tmp_path, monkeypatch, stub_exe):
+    """PowerShell's Start-Process reads [x] as a pattern, which matches a
+    folder named with x alone. The script starts exactly the files it was
+    given, from beside the very files that were checked."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe, app_name="Apps [x]",
+                                         work_name="paperpull-update-[a]")
+    for decoy in (tmp_path / "Apps x", tmp_path / "paperpull-update-a"):
+        (decoy / "python").mkdir(parents=True)
+        for name in ("PaperPull.exe", SETUP, "python/python.exe"):
+            (decoy / name).write_bytes(stub_exe)
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    log = _after(proc, seen, SETUP, "PaperPull.exe")
+    assert _ran(seen, SETUP)[0] == str(setup)
+    assert _ran(seen, "python.exe")[0] == str(app / "python" / "python.exe")
+    assert _ran(seen, "PaperPull.exe")[0] == str(app / "PaperPull.exe")
+    assert "installed" in log and not setup.parent.exists()
 
 
 def test_the_script_never_runs_an_installer_that_changed(tmp_path, monkeypatch, stub_exe):
     seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
     proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(0.2).pid)
-    log = _after(proc, seen, "PaperPull.exe.ran")
-    assert not (seen / "PaperPull-0.61.0-setup.exe.ran").exists()
+    log = _after(proc, seen, "PaperPull.exe")
+    assert not (seen / (SETUP + ".ran")).exists()
     assert "not the one the panel checked" in log and (seen / "PaperPull.exe.ran").exists()
+    assert not setup.parent.exists()
 
 
 def test_the_script_installs_nothing_while_the_panel_stays(tmp_path, monkeypatch, stub_exe):
@@ -1177,14 +1225,34 @@ def test_the_script_installs_nothing_while_the_panel_stays(tmp_path, monkeypatch
     finally:
         stays.kill()
     assert list(seen.iterdir()) == []             # neither the installer nor a second PaperPull
-    assert "did not exit" in log
+    assert "did not exit" in log and setup.is_file()
 
 
-def test_a_failed_install_still_opens_paperpull_again(tmp_path, monkeypatch, stub_exe):
-    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe, STUB_EXIT="4")
+def test_a_failed_install_opens_paperpull_again_and_keeps_the_installer(tmp_path, monkeypatch, stub_exe):
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    Path(str(setup) + ".exit").write_text("4")
     proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
-    log = _after(proc, seen, "PaperPull-0.61.0-setup.exe.ran", "PaperPull.exe.ran")
-    assert "ended with 4" in log and (seen / "PaperPull.exe.ran").exists()
+    log = _after(proc, seen, SETUP, "PaperPull.exe")
+    assert "ended with 4" in log and "opened PaperPull again" in log
+    assert _ran(seen, SETUP)[2][0] == "/SILENT" and setup.is_file()
+
+
+def test_a_failed_install_that_broke_paperpull_opens_the_installer_to_finish(tmp_path, monkeypatch, stub_exe):
+    """The installer removes the old Python before it copies the new one and
+    does not put it back. A PaperPull that would not start is not opened,
+    and the installer opens with its usual window instead."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    Path(str(setup) + ".exit").write_text("4")
+    Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    proc.wait(timeout=120)
+    deadline = time.time() + 30
+    while time.time() < deadline and _ran(seen, SETUP)[2][:1] == ["/SILENT"]:
+        time.sleep(0.1)
+    log = _after(proc, seen)
+    assert _ran(seen, SETUP)[2] == [""]           # the second time, the usual window
+    assert not (seen / "PaperPull.exe.ran").exists()
+    assert "installer was opened to finish the update" in log and setup.is_file()
 
 
 _HANDS_OVER = r'''
@@ -1201,7 +1269,8 @@ os._exit(0)
 def test_the_script_outlives_the_panel_that_started_it(tmp_path, monkeypatch, stub_exe):
     """As Restart and update does it. The panel starts the script, waits for
     it to say it is waiting, and ends, and the script goes on."""
-    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe, STUB_SLEEP_MS="1000")
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    monkeypatch.setenv("STUB_SLEEP_MS", "1000")
     gui = str(Path(updater.__file__).resolve().parent)
     done = subprocess.run([sys.executable, "-c", _HANDS_OVER, gui, str(app), str(setup), sha,
                            updater.os.pathsep.join(sys.path)],
@@ -1210,7 +1279,7 @@ def test_the_script_outlives_the_panel_that_started_it(tmp_path, monkeypatch, st
     deadline = time.time() + 60
     while time.time() < deadline and not (seen / "PaperPull.exe.ran").exists():
         time.sleep(0.2)
-    assert (seen / "PaperPull-0.61.0-setup.exe.ran").exists() and (seen / "PaperPull.exe.ran").exists()
+    assert (seen / (SETUP + ".ran")).exists() and (seen / "PaperPull.exe.ran").exists()
 
 
 def test_a_script_that_never_says_it_waits_keeps_the_panel_open(tmp_path, monkeypatch, stub_exe):
@@ -1225,14 +1294,40 @@ def test_a_script_that_never_says_it_waits_keeps_the_panel_open(tmp_path, monkey
     assert (seen / "quiet.exe.ran").exists() and setup.is_file()
 
 
+def test_a_program_running_from_the_folder_is_found(tmp_path, monkeypatch, stub_exe):
+    folder = tmp_path / "PaperPull"
+    (folder / "python").mkdir(parents=True)
+    (folder / "python" / "python.exe").write_bytes(stub_exe)
+    (tmp_path / "PaperPull-old").mkdir()
+    (tmp_path / "PaperPull-old" / "python.exe").write_bytes(stub_exe)
+    monkeypatch.setenv("STUB_DIR", str(tmp_path))
+    monkeypatch.setenv("STUB_SLEEP_MS", "30000")
+    inside = subprocess.Popen([str(folder / "python" / "python.exe")])
+    beside = subprocess.Popen([str(tmp_path / "PaperPull-old" / "python.exe")])
+    try:
+        deadline = time.time() + 20
+        found = []
+        while time.time() < deadline and not found:
+            found = updater.programs_running_from(folder)
+            time.sleep(0.1)
+        assert [Path(f).resolve() for f in found] == [(folder / "python" / "python.exe").resolve()]
+        assert updater.programs_running_from(folder, {inside.pid}) == []
+    finally:
+        inside.kill()
+        beside.kill()
+
+
 class _Started:
     """subprocess.Popen as start_installer uses it, a script that says at
     once that it is waiting, with the environment it was given kept."""
     seen = []
 
+    flags = []
+
     def __init__(self, cmd, env=None, **kw):
         _Started.seen.append(env)
-        Path(env["PAPERPULL_STARTED"]).write_text("waiting")
+        _Started.flags.append(kw.get("creationflags", 0))
+        Path(env["PAPERPULL_UPDATE_STARTED"]).write_text("waiting")
 
     def poll(self):
         return None
@@ -1251,12 +1346,13 @@ def test_the_script_waits_for_paperpull_exe_too(tmp_path, monkeypatch):
     _Started.seen.clear()
     updater.start_installer(folder, setup, sha, "0.61.0")
     env = _Started.seen[-1]
-    assert env["PAPERPULL_WAIT"] == "%d 4242" % updater.os.getpid()
-    assert env["PAPERPULL_SETUP"] == str(setup) and env["PAPERPULL_SHA256"] == sha
-    assert env["PAPERPULL_APP"] == str(folder) and env["PAPERPULL_VERSION"] == "0.61.0"
+    assert env["PAPERPULL_UPDATE_WAIT"] == "%d 4242" % updater.os.getpid()
+    assert env["PAPERPULL_UPDATE_SETUP"] == str(setup) and env["PAPERPULL_UPDATE_SHA256"] == sha
+    assert env["PAPERPULL_UPDATE_APP"] == str(folder) and env["PAPERPULL_UPDATE_VERSION"] == "0.61.0"
+    assert "PAPERPULL_VERSION" not in env or env["PAPERPULL_VERSION"] == updater.os.environ.get("PAPERPULL_VERSION")
     monkeypatch.setattr(updater, "_image_of", lambda pid: r"C:\Windows\explorer.exe")
     updater.start_installer(folder, setup, sha, "0.61.0")
-    assert _Started.seen[-1]["PAPERPULL_WAIT"] == str(updater.os.getpid())
+    assert _Started.seen[-1]["PAPERPULL_UPDATE_WAIT"] == str(updater.os.getpid())
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows names a process's program")
@@ -1264,3 +1360,146 @@ def test_the_program_a_process_runs_is_read(tmp_path):
     image = updater._image_of(updater.os.getpid())
     assert image.lower().endswith("python.exe") and Path(image).is_file()
     assert updater._image_of(0) == ""
+
+
+# -- what the review of the Windows install found ---------------------------
+
+def test_a_pc_that_allows_only_restricted_powershell_is_told_so(tmp_path, monkeypatch):
+    """Where an organization locks PowerShell to its restricted language,
+    neither script can run, so the copy says so before it downloads."""
+    class Ran:
+        stdout = "restricted\r\n"
+    monkeypatch.setattr(updater.subprocess, "run", lambda *a, **k: Ran())
+    assert updater.windows_signature(tmp_path / "x.exe") == {"restricted": True}
+    with pytest.raises(updater.UpdateError, match="restricted commands"):
+        updater.this_copy_is_signed(tmp_path)
+    setup, sha = _installer(tmp_path)
+    with pytest.raises(updater.UpdateError, match="restricted commands"):
+        updater.verify_installer(setup, sha, "0.61.0")
+    assert "LanguageMode -ne 'FullLanguage') { 'restricted'; exit }" in updater._SIGNATURE_PS
+
+
+def test_a_folder_this_account_cannot_write_is_found_by_writing(tmp_path, monkeypatch):
+    folder = tmp_path / "PaperPull"
+    folder.mkdir()
+    assert updater.can_write(folder) and list(folder.iterdir()) == []
+    assert not updater.can_write(tmp_path / "not there")
+    asked = []
+    monkeypatch.setattr(updater, "this_copy_is_signed", lambda folder: True)
+    monkeypatch.setattr(updater, "can_write", lambda folder: False)
+    monkeypatch.setattr(updater, "check_latest", lambda *a, **k: asked.append(a))
+    inst = updater.Install()
+    inst.start("0.60.1", tmp_path, kind="windows")
+    snap = _finish(inst)
+    assert snap["phase"] == "error" and "cannot change" in snap["error"] and asked == []
+
+
+def test_a_ready_update_is_kept_from_a_second_download(tmp_path, monkeypatch):
+    inst, setup, sha = _windows_ready(tmp_path)
+    started = []
+    monkeypatch.setattr(updater.threading, "Thread", lambda *a, **k: started.append(k) or pytest.fail("started"))
+    inst.start("0.60.1", tmp_path / "PaperPull", kind="windows")
+    assert inst.phase == "ready" and inst.staged == setup and setup.is_file() and started == []
+
+
+def test_restart_waits_while_another_paperpull_program_runs_from_the_folder(tmp_path, monkeypatch):
+    """The installer would close it, a download started in a terminal with
+    paperpull.bat among them, or fail on a file it holds."""
+    inst, setup, sha = _windows_ready(tmp_path)
+    started, looked = [], []
+    monkeypatch.setattr(updater, "verify_installer", lambda *a: None)
+    monkeypatch.setattr(updater, "start_installer", lambda *a: started.append(a))
+    seen_but = []
+
+    def running(folder, but=()):
+        seen_but.append(set(but))
+        return [str(folder / "python" / "python.exe")]
+    monkeypatch.setattr(updater, "programs_running_from", running)
+    with pytest.raises(updater.UpdateError, match="running from its folder"):
+        inst.restart(lambda: looked.append(1) or "")
+    assert started == [] and looked == [] and inst.phase == "ready" and setup.is_file()
+    assert seen_but == [{updater.os.getpid(), updater.os.getppid()}]
+
+
+def test_an_installer_the_script_took_with_it_leaves_nothing_ready(tmp_path, monkeypatch):
+    inst, setup, sha = _windows_ready(tmp_path)
+    monkeypatch.setattr(updater, "verify_installer", lambda *a: None)
+
+    def gone(*a):
+        setup.unlink()
+        raise updater.UpdateError("the installer could not be started")
+    monkeypatch.setattr(updater, "start_installer", gone)
+    with pytest.raises(updater.UpdateError):
+        inst.restart()
+    assert inst.phase == "idle"
+
+
+def test_a_copy_off_the_mac_and_windows_gets_no_mac_words(monkeypatch):
+    monkeypatch.setattr(updater.sys, "platform", "linux")
+    ok, why = updater.can_install(None)
+    assert not ok and "Mac" not in why and "git pull" in why
+
+
+# -- what the review of those repairs found ---------------------------------
+
+def test_an_installer_that_was_not_the_one_checked_is_never_opened(tmp_path, monkeypatch, stub_exe):
+    """Even when PaperPull would not start, a changed installer is not the
+    way to finish anything."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
+    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(0.2).pid)
+    log = _after(proc, seen, "python.exe")
+    time.sleep(1.0)
+    assert not (seen / (SETUP + ".ran")).exists() and not (seen / "PaperPull.exe.ran").exists()
+    assert "not the one the panel checked" in log and "Download the installer from the release page" in log
+    assert not setup.parent.exists()
+
+
+def test_a_python_that_cannot_even_be_started_counts_as_a_no(tmp_path, monkeypatch, stub_exe):
+    """A file of no bytes where the Python was, as a failed install can leave
+    it. Windows will not start it, and the kept installer opens instead."""
+    seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
+    Path(str(setup) + ".exit").write_text("4")
+    (app / "python" / "python.exe").write_bytes(b"")
+    proc = updater.start_installer(app, setup, sha, "0.61.0", pid=_panel_for(0.2).pid)
+    proc.wait(timeout=120)
+    deadline = time.time() + 30
+    while time.time() < deadline and _ran(seen, SETUP)[2][:1] == ["/SILENT"]:
+        time.sleep(0.1)
+    log = _after(proc, seen)
+    assert _ran(seen, SETUP)[2] == [""] and not (seen / "PaperPull.exe.ran").exists()
+    assert "would not start" in log and "installer was opened to finish the update" in log
+
+
+def test_the_script_is_not_put_in_a_process_group_of_its_own(tmp_path, monkeypatch):
+    """A group of its own turns Ctrl+C off, for the script and for the
+    PaperPull it opens again, whose window says Ctrl+C stops it."""
+    folder = tmp_path / "PaperPull"
+    folder.mkdir()
+    setup, sha = _installer(tmp_path)
+    monkeypatch.setattr(updater.subprocess, "Popen", _Started)
+    _Started.flags.clear()
+    updater.start_installer(folder, setup, sha, "0.61.0", pid=4242)
+    group = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
+    assert _Started.flags and not _Started.flags[-1] & group
+
+
+def test_a_ready_update_whose_file_went_starts_over(tmp_path, monkeypatch):
+    inst, setup, sha = _windows_ready(tmp_path)
+    updater.shutil.rmtree(setup.parent)
+    with pytest.raises(updater.UpdateError, match="no update is ready"):
+        inst.restart()
+    assert inst.phase == "idle"
+
+
+def test_a_process_list_windows_will_not_give_does_not_stop_the_update(tmp_path, monkeypatch):
+    inst, setup, sha = _windows_ready(tmp_path)
+    started = []
+    monkeypatch.setattr(updater, "verify_installer", lambda *a: None)
+    monkeypatch.setattr(updater, "start_installer", lambda *a: started.append(a))
+
+    def broken(*a):
+        raise OSError("access denied")
+    monkeypatch.setattr(updater, "programs_running_from", broken)
+    inst.restart(lambda: "")
+    assert len(started) == 1 and inst.phase == "restarting"

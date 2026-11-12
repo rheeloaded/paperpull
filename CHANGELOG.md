@@ -35,11 +35,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   that same signature, or nothing is downloaded. **Restart and update**
   checks the installer again, then closes PaperPull, runs the installer with
   only its progress showing, in the folder you installed it in, and opens
-  PaperPull again when it is done, or opens the copy you had if the
-  installer failed. A script waits for PaperPull to exit and checks the
-  installer's SHA-256 one last time while it holds the file, and if that
-  script never starts, PaperPull stays open. It writes what it did to
-  `update.log` in `AppData\Roaming\PaperPull`. The portable zip says a
+  PaperPull again when it is done. It refuses while another PaperPull
+  program runs from that folder, such as a download started in a terminal,
+  which the installer would close. If the installer fails and leaves a
+  PaperPull that does not start, the installer opens again with its usual
+  window so you can finish the install. A script waits for PaperPull to
+  exit and checks the installer's SHA-256 one last time while it holds the
+  file, and if that script never starts, PaperPull stays open. It writes
+  what it did to `update.log` in `AppData\Roaming\PaperPull`. Where an
+  organization lets PowerShell run only its restricted commands, the panel
+  says so and points to the release page. The portable zip says a
   newer version exists and how to take it. PaperPull Server asks the same
   way and gives the steps that take the new image, the `image:` line in
   `compose.yaml`, `docker compose pull` and `docker compose up -d`, since a
