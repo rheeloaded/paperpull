@@ -14,10 +14,10 @@ and delete-safe, part of [PaperPull](../../README.md):
 - **Claims summaries**, the claims list, one a year for each of the five
   years before this one and one for the current year to date, each a PDF
   table with Anthem's CSV kept beside it. Claims for a year keep arriving
-  after it ends, and a year's summary is filed once, so a year is filed only
-  once 90 days have passed since it ended. A run in January leaves the year
-  just ended for later and says so, and the year to date covers it until
-  then.
+  after it ends, and a year's summary is saved one time and never updated,
+  so it waits until 90 days have passed since the year ended. A run in
+  January leaves the year just ended for later and says so, and the year to
+  date covers it until then.
 
 Every one of these is fetched by the portal's own read-only member API from inside
 your signed-in page, **nothing on the page is ever clicked, submitted or
@@ -67,16 +67,20 @@ and message your care team. This tool does none of it. Concretely:
   enroll, switch plan, pay premium, go paperless, plus every "change", "update",
   "consent", "agree", "submit" and "authorize" variant.
 - **A document is fetched by a validated identity, never a URL.** The identity
-  is `claimType|claimId|docKind`: the claim type and kind must be ones this app
+  is `claimType|claimId|docKind|seq`: the claim type and kind must be ones this app
   knows and the claim number is validated to Anthem's alphanumeric shape, so the
   request is built from values this app recognizes rather than any stored string.
+  The last part is Anthem's own sequence number for the claim's documents.
   A Pharmacy statement for a month has no claim, so its identity is
-  `Pharmacy|<its date, YYYYMMDD>|Statement`.
-- **The opaque per-document tokens never leave the page.** Anthem authorizes a
+  `Pharmacy|<its date, YYYYMMDD>|Statement|0`. Two statements of one date
+  would share it, so neither is saved and the run says so.
+- **The opaque per-document tokens are never stored.** Anthem authorizes a
   PDF fetch with a per-document `eobId` token and a token for the claim (the
   summary shows the claim number beside it), both made new on every listing.
-  They are read and spent inside the page and are **never stored**; the
-  identity above is looked up fresh at download time.
+  They pass through this app with every listing it reads, and at download
+  time the ones a fresh listing gives are handed straight back to the page's
+  download call. They are **never stored**, logged or written into a file
+  name. The identity above is what is kept between runs.
 - **A session that expires, or an Akamai block page, stops the run** and says
   so, rather than filing everything as "needs manual review" and exiting as
   though it worked.
