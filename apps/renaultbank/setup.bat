@@ -31,8 +31,8 @@ rem always is. If none is found, login.bat offers the download then, when
 rem somebody is present to agree to it.
 
 echo.
-echo Setup complete. Then run login.bat, sign in and keep the browser open,
-echo then press Record steps in the panel and click your way to one document.
+echo Setup complete. Next: login.bat  (sign in, keep the browser open),
+echo then paperpull renaultbank diagnose, then paperpull renaultbank pilot.
 pause
 exit /b 0
 

@@ -29,8 +29,8 @@ def test_the_folders_and_categories_are_what_the_index_expects():
 
 def test_an_install_starts_with_every_kind_the_real_build_may_file():
     """An install keeps the document_types it was set up with, and a kind
-    added to the template later reaches new installs only, so a tester who
-    sets up this shell would never get one. Every kind is in from the
+    added to the template later reaches new installs only, so a person who
+    set up this app before it would never get one. Every kind is in from the
     first build, the template and the defaults alike."""
     every = storage.ALL_CATEGORIES + [storage.OTHER]
     template = json.loads((APP / "config.example.json").read_text(encoding="utf-8"))

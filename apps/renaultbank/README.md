@@ -1,77 +1,81 @@
 # Renault Bank direkt
 
-Downloads existing PDFs from the Renault Bank direkt Postfach and archive,
-including statements, tax documents, confirmations and message attachments.
-Requested in [#172](https://github.com/rheeloaded/paperpull/issues/172).
-Renault Bank direkt is the 92nd provider app, raising the supported-provider
-count from 82 to 83 relative to upstream main. Its default CDP port is 9313,
-the next port after main’s highest provider port, 9312.
+Downloads the PDFs Renault Bank direkt already holds in its Postfach and
+archive, statements, tax documents, confirmations and the PDF attachments
+of messages. Requested in [#172](https://github.com/rheeloaded/paperpull/issues/172)
+and contributed by [@MelleD](https://github.com/MelleD) in
+[#212](https://github.com/rheeloaded/paperpull/pull/212). Its CDP port is 9313.
 
-**Status: tested on one contributor’s real account on 2026-11-12.**
-Discovery read the available history; five recent documents, an older archive
-document and a message attachment were saved as valid PDFs. A repeated Pilot
-saved no new files. A full download of the entire account has not been run.
+**Run on the contributor's own account on 2026-11-12.** Discover
+read the history, and a Pilot saved five recent documents, an older archive
+document and a message attachment as valid PDFs. A second Pilot saved
+nothing new. A whole run of the account has not been reported yet.
 
 ## Commands in a checkout
 
-`--root ./apps` selects the provider in this checkout even when the panel
-is configured to use a different install folder.
+`--root ./apps` picks the app in this checkout even when the panel is set
+to use another install folder.
 
 ```sh
 ./paperpull --root ./apps renaultbank login
 ```
 
-Sign in yourself, answer your own two-factor prompt, and leave the window open.
-The Postfach is at
+Sign in yourself, answer your own two-factor prompt, and leave the window
+open. The Postfach is at
 `https://banking.renault-bank-direkt.de/services_cloud/portal/webcomp/epostfach/postfach`.
 
 ```sh
 ./paperpull --root ./apps renaultbank discover
 ./paperpull --root ./apps renaultbank pilot
-./paperpull --root ./apps renaultbank pilot
 ./paperpull --root ./apps renaultbank all
 ```
 
-Check the first Pilot’s PDFs. The second Pilot must save no new files.
-Resume continues a stopped download; Verify checks saved PDFs locally.
+Check the Pilot's PDFs first. Resume carries on with a run that stopped,
+and Verify checks the saved PDFs on this computer.
 
 ## How it reads documents
 
-The signed-in page makes same-origin calls to Renault’s Atruvia document
-API. Cookies, customer/document JWTs and download tickets stay in the
-browser. Only document metadata and the requested PDF bytes leave it.
-Before a request, the portal’s own `getSecurityService().ensureTokenForApiCall()`
-prepares its access cookie, as the portal’s HTTP interceptor does. An expired
-login session stops the run; the app never attempts a login or answers a prompt.
+The signed-in page asks Renault Bank direkt's Atruvia document API for the
+lists and files, from the bank's own address. Cookies, the customer and
+document tokens and the download tickets stay in the browser, and only
+each document's description and the PDF asked for leave it. Before each
+request the portal's own `getSecurityService().ensureTokenForApiCall()`
+prepares its access cookie, as the portal's own pages do. A session that
+has ended stops the run. The app never signs in or answers a prompt.
 
-- `liefereBerechtigteKunden?institut=BANK` supplies every accessible bank
-  customer, including customers outside the currently selected profile.
-- `liefereDokumenteZuKunden` reads Posteingang and Archiv separately for
-  each customer, without date, account or unread filters. The response’s
-  `aufsetzpunkt` is followed until the declared total is reached.
-- Incoming and sent correspondence is paginated by its declared count.
-  Older entries in correspondence threads are read too; each attachment
-  is listed once. Text-only messages are counted and reported, but their
-  text is not exported. Linked external-provider postboxes are unsupported
-  and stop discovery explicitly.
-- Missing metadata, repeated pages, changing totals or incomplete history
-  stop discovery before it commits a partial list.
-- Document downloads use the observed `datasharing/documentUpload` call,
-  which stages an existing bank document for download; it sends no file.
-  Message attachments use `messageAttachmentDownload` and a download
-  ticket. PDFs are fetched by the portal’s `ticket/download` URL.
+- `liefereBerechtigteKunden?institut=BANK` names every bank customer the
+  sign-in can see, customers outside the profile picked at the moment
+  included.
+- `liefereDokumenteZuKunden` reads Posteingang and Archiv for each customer
+  with no date, account or unread filter, page by page to the total the
+  bank declares.
+- Incoming and sent messages are read page by page to their declared
+  count, and the older messages of a thread too. Each PDF attachment is
+  listed once. A message with no attachment is counted and said, and its
+  own text is not saved. An attachment that is not a PDF (a photo or a
+  Word file, say) is left out, counted and said. A postbox of a linked
+  outside provider is not supported and stops Discover with that said.
+- A missing field, a page given twice, a total that changes or a history
+  that stops short stops Discover before any of the list is recorded.
+- A document's PDF is staged with `datasharing/documentUpload`, which
+  prepares a document the bank already holds and sends no file. A message
+  attachment uses `messageAttachmentDownload` and a download ticket. Both
+  are then fetched from the portal's `ticket/download` address.
 
-No banking control is pressed. Requests are limited to an explicit set of
-read/list/download operations; redirects are refused. Transfer, payment,
-status, delete, archive and activation endpoints are excluded. The app does
-not explicitly mark anything read. Any server-side read-marking caused by
-a download has not been checked yet.
+No control is pressed. Only a fixed list of read, list and download calls
+is made, and redirects are refused. Transfer, payment, status, delete,
+archive and activation calls are never made. The app never marks anything
+read itself. Whether the bank marks a document read when its PDF is
+fetched has not been checked yet.
 
-The orchestration follows DKB: category, date, account suffix and full title
-identify a document; ids are re-resolved as hints. Ambiguous documents fail
-rather than being confused with another. Progress and indexes remain local,
-and successful downloads are remembered even if their files are later removed.
-Non-PDF downloads fail explicitly rather than being saved as PDFs.
+Documents are told apart as DKB's are, by kind, date, the last four of the
+account and the whole title, and a stored id is a hint the list is checked
+against. Documents alike that cannot be told apart fail rather than be
+saved as each other. A document whose PDF does not come (an HTTP error,
+no ticket, an answer that is not a PDF) fails alone, and the run goes on
+and the next run asks for it again. Progress and indexes stay on this
+computer, and a document saved once is remembered even after its file is
+deleted.
 
 ## Development checks
 
@@ -79,9 +83,8 @@ Non-PDF downloads fail explicitly rather than being saved as PDFs.
 python -m pytest apps/renaultbank/tests -q
 ```
 
-The in-page API tests use Node and invented responses to check pagination,
-archive and thread traversal, JWT containment, ticket downloads, session
-expiry and incomplete-list failures. No account is used by those tests.
-`capture_structure.py` is a local development helper for route/schema
-reports; it saves no request/response values, authentication headers or PDF
-contents. Diagnostic files and recordings are ignored by Git.
+The in-page tests run the app's own page script against made-up answers,
+in Node for each part of the list and in Playwright's Chromium for whole
+runs. They check paging, the archive and threads, that tokens stay in the
+page, ticket downloads, an ended session and a list that stops short. No
+account is used. Diagnostic files and recordings are kept out of Git.

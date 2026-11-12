@@ -7,6 +7,26 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Renault Bank direkt, the Postfach, its archive and message attachments
+  (#172).** Contributed by @MelleD and run on the contributor's own
+  account, where a Pilot saved recent documents, an older archive document
+  and a message attachment, and a second Pilot saved nothing new. It reads
+  the bank's own Postfach API from inside the signed-in page, every bank
+  customer the sign-in can see, Posteingang and Archiv page by page to the
+  total the bank declares, and incoming and sent messages with the older
+  messages of each thread. Each document's tokens and download tickets stay
+  in the page, and nothing is pressed. Before merging, a document whose PDF
+  does not come (an HTTP error for that one file, no ticket, or an answer
+  that is not a PDF) fails alone and the run goes on, where it had ended
+  every run at that document so nothing older was ever saved. Attachments
+  that are not PDFs are left out and counted, a missing field stops the
+  listing rather than read as nothing there, and a message is dated by its
+  day in Berlin, not in UTC. Whether the bank marks a document read when
+  its PDF is fetched has not been checked yet.
+
 ## [0.65.0] - 2026-11-12
 
 The update check now installs on Windows too, and PaperPull Server gives
@@ -140,7 +160,6 @@ to record, ING no longer reads its notice that nothing matches as an empty
 list, and a recording keeps a Canadian bank's words for its accounts.
 
 ### Added
-- Renault Bank direkt, the 92nd provider app (83rd supported provider): Postfach and archive PDFs, plus message attachments across accessible bank customers (#172). Uses the observed Atruvia API from inside the browser, with pagination, thread history and DKB-style identity and recovery. Pilot tested on one contributor’s account, including an archive document and a message attachment; a repeated Pilot saved no duplicates.
 - **An update check that asks only when you press its button (#146).**
   Settings has an Updates card, off until you turn it on. Turning it on
   sends nothing. It shows **Check github.com for an update**, and each press
