@@ -77,11 +77,14 @@ Walmart, Verizon and Chase apps, never the bundled Playwright Chromium.
   call this app knows reaches, so the run says so, downloads what is
   listed and finishes. Look for older statements on Discover's Statements
   page yourself.
-- **An account on the menu whose list answers with no statements** is not
-  called whole, since a list that did not load can look like that. The
-  run says so, downloads every other account's statements and finishes,
-  with the list not noted as read whole, so a brand new account is never
-  marked checked until its first statement.
+- **An account on the menu whose list answers with no statements** is a
+  part of the list missing too. A list that did not load, or one Discover
+  answered empty in place of refusing it, looks the same as a brand new
+  account's, and nothing in the answer tells them apart. The run says so,
+  downloads every other account's statements, writes a failure file and
+  stops at its end rather than finish, and the panel offers a run that
+  reads the list again. A brand new account stops each run this way until
+  its first statement comes.
 - **With no account menu to read**, the one statement list the page asked
   for itself is read, and the run still stops at its end, since how many
   accounts there are is then not known. With no list either, the run stops

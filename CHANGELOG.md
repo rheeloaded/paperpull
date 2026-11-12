@@ -74,6 +74,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   was being built cut it off, since the restart did not see it. The restart
   now says a spreadsheet is being built and waits for it, as it waits for a
   download, and no spreadsheet starts while PaperPull restarts.
+- **Discover Bank no longer ends a run as Nothing new when an account's list
+  answers empty.** An account on the menu whose statement list answered with
+  no statements left the list not read whole but let the run finish, so a
+  run that read nothing of that account looked clean and only the details
+  said so. A list that did not load, or one Discover answered empty in place
+  of refusing it, looks exactly like a new account's. So the run now
+  downloads every other account's statements, writes a failure file and
+  stops at its end, and the panel offers Get new documents, which reads the
+  list again. A brand new account stops each run this way until its first
+  statement comes. Any other part of the list it could not read stops the
+  run the same way, where the panel used to offer Continue, which reads no
+  list.
 
 ## [0.65.0] - 2026-11-12
 
