@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-two providers are supported today, all built on the same pattern.
+Eighty-three providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -134,6 +134,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |
 | [`portlandgeneral`](apps/portlandgeneral) | Portland General Electric (Oregon) | Monthly bills, the Detailed Bill PDF | **Built and run on a contributor's own account, 36 bills listed and the newest saved by a Pilot.** The list and each PDF are asked of PGE's own account API from inside the signed-in page, nothing clicked. One account at a time |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
+| [`renaultbank`](apps/renaultbank) | Renault Bank direkt | Statements, tax documents, confirmations and other Postfach/archive PDFs, plus message attachments | **Pilot tested on one contributor’s account.** Archive and message attachment downloads checked; repeated Pilot saved no duplicates. Requested in [#172](https://github.com/rheeloaded/paperpull/issues/172) |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
 | [`scalable`](apps/scalable) | Scalable Capital | Statements, securities documents, tax certificates | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/scalable/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document, and a second recording that switches to a child's sub-account. Requested in [#170](https://github.com/rheeloaded/paperpull/issues/170) |
@@ -916,10 +917,10 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-one** apps pass their tests, the eighty-two that are
+- ✅ All **ninety-two** apps pass their tests, the eighty-three that are
   supported, the five still waiting for a tester and the Scalable Capital,
-  Consorsbank, CIBC and MBNA shells, 39,463 of them
-  across the repo. Most are in regular use by the author. The rest were built or
+  Consorsbank, CIBC and MBNA shells. Renault Bank direkt, the ninety-second
+  provider app, adds 189 provider checks. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with

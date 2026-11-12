@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (82, plus five built and waiting for a tester, and four first shells)
+## Supported (83, plus five built and waiting for a tester, and four first shells)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -75,6 +75,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`paylocity`](apps/paylocity) | Paylocity | Pay statements | Payroll |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements. Contributed by @appchamp. Repaired in 0.37.1 and confirmed on a real account by @watling777 (#33) | Utility |
 | [`portlandgeneral`](apps/portlandgeneral) | Portland General Electric (PGE, Oregon) | Monthly bills, the Detailed Bill PDF, read from Billing & Payment History's own API answers and asked for from inside the signed-in page, nothing clicked. One account at a time. Built and run on a contributor's own account, 36 bills | Utility |
+| [`renaultbank`](apps/renaultbank) | Renault Bank direkt | Statements, tax documents, confirmations and other Postfach/archive PDFs across bank customers, plus incoming and sent message attachments. Tested on one contributor’s account, including an archive document and message attachment; repeated Pilot saved no duplicates (#172) | Bank |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements for the individual, retirement and crypto accounts, tax docs. A statement Robinhood serves only as HTML (seen for three recent months) is left for manual review | Brokerage |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098. UNTESTED, built without an account. Have an SBA loan? Run Diagnose and attach the file to issue #28 | Government loan servicing |
