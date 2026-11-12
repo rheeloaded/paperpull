@@ -512,6 +512,16 @@ class App:
                 print(f"  !! Anthem lists {n} {claim_type} statements dated "
                       f"{day[:4]}-{day[4:6]}-{day[6:]}, which nothing here tells apart, "
                       "so none of them is saved.")
+        # A row whose claim number could not be read is an EOB this run
+        # cannot keep, so it counts as failed and the run does not end clean.
+        unread = getattr(raw, "unread", None) or {}
+        if unread:
+            self.stats["failed"] += sum(unread.values())
+            for claim_type, n in sorted(unread.items()):
+                print(f"  !! {n} {claim_type} EOB row{'s' if n != 1 else ''} could not be read, "
+                      "since no claim number was found. The log names the fields it had.")
+            self.write_failure("read the eob list", "a row had no claim number")
+        if alike or unread:
             print("  So the list is not taken as whole. Everything else on it is kept.")
         else:
             # The whole list is in, and only now may a Resume that carries on

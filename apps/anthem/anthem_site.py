@@ -889,12 +889,15 @@ def _date_window(days: int = DEFAULT_LOOKBACK_DAYS) -> Tuple[str, str]:
 class Collected(list):
     """The EOBs a listing kept, newest first, as a list. `alike` holds each
     identity two or more statements gave, with how many gave it. Those are
-    kept by none of them, since nothing tells which statement is which, so
-    the list they came in is not a whole one."""
+    kept by none of them, since nothing tells which statement is which.
+    `unread` holds, by claim type, how many rows were no document this app
+    can keep, a claim whose claim number could not be read. Either way the
+    list they came in is not a whole one."""
 
-    def __init__(self, rows=(), alike: Optional[dict] = None):
+    def __init__(self, rows=(), alike: Optional[dict] = None, unread: Optional[dict] = None):
         super().__init__(rows)
         self.alike = dict(alike or {})
+        self.unread = dict(unread or {})
 
 
 def collect_documents(page) -> List[dict]:
@@ -905,7 +908,8 @@ def collect_documents(page) -> List[dict]:
     human-meaningful. The opaque eobId is deliberately NOT part of it and is
     fetched fresh at download. Two statements of one claim type and one date
     give one identity, so neither is kept, each is named in the log, and the
-    Collected says so in `alike`.
+    Collected says so in `alike`. A row whose claim number cannot be read is
+    logged and counted in `unread`.
     """
     rows = Collected()
     seen = set()
@@ -929,8 +933,16 @@ def collect_documents(page) -> List[dict]:
                      str(e).splitlines()[0][:80])
             continue
         kept = 0
-        found = [row for row in (_extract_row(r, claim_type) for r in raw) if row]
-        ids = [make_doc_id(row["claim_type"], row["claim_id"], row["doc_kind"], row["seq"])
+        found = []
+        for r in raw:
+            row = _extract_row(r, claim_type)
+            if row:
+                found.append(row)
+            else:
+                # Logged by _extract_row, and counted, so the run says it
+                # could not read the whole list rather than end clean.
+                rows.unread[claim_type] = rows.unread.get(claim_type, 0) + 1
+        ids =[make_doc_id(row["claim_type"], row["claim_id"], row["doc_kind"], row["seq"])
                for row in found]
         statements: dict = {}
         for row, doc_id in zip(found, ids):
