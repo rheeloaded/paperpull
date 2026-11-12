@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-two providers are supported today, all built on the same pattern.
+Eighty-three providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -917,10 +917,10 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-one** apps pass their tests, the eighty-two that are
+- ✅ All **ninety-two** apps pass their tests, the eighty-three that are
   supported, the five still waiting for a tester and the Scalable Capital,
-  Consorsbank, CIBC and MBNA shells, 39,463 of them
-  across the repo. Most are in regular use by the author. The rest were built or
+  Consorsbank, CIBC and MBNA shells. Renault Bank direkt, the ninety-second
+  provider app, adds 189 provider checks. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with

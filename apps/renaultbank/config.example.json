@@ -3,7 +3,7 @@
   "owner_in_filename": false,
   "output_dir": ".",
   "profile_dir": "./renaultbank-browser-profile",
-  "cdp_url": "http://127.0.0.1:9311",
+  "cdp_url": "http://127.0.0.1:9313",
   "document_types": [
     "Statement",
     "Credit Card Statement",

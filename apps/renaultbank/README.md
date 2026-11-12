@@ -3,6 +3,9 @@
 Downloads existing PDFs from the Renault Bank direkt Postfach and archive,
 including statements, tax documents, confirmations and message attachments.
 Requested in [#172](https://github.com/rheeloaded/paperpull/issues/172).
+Renault Bank direkt is the 92nd provider app, raising the supported-provider
+count from 82 to 83 relative to upstream main. Its default CDP port is 9313,
+the next port after main’s highest provider port, 9312.
 
 **Status: tested on one contributor’s real account on 2026-11-12.**
 Discovery read the available history; five recent documents, an older archive
