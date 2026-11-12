@@ -180,11 +180,19 @@ def test_the_only_post_is_the_claims_list_export():
     That POST reads the list: it names the export procedure and nothing else,
     and sends only the dates and the export's own options."""
     js = site._CLAIMS_EXPORT_JS
-    assert SRC.count("method: 'POST'") == js.count("method: 'POST'") == 1
+    # Every method that changes something, quoted any way and in any case,
+    # and every method given at all, is this one POST.
+    changing = re.compile(r"""[`'"]\s*(post|put|patch|delete)\s*[`'"]""", re.I)
+    assert changing.findall(SRC) == changing.findall(js) == ["POST"]
+    assert len(re.findall(r"\bmethod\s*:", SRC)) == len(re.findall(r"\bmethod\s*:", js)) == 1
     assert re.findall(r"api/claims/trpc/([\w.]+)", js) == ["claims.v1.summaryDownload"]
+    # What it sends, every value pinned. The dates are the only values that
+    # come from outside the code, and the app hands it dates alone
+    # (test_claims_summary_answers holds the request as the page sends it).
     sent = re.search(r"const input = \{(.*?)\};", js).group(1)
-    assert sorted(re.findall(r"(\w+):", sent)) == ["end", "filters", "mediaType", "sort", "start"]
-    assert "body: JSON.stringify(input)" in js
+    assert sent == "start: a.start, end: a.end, sort: ['-end'], mediaType: 'csv', filters: []"
+    assert js.count("body:") == 1 and "body: JSON.stringify(input)" in js
+    assert re.findall(r"\ba\.(\w+)", js) == ["start", "end"]
 
 
 def test_letter_keys_are_per_message():

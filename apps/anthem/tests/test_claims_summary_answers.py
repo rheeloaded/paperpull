@@ -203,3 +203,37 @@ def test_the_export_code_hands_back_a_file_and_its_type(browser_page):
     assert [r["doc_id"] for r in rows] == ["ClaimsSummary|%s" % p["period"]
                                            for p in site.claims_summary_periods(TODAY)]
     assert rows[0]["csv"] == csv
+
+
+# -- what is sent ------------------------------------------------------------
+
+def test_the_app_hands_the_export_two_dates_and_nothing_else():
+    page = Answers(ok(""))
+    site.list_claims_summaries(page, TODAY)
+    assert page.asked == [{"start": p["start"], "end": p["end"]}
+                          for p in site.claims_summary_periods(TODAY)]
+    for arg in page.asked:
+        assert date.fromisoformat(arg["start"]).isoformat() == arg["start"]
+        assert date.fromisoformat(arg["end"]).isoformat() == arg["end"]
+
+
+def test_the_export_is_one_post_of_the_dates_and_its_own_options(browser_page):
+    answered(browser_page, {"type": "text/csv", "file": ""})
+    browser_page.evaluate("""() => {
+      const answer = window.fetch;
+      window.__asked = [];
+      window.fetch = async (url, init) => {
+        window.__asked.push({url: String(url), method: init.method, body: init.body});
+        return answer(url, init);
+      };
+    }""")
+    site.list_claims_summaries(browser_page, TODAY)
+    asked = browser_page.evaluate("() => window.__asked")
+    periods = site.claims_summary_periods(TODAY)
+    assert len(asked) == len(periods)
+    for got, p in zip(asked, periods):
+        assert got["url"] == ("https://membersecure-polaris.anthem.com/api/claims/trpc/"
+                              "claims.v1.summaryDownload")
+        assert got["method"] == "POST"
+        assert json.loads(got["body"]) == {"start": p["start"], "end": p["end"],
+                                           "sort": ["-end"], "mediaType": "csv", "filters": []}
