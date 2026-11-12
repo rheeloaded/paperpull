@@ -157,6 +157,50 @@ def told_apart_by(record: dict) -> str:
     return renaming.told_apart_by(record)
 
 
+TOKEN_ID_NOTE = ("Kept by an older version under a token Anthem makes new on every listing, "
+                 "which could never be downloaded. The EOB is listed by its claim number now")
+
+
+def retire_token_records(progress, discovery) -> int:
+    """Set down the EOB records an older version kept by a token, and answer
+    how many.
+
+    Until #210 the claim number was read from the claim's identifier value.
+    Once Anthem put an opaque token there ("e_" and hex, made new on every
+    listing), every EOB was recorded as Medical|e_...|EOB|n, an id the guard
+    (anthem_site.parse_doc_id) refuses. Each run then took every such record
+    from discovery.json, failed on it and wrote a failure file, for good, and
+    each listing added more, since the token is new each time. The same EOB
+    is listed now by the claim number shown beside its token, under an id of
+    its own. Only a record whose id names a claim type this app knows and
+    that the guard refuses is set down, and a record either store says was
+    downloaded, or holds a file for, is never touched. No Longer Listed is
+    not a failure and the panel has nothing left to take for it, as Chase's
+    retire_menu_rows does for its menu rows.
+    """
+    retired = 0
+    done = (State.NO_LONGER_LISTED.value, State.COMPLETED.value, State.PDF_VERIFIED.value)
+    for key, rec in list(discovery.data.items()):
+        if not isinstance(rec, dict):
+            continue
+        doc_id = rec.get("document_id")
+        if (not isinstance(doc_id, str) or doc_id.split("|")[0] not in site.CLAIM_TYPES
+                or site.parse_doc_id(doc_id) is not None):
+            continue
+        prog = progress.get(key) or {}
+        if not isinstance(prog, dict):
+            continue
+        if any(r.get("downloaded_ok") or r.get("pdf_path") or r.get("state") in done
+               for r in (rec, prog)):
+            continue
+        notes = "; ".join(x for x in (prog.get("notes"), TOKEN_ID_NOTE) if x and isinstance(x, str))
+        if prog:
+            progress.update(key, {"state": State.NO_LONGER_LISTED.value, "notes": notes}, save=False)
+        discovery.update(key, {"state": State.NO_LONGER_LISTED.value}, save=False)
+        retired += 1
+    return retired
+
+
 class App:
     _journal = None
     _requests = None
@@ -183,6 +227,9 @@ class App:
         for store in (self.progress, self.discovery):
             if migrate_legacy_keys(store.data):
                 store.save(backup=True)
+        if retire_token_records(self.progress, self.discovery):
+            self.progress.save(backup=True)
+            self.discovery.save(backup=True)
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
@@ -480,7 +527,9 @@ class App:
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
-        docs = [d for d in docs if self._in_scope(d)]
+        # A record set down by retire_token_records is never offered again,
+        # by a Download again either.
+        docs = [d for d in docs if d.state != State.NO_LONGER_LISTED.value and self._in_scope(d)]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
