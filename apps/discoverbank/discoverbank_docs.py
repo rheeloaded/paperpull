@@ -638,7 +638,11 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except Exception as e:
-                log.exception("Failed on %s", doc.key)
+                # Named by its date and kind, never by its key, which is its
+                # PDF's address with the account's id, and the error by its
+                # kind, since what it says can carry that address too.
+                log.error("Failed on the %s of %s (%s, %s)", doc.category or "document",
+                          doc.date or "no date", type(e).__name__, failure.error_kind(e))
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()

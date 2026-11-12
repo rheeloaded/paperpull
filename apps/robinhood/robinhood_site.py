@@ -37,6 +37,9 @@ from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.characters import whole_characters, whole_json
+from paperpull_core.failure import error_kind
+from paperpull_core.urls import where_it_leads
+from paperpull_core.words import shape_label
 
 log = logging.getLogger("robinhood_docs.site")
 
@@ -304,7 +307,7 @@ def goto_documents(page) -> bool:
             if page.locator(FALLBACK["doc_row"]).count() > 1:
                 return True
         except Exception as e:
-            log.info("documents URL %s failed: %s", url, e)
+            log.info("documents URL %s failed: %s", where_it_leads(url), error_kind(e))
     try:
         link = page.get_by_role("link", name=re.compile(
             r"(documents?|statements?|reports?|tax)", re.I))
@@ -538,7 +541,6 @@ def download_by_url(page, url: str, out_path) -> bool:
     # provider's own site. Before this check the value went straight to
     # page.goto in the signed-in tab.
     if not is_safe_url(full):
-        from paperpull_core.urls import where_it_leads
         log.error("refusing a URL that is not on this provider's host, at %s", where_it_leads(full))
         return False
     # try a genuine download first
@@ -565,7 +567,7 @@ def download_by_url(page, url: str, out_path) -> bool:
                 out_path.write_bytes(data)
                 return True
     except Exception as e:
-        log.info("download_by_url blob fallback failed for %s: %s", url, e)
+        log.info("download_by_url blob fallback failed for %s: %s", where_it_leads(url), error_kind(e))
     return False
 
 
@@ -1171,7 +1173,7 @@ def download_named(page, title: str, out_path, year: str = ""):
     out_path.parent.mkdir(parents=True, exist_ok=True)
     found = find_control_with_label(page, title, year)
     if found is None:
-        log.info("download control not found for %r%s", title,
+        log.info("download control not found for %r%s", shape_label(title),
                  f" of tax year {year}" if year else "")
         return False
     control, label = found
@@ -1269,9 +1271,9 @@ def _click_and_capture(page, control, title: str, out_path, label: str = ""):
             while not popups and _time.time() < until:
                 page.wait_for_timeout(100)
             if not popups:
-                log.info("no tab opened for %r after its answer", title)
+                log.info("no tab opened for %r after its answer", shape_label(title))
     except Exception as e:
-        log.info("download click failed for %r: %s", title, e)
+        log.info("download click failed for %r: %s", shape_label(title), error_kind(e))
         return False
     finally:
         try:
@@ -1293,30 +1295,26 @@ def _click_and_capture(page, control, title: str, out_path, label: str = ""):
             save_download(got["download"], out_path)
             return True
         except Exception as e:
-            log.info("saving the download for %r failed: %s", title, e)
+            log.info("saving the download for %r failed: %s", shape_label(title), error_kind(e))
             return False
 
     if got["response"] is None:
         log.info("no download event and no document response for %r within 45s",
-                 title)
+                 shape_label(title))
         return False
 
     try:
         body = whole_json(_json.loads(got["response"].text() or "{}"))
     except Exception as e:
-        log.info("document response for %r was not JSON: %s", title, e)
+        log.info("document response for %r was not JSON: %s", shape_label(title), error_kind(e))
         return False
     url = str((body or {}).get("download_url") or "")
     if not is_document_store_url(url):
-        # The host only, never the link, which is signed. It is what says
-        # whether a page serves its documents from another bucket, which a
-        # statements page read for the first time might.
-        from urllib.parse import urlparse
-        try:
-            host = urlparse(url).hostname or "none"
-        except ValueError:
-            host = "unreadable"
-        log.error("refusing to fetch %r from an unexpected host (%s)", title, host)
+        # Where the link leads, never the link, which is signed. It is what
+        # says whether a page serves its documents from another bucket, which
+        # a statements page read for the first time might.
+        log.error("refusing to fetch %r from an unexpected host, at %s", shape_label(title),
+                  where_it_leads(url))
         return False
     try:
         # page.request shares the browser's cookie jar, and left to itself it
@@ -1327,7 +1325,7 @@ def _click_and_capture(page, control, title: str, out_path, label: str = ""):
         resp = page.request.get(url, max_redirects=0, timeout=60000)
         data = intake.body(resp) if resp.ok else b""
     except Exception as e:
-        log.info("fetching the PDF for %r failed: %s", title, e)
+        log.info("fetching the PDF for %r failed: %s", shape_label(title), error_kind(e))
         return False
     return keep_fetched(page, data, title, out_path, label=label)
 
@@ -1485,7 +1483,7 @@ def keep_fetched(page, data: bytes, title: str, out_path, label: str = "", rende
         out_path.write_bytes(data)
         return True
     if not data or not (HTML_CONTROL_RE.search(label or "") and looks_like_html(data)):
-        log.info("fetched %d bytes for %r but it is not a PDF", len(data or b""), title)
+        log.info("fetched %d bytes for %r but it is not a PDF", len(data or b""), shape_label(title))
         return False
     if render is None:
         from paperpull_core import receipt_pdf
@@ -1497,20 +1495,20 @@ def keep_fetched(page, data: bytes, title: str, out_path, label: str = "", rende
         try:
             render(page, data.decode("utf-8", "replace"), tmp)
         except Exception as e:
-            log.info("rendering the HTML statement for %r failed (%s)", title, type(e).__name__)
+            log.info("rendering the HTML statement for %r failed (%s)", shape_label(title), type(e).__name__)
             return False
         try:
             ok = tmp.is_file() and tmp.read_bytes()[:5] == b"%PDF-"
         except OSError:
             ok = False
         if not ok:
-            log.info("the HTML statement for %r did not render to a PDF", title)
+            log.info("the HTML statement for %r did not render to a PDF", shape_label(title))
             return False
         if not check(tmp, title):
-            log.info("the rendered PDF for %r does not name the statement's month", title)
+            log.info("the rendered PDF for %r does not name the statement's month", shape_label(title))
             return False
         tmp.replace(out_path)
-        log.info("rendered the HTML statement for %r to PDF", title)
+        log.info("rendered the HTML statement for %r to PDF", shape_label(title))
         return RENDERED
     finally:
         try:

@@ -696,7 +696,6 @@ ANSWERS = {
     ("apps/capitalone/capitalone_site.py", "_BYTES_FETCH_JS"): IN_PAGE_BESIDE,
     ("apps/citi/citi_site.py", "_FETCH_JS"): IN_PAGE_BESIDE,
     ("apps/discoverbank/discoverbank_site.py", "_STATEMENTS_FETCH_JS"): IN_PAGE,
-    ("apps/discoverbank/discoverbank_site.py", "_DOWNLOAD_BYTES_JS"): IN_PAGE_BESIDE,
     ("apps/ezpassva/ezpassva_site.py", "_FETCH_JS"): IN_PAGE_BESIDE,
     ("apps/homedepot/homedepot_site.py", "_FETCH_HISTORY_JS"): IN_PAGE,
     ("apps/kroger/kroger_site.py", "_FETCH_HISTORY_JS"): IN_PAGE,

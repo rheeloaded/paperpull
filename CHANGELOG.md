@@ -86,6 +86,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   statement comes. Any other part of the list it could not read stops the
   run the same way, where the panel used to offer Continue, which reads no
   list.
+- **The log no longer carries a page's address, an account's id or a page's
+  words in Discover Bank, Chase, Ally, Robinhood and Discover.** These apps
+  wrote into their log the address the tab was on, a statement's whole PDF
+  address with the account's id in it, an error's own text, which names the
+  address it was at, document titles and account names. Discover Bank also
+  wrote up to 300 characters of what Discover answered for a PDF it refused,
+  and no longer reads that answer at all. A place
+  is now named by its site alone, an error by its kind, and a name from the
+  page by its shape. A new check reads the log lines of every app and fails
+  on any new one that does this, and lists the ones other apps still have so
+  they can be fixed next.
 
 ## [0.65.0] - 2026-11-12
 
