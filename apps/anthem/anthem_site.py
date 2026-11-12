@@ -1687,7 +1687,7 @@ def render_letter(page, subject: str, body: str, date: str = "") -> Optional[byt
 # ---------------------------------------------------------------------------
 
 # How many calendar years back the claims list is asked for, the current one
-# included. A year that holds no claim answers an empty file and is skipped.
+# included. A year whose answer holds no claim files nothing (_export_csv).
 CLAIMS_SUMMARY_YEARS = 6
 
 _CLAIMS_EXPORT_JS = r"""async (a) => {
@@ -1700,11 +1700,19 @@ _CLAIMS_EXPORT_JS = r"""async (a) => {
     body: JSON.stringify(input)});
   const ct = r.headers.get('content-type') || '';
   if (!/json/i.test(ct)) return {status: r.status, html: true};
-  // The CSV arrives base64-encoded at result.data.file.
+  // The CSV arrives base64-encoded at result.data.file. An answer with no
+  // file there hands back null, never an empty file, so it is not taken for
+  // a year with no claim.
   const j = await ppJson(r);
   const d = (j && j.result && j.result.data) || {};
-  return {status: r.status, type: d.type || null, file: d.file || ''};
+  return {status: r.status,
+          type: (typeof d.type === 'string') ? d.type : null,
+          file: (typeof d.file === 'string') ? d.file : null};
 }"""
+
+# What the export's answer names its file, as the run it was built from saw
+# it. A file named any other way is refused, never read as a claims list.
+_CSV_TYPE = re.compile(r"text/csv\s*(;.*)?", re.I)
 
 
 def claims_summary_periods(today=None) -> List[dict]:
@@ -1730,11 +1738,65 @@ def _csv_table(text: str) -> List[List[str]]:
     return [row for row in csv.reader(io.StringIO(text or "")) if any(c.strip() for c in row)]
 
 
+def _is_claims_header(row: List[str]) -> bool:
+    """Whether a CSV row is the claims list's own header, the one naming
+    each claim's number."""
+    return any(c.strip().lower() == "claim number" for c in row)
+
+
+def _ask_export(page, arg: dict, period: str) -> dict:
+    """One answer of the export, with anything that goes wrong in the page a
+    ListingIncomplete, as _prime_and_fetch has it, never an escape."""
+    try:
+        res = intake.evaluate(page, _CLAIMS_EXPORT_JS, arg)
+    except Exception as e:
+        raise ListingIncomplete(f"the claims summary for {period} could not be fetched: "
+                                f"{(str(e).splitlines() or [''])[0][:80]}")
+    if not isinstance(res, dict):
+        raise ListingIncomplete(f"the claims summary for {period} came back as nothing "
+                                "this reads")
+    return res
+
+
+def _export_csv(res: dict, period: str) -> Optional[Tuple[bytes, str]]:
+    """The CSV of one answer of the export that Anthem gave with status 200,
+    as (its bytes, its text), or None for a period that holds no claim.
+
+    Raises ListingIncomplete for an answer with no file, a file not named a
+    CSV, one that does not decode, or one that is not the claims list, so a
+    year whose list did not come is never taken for an empty one."""
+    file, kind = res.get("file"), res.get("type")
+    if not isinstance(file, str):
+        raise ListingIncomplete(f"the claims summary for {period} came with no file")
+    if not isinstance(kind, str) or not _CSV_TYPE.fullmatch(kind.strip()):
+        raise ListingIncomplete(f"the claims summary for {period} came as a file that "
+                                "is not named a CSV")
+    try:
+        data = intake.decode("".join(file.split()), validate=True)
+        text = data.decode("utf-8-sig", "replace")
+        table = _csv_table(text)
+    except Exception as e:
+        raise ListingIncomplete(f"the claims summary for {period} could not be read "
+                                f"({type(e).__name__})")
+    # Unconfirmed live. What the export answers for a year that holds no
+    # claim was not seen. An empty file, one of blank lines alone, and the
+    # claims list's header row alone are each taken for such a year, and
+    # anything else that is not the claims list is refused.
+    if not table:
+        return None
+    if not _is_claims_header(table[0]):
+        raise ListingIncomplete(f"the claims summary for {period} is not the claims list")
+    if len(table) == 1:
+        return None
+    return data, text
+
+
 def list_claims_summaries(page, today=None) -> List[dict]:
     """Every period's claims summary that holds a claim, as a filing row
     carrying its CSV. Raises SessionExpired when Anthem will not authenticate
-    the export, and ListingIncomplete when it refuses one, so a refused year
-    is never taken for an empty one."""
+    the export, and ListingIncomplete when it refuses one, answers no file or
+    anything but the claims list, or the page fails, so a year whose list did
+    not come is never taken for an empty one."""
     rows: List[dict] = []
     if not is_anthem_owned_page(page):
         raise SessionExpired("the Anthem tab is no longer open on Anthem")
@@ -1742,10 +1804,10 @@ def list_claims_summaries(page, today=None) -> List[dict]:
         raise SessionExpired("could not capture Anthem's session for the claims list")
     for p in claims_summary_periods(today):
         arg = {"start": p["start"], "end": p["end"]}
-        res = intake.evaluate(page, _CLAIMS_EXPORT_JS, arg) or {}
+        res = _ask_export(page, arg, p["period"])
         if res.get("noauth") or res.get("status") in (401, 403):
             if prime_session(page, force=True):
-                res = intake.evaluate(page, _CLAIMS_EXPORT_JS, arg) or {}
+                res = _ask_export(page, arg, p["period"])
         status = res.get("status")
         if res.get("noauth") or res.get("html") or status in (401, 403):
             raise SessionExpired("Anthem would not authenticate the claims list "
@@ -1753,9 +1815,10 @@ def list_claims_summaries(page, today=None) -> List[dict]:
         if status != 200:
             raise ListingIncomplete(
                 f"the claims summary for {p['period']} could not be fetched (status {status})")
-        text = intake.decode(res.get("file") or "").decode("utf-8-sig", "replace")
-        if len(_csv_table(text)) < 2:
+        got = _export_csv(res, p["period"])
+        if got is None:
             continue
+        _data, text = got
         rows.append({
             "doc_id": "ClaimsSummary|" + p["period"],
             "key": "claims:" + p["period"],
