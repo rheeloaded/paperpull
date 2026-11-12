@@ -15,6 +15,8 @@ import base64
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # noqa: F401  binds this provider's AppSpec
@@ -157,3 +159,44 @@ def test_a_pharmacy_statement_is_asked_for_with_no_claim(monkeypatch, tmp_path):
     page = FakePage({"Pharmacy": [statement_row()]})
     assert site.download_document(page, "Pharmacy|20260301|Statement|0", tmp_path / "s.pdf")
     assert page.downloads == [{"claimId": "", "claimType": "Pharmacy", "eobId": STATEMENT_ID}]
+
+
+# -- a patient's name in each shape it comes in ------------------------------
+
+def named(name):
+    row = claim_row()
+    row["patient"]["name"] = name
+    return row
+
+
+def test_a_list_of_human_names_is_read_as_the_name_it_holds():
+    assert site._patient_name(named([{"given": ["DANA"], "family": "EXAMPLE"}])) == "DANA EXAMPLE"
+    assert site._patient_name(named([{"given": ["Dana", "Q"], "family": "Example"},
+                                     {"given": ["DANA", "Q"], "family": "EXAMPLE"}])) == "Dana Q Example"
+    assert site._patient_name(named([{"use": "official", "given": ["Dana"], "family": "Example"},
+                                     {"use": "old", "given": ["Dana"], "family": "Sample"}])) \
+        == "Dana Example, Dana Sample"
+    assert site._patient_name(named(["Dana Example"])) == "Dana Example"
+    assert site._patient_name(named([{"text": "Dana Q Example"}])) == "Dana Q Example"
+
+
+@pytest.mark.parametrize("name", [
+    [], [None], [7], [[{"given": ["DANA"]}]], [{"given": [["DANA"]], "family": {"x": 1}}],
+    {"given": None, "family": None}, {"given": [3, None]}, [{"use": "official"}],
+])
+def test_a_name_with_nothing_readable_gives_no_name_rather_than_its_shape(name):
+    assert site._patient_name(named(name)) == ""
+
+
+@pytest.mark.parametrize("name", [
+    [{"given": ["DANA"], "family": "EXAMPLE"}],
+    [{"given": ["DANA"], "family": "EXAMPLE"}, {"given": ["DEE"], "family": "EXAMPLE"}],
+    {"given": "DANA", "family": "EXAMPLE"},
+    [{"given": ["DANA"], "family": ["EXAMPLE"]}, None, 4],
+])
+def test_no_name_puts_a_list_or_a_dict_into_a_filename(monkeypatch, name):
+    signed_in(monkeypatch)
+    (row,) = site.collect_documents(FakePage({"Medical": [named(name)]}))
+    for mark in "[]{}'\"":
+        assert mark not in row["account"], row["account"]
+    assert row["account"].startswith("Dana")

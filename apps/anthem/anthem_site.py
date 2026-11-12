@@ -644,22 +644,44 @@ def _title_name(name: str) -> str:
                     for w in s.split())
 
 
+def _human_name(value) -> str:
+    """A name as text, from any shape Anthem gives one in. A string is
+    itself. A FHIR HumanName, {given: [...], family}, is its given names and
+    then its family name, or its `text` when it has neither. A list of them
+    is each distinct name, joined. Anything else, or any part that is not
+    text, gives nothing, so no list or dict is ever written into a name."""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, dict):
+        given = value.get("given")
+        given = [given] if isinstance(given, str) else given if isinstance(given, list) else []
+        family = value.get("family")
+        parts = [g for g in given if isinstance(g, str)] + ([family] if isinstance(family, str) else [])
+        name = " ".join(p.strip() for p in parts if p.strip())
+        if not name and isinstance(value.get("text"), str):
+            name = value["text"].strip()
+        return name
+    if isinstance(value, list):
+        names: List[str] = []
+        for v in value:
+            name = _human_name(v) if isinstance(v, (str, dict)) else ""
+            if name and name.lower() not in [n.lower() for n in names]:
+                names.append(name)
+        return ", ".join(names)
+    return ""
+
+
 def _patient_name(row: dict) -> str:
-    """Patient name for one summary row, or "". Confirmed path is patient.name;
-    older shapes (a bare string, or first/last fields) are fallbacks."""
+    """Patient name for one summary row, or "". Confirmed path is patient.name,
+    a FHIR HumanName or a list of them; older shapes (a bare string, or
+    first/last fields) are fallbacks."""
     for k in _PATIENT_KEYS:
         v = row.get(k)
         if isinstance(v, str) and v.strip():
             return _clean_patient(v)
         if isinstance(v, dict):
-            name = _first_key(v, ["name", "fullName", "displayName"])[1]
-            if isinstance(name, dict):
-                # A FHIR HumanName: {given: [...], family}.
-                given = name.get("given") or []
-                if isinstance(given, str):
-                    given = [given]
-                name = " ".join([str(g) for g in given] + [str(name.get("family") or "")])
-            if name and str(name).strip():
+            name = _human_name(_first_key(v, ["name", "fullName", "displayName"])[1])
+            if name:
                 return _clean_patient(name)
             fn = _first_key(v, ["firstName", "first", "givenName"])[1]
             ln = _first_key(v, ["lastName", "last", "familyName"])[1]
