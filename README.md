@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-two providers are supported today, all built on the same pattern.
+Eighty-three providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -99,6 +99,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`costco`](apps/costco) | Costco Wholesale | Receipts, in-warehouse, gas, pharmacy and costco.com orders | **Written from a member's recording and run against their account, 34 purchases back to July 2024** ([#47](https://github.com/rheeloaded/paperpull/issues/47)). Each receipt names its part of Costco, Warehouse or Gas Station, for a file name pattern ([#60](https://github.com/rheeloaded/paperpull/issues/60)). One membership so far, so a second Pilot is welcome. Two tabs, quarters walked, the warehouse receipt is a dialog rendered with printToPDF, real Edge/Chrome |
 | [`discoverbank`](apps/discoverbank) | Discover Bank | Checking and savings statements | **Contributed by [@appchamp](https://github.com/appchamp), 100 checking and 100 savings statements saved on a full run** ([#151](https://github.com/rheeloaded/paperpull/pull/151)). The statements page's own list call for each account its account menu holds, read from inside the page, nothing clicked but the inactivity dialog's keep-alive. A list of exactly 100 statements, which looks like the most one answer holds, may have older statements this app cannot reach, and the run says so. Money market and CD accounts are untested |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements | Capital One is moving these accounts onto its own site. A card that has moved is read there by the [`capitalone`](apps/capitalone) app ([#13](https://github.com/rheeloaded/paperpull/issues/13)) |
+| [`direkt1822`](apps/direkt1822) | 1822direkt | Account/card statements, securities documents, tax certificates and other Postbox PDFs | **Pilot tested on one contributor’s account.** Paginated lists and direct PDF downloads, with opt-in conversation reading that marks conversations read. A repeated Pilot saved no duplicates. Requested in [#174](https://github.com/rheeloaded/paperpull/issues/174) |
 | [`dkb`](apps/dkb) | DKB (Deutsche Kreditbank) | Kontoauszüge, Kreditkartenabrechnungen, Wertpapierdokumente, Steuerbescheinigungen, Vertragsinformationen and Mitteilungen, from the Postfach and its archive | **Contributed by [@tabacha](https://github.com/tabacha), 611 documents saved on a full run of the contributor's own account.** The Postfach's own API from inside the page, nothing clicked. DKB answers 500 for most archived securities documents, which its own page cannot open either |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Paginated MUI accordion; ~18-month limit |
 | [`ebay`](apps/ebay) | eBay | Order receipts, ten years of purchase history | **Confirmed by [@jpfieber](https://github.com/jpfieber), every order back to 2017.** Order-details page rendered to PDF, nothing clicked but the order list's Show more, real Edge/Chrome. Requested in [#44](https://github.com/rheeloaded/paperpull/issues/44) |
@@ -916,10 +917,10 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-one** apps pass their tests, the eighty-two that are
+- ✅ All **ninety-two** apps pass their tests, the eighty-three that are
   supported, the five still waiting for a tester and the Scalable Capital,
-  Consorsbank, CIBC and MBNA shells, 39,463 of them
-  across the repo. Most are in regular use by the author. The rest were built or
+  Consorsbank, CIBC and MBNA shells. The new 1822direkt provider adds its
+  own automated suite and has been Pilot-tested on one account. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with

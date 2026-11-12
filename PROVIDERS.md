@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (82, plus five built and waiting for a tester, and four first shells)
+## Supported (83, plus five built and waiting for a tester, and four first shells)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -41,6 +41,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`costco`](apps/costco) | Costco Wholesale | Receipts, in-warehouse, gas, pharmacy and costco.com orders. Written from a member's recording and run against their account. One membership so far, a second Pilot is welcome, see issue #47 | Retail |
 | [`discoverbank`](apps/discoverbank) | Discover Bank (deposits) | Checking and savings statements, every statement the statements page's own list call names for each account its account menu holds, read from inside the page with nothing clicked but the inactivity dialog's keep-alive. Contributed by @appchamp. Built and run on a contributor's own accounts, 100 checking and 100 savings statements saved (#151). An account whose list holds exactly 100, which looks like the most one answer holds, may have older statements this app cannot reach, and the run says so. Money market and CD accounts are untested. Discover credit cards are the `discovercard` app | Bank |
 | [`discovercard`](apps/discovercard) | Discover (credit cards) | Card statements. A card that has moved to Capital One is read there by the Capital One app (#13) | Card |
+| [`direkt1822`](apps/direkt1822) | 1822direkt | Account/card statements, securities and tax documents, and other Postbox PDFs. Full paginated inbox, sent items and trash; conversation attachments require explicit consent to mark conversations read. Pilot tested on one account; repeated Pilot saved no duplicates | Bank / brokerage |
 | [`dkb`](apps/dkb) | DKB (Deutsche Kreditbank) | Kontoauszüge, Kreditkartenabrechnungen, Wertpapierdokumente, Steuerbescheinigungen, Vertragsinformationen and Mitteilungen, from the Postfach and its archive, read through the Postfach's own API with nothing clicked. Contributed by @tabacha. Built and run on a contributor's own account, 611 documents saved. DKB answers 500 for most archived securities documents, which its own page cannot open either | Bank / brokerage |
 | [`dominion`](apps/dominion) | Dominion Energy (VA) | Billing statements | Utility |
 | [`ebay`](apps/ebay) | eBay | Order receipts, the order-details page rendered to PDF, ten years of purchase history, nothing clicked. Confirmed by @jpfieber on issue #44, every order back to 2017 | Retail |
