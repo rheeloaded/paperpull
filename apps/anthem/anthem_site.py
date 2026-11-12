@@ -1843,8 +1843,9 @@ def _ask_export(page, arg: dict, period: str) -> dict:
     try:
         res = intake.evaluate(page, _CLAIMS_EXPORT_JS, arg)
     except Exception as e:
-        raise ListingIncomplete(f"the claims summary for {period} could not be fetched: "
-                                f"{(str(e).splitlines() or [''])[0][:80]}")
+        # Named by how it failed alone, never by any words the page gave.
+        raise ListingIncomplete(f"the claims summary for {period} could not be fetched "
+                                f"({type(e).__name__})")
     if not isinstance(res, dict):
         raise ListingIncomplete(f"the claims summary for {period} came back as nothing "
                                 "this reads")
@@ -1884,17 +1885,60 @@ def _export_csv(res: dict, period: str) -> Optional[Tuple[bytes, str]]:
     return data, text
 
 
+class Summaries(list):
+    """The claims summaries a listing read, as a list, with `refused`, the
+    label of each period whose answer was not the claims list."""
+
+    def __init__(self, rows=(), refused=()):
+        super().__init__(rows)
+        self.refused = list(refused)
+
+
+def _period_summary(page, p: dict) -> Optional[dict]:
+    """One period's claims summary as a filing row carrying its CSV, or None
+    for a period that holds no claim. Raises SessionExpired when Anthem will
+    not authenticate the export, and ListingIncomplete when it refuses the
+    period, answers no file or anything but the claims list, or the page
+    fails, so a year whose list did not come is never taken for an empty
+    one."""
+    arg = {"start": p["start"], "end": p["end"]}
+    res = _ask_export(page, arg, p["period"])
+    if res.get("noauth") or res.get("status") in (401, 403):
+        if prime_session(page, force=True):
+            res = _ask_export(page, arg, p["period"])
+    status = res.get("status")
+    if res.get("noauth") or res.get("html") or status in (401, 403):
+        raise SessionExpired("Anthem would not authenticate the claims list "
+                             f"(status {status})")
+    if status != 200:
+        raise ListingIncomplete(
+            f"the claims summary for {p['period']} could not be fetched (status {status})")
+    got = _export_csv(res, p["period"])
+    if got is None:
+        return None
+    data, text = got
+    return {
+        "doc_id": "ClaimsSummary|" + p["period"],
+        "key": claims_summary_key(p["period"]),
+        "label": p["label"],
+        "folder_attr": "claims_summaries",
+        "date": p["date"],
+        "csv": text,
+        # The CSV as Anthem handed it over, saved beside the PDF.
+        "csv_bytes": data,
+    }
+
+
 def list_claims_summaries(page, today=None, skip=(), pause=None) -> List[dict]:
     """Every period's claims summary that holds a claim, as a filing row
-    carrying its CSV. Raises SessionExpired when Anthem will not authenticate
-    the export, and ListingIncomplete when it refuses one, answers no file or
-    anything but the claims list, or the page fails, so a year whose list did
-    not come is never taken for an empty one.
+    carrying its CSV, in a Summaries. A period whose answer is refused, as
+    _period_summary refuses one, is named in the log and in `refused`, and
+    the periods that did come are kept. SessionExpired stops it at once.
 
     A period whose record key is in `skip`, one already saved, is not asked
     for, and `pause()` is called between two asks, as the app paces its
     other calls."""
-    rows: List[dict] = []
+    rows = Summaries()
     if not is_anthem_owned_page(page):
         raise SessionExpired("the Anthem tab is no longer open on Anthem")
     if not prime_session(page):
@@ -1906,32 +1950,14 @@ def list_claims_summaries(page, today=None, skip=(), pause=None) -> List[dict]:
         if asked and pause is not None:
             pause()
         asked += 1
-        arg = {"start": p["start"], "end": p["end"]}
-        res = _ask_export(page, arg, p["period"])
-        if res.get("noauth") or res.get("status") in (401, 403):
-            if prime_session(page, force=True):
-                res = _ask_export(page, arg, p["period"])
-        status = res.get("status")
-        if res.get("noauth") or res.get("html") or status in (401, 403):
-            raise SessionExpired("Anthem would not authenticate the claims list "
-                                 f"(status {status})")
-        if status != 200:
-            raise ListingIncomplete(
-                f"the claims summary for {p['period']} could not be fetched (status {status})")
-        got = _export_csv(res, p["period"])
-        if got is None:
+        try:
+            row = _period_summary(page, p)
+        except ListingIncomplete as e:
+            rows.refused.append(p["label"])
+            log.warning("%s did not come as the claims list (%s)", p["label"], e)
             continue
-        data, text = got
-        rows.append({
-            "doc_id": "ClaimsSummary|" + p["period"],
-            "key": claims_summary_key(p["period"]),
-            "label": p["label"],
-            "folder_attr": "claims_summaries",
-            "date": p["date"],
-            "csv": text,
-            # The CSV as Anthem handed it over, saved beside the PDF.
-            "csv_bytes": data,
-        })
+        if row is not None:
+            rows.append(row)
     log.info("Anthem: %d claims summar%s", len(rows), "y" if len(rows) == 1 else "ies")
     return rows
 

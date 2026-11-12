@@ -117,11 +117,12 @@ def test_each_period_that_holds_a_claim_is_listed_and_an_empty_one_is_not(signed
     assert len(page.asked) == len(site.claims_summary_periods(TODAY))
 
 
-def test_a_refused_export_stops_the_listing_rather_than_call_it_empty(signed_in):
+def test_a_refused_export_is_named_rather_than_called_empty(signed_in):
     page = FakePage()
     page.evaluate = lambda js, arg=None: {"status": 500}
-    with pytest.raises(site.ListingIncomplete):
-        site.list_claims_summaries(page, TODAY)
+    got = site.list_claims_summaries(page, TODAY)
+    assert list(got) == []
+    assert got.refused == [p["label"] for p in site.claims_summary_periods(TODAY)]
 
 
 def test_an_export_that_answers_a_sign_in_page_is_an_expired_session(signed_in):
@@ -402,3 +403,68 @@ def test_a_rename_takes_each_csv_with_its_summary(build, printed, tmp_path, caps
         assert on_disk() == after
     finally:
         core_storage.set_filename_patterns({})
+
+
+# -- a period whose answer did not come --------------------------------------
+
+def no_file_for(app, start):
+    """The export answers the period starting `start` with no file."""
+    real = app.fake_page.evaluate
+
+    def evaluate(js, arg=None):
+        got = real(js, arg)
+        return {"status": 200, "type": "text/csv", "file": None} if arg["start"] == start else got
+    app.fake_page.evaluate = evaluate
+
+
+def test_the_middle_of_three_periods_that_did_not_come_leaves_the_others_saved(build, monkeypatch,
+                                                                                capsys):
+    monkeypatch.setattr(site, "CLAIMS_SUMMARY_YEARS", 3)
+    app = build("--claims-summaries")
+    no_file_for(app, "2025-01-01")
+    app.cmd_claims_summaries()
+    app.progress.save()
+    assert app.fake_page.asked == [("2026-01-01", "2026-11-11"), ("2025-01-01", "2025-12-31"),
+                                   ("2024-01-01", "2024-12-31")]
+    assert saved(app, ".pdf") == ["2024-12-31 Anthem Claims Summary 2024.pdf",
+                                  "2026-11-11 Anthem Claims Summary 2026 Year to Date.pdf"]
+    assert app.stats["failed"] == 1
+    assert "claims:2025" not in records(app)
+    said = capsys.readouterr().out
+    assert "Claims Summary 2025 did not come as the claims list, so it is not saved" in said
+    text = "".join(p.read_text(encoding="utf-8") for p in Path(app.paths.diagnostics).rglob("*")
+                   if p.is_file() and "failure" in p.name)
+    assert "a claims summary was not read" in text
+
+    again = build("--claims-summaries")
+    again.cmd_claims_summaries()
+    assert again.fake_page.asked == [("2025-01-01", "2025-12-31")]
+    assert "2025-12-31 Anthem Claims Summary 2025.pdf" in saved(again, ".pdf")
+    assert not again.stats["failed"]
+
+
+def test_a_run_with_a_period_that_did_not_come_does_not_end_clean(build, monkeypatch, tmp_path):
+    monkeypatch.setattr(site, "CLAIMS_SUMMARY_YEARS", 3)
+    page = FakePage()
+    real = page.evaluate
+    page.evaluate = lambda js, arg=None: (
+        {"status": 500} if arg["start"] == "2025-01-01" else real(js, arg))
+    monkeypatch.setattr(app_mod.App, "_on_its_site", lambda self: page)
+    monkeypatch.setattr(app_mod.App, "check_session", lambda *_a, **_kw: None)
+    build("--claims-summaries")
+    assert app_mod.main(["--config", str(tmp_path / "config.json"), "--claims-summaries"]) == 1
+    # The two that came were asked and saved, 2025's 500 answered by the stand-in.
+    assert page.asked == [("2026-01-01", "2026-11-11"), ("2024-01-01", "2024-12-31")]
+
+
+def test_a_sign_in_in_the_middle_saves_nothing_and_asks_no_more(build, monkeypatch):
+    monkeypatch.setattr(site, "CLAIMS_SUMMARY_YEARS", 3)
+    monkeypatch.setattr(site, "prime_session", lambda page, force=False: not force)
+    app = build("--claims-summaries")
+    real = app.fake_page.evaluate
+    app.fake_page.evaluate = lambda js, arg=None: (
+        {"status": 401} if arg["start"] == "2025-01-01" else real(js, arg))
+    app.cmd_claims_summaries()
+    assert app.stats.get("session_expired") == 1
+    assert saved(app, ".pdf") == []
+    assert ("2024-01-01", "2024-12-31") not in app.fake_page.asked

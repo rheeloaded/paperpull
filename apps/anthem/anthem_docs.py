@@ -1169,6 +1169,16 @@ class App:
             "claims summaries", rows,
             lambda pg, r: site.render_claims_summary(pg, r["label"], r["csv"]),
             beside=lambda r: [(".csv", r["csv_bytes"])])
+        # A period whose answer was not the claims list is not an empty one.
+        # The periods that came are saved above, and each that did not counts
+        # as failed, so the run does not end clean and the next asks again.
+        refused = list(getattr(rows, "refused", None) or [])
+        if refused:
+            self.stats["failed"] += len(refused)
+            for label in refused:
+                print(f"  !! {label} did not come as the claims list, so it is not saved. "
+                      "The next run asks for it again.")
+            self.write_failure("read the claims summaries", "a claims summary was not read")
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"

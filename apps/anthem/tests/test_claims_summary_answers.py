@@ -15,6 +15,7 @@ and not a stand-in's. Every name, claim number and amount is invented.
 """
 import base64
 import json
+import logging
 import sys
 from datetime import date
 from pathlib import Path
@@ -29,6 +30,7 @@ import anthem_site as site  # noqa: E402
 from paperpull_core import intake  # noqa: E402
 
 TODAY = date(2026, 11, 11)
+LABELS = [p["label"] for p in site.claims_summary_periods(TODAY)]
 HEADER = "Claim Type,Claim Number,Patient,Service Date,Billed,Your Cost"
 CLAIM = "Medical,9000000AA0003,Dana Example,2026-03-04,$120.00,$20.00"
 
@@ -109,19 +111,22 @@ def test_a_year_with_a_claim_is_listed(kind):
     ok(b64("Something went wrong\r\nPlease try again")),
     ok(b64("<html><body>Sign in</body></html>")),
 ])
-def test_an_answer_that_is_not_the_claims_list_stops_the_listing(answer):
+def test_an_answer_that_is_not_the_claims_list_is_refused_and_named(answer, caplog):
     page = Answers(answer)
-    with pytest.raises(site.ListingIncomplete):
-        site.list_claims_summaries(page, TODAY)
-    assert len(page.asked) == 1
+    with caplog.at_level(logging.WARNING):
+        got = site.list_claims_summaries(page, TODAY)
+    assert list(got) == [] and got.refused == LABELS
+    assert len(page.asked) == len(LABELS)
+    for label in LABELS:
+        assert "%s did not come as the claims list" % label in caplog.text
 
 
 @pytest.mark.parametrize("answer", [None, [], "a string", 0])
-def test_an_answer_of_no_shape_stops_the_listing(answer):
+def test_an_answer_of_no_shape_is_refused(answer):
     page = Answers({"status": 200})
     page.evaluate = lambda js, arg=None: answer
-    with pytest.raises(site.ListingIncomplete):
-        site.list_claims_summaries(page, TODAY)
+    got = site.list_claims_summaries(page, TODAY)
+    assert list(got) == [] and got.refused == LABELS
 
 
 @pytest.mark.parametrize("error", [
@@ -129,26 +134,50 @@ def test_an_answer_of_no_shape_stops_the_listing(answer):
     intake.TooLarge("The answer was larger than PaperPull takes in"),
     TimeoutError("Timeout 30000ms exceeded"),
 ])
-def test_anything_that_goes_wrong_in_the_page_stops_the_listing(error):
-    with pytest.raises(site.ListingIncomplete):
-        site.list_claims_summaries(Answers(error), TODAY)
+def test_anything_that_goes_wrong_in_the_page_is_refused_and_never_named_by_its_words(
+        error, caplog):
+    with caplog.at_level(logging.WARNING):
+        got = site.list_claims_summaries(Answers(error), TODAY)
+    assert list(got) == [] and got.refused == LABELS
+    assert type(error).__name__ in caplog.text
+    for words in ("Failed to fetch", "larger than", "30000ms"):
+        assert words not in caplog.text
 
 
-def test_a_retry_after_a_fresh_session_that_fails_stops_the_listing(monkeypatch):
+def test_a_retry_after_a_fresh_session_that_fails_is_refused(monkeypatch):
     primed = []
     monkeypatch.setattr(site, "prime_session", lambda page, force=False: primed.append(force) or True)
     page = Answers([{"status": 401}])
-    calls = iter([{"status": 401}, RuntimeError("TypeError: Failed to fetch")])
+    calls = []
 
     def evaluate(js, arg=None):
-        got = next(calls)
-        if isinstance(got, Exception):
-            raise got
-        return got
+        calls.append(arg)
+        if len(calls) % 2:
+            return {"status": 401}
+        raise RuntimeError("TypeError: Failed to fetch")
     page.evaluate = evaluate
-    with pytest.raises(site.ListingIncomplete):
+    got = site.list_claims_summaries(page, TODAY)
+    assert list(got) == [] and got.refused == LABELS
+    assert primed == [False] + [True] * len(LABELS)
+
+
+def test_a_sign_in_in_the_middle_stops_every_period(monkeypatch):
+    page = Answers([ok(b64(HEADER + "\r\n" + CLAIM)), {"status": 401}, {"status": 401},
+                    ok(b64(HEADER + "\r\n" + CLAIM))])
+    monkeypatch.setattr(site, "prime_session", lambda page, force=False: not force)
+    with pytest.raises(site.SessionExpired):
         site.list_claims_summaries(page, TODAY)
-    assert primed == [False, True]
+    assert len(page.asked) == 2
+
+
+def test_the_period_that_did_not_come_is_refused_and_the_others_are_kept():
+    claims = ok(b64(HEADER + "\r\n" + CLAIM + "\r\n"))
+    page = Answers([claims, ok(None), claims])
+    got = site.list_claims_summaries(page, TODAY)
+    periods = site.claims_summary_periods(TODAY)
+    assert [r["doc_id"] for r in got] == ["ClaimsSummary|" + periods[0]["period"],
+                                          "ClaimsSummary|" + periods[2]["period"]]
+    assert got.refused == [periods[1]["label"]]
 
 
 # -- the export's own code ---------------------------------------------------
@@ -187,8 +216,8 @@ def test_the_export_code_hands_back_no_file_when_the_answer_has_none(browser_pag
     res = intake.evaluate(browser_page, site._CLAIMS_EXPORT_JS,
                           {"start": "2026-01-01", "end": "2026-11-11"})
     assert res["status"] == 200 and res["file"] is None
-    with pytest.raises(site.ListingIncomplete):
-        site.list_claims_summaries(browser_page, TODAY)
+    got = site.list_claims_summaries(browser_page, TODAY)
+    assert list(got) == [] and got.refused == LABELS
 
 
 def test_the_export_code_hands_back_an_empty_file_as_one(browser_page):
