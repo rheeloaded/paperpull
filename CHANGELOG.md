@@ -97,6 +97,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
   page by its shape. A new check reads the log lines of every app and fails
   on any new one that does this, and lists the ones other apps still have so
   they can be fixed next.
+- **A run started from a terminal in another folder works as the panel's
+  runs do (#166).** Since 0.62.0 such a run read `"."` and the other
+  relative folders in config.json from the folder config.json is in, but by
+  writing each one out in full. So every file it saved was recorded in
+  progress.json and the index by its full path, unlike the paths every
+  other run records, and a file recorded before was looked for in the
+  folder the terminal was in. A copy put aside for review was then taken
+  for missing, and a run could download it again as a second copy. Such a
+  run now works in the folder config.json is in, where the panel starts
+  every run, so it records and finds each file exactly as the panel's runs
+  do. A file a run recorded by its full path from 0.62.0 to 0.65.0 still
+  counts as downloaded, deleted or not, and a Download again still knows
+  the copy each record names. A test of every app holds both. American
+  Family no longer renames such a statement already in Manual Review when
+  it sets it aside again.
+- **A folder written with `~` is in your home folder (#166).**
+  `output_dir`, `profile_dir` and `documents_dir` in a config.json written
+  by hand can start with `~` for your home folder, such as
+  `~/Documents/Amex`. That is USERPROFILE on Windows and HOME on macOS and
+  Linux. A run read it as a folder named `~`, inside the provider's folder
+  or the folder config.json is in, and made Logs, Backups and a folder of
+  each kind there. The control panel now reads each one the same way as a run, and
+  so do Add a person, which makes the new person's folder beside the first
+  one's, moving history to another computer, `tools/upgrade.py` and the
+  sign-in browser. A name that only starts with `~`, such as `~archive`, is
+  still a folder of that name. On PaperPull Server the home folder is
+  outside the data folder, so a run stops before saving anything there and
+  the panel reads nothing from it, as for any folder outside it.
 
 ## [0.65.0] - 2026-11-12
 

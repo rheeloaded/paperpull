@@ -246,7 +246,7 @@ class App:
                     "found. Install Chrome or Edge, or run this from a "
                     "terminal to be offered the download.")
         self._pw = sync_playwright().start()
-        profile = Path(self.config["profile_dir"]).expanduser().resolve()
+        profile = browser_launcher.profile_folder(self.config["profile_dir"])
         profile.mkdir(parents=True, exist_ok=True)
         self._context = browser_launcher.launch_own_browser(self._pw.chromium, 
             str(profile),

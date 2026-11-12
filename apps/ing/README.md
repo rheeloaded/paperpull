@@ -173,11 +173,11 @@ From the repository root on macOS, with a Chromium-based browser installed.
 [ -e apps/ing/config.json ] || cp apps/ing/config.example.json apps/ing/config.json
 ```
 
-In `apps/ing/config.json`, set `owner`, and set `output_dir` to the full path
-of a folder outside the checkout, such as `/Users/you/Documents/ING-Test`
-(`~` is not expanded), so no statement, log or run file is written into the
-repository. For the first test, set `pilot_count` to `2`. Then follow these
-steps.
+In `apps/ing/config.json`, set `owner`, and set `output_dir` to a folder
+outside the checkout, by its full path, such as `/Users/you/Documents/ING-Test`,
+or from your home folder, such as `~/Documents/ING-Test`, so no statement,
+log or run file is written into the repository. For the first test, set
+`pilot_count` to `2`. Then follow these steps.
 
 1. `./paperpull --root apps ing login` opens the browser. Sign in yourself,
    open the Postbox, and leave the window open.

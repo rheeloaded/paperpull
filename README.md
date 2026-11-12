@@ -378,6 +378,12 @@ paperpull amex resume           REM continue after an interruption
 paperpull list                  REM every app it can see
 ```
 
+A folder in config.json, `output_dir` or `profile_dir`, is read from the
+app's own folder unless it is a full path, and one that starts with `~`,
+such as `~/Documents/Amex`, is in your home folder. That holds wherever
+the run is started from, so a run started in another folder works in the
+app's folder, as the panel's runs do.
+
 `paperpull` is `paperpull.bat` on Windows and `./paperpull` on macOS and
 Linux, or `python paperpull.py` anywhere. In the installed Mac app it is
 `/Applications/PaperPull.app/Contents/Resources/paperpull`, and in the

@@ -2233,7 +2233,7 @@ def _documents_in_use(meta: dict, account: str, root: Path) -> str:
     docs = Path(os.path.normpath(raw))
     profile = _config_of(meta, account).get("profile_dir")
     if isinstance(profile, str) and profile.strip():
-        held = Path(profile.strip())
+        held = Path(server_mode.with_home(profile.strip()))
         held = held if held.is_absolute() else Path(meta["dir"]) / held
         if _within(docs, held) or _within(held, docs):
             return ""
@@ -2259,7 +2259,7 @@ def _not_for_documents(meta: dict, account: str) -> list:
     for other in meta.get("accounts", ()):
         profile = _config_of(meta, other).get("profile_dir")
         if isinstance(profile, str) and profile.strip():
-            path = Path(profile.strip())
+            path = Path(server_mode.with_home(profile.strip()))
             out.append(path if path.is_absolute() else install / path)
         if other != account:
             try:
@@ -3631,7 +3631,8 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
                                      "person was added." % app_dir.name)
         try:
             first = json.loads(base.read_text(encoding="utf-8-sig"))
-            server_mode.hold_in_data(app_dir / mod.output_dir_for(app_dir, first, label))
+            server_mode.hold_in_data(
+                app_dir / server_mode.with_home(mod.output_dir_for(app_dir, first, label)))
         except (OSError, ValueError, TypeError, AttributeError):
             raise HTTPException(409, "%s's folder for a second person would be outside the data "
                                      "folder, so no person was added." % app_dir.name)
@@ -4840,7 +4841,7 @@ def _close_own_window(meta: dict, account: str) -> list:
     port = _sign_in_port(meta, account)
     try:
         # As the browser was opened on it (browser._launch), "~" and all.
-        profile = Path(str(cfg.get("profile_dir") or "")).expanduser()
+        profile = Path(server_mode.with_home(str(cfg.get("profile_dir") or "")))
     except (ValueError, RuntimeError):
         return []
     if not port or not str(profile) or str(profile) == ".":
@@ -5270,8 +5271,10 @@ def _naming_output(d: Path) -> Optional[Path]:
         except ValueError:
             return None
     cfg = _read_json(d / "config.json") or {}
-    # The same default load_config gives an absent output_dir.
-    out = Path(cfg.get("output_dir") or (Path.home() / "Downloads" / _provider_name(d)))
+    # The same default load_config gives an absent output_dir, and "~" read
+    # as the home folder, as a run reads it.
+    out = Path(server_mode.with_home(cfg.get("output_dir"))
+               or (Path.home() / "Downloads" / _provider_name(d)))
     return out if out.is_absolute() else d / out
 
 
@@ -5444,7 +5447,7 @@ async def api_naming_preview(request: Request):
     for r in _newest_saved(_naming_records(d)):
         # With the folders a pattern filed it in, as the new name shows the
         # folders it would be filed in.
-        current = _named_where(r, out, cfg.get(DOCUMENTS_KEY) if isinstance(
+        current = _named_where(r, out, server_mode.with_home(cfg.get(DOCUMENTS_KEY)) if isinstance(
             cfg.get(DOCUMENTS_KEY), str) else "")
         # The default names no folder, so a file a pattern put in folders
         # goes back to the folder of its kind, under the name it has.
@@ -5559,9 +5562,10 @@ def _config_of(meta: dict, account: str) -> dict:
 
 
 def _documents_of(meta: dict, account: str) -> str:
-    """The documents folder an account's config names, or ""."""
+    """The documents folder an account's config names, or "", with "~" read
+    as the home folder, as a run reads it."""
     value = _config_of(meta, account).get(DOCUMENTS_KEY)
-    return value if isinstance(value, str) else ""
+    return server_mode.with_home(value) if isinstance(value, str) else ""
 
 
 def _within(path, folder) -> bool:
@@ -5625,7 +5629,7 @@ def _profiles_known(apps: dict) -> list:
         for account in meta["accounts"]:
             profile = _config_of(meta, account).get("profile_dir")
             if isinstance(profile, str) and profile.strip():
-                path = Path(profile.strip())
+                path = Path(server_mode.with_home(profile.strip()))
                 out.append(path if path.is_absolute() else install / path)
     return out
 
@@ -5715,7 +5719,7 @@ def _follows(cfg: dict, meta: dict, account: str, root: str) -> bool:
     """_follows_root of a config already read."""
     if DOCUMENTS_KEY not in cfg:
         return True
-    value = cfg[DOCUMENTS_KEY]
+    value = server_mode.with_home(cfg[DOCUMENTS_KEY])
     return bool(root) and isinstance(value, str) and value != "" and \
         os.path.normpath(value) == _documents_for(meta, account, root)
 

@@ -187,6 +187,22 @@ def test_an_absolute_folder_elsewhere_stops_the_run(server, tmp_path):
             server, output_dir=str(tmp_path / "elsewhere"))))
 
 
+@pytest.mark.parametrize("key", ["output_dir", "documents_dir"])
+def test_a_folder_under_the_home_folder_is_outside_the_data_folder(server, tmp_path,
+                                                                    monkeypatch, key):
+    """"~" is the home folder of the server's own user, never inside the
+    data folder, so it stops the run as any folder outside it does, rather
+    than being read as a folder named "~" in the install (#166)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    with pytest.raises(SystemExit) as stopped:
+        storage.load_config(write(server, as_the_panel_writes_it(server, **{key: "~/Statements"})))
+    assert "outside" in str(stopped.value) and key in str(stopped.value)
+    assert [p for p in tmp_path.rglob("*") if p.name.startswith("~")] == []
+
+
 @pytest.mark.parametrize("out", [7, ["."], {"a": "."}, None])
 def test_an_output_dir_that_is_no_text_stops_the_run(server, out):
     with pytest.raises(SystemExit) as stopped:

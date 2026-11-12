@@ -1121,6 +1121,24 @@ def plugins() -> list:
     return out
 
 
+# What may follow a "~" that stands for the home folder.
+_AFTER_HOME = ("", "/", "\\") if os.name == "nt" else ("", "/")
+
+
+def with_home(value):
+    """A folder setting as a run reads it, with a "~" at its start read as
+    the home folder (#166), "~" alone or followed by a separator. A name
+    that only starts with "~" is a folder of that name, and anything else
+    comes back as it is. A run reads a setting the same way, in
+    paperpull_core.storage.with_home, and a test holds the two to one
+    answer. On PaperPull Server the home folder is outside the data folder,
+    so such a folder is refused there as any other outside it."""
+    if not isinstance(value, str) or value[:1] != "~" or value[1:2] not in _AFTER_HOME:
+        return value
+    home = os.path.expanduser(value)
+    return value if home == value else os.path.normpath(home)
+
+
 def output_root(install: Path, account: str) -> Path:
     """The folder an account's documents and records are written to."""
     config = install / ("config.json" if account == "primary" else "config.%s.json" % account)
@@ -1134,7 +1152,7 @@ def output_root(install: Path, account: str) -> Path:
     # be read from it or hand its files on.
     if not isinstance(out, str):
         raise ValueError("output_dir in %s is not text" % config.name)
-    root = (install / out).resolve()
+    root = (install / with_home(out)).resolve()
     # On the server the config sits in the shared folder, which others may
     # write, and the panel keeps each run's log in this folder and reads
     # records from it, so a folder outside the data folder is refused, a

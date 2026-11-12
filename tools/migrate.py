@@ -142,7 +142,7 @@ if (_CORE / "paperpull_core").is_dir():
 from paperpull_core.keys import account_component  # noqa: E402
 from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
 from paperpull_core.ports import is_example  # noqa: E402
-from paperpull_core.storage import json_text, sanitize_component  # noqa: E402
+from paperpull_core.storage import json_text, sanitize_component, with_home  # noqa: E402
 
 # The file this writes. Version 1 had one entry per folder and no people or
 # settings, and still imports.
@@ -396,10 +396,11 @@ def account_configs(install: Path) -> list:
 
 def output_dir_of(install: Path, cfg: dict, provider: str) -> Path:
     """Where a person's runs keep their records. A relative folder is the
-    install's, since a run starts there, and none at all is load_config's
-    default."""
+    install's, since a run starts there, a "~" at its start is the home
+    folder, as a run reads it (storage.with_home), and none at all is
+    load_config's default."""
     raw = str(cfg.get("output_dir") or "") or str(Path.home() / "Downloads" / provider)
-    p = Path(raw).expanduser()
+    p = Path(with_home(raw))
     if not p.is_absolute():
         p = install / p
     return Path(os.path.normpath(str(p)))

@@ -154,10 +154,12 @@ def test_a_documents_folder_holding_the_output_folder_is_not_used(tmp_path, caps
     assert inside["documents_dir"] == str(out / "Documents"), "a folder inside it may be"
 
 
-@pytest.mark.parametrize("given", ["Watched", "./Watched", "~/Watched", 7, ["x"], "   "])
+@pytest.mark.parametrize("given", ["Watched", "./Watched", "~Watched", 7, ["x"], "   "])
 def test_a_documents_folder_that_is_not_a_full_path_is_not_used(tmp_path, capsys, given):
     """A typo in a setting never sends documents somewhere nobody meant,
-    and never stops a run."""
+    and never stops a run. "~/Watched" is the folder Watched in the home
+    folder (#166, test_spec_and_paths), and "~Watched" is a folder of that
+    name, which is not a full path."""
     out = tmp_path / "out"
     cfg = storage.load_config(write(tmp_path / "app", {"output_dir": str(out),
                                                        "documents_dir": given}))

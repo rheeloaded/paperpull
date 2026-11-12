@@ -69,6 +69,21 @@ ADDED_DEFAULTS = {
 
 TERMINAL = {"Completed", "PDF Verified", "No Receipt Available", "Canceled"}
 
+# What may follow a "~" that stands for the home folder.
+_AFTER_HOME = ("", "/", "\\") if os.name == "nt" else ("", "/")
+
+
+def with_home(value):
+    """A folder setting as a run reads it, with a "~" at its start read as
+    the home folder, "~" alone or followed by a separator, and anything else
+    as it is. A run reads a setting the same way, in
+    paperpull_core.storage.with_home, which a test holds this to. Kept here,
+    since this tool runs copied somewhere on its own too."""
+    if not isinstance(value, str) or value[:1] != "~" or value[1:2] not in _AFTER_HOME:
+        return value
+    home = os.path.expanduser(value)
+    return value if home == value else os.path.normpath(home)
+
 
 def _say(line=""):
     """Console-safe, because account labels scraped from bank pages can hold
@@ -174,7 +189,10 @@ def inspect(install: Path) -> dict | None:
 
     pdir = str(cfg.get("profile_dir") or "")
     if pdir:
-        p = Path(pdir) if os.path.isabs(pdir) else install / pdir.lstrip("./")
+        # As a run reads it, "~" at its start the home folder and anything
+        # else not full from the install, where every run starts.
+        pdir = with_home(pdir)
+        p = Path(pdir) if os.path.isabs(pdir) else install / pdir
         if not p.exists():
             report["warnings"].append(
                 "no browser profile yet, so a sign-in will be needed (this is "
