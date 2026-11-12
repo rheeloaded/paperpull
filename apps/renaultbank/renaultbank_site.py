@@ -1,26 +1,26 @@
 """Renault Bank direkt's Atruvia Postfach API.
 
-Read-only lists cover every bank customer, Posteingang, Archiv and all incoming
-and sent message attachments (including older correspondence in threads).
-No control is pressed. The bank's separate status/archive/delete endpoints
-are never called. A PDF download uses the observed documentUpload/ticket
-sequence; this stages an existing document for download, it uploads no file.
-Business JWTs and tickets are used only inside the signed-in page.
+Read-only lists cover every bank customer, Posteingang, Archiv and the PDF
+attachments of incoming and sent messages (older correspondence in threads
+included). No control is pressed. The bank's separate status, archive and
+delete endpoints are never called. A PDF download uses the observed
+documentUpload and ticket sequence, which stages an existing document for
+download and uploads no file. Business JWTs and tickets are used only
+inside the signed-in page.
 """
 from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
-from typing import List, Optional
+from typing import Optional
 
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
-from paperpull_core.run_reporting import after_sign_in
 from paperpull_core.urls import is_safe_url as _host_allows
 
 log = logging.getLogger("renaultbank_docs.site")
@@ -42,7 +42,18 @@ class SessionExpired(RuntimeError):
 
 
 class ListStopped(RuntimeError):
-    """A list could not be read whole."""
+    """A list could not be read whole. A run that reads the list again while
+    it downloads stops once with the list unread
+    (listing.read_again_stopped), since every document after it reads the
+    same list."""
+
+
+class NoFile(RuntimeError):
+    """The bank lists a document and gives no PDF for it, an HTTP error for
+    that one file, no download ticket, or an answer that is not a PDF. Only
+    that document fails, and the run goes on to the next, as DKB's does. It
+    was ListStopped, which ended every run at the first such document, and
+    since runs go newest first nothing older was ever saved."""
 
 
 class NotToldApart(RuntimeError):
@@ -371,7 +382,15 @@ async (args) => {
     // Commit the in-page token map only when every list has been read.
     const items = new Map(), rows = [], rowIds = new Set();
     const summary = {documents: 0, messages: 0, attachments: 0, text_only_messages: 0,
-                     customers: 0, pages: 0};
+                     other_attachments: 0, customers: 0, pages: 0};
+    // An attachment is taken only when it says it is a PDF, by its extension
+    // field where it has one and by its file name where it has none. Any
+    // other file (a photo, a Word file) is left out and counted, since its
+    // download would never be a PDF.
+    const isPdf = (file) => {
+      const extension = typeof file.extension === "string" ? file.extension.trim() : "";
+      return extension ? /^\.?pdf$/i.test(extension) : /\.pdf$/i.test(String(file.filename).trim());
+    };
     const eligible = await ask(core + "liefereBerechtigteKunden?institut=BANK");
     const customers = array(eligible.kundeMitHauptKategorieZaehlerListe, "customers");
     if (!customers.length || !eligible.jwtKundeListe) fail("no accessible bank postbox was returned");
@@ -383,6 +402,9 @@ async (args) => {
     for (const entry of customers) {
       const customer = entry.kunde;
       if (!customer?.kundenId || customer.verbundkunde) fail("unsupported customer or linked-provider postbox");
+      // Read as false when missing, it left every message of this customer
+      // out of a list still called whole.
+      if (typeof customer.nachrichtenBerechtigt !== "boolean") fail("incomplete customer metadata");
       const customerId = String(customer.kundenId);
       summary.customers++;
       for (const category of ["POSTEINGANG", "ARCHIV"]) {
@@ -430,7 +452,9 @@ async (args) => {
         if (m.attachmentCount !== undefined && m.attachmentCount !== attachments.length) fail("message attachment list is incomplete");
         if (!attachments.length) summary.text_only_messages++;
         for (const file of attachments) {
-          if (!file?.binaryDataId || !file.filename || !jwt) fail("incomplete attachment metadata");
+          if (!file?.filename) fail("incomplete attachment metadata");
+          if (!isPdf(file)) { summary.other_attachments++; continue; }
+          if (!file.binaryDataId || !jwt) fail("incomplete attachment metadata");
           const binaryId = String(file.binaryDataId);
           add("attachment:" + id + ":" + binaryId, {
             title: (m.betreff || "Mitteilung") + " - " + file.filename, date: m.receivedTimestamp,
@@ -454,11 +478,15 @@ async (args) => {
           for (const m of listed) {
             const id = String(m.docId || "");
             if (!id || ids.has(id)) fail("message page repeated an entry");
+            // Read as one when missing, a thread's older messages were never
+            // asked for while the list was still called whole.
+            const parts = m.anzahlNachrichtenAusKorrespondenz;
+            if (!Number.isSafeInteger(parts) || parts < 1) fail("incomplete message metadata");
             ids.add(id); addMessage(m, result.jwt);
-            if (m.anzahlNachrichtenAusKorrespondenz > 1) {
+            if (parts > 1) {
               const thread = await ask(messages + "messageThread/" + segment(id), undefined, {jwtDocId: result.jwt});
               const chain = array(thread.korrespondenznachrichten, "message thread");
-              if (chain.length < m.anzahlNachrichtenAusKorrespondenz) fail("message thread is incomplete");
+              if (chain.length < parts) fail("message thread is incomplete");
               for (const part of chain) addMessage(part, thread.jwt);
             }
           }
@@ -484,7 +512,10 @@ _cache = None
 _summary = {}
 
 
-def _execute(page, operation, **values):
+def _execute(page, operation, stop=ListStopped, **values):
+    """The in-page bridge's answer to one operation. A signed-out answer
+    raises SessionExpired, and any other failure raises `stop`, ListStopped
+    for the list and NoFile for one document's download."""
     if not is_safe_url(page.url or ""):
         raise SessionExpired("Open the signed-in Renault Bank direkt tab.")
     try:
@@ -492,13 +523,13 @@ def _execute(page, operation, **values):
     except intake.TooLarge:
         raise
     except Exception:
-        raise ListStopped("the in-page document request did not finish") from None
+        raise stop("the in-page document request did not finish") from None
     if not isinstance(result, dict):
-        raise ListStopped("the document API answered in an unexpected shape")
+        raise stop("the document API answered in an unexpected shape")
     if result.get("expired"):
         raise SessionExpired("Sign in to Renault Bank direkt again.")
     if not result.get("ok"):
-        raise ListStopped(result.get("error") or "the document API did not answer")
+        raise stop(result.get("error") or "the document API did not answer")
     return result
 
 
@@ -547,8 +578,46 @@ def filed_category(row):
     return row.get("category") or classify(row.get("kind"), row.get("title"))
 
 
+def _last_sunday(year: int, month: int) -> int:
+    day = 31
+    while datetime(year, month, day).weekday() != 6:
+        day -= 1
+    return day
+
+
+def _berlin(when):
+    """A moment in Berlin time, by the EU rule, summer time from 01:00 UTC
+    on the last Sunday of March to 01:00 UTC on the last Sunday of October.
+    Worked out here because Windows' Python has no time zone data without
+    an extra package (DKB's own)."""
+    u = when.astimezone(timezone.utc)
+    start = datetime(u.year, 3, _last_sunday(u.year, 3), 1, tzinfo=timezone.utc)
+    end = datetime(u.year, 10, _last_sunday(u.year, 10), 1, tzinfo=timezone.utc)
+    return u + timedelta(hours=2 if start <= u < end else 1)
+
+
+_STAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2})?)(\.\d+)?(Z|[+-]\d{2}:?\d{2})$")
+
+
 def parse_date(value):
+    """A day as the bank means it, YYYY-MM-DD, or "" when it names none.
+
+    A message's receivedTimestamp is a UTC moment, and one received after
+    midnight in Berlin is the day before in UTC, so a timestamp with a zone
+    is read in Berlin time. A plain day is taken as it is."""
     value = str(value or "").strip()
+    stamp = _STAMP_RE.match(value)
+    if stamp:
+        zone = stamp.group(4)
+        if zone == "Z":
+            zone = "+00:00"
+        elif ":" not in zone:
+            zone = zone[:3] + ":" + zone[3:]
+        try:
+            when = datetime.fromisoformat(stamp.group(1) + "T" + stamp.group(2) + zone)
+        except ValueError:
+            return ""
+        return _berlin(when).strftime("%Y-%m-%d")
     for fmt, pattern in (("%Y-%m-%d", r"^\d{4}-\d{2}-\d{2}(?!\d)"),
                          ("%d.%m.%Y", r"^\d{2}\.\d{2}\.\d{4}(?!\d)"),
                          ("%Y%m%d", r"^\d{8}(?!\d)")):
@@ -562,7 +631,7 @@ def parse_date(value):
     return ""
 
 
-def _normalise(row):
+def _normalize(row):
     date = parse_date(row.get("date"))
     if not date or not row.get("title") or not row.get("item_id"):
         raise ListStopped("a listed document has no readable date, title or identity")
@@ -585,7 +654,7 @@ def listed_rows(page, config=None, fresh=False):
         raw = result.get("rows")
         if not isinstance(raw, list):
             raise ListStopped("the document list could not be read")
-        rows = [_normalise(row) for row in raw]
+        rows = [_normalize(row) for row in raw]
         if len({r["item_id"] for r in rows}) != len(rows):
             raise ListStopped("the document list repeats an identity")
         _summary = result.get("summary") or {}
@@ -612,13 +681,18 @@ def undated():
 
 def resolve_item(page, title, date, account, occurrence=0, item_id="", *,
                  category, number_rows, twins=1, config=None):
-    """DKB's identity matching, without falling back to an unlisted id."""
+    """DKB's identity matching, without falling back to an unlisted id,
+    since the page holds a download's tokens only for the rows it listed."""
     rows = listed_rows(page, config)
     numbers = number_rows(rows)
     alike = [i for i, row in enumerate(rows) if
              (row["title"], row["date"], row["account"], filed_category(row)) ==
              (title, date, account, category)]
     mine = [i for i in alike if numbers[i][0] == occurrence]
+    if not mine:
+        if item_id and any(row["item_id"] == item_id for row in rows):
+            raise NotToldApart("Its stored id is now another document's.")
+        raise NotToldApart("The list no longer shows this document.")
     if len(mine) != 1:
         raise NotToldApart("The list does not uniquely identify this document.")
     index = mine[0]
@@ -631,14 +705,21 @@ def resolve_item(page, title, date, account, occurrence=0, item_id="", *,
 def download_document(page, title, date, out_path, occurrence=0, item_hint="",
                       client_hint="", account="", *, category, number_rows,
                       twins=1, config=None):
+    """Save one document, and answer the id its bytes came from, or "" when
+    the bank gave no PDF for it, which fails that document alone. Which row
+    is its own is resolve_item's to say. A signed-out answer raises
+    SessionExpired and a list that cannot be read again ListStopped, since
+    both hold for every document after it."""
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins, config=config)
-    result = _execute(page, "download", id=row["item_id"])
     try:
+        result = _execute(page, "download", stop=NoFile, id=row["item_id"])
         data = intake.decode(result["data"], validate=True)
-    except (ValueError, KeyError):
+    except (NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
+        log.warning("no PDF for one %s of %s: %s", category, date, e)
         return ""
     if not data.startswith(b"%PDF-"):
+        log.warning("not a PDF for one %s of %s (%d bytes)", category, date, len(data))
         return ""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -49,6 +49,7 @@ global.fetch = async (path, options) => {
   if (mode==='expired') return {status:401,ok:false};
   data={jwtKundeListe:'INVENTED_CUSTOMER_JWT',jwtNextVersion:true,
    kundeMitHauptKategorieZaehlerListe:[{kunde:{kundenId:'9999',nachrichtenBerechtigt:true}}]};
+  if (mode==='no-message-right') delete data.kundeMitHauptKategorieZaehlerListe[0].kunde.nachrichtenBerechtigt;
  } else if (path.endsWith('liefereDokumenteZuKunden')) {
   if (body.jwtKundeListe !== 'INVENTED_CUSTOMER_JWT') throw new Error('missing customer token');
   const arch=body.hauptKategorie==='ARCHIV';
@@ -61,9 +62,14 @@ global.fetch = async (path, options) => {
   if (mode==='bad-date') data.dokumentListe[0].erstellDatum='bad';
  } else if (path.includes('/messageCount/')) data={count:body.nachrichtenFilter==='EINGANG'?2:0};
  else if (path.includes('/messages/')) {
+  const first = mode==='other-attachments' ? [attachment('a1'),
+   {binaryDataId:'p1',filename:'foto.jpg',extension:'jpg'},
+   {binaryDataId:'p2',filename:'Brief.PDF'}, {binaryDataId:'p3',filename:'scan'},
+   {binaryDataId:'p4',filename:'renamed.pdf',extension:'docx'}] : [attachment('a1')];
   data={korrespondenznachrichten:body.offset===0 ?
-   [message('m1',[attachment('a1')],{anzahlNachrichtenAusKorrespondenz:2})] : [message('m2')],
+   [message('m1',first,{anzahlNachrichtenAusKorrespondenz:2})] : [message('m2')],
    jwt:'INVENTED_MESSAGE_JWT'};
+  if (mode==='no-thread-count') delete data.korrespondenznachrichten[0].anzahlNachrichtenAusKorrespondenz;
  } else if (path.includes('/messageThread/')) {
   if(options.headers.jwtDocId!=='INVENTED_MESSAGE_JWT') throw new Error('missing message token');
   data={jwt:'INVENTED_THREAD_JWT',korrespondenznachrichten:
@@ -127,11 +133,28 @@ def test_all_document_pages_archive_and_older_message_attachments_are_read():
                    for r in data["requests"])
 
 
-@pytest.mark.parametrize("mode", ["missing-cursor", "repeated-page", "short-thread"])
+@pytest.mark.parametrize("mode", ["missing-cursor", "repeated-page", "short-thread",
+                                  "no-message-right", "no-thread-count"])
 def test_incomplete_or_repeated_pages_stop_the_whole_listing(mode):
+    """A customer's nachrichtenBerechtigt or a message's thread count that is
+    missing was read as false or one, which left that customer's messages
+    or a thread's older messages out of a list still called whole."""
     result = run_bridge(mode)["collected"]
     assert not result["ok"] and "rows" not in result
     assert "JWT" not in json.dumps(result)
+
+
+def test_attachments_that_are_not_pdfs_are_left_out_and_counted():
+    """A photo in a message was listed, and its download, never a PDF,
+    stopped every run at it. An attachment is a PDF by its extension field
+    where it has one and by its name where it has none."""
+    result = run_bridge("other-attachments")["collected"]
+    assert result["ok"], result
+    taken = sorted(r["item_id"].rsplit(":", 1)[1] for r in result["rows"]
+                   if r["item_id"].startswith("attachment:m1:"))
+    assert taken == ["a1", "p2"]
+    assert result["summary"]["other_attachments"] == 3
+    assert result["summary"]["attachments"] == 3
 
 
 def test_expired_session_is_identified_without_returning_tokens():
@@ -169,16 +192,34 @@ def test_an_html_login_response_is_not_saved_as_a_pdf():
 
 def test_invalid_dates_stop_the_listing():
     with pytest.raises(site.ListStopped):
-        site._normalise({"item_id": "invented", "title": "Kontoauszug", "date": "2026-02-30"})
+        site._normalize({"item_id": "invented", "title": "Kontoauszug", "date": "2026-02-30"})
 
 
-def test_normalised_metadata_files_by_kind_and_keeps_only_account_suffix():
-    row = site._normalise({"item_id": "invented", "title": "Steuerbescheinigung",
+def test_normalized_metadata_files_by_kind_and_keeps_only_account_suffix():
+    row = site._normalize({"item_id": "invented", "title": "Steuerbescheinigung",
                            "date": "2026-01-31T12:00:00Z", "account": "DE00111122223333444455"})
     assert row["category"] == "Tax Document"
     assert row["date"] == "2026-01-31"
     assert row["account"] == "Konto 4455"
     assert "DE00" not in json.dumps(row)
+
+
+@pytest.mark.parametrize("stamp,day", [
+    ("2026-02-28T23:30:00Z", "2026-03-01"),          # after midnight in Berlin, winter
+    ("2026-07-31T22:15:00.123Z", "2026-08-01"),      # after midnight in Berlin, summer
+    ("2026-07-31T21:59:59Z", "2026-07-31"),
+    ("2026-03-29T00:59:00Z", "2026-03-29"),          # the hour before summer time
+    ("2026-10-25T00:30:00+00:00", "2026-10-25"),
+    ("2026-12-31T23:00:00+0100", "2026-12-31"),      # an offset of its own
+    ("2026-02-28T23:30:00", "2026-02-28"),           # no zone, taken as it is
+    ("2026-02-28", "2026-02-28"),
+    ("28.02.2026", "2026-02-28"),
+])
+def test_a_timestamp_is_dated_by_its_day_in_berlin(stamp, day):
+    """A message's receivedTimestamp was dated by its UTC day, so one that
+    arrived just after midnight in Berlin was filed under the day before,
+    and the date is part of every document's key."""
+    assert site.parse_date(stamp) == day
 
 
 def test_missing_or_ambiguous_identity_is_not_replaced_with_an_arbitrary_stored_id(monkeypatch):

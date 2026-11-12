@@ -1,8 +1,28 @@
-"""Renault Bank direkt Postfach downloader.
+"""Renault Bank direkt Postfach downloader (local, supervised).
 
-Uses DKB's shared orchestration for identity, progress, indexing and recovery.
-The Renault-specific API is in renaultbank_site.py.
-Mapped from the account holder's technical capture and the public portal client.
+Usage:
+    python renaultbank_docs.py --login       verify connection to your browser
+    python renaultbank_docs.py --discover    list available documents
+    python renaultbank_docs.py --pilot       download the 5 newest, then stop
+    python renaultbank_docs.py --all         download everything in scope
+    python renaultbank_docs.py --resume      continue an interrupted run
+    python renaultbank_docs.py --verify      re-validate every saved PDF
+    python renaultbank_docs.py --diagnose    dump page structure (no downloads)
+    python renaultbank_docs.py --dry-run     plan filenames, save nothing
+
+Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
+         --max-docs N  --type Statement|"Tax Document"|Message|...
+
+READ-ONLY: this tool only reads the Renault Bank direkt Postfach, its archive
+and its messages, and downloads PDFs the bank already holds. It never moves
+money, never changes an account or a setting, and never calls the Postfach's
+own read, archive or delete endpoints. Whether the bank marks a document
+read when its PDF is fetched has not been checked. Everything stays on this
+machine. Nothing is sent to any external service.
+
+Uses DKB's orchestration for identity, progress, indexing and recovery
+(apps/dkb/dkb_docs.py). The Renault Bank direkt API is in renaultbank_site.py,
+mapped on the contributor's own account (#172, #212).
 """
 from __future__ import annotations
 
@@ -481,8 +501,11 @@ class App:
         self.stats["discovered"] = len(self.discovery.data)
         counts = getattr(site, "_summary", {})
         if counts.get("text_only_messages"):
-            print(f"{counts['text_only_messages']} text-only message(s) have no PDF attachment; "
-                  "their text is not exported.")
+            print(f"{counts['text_only_messages']} message(s) have no attachment, and a message's "
+                  "own text is not saved.")
+        if counts.get("other_attachments"):
+            print(f"{counts['other_attachments']} message attachment(s) are not PDFs (a photo or "
+                  "a Word file, say), so they are left out. Open them in the Postfach yourself.")
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
