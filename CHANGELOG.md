@@ -7,6 +7,48 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Anthem claims summaries (#211).** Anthem now files its claims list, which
+  is not the EOB Center, as one claims summary for each of the five years
+  before this one and one for the current year to date each month a run
+  sees. Each is a PDF table in Claims Summaries with Anthem's own CSV beside
+  it. Run All, Resume and `--claims-summaries` take them. Anthem exports the
+  list only by POST, as its own page asks for it, and that one POST reads
+  the list for two dates and changes nothing. Contributed by @riordan.
+  Before merging, an answer with no file, a file that is not the claims
+  list, or anything that goes wrong in the page stops the list as
+  incomplete, rather than read as a year with no claim. A year is filed only
+  once 90 days have passed since it ended, since its claims keep arriving
+  after it ends, and a run in January names the year just ended as waiting.
+  Each CSV is written with its PDF and listed in the summary's record, so a
+  Rename or a Move takes it along, and it is never written again once
+  deleted. A summary saved before is not asked for again, the asks are paced
+  as the app's other calls are, and a test pins every value the POST sends.
+
+### Fixed
+- **Anthem's claim tokens, patient names, Pharmacy statements and the
+  letters listing (#210).** Anthem's EOB summary now gives each claim number
+  beside an opaque token made new on every listing. The app took the token
+  for the claim number, so every EOB got an identity the guard refused and
+  none could be downloaded. An EOB is known by its claim number again, a
+  download asks with the token the current listing gives, and the token is
+  never stored. A patient's name, now a FHIR HumanName, is read whole rather
+  than written into the filename as Python prints it. A monthly Pharmacy
+  statement, which has no claim, is kept by its date. Anthem's page answers
+  some calls with no body stream at all, which the core read as an empty
+  answer, so the letters list stopped. The core now reads such an answer
+  whole and holds it to the same limit. Contributed by @riordan. Before
+  merging, the EOB records an older version kept by a token, which failed
+  on every run and wrote a failure file each time, are set down as No Longer
+  Listed, and one ever downloaded is never touched. Two statements of one
+  date are both left unsaved and named, and the list is not taken as whole,
+  rather than one kept under the other's identity. Only Pharmacy's own
+  statement row is taken for a statement, so a claim whose claim key moved
+  is refused as before, never fetched with no claim. A patient's name sent
+  as a list of HumanNames is read as the names it holds.
+
 ## [0.64.0] - 2026-11-11
 
 PaperPull can now ask github.com whether a newer version exists, only when
