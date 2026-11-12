@@ -30,6 +30,6 @@ echo 'A browser window with a profile of its own will open. Then:'
 echo '1. Sign in to Renault Bank direkt (answer any code it sends yourself)'
 echo '2. Open the page with your documents on it'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
-echo '4. Then press Record steps in the panel and click to one document'
+echo '4. Then run Discover, followed by Pilot, in PaperPull'
 
 "$PY" renaultbank_docs.py --open-browser $CFG

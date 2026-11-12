@@ -23,7 +23,7 @@ DOCUMENT_INDEX_COLUMNS = [
 
 # The kinds DKB's Postfach sorts its documents into, which a German bank's
 # or broker's mailbox is likeliest to hold too. Which kinds this one holds
-# waits on the recording (#172). They are all here from the first
+# is decided by renaultbank_site.classify. They are all here from the first
 # build because an install keeps the document_types it was set up with,
 # and a kind added later would be left out of every run. The core knows
 # "Statement" and "Tax Document". The folders carry German names, as

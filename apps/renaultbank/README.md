@@ -1,54 +1,80 @@
 # Renault Bank direkt
 
-Provider setup for [issue #172](https://github.com/rheeloaded/paperpull/issues/172).
+Downloads existing PDFs from the Renault Bank direkt Postfach and archive,
+including statements, tax documents, confirmations and message attachments.
+Requested in [#172](https://github.com/rheeloaded/paperpull/issues/172).
 
-**In progress: sign-in, Record and Diagnose are available. Document discovery
-and downloads still require a recording from an account holder.** The public
-Atruvia portal reveals no authenticated document list or PDF endpoint. This
-setup assumes neither ING selectors nor an undocumented banking API.
+**Status: implemented from the contributor’s recording and a technical
+capture on 2026-11-12, checked against the public Postfach client. Automated
+checks pass; a live-account Pilot is still pending.**
 
-The intended scope is all available statements, tax documents, confirmations
-and other account documents, across every accessible account and product,
-including the full available history.
+## Commands in a checkout
 
-## Record the document workflow
-
-From the repository root on macOS:
+`--root ./apps` selects the provider in this checkout even when the panel
+is configured to use a different install folder.
 
 ```sh
-./paperpull renaultbank setup
-./paperpull renaultbank login
+./paperpull --root ./apps renaultbank login
 ```
 
-Sign in yourself in the browser that opens, complete two-factor authentication,
-and leave it open. Then, in a second terminal from the repository root:
+Sign in yourself, answer your own two-factor prompt, and leave the window open.
+The Postfach is at
+`https://banking.renault-bank-direkt.de/services_cloud/portal/webcomp/epostfach/postfach`.
 
 ```sh
-./paperpull renaultbank record
+./paperpull --root ./apps renaultbank discover
+./paperpull --root ./apps renaultbank pilot
+./paperpull --root ./apps renaultbank pilot
+./paperpull --root ./apps renaultbank all
 ```
 
-While recording, open the Postfach, open a document and download its PDF.
-If available, also visit archive/history, account selectors, filters and the
-next page, so the full history can be implemented. Return to the terminal and
-press Enter to stop. Review `apps/renaultbank/Diagnostics/recording.json` before
-sharing it in this chat. Never share credentials, cookies or downloaded bank PDFs.
-The [recording guide](../../docs/testing-a-provider.md) explains what is captured.
+Check the first Pilot’s PDFs. The second Pilot must save no new files.
+Resume continues a stopped download; Verify checks saved PDFs locally.
 
-Alternatively use **Record steps** under **More → Get help** in the panel.
-`./paperpull renaultbank diagnose` produces a passive support report.
+## How it reads documents
 
-## Implementation status
+The signed-in page makes same-origin calls to Renault’s Atruvia document
+API. Cookies, customer/document JWTs and download tickets stay in the
+browser. Only document metadata and the requested PDF bytes leave it.
 
-- Stable entry URL: `https://banking.renault-bank-direkt.de/services_cloud/portal/`.
-- Postfach: `https://banking.renault-bank-direkt.de/services_cloud/portal/webcomp/epostfach/postfach`.
-- Authentication routes are treated as signed out.
-- Separate browser profile and CDP port `9311`.
-- Document categories, index, resumable state and CLI follow the existing apps.
-- No automatic clicks, form submissions or downloads while the site is unmapped.
-- Discover/Pilot/All stop explicitly rather than report an empty successful run.
+- `liefereBerechtigteKunden?institut=BANK` supplies every accessible bank
+  customer, including customers outside the currently selected profile.
+- `liefereDokumenteZuKunden` reads Posteingang and Archiv separately for
+  each customer, without date, account or unread filters. The response’s
+  `aufsetzpunkt` is followed until the declared total is reached.
+- Incoming and sent correspondence is paginated by its declared count.
+  Older entries in correspondence threads are read too; each attachment
+  is listed once. Text-only messages are counted and reported, but their
+  text is not exported. Linked external-provider postboxes are unsupported
+  and stop discovery explicitly.
+- Missing metadata, repeated pages, changing totals or incomplete history
+  stop discovery before it commits a partial list.
+- Document downloads use the observed `datasharing/documentUpload` call,
+  which stages an existing bank document for download; it sends no file.
+  Message attachments use `messageAttachmentDownload` and a download
+  ticket. PDFs are fetched by the portal’s `ticket/download` URL.
 
-## Tests
+No banking control is pressed. Requests are limited to an explicit set of
+read/list/download operations; redirects are refused. Transfer, payment,
+status, delete, archive and activation endpoints are excluded. The app does
+not explicitly mark anything read. Any server-side read-marking caused by
+a download has not been checked yet.
+
+The orchestration follows DKB: category, date, account suffix and full title
+identify a document; ids are re-resolved as hints. Ambiguous documents fail
+rather than being confused with another. Progress and indexes remain local,
+and successful downloads are remembered even if their files are later removed.
+Non-PDF downloads fail explicitly rather than being saved as PDFs.
+
+## Development checks
 
 ```sh
 python -m pytest apps/renaultbank/tests -q
 ```
+
+The in-page API tests use Node and invented responses to check pagination,
+archive and thread traversal, JWT containment, ticket downloads, session
+expiry and incomplete-list failures. No account is used by those tests.
+`capture_structure.py` is a local development helper for route/schema
+reports; it saves no request/response values, authentication headers or PDF
+contents. Diagnostic files and recordings are ignored by Git.

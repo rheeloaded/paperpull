@@ -1,23 +1,8 @@
-"""Renault Bank direkt document downloader, a first shell for a tester (#172).
+"""Renault Bank direkt Postfach downloader.
 
-Usage:
-    python renaultbank_docs.py --open-browser  open a sign-in window of its own
-    python renaultbank_docs.py --login         check the connection to that browser
-    python renaultbank_docs.py --record        record your own path to a document
-    python renaultbank_docs.py --diagnose      survey the open page (no downloads)
-
-NOT BUILT YET. This first build opens Renault Bank direkt's site for you to sign
-in, and lets Record and Diagnose watch the page you leave open. Discover,
-Pilot and Run All say it is not built yet and stop, Resume says nothing has
-been listed yet, and nothing is listed or downloaded. A recording of one
-trip to a document is what the real app is built from
-(docs/testing-a-provider.md).
-
-READ-ONLY. This build presses nothing on the bank's pages. It never pays,
-transfers money, buys or sells, or changes any account setting. Everything
-stays on this machine. Nothing is sent to any external service.
-
-See the STATUS block in renaultbank_site.py for what is known.
+Uses DKB's shared orchestration for identity, progress, indexing and recovery.
+The Renault-specific API is in renaultbank_site.py and renaultbank_api.js.
+Mapped from the account holder's technical capture and the public portal client.
 """
 from __future__ import annotations
 
@@ -29,15 +14,14 @@ from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          after_sign_in, lists_what_it_saved,
-                                          not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
+import inspect
 import logging
 import random
 import re
 import sys
-import textwrap
 import time
 from datetime import datetime
 from pathlib import Path
@@ -46,9 +30,11 @@ from typing import List, Optional
 from paperpull_core import doc_types, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
 import renaultbank_site as site
+import storage
 from paperpull_core.models import State
-from paperpull_core.keys import account_component as _account_component
-from paperpull_core.words import shape_tree, words_for, write_shaped
+from paperpull_core.keys import told_apart as _told_apart
+from paperpull_core.keys import twins as _twins
+from paperpull_core.words import shape_label, shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
                      atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
@@ -73,7 +59,8 @@ class Document:
 
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
-                 date_text="", document_id="", occurrence=0, **kw):
+                 date_text="", document_id="", item_id="", client_id="",
+                 occurrence=0, **kw):
         self.title = title
         self.account = account
         self.category = category
@@ -81,8 +68,10 @@ class Document:
         self.date = date
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
-        self.document_id = document_id
-        self.occurrence = occurrence    # nth document with this title, date and account
+        self.document_id = document_id  # unused here, identity is subject + date
+        self.item_id = item_id          # the Postfach document id, a hint only, re-resolved
+        self.client_id = client_id      # goes with it on the content call
+        self.occurrence = occurrence    # nth document with this title and date
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -100,15 +89,18 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Category, date, title and account. A Renault Bank direkt sign-in can
-        hold a current account, a depot and a card, whose documents can
-        share a day, so the account is what tells one from another.
-        Which id, if any, a document carries, and how two of one account
-        and one day are told apart, wait on the recording, so neither is
-        keyed on yet. Nothing is listed in this first build, so no key
-        has been written."""
-        acct = _account_component(sanitize_component(self.account or ""))
-        return f"{self.category}:{self.date}:{sanitize_component(self.title)[:60]}:{acct}"
+        """Kind, date, account and subject, never the Postfach id. The id is looked up fresh
+        at download time. myPay's ids died with the session, and there is no
+        reason to find out the hard way whether Renault Bank direkt's do."""
+        # The whole subject, not its first sixty letters. Renault Bank direkt's run past
+        # that ("Abrechnung Kauf WKN ... zu Depot ... Ordernr. ..."), and two
+        # orders of one day differ only in the part that was cut off, so
+        # they shared a key and one of them was never listed.
+        # The account too, so two accounts' documents of one title and day
+        # are two documents.
+        acct = f"{sanitize_component(self.account)}:" if self.account else ""
+        base = f"{self.category}:{self.date}:{acct}{sanitize_component(self.title)}"
+        return base if not self.occurrence else f"{base}#{self.occurrence}"
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -116,6 +108,34 @@ class Document:
     @classmethod
     def from_dict(cls, d: dict) -> "Document":
         return cls(**d)
+
+
+# Which of several documents sharing these is which is told by their ids
+# (keys.told_apart). Every field the key is made of but the number, so two
+# documents alike but for their account or their kind are never one group
+# whose numbers one of them takes from the other (#122). App._numbered
+# writes the same out where it numbers.
+ALIKE = ("title", "date", "account", "category")
+
+
+def tidy(text) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def row_category(d: dict, title: str) -> str:
+    """The category a listed row is recorded under, as _record_statement_doc
+    reads it before the rules choose its words (site.filed_category)."""
+    return site.filed_category(dict(d, title=title))
+
+
+def listed_key(d: dict) -> str:
+    """The key of the document a listed row names, before it is numbered,
+    as _record_statement_doc reads the row. A history moved to another
+    computer carries no discovery.json, and told_apart finds each saved
+    number by this key then."""
+    title = tidy(d.get("title")) or "Statement"
+    return Document(title=title, category=row_category(d, title),
+                    date=(d.get("date") or "").strip(), account=tidy(d.get("account"))).key
 
 
 class App:
@@ -182,7 +202,9 @@ class App:
         cdp_url = self.config.get("cdp_url")
         if cdp_url:
             try:
-                self._browser = self._pw.chromium.connect_over_cdp(cdp_url)
+                self._browser = self._pw.chromium.connect_over_cdp(
+                    cdp_url, **({"no_defaults": True} if "no_defaults" in
+                                inspect.signature(self._pw.chromium.connect_over_cdp).parameters else {}))
             except Exception as e:
                 self._pw.stop()
                 self._pw = None
@@ -206,12 +228,12 @@ class App:
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
         if self._cdp_mode:
-            # Reuse the person's own tab on Renault Bank direkt's site, the page
-            # they left open for this. With none open, a tab of this run's
-            # own is opened, never a tab of another site (tabs.new_tab).
-            # Matched on the parsed host, never a substring, since
-            # "provider.com" in an address also matches
-            # "provider.com.phish.example".
+            # Reuse the person's own tab on Renault Bank direkt's site, the page they
+            # left open for this. With none open, a tab of this run's own is
+            # opened, never a tab of another site, since the session is a
+            # cookie a new tab shares (tabs.new_tab). Matched on the parsed
+            # host, never a substring, since "provider.com" in an address also
+            # matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
             mine = [p for p in live if site.is_safe_url(p.url or "")]
             self._work_page = mine[0] if mine else tabs.new_tab(ctx)
@@ -261,15 +283,7 @@ class App:
                     "Press Enter after you are signed in... ") is None:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
-
-    def not_built(self, e: Exception) -> None:
-        """Say that this first build reads nothing, and stop the run as one
-        that stopped, never as a clean run that found nothing. Nothing was
-        asked of the bank's pages (renaultbank_site.NotBuilt)."""
-        print()
-        for line in textwrap.wrap(str(e) or site.NOT_BUILT, width=72):
-            print(line)
-        raise SystemExit(0)
+            site.goto_documents(page)
 
     # -- commands ----------------------------------------------------------
 
@@ -278,51 +292,46 @@ class App:
 
         A second account opens its own browser, on its own port, with its own
         saved session - so nothing is duplicated in the launcher scripts. You
-        sign in, and the tool attaches afterwards.
+        sign in; the tool attaches afterwards.
         """
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9311")
         profile = self.config["profile_dir"]
-        url = site.URLS.get("login") or site.URLS["home"]
+        url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         name = browser_launcher.open_signin_browser(profile, port, url,
-            # A bank's or a broker's sign-in is the likeliest place to
-            # turn a bare Chromium away, so the person's own Edge or Chrome
-            # is tried first, in a profile of its own.
-            prefer_real=True,
+            prefer_real=True,   # Use the account holder's installed browser
             mode=self.config.get("browser", "auto"))
         if not name:
             raise SystemExit(NOTHING_OPENED)
         print(f"Opened a sign-in browser on port {port} ({name}).")
         print(f"Profile: {profile}")
-        # This first build downloads nothing, so the step after signing in
-        # is a recording of one trip to a document.
-        print("Sign in, keep the window OPEN, then")
-        print(f"{after_sign_in(record=True)}, and click your way to one document.")
+        print(f"Sign in, keep the window OPEN, then {after_sign_in()}.")
 
     def cmd_login(self):
-        """What the browser shows, and never a claim of a session. This first
-        build knows no shape of a signed-in Renault Bank direkt page, so it can
-        name a sign-in page or a check, and otherwise says it cannot tell."""
-        print("Checking the connection to your Renault Bank direkt browser...\n")
+        print("Checking the connection to your signed-in Renault Bank direkt browser...\n")
         page = self.page()
-        if not site.is_safe_url(page.url or "") and tabs.is_own(page):
-            # No tab of the person's was on the site, so the one this run
-            # opened is sent to the sign-in page.
-            site.open_sign_in(page)
+        ok = site.goto_documents(page)
         challenge = site.detect_security_challenge(page)
+        # A banking.renault-bank-direkt.de address without a sign-in form says nothing of
+        # the session. Renault Bank direkt answering the Postfach list does.
+        listed = False
+        if ok and not challenge:
+            try:
+                listed = site.answers_its_list(page)
+            except (site.SessionExpired, site.ListStopped) as e:
+                log.info("the Postfach list did not answer: %s", e)
         if challenge:
-            print(f"!! {challenge}\nResolve it in the browser, then re-run Login.")
-        elif not site.is_safe_url(page.url or ""):
-            print("Connected, but no tab is on banking.renault-bank-direkt.de. Open it in that")
-            print("window and sign in yourself, then run Login again.")
+            print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
-            print("Connected, and the tab shows a sign-in page. Sign in there")
-            print("yourself, answer any code it sends, and keep the window OPEN.")
+            print("Connected, but Renault Bank direkt shows a signed-out page.")
+            print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
+        elif listed:
+            print("Success: connected, and Renault Bank direkt answers with your Postfach list.")
+            print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
-            print("Connected to the browser, on banking.renault-bank-direkt.de. This first build")
-            print("does not read your accounts yet, so it cannot tell whether you are")
-            print("signed in. If the window shows your accounts, open the page with")
-            print(f"your documents, then {after_sign_in(record=True)}, and click")
-            print("your way to one.")
+            print("Connected, but the Documents list did not load, so this cannot say")
+            print("whether you are signed in. Look at the browser window and answer")
+            print("anything Renault Bank direkt asks there yourself. If it shows your account, open")
+            print("your Documents/Statements page in it, then run --diagnose.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -333,6 +342,7 @@ class App:
             return False
         if a.year and not (doc.date or "").startswith(str(a.year)):
             return False
+        # Never process documents before the configured start date.
         floor = a.start_date or self.config.get("default_start_date")
         if floor and (not doc.date or doc.date < floor):
             return False
@@ -340,50 +350,158 @@ class App:
             return False
         return True
 
-    def _record_document(self, d: dict) -> int:
-        """Record one listed document {title, date, account}. Returns 1 if new.
-        Nothing reaches here until collect_documents is built."""
-        title = re.sub(r"\s+", " ", (d.get("title") or "")).strip() or "Statement"
+
+    def _numbered(self, rows: List[dict]) -> list:
+        """Each row's number among the documents sharing its kind, title,
+        date and account, and whether that surely names it, as (number, sure).
+        Discover and each download's look at a recent listing are both
+        numbered here, so the two agree on which row is which document.
+
+        A number stays with the document it was given to, by the id it was
+        saved under first (paperpull_core.keys.told_apart), so a list in
+        another order or a new row ahead of one saved moves nothing. A
+        document this run saved is not counted as saved here, since an id
+        may last no longer than one list.
+
+        Numbered by every field the key holds but the number (ALIKE), each
+        row by the kind its record holds (site.filed_category), so a row
+        and its record are alike."""
+        alike = ("title", "date", "account", "category")
+        saved = {key: rec for key, rec in self.progress.data.items()
+                 if saved_copy.holding(self, key)}
+        filed = [dict(r, category=site.filed_category(r)) for r in rows]
+        return _told_apart(filed, self.discovery.data, fields=alike, id_field="item_id",
+                           saved=saved, key_of=listed_key)
+
+    def _record_statement_doc(self, d: dict, occurrence: int = 0, sure: bool = True) -> int:
+        """Record one Postfach row {title, date, account, category, item_id, client_id}. Returns 1 if new.
+        A row that cannot be told apart from one saved keeps no id
+        (keys.told_apart), so it is never downloaded in its place."""
+        title = tidy(d.get("title")) or "Statement"
         if doc_types.should_skip(title, self.rules):
             self.stats["skipped_out_of_scope"] += 1
             return 0
         category, summary, confidence = doc_types.classify_document(title, self.rules)
+        if d.get("category"):
+            # The Postfach says which kind a document is. Rules only choose the
+            # wording inside the filename.
+            category = d["category"]
+            if confidence != doc_types.HIGH or summary in ("", "Other Document", "Document"):
+                summary = storage.FALLBACK_SUMMARY.get(category, "Dokument")
+            confidence = confidence or "high"
+        # The same as row_category, which listed_key reads a row by.
+        if category == doc_types.OTHER and re.search(r"statement|kontoauszug", title, re.I):
+            category = doc_types.STATEMENT
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
             return 0
-        doc = Document(title=title, category=category, summary=summary,
-                       date=(d.get("date") or "").strip(), confidence=confidence,
-                       account=re.sub(r"\s+", " ", (d.get("account") or "")).strip(),
-                       href=d.get("href", ""))
-        if self.discovery.get(doc.key) is not None:
+        date = (d.get("date") or "").strip()
+        floor = self.args.start_date or self.config.get("default_start_date")
+        if floor and (not date or date < floor):
+            self.stats["skipped_out_of_scope"] += 1
             return 0
-        rec = doc.to_dict()
-        rec["state"] = State.DISCOVERED.value
-        self.discovery.update(doc.key, rec, save=False)
-        return 1
+        account = re.sub(r"\s+", " ", (d.get("account") or "")).strip()
+        acct_short = re.sub(r"\b(COMBINED|ACCOUNTS?)\b", "", account, flags=re.I)
+        acct_short = re.sub(r"\s+", " ", acct_short).strip()
+        if acct_short.isupper():
+            acct_short = acct_short.title()
+        full_summary = f"{summary} - {acct_short}" if acct_short else summary
+        doc = Document(title=title, category=category, summary=full_summary,
+                       date=date, confidence=confidence, account=account,
+                       date_text=date, item_id=d.get("item_id", "") if sure else "",
+                       client_id=d.get("client_id", ""), occurrence=occurrence,
+                       href=d.get("href", ""))
+        existing = self.discovery.get(doc.key)
+        if existing is None:
+            rec = doc.to_dict()
+            rec["state"] = State.DISCOVERED.value
+            self.discovery.update(doc.key, rec, save=False)
+            return 1
+        if doc.item_id and existing.get("item_id") != doc.item_id:
+            self.discovery.update(doc.key, {"item_id": doc.item_id,
+                                            "client_id": doc.client_id}, save=False)
+        return 0
+
 
     def cmd_discover(self, quiet: bool = False) -> int:
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, for Resume (paperpull_core.listing).
         listing.started(self)
-        # The browser is attached as every Discover attaches it, so a run
-        # with none open says to sign in first. No tab is opened, read or
-        # pressed. This first build cannot read the list, so it says so and
-        # stops here (renaultbank_site.NotBuilt), and the list is never noted whole.
-        self.browser()
+        page = self.page()
+        if not site.ensure_statements(page):
+            self.check_session(page)
+            if not site.ensure_statements(page):
+                print("Could not reach the Renault Bank direkt Postfach. Sign in in the browser (the tab")
+                print("should be on banking.renault-bank-direkt.de), then try again.")
+                # Nothing was listed, so this run stops here rather than finish
+                # clean, as a Resume after it does (paperpull_core.listing).
+                raise SystemExit(0)
+        self.check_session(page)
+
+        # The Postfach, read through its own API. Two documents can share a
+        # title and a date (a statement and its supplement, say), so the
+        # nth such pair is keyed with its number.
         try:
-            raw = site.collect_documents(None, keep=scope.period_filter(self.args, self.config),
+            raw = site.collect_documents(page, keep=scope.period_filter(self.args, self.config),
                                          config=self.config)
-        except site.NotBuilt as e:
-            self.not_built(e)
+        except site.SessionExpired as e:
+            log.info("the list answered as signed out: %s", e)
+            self.session_ended()
+        except site.ListStopped as stop:
+            # Nothing of this listing is recorded, and the listing stays
+            # noted as one that stopped, so neither this run nor a Resume
+            # calls it whole.
+            print(f"\n!! The Renault Bank direkt list could not be read whole, since {stop}.")
+            print("   Nothing from this listing is recorded, and this run stops rather than")
+            print("   call the list read. Look at the browser window, then run it again.")
+            self.write_failure("read the documents list", "the list stopped partway")
+            raise SystemExit(1)
+        log.info("Renault Bank direkt: %d document(s) in the Postfach", len(raw))
+        # A document with no date the app can read has no key, so it is
+        # left out of the list and said here rather than vanish.
+        left_out = site.undated()
+        if left_out:
+            self.stats["undated"] = left_out
+            print(f"\n!! {left_out} document(s) in the Renault Bank direkt list carry no date this app can read,")
+            print("   so they are left out and nothing is saved for them. Open them in the")
+            print("   Postfach yourself. Everything else is listed.")
         n_new = 0
-        for d in raw:
-            n_new += self._record_document(d)
+        # Which of several documents sharing a kind, a title, a date and an
+        # account this is. The number used to follow the order the provider answered
+        # in, so if that order ever changed, the document already downloaded
+        # took the other one's number and was skipped as done while the
+        # other was fetched again beside it. A number now stays with the id
+        # it was given to (keys.told_apart).
+        for d, (occ, sure) in zip(raw, self._numbered(raw)):
+            n_new += self._record_statement_doc(d, occ, sure)
         self.discovery.save()
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
         listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
+        counts = getattr(site, "_summary", {})
+        if counts.get("text_only_messages"):
+            print(f"{counts['text_only_messages']} text-only message(s) have no PDF attachment; "
+                  "their text is not exported.")
+
+        if not quiet:
+            docs = [Document.from_dict(v) for v in self.discovery.data.values()]
+            print(f"\nDiscovery complete. Documents known: {len(docs)}")
+            by_cat = {}
+            for d in docs:
+                by_cat.setdefault(d.category, []).append(d)
+            for cat, group in sorted(by_cat.items()):
+                years = {}
+                for d in group:
+                    y = (d.date or "?")[:4]
+                    years[y] = years.get(y, 0) + 1
+                spread = ", ".join(f"{y}: {c}" for y, c in sorted(years.items(), reverse=True))
+                print(f"  {cat}: {len(group)}  ({spread})")
+            dates = sorted(d.date for d in docs if d.date)
+            if dates:
+                print(f"  Date range: {dates[0]} .. {dates[-1]}")
+            if self.stats["skipped_out_of_scope"]:
+                print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
@@ -411,7 +529,7 @@ class App:
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
                      State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
             return True
-        # a review copy counts only if its PDF is still present and valid,
+        # a review copy counts only if its PDF is still present and valid;
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
@@ -422,12 +540,20 @@ class App:
     # -- processing --------------------------------------------------------
 
     def _on_its_site(self):
-        """The tab the next document is taken in, on Renault Bank direkt's own
-        site and never a tab of another site. How the site keeps a session is
-        not known yet, so no page is opened by its address, and with no tab
-        of the person's on the site the run stops and says so
+        """The tab the next document is taken in, on Renault Bank direkt's own site and
+        never a tab of another site. Renault Bank direkt keeps its session in a cookie
+        a new tab shares, so with no tab of the person's on the site the
+        documents page is opened in a tab of this run's own
         (tabs.on_its_site)."""
-        return tabs.on_its_site(self, site.is_safe_url, "Renault Bank direkt", None)
+        return tabs.on_its_site(self, site.is_safe_url, "Renault Bank direkt",
+                                self._open_documents)
+
+    def _open_documents(self, page):
+        """Renault Bank direkt's documents page, opened by its address the way discovery
+        opens it."""
+        if not site.ensure_statements(page):
+            self.check_session(page)
+            site.ensure_statements(page)
 
     def process(self, docs: List[Document], dry_run: bool = False):
         for i, doc in enumerate(docs, 1):
@@ -454,9 +580,6 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
-            except site.NotBuilt as e:
-                # Every document would say the same, so the run stops here.
-                self.not_built(e)
             except site.SessionExpired:
                 # Already explained by download_one. Stop rather than grind
                 # through the rest producing empty "manual review" entries.
@@ -465,30 +588,81 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.ListStopped as stop:
+                # The list, read again for this document, could not be read
+                # whole. Every document after it reads the same list, so the
+                # run stops here, with nothing recorded against this one.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
 
+    def session_ended(self) -> None:
+        """Stop the run because Renault Bank direkt answered the list as signed out.
+        Progress is saved and the run ends as one that stopped (tabs.stop)."""
+        self.stats["session_expired"] = 1
+        tabs.stop(self, [
+            "Renault Bank direkt answered the list as signed out, so this run stops here.",
+            "Everything saved so far is kept. Sign in again in the open browser",
+            "window, then run this again.",
+        ])
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the list could not be read again while a
+        document was sought. Nothing is recorded against the document, and
+        the run leaves as one whose list did not end whole, which only a run
+        that lists carries on from (listing.read_again_stopped)."""
+        log.info("the list could not be read again: %s", stop)
+        self.write_failure("read the documents list again", "the list stopped partway")
+        listing.read_again_stopped(self, (
+            "The Renault Bank direkt list could not be read again whole (%s), so this run stops here." % stop))
+
     def download_one(self, page, doc: Document, filename: str):
-        """Download one document PDF straight to its final path. This first
-        build has no way to, and site.download_document says so."""
+        """Download one document PDF straight to its final path.
+
+        The document's own row is found again in a recent listing, by its
+        title, date and account and the number Discover gave it, and its
+        PDF is asked for by that row's id. Nothing is pressed.
+        """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
+        # Two documents on one day used to differ by " (2)", which says
+        # nothing about which is which and moves between them when a file
+        # is deleted (#49, and the same complaint on #43).
         out_path = unique_path(folder, filename, self.config["max_path_length"],
                                distinguisher=(doc.document_id or "")[-6:])
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
+
+        # Each PDF comes back from the Postfach download call, made
+        # from inside the page. Nothing is clicked. The document is looked
+        # up again by kind, account and date first.
+        if not site.ensure_statements(page):
+            self.check_session(page)
+            site.ensure_statements(page)
+        # How many documents alike the app knows, this one among them, so a
+        # row found by its number alone is taken only when the listing shows
+        # as many (site.resolve_item).
+        alike = _twins(doc.to_dict(), self.discovery.data, fields=ALIKE)
         try:
             saved = site.download_document(page, doc.title, doc.date, out_path,
+                                           item_hint=doc.item_id,
+                                           client_hint=doc.client_id,
                                            occurrence=doc.occurrence,
-                                           account=doc.account)
+                                           account=doc.account,
+                                           category=doc.category,
+                                           number_rows=self._numbered, twins=alike,
+                                           config=self.config)
         except site.SessionExpired:
-            print("\n  !! Renault Bank direkt answered with a sign-in page instead of a document.")
+            # Stop the whole run. Continuing would file every remaining
+            # document as "manual review" and finish looking successful while
+            # having saved nothing.
+            print("\n  !! Renault Bank direkt answered with a sign-in error instead of a document.")
             print("     Your session has expired. Sign in again in the open")
-            print("     browser, then run Resume.")
+            print("     browser, re-list your statements, then run Resume.")
             self.stats["session_expired"] = 1
             raise
         if not saved:
@@ -499,6 +673,25 @@ class App:
             self.stats["failed"] += 1
             print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
+        # The id its bytes came from, which may not be the one discovery
+        # kept. A later list knows the saved document by it.
+        doc.item_id = saved
+
+        # Some tax forms arrive as a ZIP holding the PDF. One PDF and nothing
+        # else is the document. Anything more is kept whole for a person to
+        # open, since which file is this document cannot be told
+        # (receipt_pdf.open_zip).
+        if receipt_pdf.is_zip(out_path):
+            opened = receipt_pdf.open_zip(out_path, self.paths.manual_review)
+            if opened.pdf is None:
+                self._record(doc, State.NEEDS_MANUAL_REVIEW, notes=opened.reason)
+                self._write_row(doc, "Archive kept for review", "Needs Manual Review")
+                self.write_failure('open the downloaded archive', opened.failure)
+                self.stats["manual_review"] += 1
+                print(f"  !! {opened.reason}. Marked for manual review.")
+                return
+            out_path = opened.pdf
+            log.info("Opened the ZIP for %s", doc.title)
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         self._record(doc, State.PDF_SAVED)
@@ -564,6 +757,9 @@ class App:
             "PDF Full Path": doc.pdf_path,
             "PDF File Size": doc.pdf_size,
             "PDF Page Count": doc.pdf_pages,
+            # No URL exists for a Renault Bank direkt document: it is fetched by a
+            # (type, id) pair. The id is account-specific, so the CSV
+            # records only which KIND of document this was.
             "Source URL": doc.href,
             "Classification Confidence": doc.confidence,
             "Downloaded At": now_iso() if doc.pdf_filename else "",
@@ -578,11 +774,7 @@ class App:
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.\n")
         self.cmd_discover()
-        # --max-docs takes fewer, so a first try can be one document.
-        limit = self.config.get("pilot_count", 5)
-        if self.args.max_docs:
-            limit = min(limit, self.args.max_docs)
-        docs = self._select(limit=limit)
+        docs = self._select(limit=self.config.get("pilot_count", 5))
         if not docs:
             print("\nNo documents in scope to pilot. Run --diagnose.")
             return
@@ -621,8 +813,13 @@ class App:
 
     def cmd_run(self, mode_name: str):
         self.stats["mode"] = mode_name
-        # Not built, so there is nothing to ask YES for. Discover says so
-        # and stops before anything is asked of the browser.
+        if mode_name == "all" and not self.args.yes:
+            scope = ", ".join(self.config.get("document_types", []))
+            print(f"This downloads ALL available Renault Bank direkt documents ({scope}).")
+            print("Type YES to continue:")
+            if ask("> ").strip().upper() != "YES":
+                print("Aborted. (Run the pilot first if you haven't: --pilot)")
+                return
         self.cmd_discover()
         docs = self._select()
         print(f"\nDownloading {len(docs)} document(s)...")
@@ -630,16 +827,21 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
-        # Resume reads no list of its own. This first build never lists, so
-        # with nothing listed it says so and stops as a run that stopped,
-        # and Pilot then says it is not built yet (paperpull_core.listing).
+        # Resume reads no list of its own. With nothing listed, or after a
+        # run that stopped before it had the whole list, it says so and stops
+        # as a run that stopped, rather than call the run finished
+        # (paperpull_core.listing).
         docs = [d for d in self._select() if not self._already_done(d)]
         listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run))
 
+
     def cmd_rename(self):
         """Rename what is already downloaded, without downloading it again.
-        Nothing is asked of the provider here (#43, #49). A preview unless
-        --apply is given."""
+
+        A naming scheme improves and the files on disk keep the old one.
+        Nothing about them needs fetching, only their names are wrong, so
+        nothing is asked of the provider here (#43, #49). A preview
+        unless --apply is given."""
         self.stats["mode"] = "rename"
         renaming.run_for(self, apply_changes=bool(getattr(self.args, "apply", False)))
 
@@ -668,7 +870,9 @@ class App:
         """Which of the provider's own calls happened, and what came back.
 
         Made on first use like the journal, and started at once, because
-        it only sees what arrives after it starts listening."""
+        it only sees what arrives after it starts listening. An app that
+        drives an API rather than a page has no selectors for the census
+        to count, and this is what it has instead."""
         if self._requests is None:
             self._requests = Requests(getattr(self, "_work_page", None),
                                       getattr(site, "is_safe_url", None))
@@ -681,25 +885,31 @@ class App:
 
         Lazy, because a run that never opens a page has nothing to say
         and an app that fails before the browser is up must not fail
-        differently because of this."""
+        differently because of this. It watches every selector the app
+        declares, since choosing between them is a decision nobody can
+        make before the first failure."""
         if self._journal is None:
             self._journal = Journal(getattr(self, "_work_page", None),
                                     getattr(site, "FALLBACK", None))
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None, extra: dict = None) -> None:
+                      postmortem: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
-        Written without anybody having to know to ask for it. One per run,
-        taken while the page is still sitting on the thing that broke.
-        `extra` holds only our own words, counts and yes or no."""
+        Written without anybody having to know to ask for it, because a
+        tester who has to be told to run a second command is a tester who
+        sends one file and waits a day for the request for the other.
+
+        One per run. A run where thirty documents fail for one reason
+        does not need thirty files, and the first is taken while the page
+        is still sitting on the thing that broke."""
         if self.stats.get("failure_files"):
             return
-        extra = dict(extra or {})
-        if postmortem:
-            extra["postmortem"] = postmortem
-        extra = extra or None
+        extra = {"postmortem": postmortem} if postmortem else None
+        # A checkpoint at the moment it gave up. It is also what makes the
+        # journal when nothing had written to it yet, and every tester file
+        # sent in on 2026-09-25 came back without one for that reason.
         try:
             if getattr(self, "_work_page", None) is not None:
                 self.journal.checkpoint("when the run gave up")
@@ -727,21 +937,28 @@ class App:
             print("  What it noticed:")
             for line in said[:6]:
                 print("    - %s" % line)
-        print("  Read it through, then attach it to a new issue on GitHub.")
-        print("  It is the one thing that saves a round of guessing.")
+        print("  Read it through, then attach it to this provider's issue on")
+        print("  GitHub. It is the one thing that saves a round of guessing.")
 
-    def write_survey(self, stopped=None) -> None:
-        """The survey Diagnose is safe to send, on the same list of what may
-        leave that the failure file uses, saying why Diagnose stopped when a
-        press stopped it."""
+    def write_survey(self) -> None:
+        """The survey Diagnose is safe to send.
+
+        Diagnose writes a detailed file for repairing this provider, and
+        that file holds the page's own title, the URL with its query
+        string, the text of the rows it found and the labels of the
+        controls. The panel said to attach it to an issue, which is not
+        something that file is for.
+
+        So this is written beside it, on the same list of what may leave
+        that the failure file uses, and it is the one to send.
+        """
         failure.write_survey(
             self.paths.diagnostics,
             page=getattr(self, "_work_page", None),
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
             requests=self._requests,
-            provider='Renault Bank direkt',
-            stopped=stopped or getattr(self, "_diagnose_stopped", None))
+            provider='Renault Bank direkt')
 
     def cmd_diagnose(self):
         self.stats["mode"] = "diagnose"
@@ -749,25 +966,37 @@ class App:
         page = self.page()
         info = {"timestamp": now_iso()}
         try:
-            info["on_site"] = site.is_safe_url(page.url or "")
             info["signed_out"] = site.looks_signed_out(page)
-            # The account holder's name is never written, even where its
-            # parts are ordinary words on the fixed list.
-            site.set_private_words([self.config.get("owner", "")])
             info["challenge"] = site.detect_security_challenge(page)
             info["mapped"] = not getattr(site, "NOT_MAPPED", "")
-            # The page the person left open, read and nothing else. Nothing
-            # is followed or pressed (renaultbank_site.survey).
+            # The survey stays, for the day the site changes. Read only,
+            # banking.renault-bank-direkt.de pages only, the only links it follows are the few whose
+            # text is exactly a document word, account numbers
+            # are masked and JSON bodies are recorded as shape only.
             info["survey"] = site.survey(page)
             try:
-                info["collected"] = len(site.collect_documents(page))
+                docs = site.collect_documents(page)
             except Exception as e:
-                info["collected"] = type(e).__name__
-            # No screenshot. Its pages show balances, and a PNG of one
-            # would sit in Diagnostics where it is easy to attach to a bug
-            # report by accident.
+                # This read `except site.NotMapped`, a name no module in
+                # this repository defines. An except clause is evaluated
+                # only when something is raised, so it cost nothing until
+                # collection failed, and then it replaced the real error
+                # with an AttributeError about the handler itself.
+                info["collect_error"] = "%s: %s" % (type(e).__name__, e)
+                docs = []
+            info["collected"] = len(docs)
+            info["samples"] = []
+            for d in docs[:12]:
+                cat, summ, _ = doc_types.classify_document(d.get("title", ""), self.rules)
+                info["samples"].append({
+                    "title": (d.get("title") or "")[:90],
+                    "date": d.get("date", ""),
+                    "category": cat, "summary": summ})
+            # No screenshot. A bank page shows balances, and a
+            # PNG of it would sit in Diagnostics where it is easy to attach to
+            # a bug report by accident.
         except Exception as e:
-            info["error"] = type(e).__name__
+            info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"
         write_shaped(out, info, words)
         print(f"Wrote {out}")
@@ -776,28 +1005,25 @@ class App:
         print("  shape, a for a letter and 9 for a digit, so it can be attached")
         print("  too. Read it through first.")
         sv = info.get("survey") or {}
-        pages = sv.get("pages", [])
-        print(f"Pages surveyed: {len(pages)}   "
-              f"on banking.renault-bank-direkt.de: {sum(1 for p in pages if p.get('on_site'))}")
-        print(f"Documents listed: {shape_tree(info.get('collected', '?'), words)}")
-        # Fixed words, as the census of what Diagnose prints reads any
-        # answer of a core function as a page's.
-        print("This first build lists nothing yet. A recording of one trip to a")
-        print("document is what it needs, Record steps in the panel (More, then")
-        print("Get help), or the record command in a terminal.")
+        print(f"Pages surveyed: {len(sv.get('pages', []))}   "
+              f"JSON/PDF responses seen: {len(sv.get('responses', []))}")
+        print(f"Rows collected: {shape_tree(info.get('collected', '?'), words)}")
+        for s in info.get("samples", [])[:5]:
+            print(shape_label(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}",
+                              words, collapse=False))
+
+    # -- summary -----------------------------------------------------------
 
     def cmd_record(self):
         """Record the path a person takes to a document, so this app can be
-        written to take the same one. Downloads nothing, and captures no
-        keystroke. The whole thing is in the core."""
+        written or repaired to take the same one. Downloads nothing, and
+        captures no keystroke. The whole thing is in the core."""
         self.stats["mode"] = "record"
         from paperpull_core.recorder import record_session
         if record_session(self.page(), site, self.paths.diagnostics,
                           provider='Renault Bank direkt',
                           owner=self.config.get("owner", "")) is None:
             raise SystemExit(NOTHING_RECORDED)
-
-    # -- summary -----------------------------------------------------------
 
     def write_run_summary(self):
         s = self.stats
@@ -844,18 +1070,17 @@ class App:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
-        description="Local supervised Renault Bank direkt document downloader "
-                    "(read-only, not built yet)")
+        description="Local supervised Renault Bank direkt document downloader (read-only)")
     for name, help_text in [
-            ("login", "check the connection to your browser"),
-            ("discover", "not built yet, says so and stops"),
-            ("pilot", "not built yet, says so and stops"),
-            ("all", "not built yet, says so and stops"),
-            ("resume", "nothing is listed yet, says so and stops"),
+            ("login", "verify connection to your signed-in browser"),
+            ("discover", "list available documents; writes discovery.json"),
+            ("pilot", "download the 5 newest in-scope documents, then stop"),
+            ("all", "download everything in scope (asks for confirmation)"),
+            ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
             ("rename", "rename downloaded files to this app's current naming"),
-            ("diagnose", "survey the open page (no downloads, nothing pressed)"),
-            ("record", "record your own path to a document, so this app can be built (downloads nothing)"),
+            ("diagnose", "dump the Documents page structure (no downloads)"),
+            ("record", "record your own path to a document, so this app can be repaired (downloads nothing)"),
             ]:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)
     ap.add_argument("--apply", action="store_true",
@@ -866,7 +1091,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--start-date")
     ap.add_argument("--end-date")
     ap.add_argument("--max-docs", type=int)
-    ap.add_argument("--type", help="a kind, such as Statement or 'Tax Document'")
+    ap.add_argument("--type", help="Statement or 'Tax Document'")
     ap.add_argument("--yes", action="store_true", help="skip the --all confirmation")
     ap.add_argument("--redownload", action="store_true",
                     help="re-download everything in scope, ignoring the "
@@ -926,12 +1151,17 @@ def main(argv=None):
         if app.stats["mode"] in ("discover", "rename"):
             # Discover and Rename download nothing, so the run summary
             # and new-this-run.txt stay as the last download run wrote
-            # them, and only the panel is told how it ended (#103).
+            # them, and only the panel is told how it ended. The panel
+            # moves what a run saved into a documents folder with a
+            # Rename, and its empty list made that run read as one that
+            # saved nothing (#103).
             report_run_result(app.stats)
         elif app.stats["mode"] not in ("", "diagnose", "record"):
             app.write_run_summary()
         app.close()
-    # A run that saved nothing must not look like a clean run.
+    # A run that saved nothing must not look like a clean run. Previously any
+    # outcome returned 0, so an expired session or a failed discovery ended
+    # with a success code and only a log line to show for it.
     if app.stats.get("session_expired"):
         return 2
     if app.stats.get("failed") or app.stats.get("manual_review"):

@@ -68,7 +68,7 @@
     "paypal": {"gets": "Monthly statements, about three years online", "group": "banks", "note": "Business accounts not tested yet"},
     "pge": {"gets": "Monthly bills", "group": "bills"},
     "portlandgeneral": {"gets": "Monthly bills, about three years online", "group": "bills", "note": "Reads one account"},
-    "renaultbank": {"gets": "Account statements, tax documents, confirmations and messages", "group": "banks", "tested": false, "shell": true, "note": "Recording setup only; downloads await an account recording (#172)"},
+    "renaultbank": {"gets": "Account statements, tax documents, confirmations and messages", "group": "banks", "tested": false, "note": "Postfach and archive PDFs plus message attachments; awaiting a live Pilot (#172)"},
     "redcard": {"gets": "Target RedCard and Circle Card statements", "group": "banks"},
     "robinhood": {"gets": "Statements for individual, retirement and crypto accounts and tax forms", "group": "investing"},
     "sba": {"gets": "Loan statements and 1098", "group": "loans", "tested": false},

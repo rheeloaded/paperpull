@@ -1475,11 +1475,7 @@ def record_session(page, site, diagnostics_dir, provider: str = "",
     from pathlib import Path
 
     set_private_words([owner] if owner else [])
-    # A provider may name a few public, non-personal route terms whose
-    # spelling helps maintainers map a recording. Values, identifiers and
-    # the rest of each address still pass through the ordinary shaper.
-    words = words_for(provider, site) | frozenset(
-        getattr(site, "RECORD_WORDS", ()) or ())
+    words = words_for(provider, site)
     watching = page_to_watch(page, site.is_safe_url)
     if watching is not page:
         page = watching

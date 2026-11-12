@@ -1,36 +1,19 @@
-"""Renault Bank direkt's site, as far as this first shell knows it.
+"""Renault Bank direkt's Atruvia Postfach API.
 
-When the site changes, repair this file only.
-
-STATUS, NOT BUILT (#172). This is the shell a tester signs in with and
-Records in. It opens Renault Bank direkt's sign-in form in a browser profile of its
-own, the person signs in there themselves, and Record and Diagnose watch the
-tab they leave open. Which page lists documents, how a current account, a
-depot and a card are told apart, and how a document's PDF arrives are not
-known, and nothing here guesses at them. Discover and every download raise
-NotBuilt, which says to Record one trip to a document, since a recording is
-what the real app is written from (docs/testing-a-provider.md).
-
-The public portal is an Atruvia application rooted at
-/services_cloud/portal/. Authentication uses /services_auth/auth-frontend/
-and /services_cloud/portal/portal-oauth/login. The public shell names a
-postfach/menu component, but exposes neither its signed-in list nor its
-PDF requests. Those must be mapped from the account holder's recording.
-No ING selectors or unobserved download endpoints are assumed.
-
-SAFETY. A bank and a broker, with transfers, standing orders, direct debits,
-buying and selling, savings plans, cards and credit.
-  Strictly READ-ONLY, and in this shell nothing is pressed at all. No
-  function here clicks, types, selects, submits a form or confirms a
-  dialog. The one navigation is opening the sign-in form, in a tab this run
-  opened itself, when no tab of the person's is on Renault Bank direkt's site. The
-  guard below is what Record marks each control a person pressed against,
-  and what the real build will hold every press to. Every host but
-  banking.renault-bank-direkt.de is refused.
+Read-only lists cover every bank customer, Posteingang, Archiv and all incoming
+and sent message attachments (including older correspondence in threads).
+No control is pressed. The bank's separate status/archive/delete endpoints
+are never called. A PDF download uses the observed documentUpload/ticket
+sequence; this stages an existing document for download, it uploads no file.
+Business JWTs and tickets are used only inside the signed-in page.
 """
 from __future__ import annotations
 
+import base64
 import logging
+import time
+from datetime import datetime
+from pathlib import Path
 import re
 from typing import List, Optional
 
@@ -54,59 +37,16 @@ URLS = {
     "documents": BASE + "/services_cloud/portal/webcomp/epostfach/postfach",
 }
 
-# Public, non-personal route vocabulary. The recorder keeps these words
-# readable while shaping every other unknown URL segment, identifier and
-# query value. This makes the account holder's request flow useful for
-# mapping without retaining account data.
-RECORD_WORDS = frozenset({
-    "oauth", "token", "assets", "de-DE", "serviceproxy", "rest",
-    "checkMessageSupport", "deep-links", "profile", "active",
-    "messageCount", "messages", "messageAttachmentDownload",
-    "documentUpload", "datasharing", "download", "LIST_ITEM_HEADER",
-    "ATTACHMENT_ICON", "banking_start", "epostfach", "postfach",
-    "account", "accounts", "statement",
-    "statements", "document", "documents", "archive", "folder", "folders",
-    "tax", "securities", "card", "cards", "contract", "information",
-    "content", "file", "files", "attachment", "attachments", "history",
-    "transfer", "balance", "product", "products", "customer", "user",
-})
-
-# Diagnose writes this down, so a survey file says it came from a shell.
-NOT_MAPPED = ("Renault Bank direkt is not built yet. This first build only opens "
-              "the site for a sign-in, and Record and Diagnose.")
-
-
-def not_built_words() -> str:
-    """What Discover, Pilot, Run All and every download say instead of
-    guessing, in the words of where the run is. Plain words, no address,
-    nothing from a page."""
-    return (
-        "Renault Bank direkt is not built yet, so this run lists and downloads "
-        "nothing. This first build opens the site for you to sign in, and "
-        f"nothing more. To help build it, sign in, then {after_sign_in(record=True)}, "
-        "and click your way to one document the way you always do, then stop "
-        "the recording. The recording.json it writes in this provider's "
-        "Diagnostics folder is what the real app is built from. Read it "
-        "through, then attach it to issue #172 on GitHub. Every run but the "
-        "sign-in, Record and the support report stops until it is built.")
-
-
-# The words as a terminal reads them, for anything that wants them without
-# asking where the run is.
-NOT_BUILT = not_built_words()
-
-
-class NotBuilt(RuntimeError):
-    """Asked for a list or a document this first build cannot read."""
-
-    def __init__(self, what: str = ""):
-        super().__init__(not_built_words())
-        self.what = what
-
-
 class SessionExpired(RuntimeError):
-    """Renault Bank direkt answered with a sign-in page instead of a document.
-    Nothing in this shell raises it yet. The engine stops a run on it."""
+    """The document API needs the user to sign in again."""
+
+
+class ListStopped(RuntimeError):
+    """A list could not be read whole."""
+
+
+class NotToldApart(RuntimeError):
+    """A fresh list cannot uniquely identify a document."""
 
 
 def is_safe_url(url: str) -> bool:
@@ -260,41 +200,6 @@ def detect_security_challenge(page) -> Optional[str]:
     return None
 
 
-def open_sign_in(page) -> bool:
-    """Renault Bank direkt's sign-in form, opened in a tab this run opened itself.
-    Never in a tab of the person's, which is left where they put it. True
-    when the tab ended on the site."""
-    if not is_safe_url(URLS["login"]):
-        return False
-    try:
-        page.goto(URLS["login"], wait_until="domcontentloaded", timeout=30000)
-    except Exception as e:
-        log.info("sign-in page failed: %s", e)
-    try:
-        return is_safe_url(page.url or "")
-    except Exception:
-        return False
-
-
-# -- what this first build cannot do yet ---------------------------------------
-
-def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[dict]:
-    """Every document the accounts list. Not built, so this refuses rather
-    than read a page it does not know."""
-    raise NotBuilt("the list of documents")
-
-
-def download_document(page, *args, **kwargs) -> bool:
-    """Save one document. Not built, so this refuses rather than press or
-    fetch anything."""
-    raise NotBuilt("a document's PDF")
-
-
-# ---------------------------------------------------------------------------
-# Diagnose survey. Read-only and on the page the person left open. Nothing
-# is followed, pressed or downloaded, no screenshot is taken, and every word
-# goes through the redactor and then the word list that writes the file.
-# ---------------------------------------------------------------------------
 def _page_summary(page) -> dict:
     out = {"url": "", "title": ""}
     try:
@@ -350,10 +255,166 @@ def _page_summary(page) -> dict:
 def survey(page, dwell_ms: int = 2000) -> dict:
     """What the page the person left open looks like, without following,
     pressing or downloading anything."""
-    report = {"pages": [], "responses": [], "mapped": False}
+    report = {"pages": [], "responses": [], "mapped": True}
     try:
         page.wait_for_timeout(dwell_ms)
     except Exception:
         pass
     report["pages"].append(_page_summary(page))
+    report["listing_counts"] = dict(_summary)
     return report
+
+
+_API_JS = Path(__file__).with_name("renaultbank_api.js").read_text(encoding="utf-8")
+_cache = None
+_summary = {}
+
+
+def _execute(page, operation, **values):
+    if not is_safe_url(page.url or ""):
+        raise SessionExpired("Open the signed-in Renault Bank direkt tab.")
+    try:
+        result = page.evaluate(_API_JS, {"op": operation, **values})
+    except Exception:
+        raise ListStopped("the in-page document request did not finish") from None
+    if not isinstance(result, dict):
+        raise ListStopped("the document API answered in an unexpected shape")
+    if result.get("expired"):
+        raise SessionExpired("Sign in to Renault Bank direkt again.")
+    if not result.get("ok"):
+        raise ListStopped(result.get("error") or "the document API did not answer")
+    return result
+
+
+def goto_documents(page):
+    """Open the known Postfach route; never navigate a signed-out bank tab."""
+    if looks_signed_out(page) and is_safe_url(page.url or ""):
+        return False
+    try:
+        if (page.url or "").split("?", 1)[0].rstrip("/") != URLS["documents"]:
+            page.goto(URLS["documents"], wait_until="domcontentloaded", timeout=30000)
+        return not looks_signed_out(page)
+    except Exception:
+        return False
+
+
+def ensure_statements(page):
+    return goto_documents(page)
+
+
+def answers_its_list(page):
+    listed_rows(page, fresh=True)
+    return True
+
+
+def classify(kind, title=""):
+    text = str(kind or "") + " " + str(title or "")
+    for category, pattern in (
+        ("Tax Document", r"steuer|tax|freistellung|verlustbescheinigung|ertr[aä]gnis"),
+        ("Credit Card Statement", r"kreditkarte|credit.?card|\bvisa\b"),
+        ("Securities Document", r"depot|wertpapier|dividend|fonds|securit"),
+        ("Statement", r"kontoausz|statement|tagesgeld|festgeld|zinsabrechnung|rechnungsabschluss"),
+        ("Contract Information", r"vertrag|bedingung|vereinbarung|kontoer[öo]ffnung|contract"),
+        ("Message", r"mitteilung|nachricht|information|message"),
+    ):
+        if re.search(pattern, text, re.I):
+            return category
+    return "Other Document"
+
+
+def filed_category(row):
+    return row.get("category") or classify(row.get("kind"), row.get("title"))
+
+
+def parse_date(value):
+    value = str(value or "").strip()
+    for fmt, length in (("%Y-%m-%d", 10), ("%d.%m.%Y", 10), ("%Y%m%d", 8)):
+        try:
+            return datetime.strptime(value[:length], fmt).date().isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def _normalise(row):
+    date = parse_date(row.get("date"))
+    if not date or not row.get("title") or not row.get("item_id"):
+        raise ListStopped("a listed document has no readable date, title or identity")
+    account = re.sub(r"\W", "", str(row.get("account") or ""))[-4:]
+    return {"title": re.sub(r"\s+", " ", row["title"]).strip(), "date": date,
+            "account": "Konto " + account if account else "",
+            "category": filed_category(row), "item_id": row["item_id"],
+            "client_id": "", "href": URLS["documents"]}
+
+
+def listed_rows(page, config=None, fresh=False):
+    global _cache, _summary
+    try:
+        present = page.evaluate("Boolean(window.__paperpullRenaultDocumentsV1?.items)")
+    except Exception:
+        present = False
+    if (fresh or not _cache or _cache[0] is not page or not present
+            or time.monotonic() - _cache[1] > 120):
+        result = _execute(page, "collect")
+        raw = result.get("rows")
+        if not isinstance(raw, list):
+            raise ListStopped("the document list could not be read")
+        rows = [_normalise(row) for row in raw]
+        if len({r["item_id"] for r in rows}) != len(rows):
+            raise ListStopped("the document list repeats an identity")
+        _summary = result.get("summary") or {}
+        _cache = (page, time.monotonic(), rows)
+    wanted = set((config or {}).get("document_types") or storage_categories())
+    return [dict(row) for row in _cache[2] if row["category"] in wanted]
+
+
+def storage_categories():
+    return ["Statement", "Credit Card Statement", "Securities Document", "Tax Document",
+            "Contract Information", "Message", "Other Document"]
+
+
+def collect_documents(page, keep=None, config=None):
+    rows = listed_rows(page, config, fresh=True)
+    return sorted((r for r in rows if keep is None or keep(r["date"][:4])),
+                  key=lambda row: row["date"], reverse=True)
+
+
+def undated():
+    # An unreadable date stops this provider's whole listing.
+    return 0
+
+
+def resolve_item(page, title, date, account, occurrence=0, item_id="", *,
+                 category, number_rows, twins=1, config=None):
+    """DKB's identity matching, without falling back to an unlisted id."""
+    rows = listed_rows(page, config)
+    numbers = number_rows(rows)
+    alike = [i for i, row in enumerate(rows) if
+             (row["title"], row["date"], row["account"], filed_category(row)) ==
+             (title, date, account, category)]
+    mine = [i for i in alike if numbers[i][0] == occurrence]
+    if len(mine) != 1:
+        raise NotToldApart("The list does not uniquely identify this document.")
+    index = mine[0]
+    row = rows[index]
+    if not numbers[index][1] or (row["item_id"] != item_id and len(alike) != twins):
+        raise NotToldApart("Documents alike cannot be safely matched.")
+    return row
+
+
+def download_document(page, title, date, out_path, occurrence=0, item_hint="",
+                      client_hint="", account="", *, category, number_rows,
+                      twins=1, config=None):
+    row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
+                       category=category, number_rows=number_rows, twins=twins, config=config)
+    result = _execute(page, "download", id=row["item_id"])
+    try:
+        data = base64.b64decode(result["data"], validate=True)
+    except (ValueError, KeyError):
+        return ""
+    if not data.startswith(b"%PDF-"):
+        return ""
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(data)
+    return row["item_id"]
