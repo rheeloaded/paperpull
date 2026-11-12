@@ -55,9 +55,11 @@ WHERE IT REFUSES TO RUN
 
 Before the account holder is signed in. start() checks the page is on
 the provider's own host, that the app does not think it is signed out,
-and that there is no password field on it. A recorder that can be
+and that no password field is shown on it. A recorder that can be
 switched on at a sign-in screen is a keylogger with good intentions, so
-this one cannot be.
+this one cannot be. A sign-in window a site keeps in every page and
+draws only when asked is not a sign-in screen. Consorsbank keeps one,
+and counting it refused every page of the bank (#178).
 
 HOW A CONTROL IS NAMED
 
@@ -658,7 +660,11 @@ class Recorder:
             except Exception:
                 pass
         try:
-            if self.page.locator("input[type='password']").count() > 0:
+            # A field a person can see and type into. Consorsbank keeps its
+            # sign-in window in every page, signed in or not, and draws it
+            # only when asked, so counting every field in the page refused
+            # each of the bank's own pages (#178).
+            if self.page.locator("input[type='password']:visible").count() > 0:
                 return ("there is a password field on this page, so recording "
                         "will not start here. Finish signing in first.")
         except Exception:
@@ -1005,7 +1011,7 @@ class Recorder:
         gathers on a vendor's page is the same as anywhere else: the
         controls pressed, named the way a person reads them. Recording
         still refuses to START outside the provider's own site, and still
-        refuses a page with a password field on it."""
+        refuses a page that shows a password field."""
         if page is None or page in self._watched:
             return
         self._watched.append(page)

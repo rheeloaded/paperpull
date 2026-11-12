@@ -43,9 +43,12 @@ class FakeFrame:
 class FakePage:
     """Enough of a Playwright page to drive the recorder."""
 
-    def __init__(self, url="https://bank.example/accounts", passwords=0):
+    def __init__(self, url="https://bank.example/accounts", passwords=0, hidden=0):
+        """`passwords` are the password fields the page shows, `hidden`
+        those it holds and never draws, as a sign-in window kept for later."""
         self.url = url
         self._passwords = passwords
+        self._hidden = hidden
         self.handlers = {}
         self.bindings = {}
         self.evaluated = []
@@ -55,7 +58,10 @@ class FakePage:
         self.removed = []
 
     def locator(self, sel):
-        return FakeLocator(self._passwords if "password" in sel else 0)
+        if "password" not in sel:
+            return FakeLocator(0)
+        # Playwright's :visible keeps the fields the page draws.
+        return FakeLocator(self._passwords + (0 if ":visible" in sel else self._hidden))
 
     def expose_binding(self, name, fn):
         self.bindings[name] = fn
@@ -123,6 +129,20 @@ def test_a_password_field_on_the_page_refuses_the_recording():
     with pytest.raises(RuntimeError, match="password"):
         r.start()
     assert page.bindings == {}, "nothing may be installed on a sign-in page"
+
+
+def test_a_sign_in_window_the_page_never_shows_does_not_refuse_the_recording():
+    """Consorsbank keeps its sign-in window in every page, the bank's own
+    included, and draws it only when asked. Counting that field refused
+    every page a tester was signed in on (#178). The backstop counts the
+    fields a person can see, and one shown beside it still refuses."""
+    page = FakePage(hidden=1)
+    r = Recorder(page, is_safe_url=safe)
+    assert r.refusal() is None
+    r.start()
+    assert "__ppRecorderPost" in page.bindings
+    shown = FakePage(passwords=1, hidden=1)
+    assert "password" in Recorder(shown, is_safe_url=safe).refusal()
 
 
 def test_a_page_off_the_providers_site_refuses_the_recording():

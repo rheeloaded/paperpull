@@ -215,7 +215,12 @@ def looks_signed_out(page) -> bool:
     if not url or any(m in url for m in LOGIN_URL_MARKERS):
         return True
     try:
-        if page.locator("input[type='password']").count() > 0:
+        # A field the page shows. Consorsbank keeps its sign-in window in
+        # every page, the bank's own included, and draws it only when asked,
+        # so a field it never shows read each signed-in page as signed out
+        # and Record refused them all (#178). The sign-in address is the
+        # marker above, so the form drawn late over it is still refused.
+        if page.locator("input[type='password']:visible").count() > 0:
             return True
     except Exception:
         return True
@@ -326,6 +331,8 @@ def _page_summary(page) -> dict:
     out["controls"] = controls
     try:
         out["password_fields"] = page.locator("input[type='password']").count()
+        # Those the page shows, which is what looks_signed_out counts (#178).
+        out["visible_password_fields"] = page.locator("input[type='password']:visible").count()
     except Exception:
         pass
     return out
