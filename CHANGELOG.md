@@ -44,10 +44,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   then checked on their account that ING keeps a search or filter only
   while the address carries the session id it adds, and that a list opened
   by its own address is under the default filter, the widest ING has, every
-  account, every document type and the longest period it offers. The app
-  opens each list by its own address before it reads it, so the notice
-  right after that shows the list empty. A run with an empty archive
-  finishes clean again without `read_archive` set to `false`. Read as it
+  account, every document type and the longest period it offers, ten years
+  back. The app opens each list by its own address before it reads it, so
+  the notice right after that shows the list empty. A run with an empty archive
+  finishes clean again without `read_archive` set to `false`. If you set it
+  to `false` for an empty archive on 0.64.0's advice, set it back to `true`,
+  or the archive stays unread once documents arrive there. Read as it
   stands, as Diagnose reads it, the notice is still not taken for an empty
   list, and Diagnose says so. The README names sub-accounts behind a tab in
   ING's newer web banking as not read yet.

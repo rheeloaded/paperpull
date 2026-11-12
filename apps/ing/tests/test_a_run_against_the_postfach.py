@@ -354,13 +354,14 @@ def test_an_empty_postbox_and_archive_are_a_whole_list(home):
 
 
 def test_a_filter_left_set_in_the_window_is_cleared_by_the_run_opening_each_list(home):
-    """The tab shows the archive under a filter that finds nothing, only
-    ING's notice. The run opens each list by its own address, which clears
-    the filter, and takes what the archive holds."""
+    """The tab shows the Postbox under a filter that finds nothing, only
+    ING's notice, and the archive has one too. The run opens each list by
+    its own address, even the one on screen, which clears the filter, and
+    takes what both hold."""
     home.configure(read_archive=True)
     home.bank.lists["postbox"] = [statement("P1", 1)]
     home.bank.lists["archive"] = [statement("A1", 1, 2019)]
-    home.bank.url = ARCHIVE + ";jsessionid=0?7"
+    home.bank.url = POSTBOX + ";jsessionid=0?7"
     home.bank.filtered = {"postbox", "archive"}
     code, _said = home.run_all()
     assert code == 0 and home.stopped is None

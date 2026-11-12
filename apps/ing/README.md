@@ -69,13 +69,13 @@ angezeigt werden", in the list's own box. ING shows the same notice for a
 search or filter that finds nothing. It keeps a search or filter only while
 the address carries the session id ING adds to it, and a list opened by its
 own address, as the app opens each one, is under the default filter, the
-widest ING has (the longest period it offers, every account, every document
-type), with no search. @MelleD checked both on their account (#203). So the notice
-right after the app opened the list shows it empty, and the list is read
-whole with nothing in it. Read as it stands, as Diagnose reads it, the
-notice is not taken for an empty list. The same words anywhere else on the
-page, a count, or "keine neuen Nachrichten" (no new messages, which is not
-no messages) are not taken for the notice.
+widest ING has (the longest period it offers, ten years back, every account
+and every document type), with no search. @MelleD checked both on their
+account (#203). So the notice right after the app opened the list shows it
+empty, and the list is read whole with nothing in it. Read as it stands, as
+Diagnose reads it, the notice is not taken for an empty list. The same words
+anywhere else on the page, a count, or "keine neuen Nachrichten" (no new
+messages, which is not no messages) are not taken for the notice.
 
 Some rows are passed over, and Discover says how many and why. These are
 rows the Postbox marks unread when `include_unread` is `false`, rows with
@@ -149,6 +149,8 @@ The single-account test does not cover every case.
   differs, the run stops there. `read_archive: false` leaves it out.
 - Sub-accounts that ING's newer web banking shows behind a tab in the root
   account are not read. A run reads the Postbox and archive it opens.
+- ING's default filter reaches back ten years, its longest period. A
+  document older than that is not shown, so it is not read.
 - A list with paging or a "show more" button stops the run, since nothing is
   pressed. A download link inside a menu is not followed.
 - A link that ING sends on to another host fails.
