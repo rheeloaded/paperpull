@@ -774,7 +774,10 @@ class App:
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.\n")
         self.cmd_discover()
-        docs = self._select(limit=self.config.get("pilot_count", 5))
+        limit = self.config.get("pilot_count", 5)
+        if self.args.max_docs and self.args.max_docs > 0:
+            limit = min(limit, self.args.max_docs)
+        docs = self._select(limit=limit)
         if not docs:
             print("\nNo documents in scope to pilot. Run --diagnose.")
             return

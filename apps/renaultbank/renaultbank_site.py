@@ -287,9 +287,14 @@ def _execute(page, operation, **values):
 
 
 def goto_documents(page):
-    """Open the known Postfach route; never navigate a signed-out bank tab."""
-    if looks_signed_out(page) and is_safe_url(page.url or ""):
-        return False
+    """Reuse the banking tab; the list API, not its URL, proves sign-in.
+
+    Reopening the SPA's deep link can take it through an OAuth callback.
+    Reading from the existing tab avoids both that race and discarding the
+    session the person just opened. A tab of the run's own may navigate.
+    """
+    if is_safe_url(page.url or ""):
+        return not looks_signed_out(page)
     try:
         if (page.url or "").split("?", 1)[0].rstrip("/") != URLS["documents"]:
             page.goto(URLS["documents"], wait_until="domcontentloaded", timeout=30000)

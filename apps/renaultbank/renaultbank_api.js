@@ -30,6 +30,24 @@ async (args) => {
   const ask = async (path, body, extra = {}, pdf = false) => {
     const method = body === undefined ? "GET" : "POST";
     if (location.origin !== origin || !allowed(path, method)) fail("refused request outside the document API");
+    // Use the same public PortalContext service as the Postfach's own
+    // HTTP interceptor. It refreshes an expiring access cookie within the
+    // existing session, without exposing a token or attempting a login.
+    const security = window.okpGlobal?.portalContext?.getSecurityService?.();
+    if (!security?.ensureTokenForApiCall) fail("document session service is unavailable");
+    const expiry = security.getSessionExpiry?.();
+    if (typeof expiry === "number" && expiry > 0 && expiry <= Date.now()) fail("SESSION_EXPIRED");
+    await new Promise((resolve, reject) => {
+      const wait = setTimeout(() => reject(new Error("SESSION_EXPIRED")), 30000);
+      const ready = () => { clearTimeout(wait); resolve(); };
+      const failed = () => { clearTimeout(wait); reject(new Error("SESSION_EXPIRED")); };
+      try {
+        const result = security.ensureTokenForApiCall();
+        if (result?.subscribe) result.subscribe({complete: ready, error: failed});
+        else if (result?.then) result.then(ready, failed);
+        else failed();
+      } catch { failed(); }
+    });
     const headers = {"Accept": pdf ? "application/pdf" : "application/json", "X-VP-App-Locale": "de-DE", ...extra};
     if (body !== undefined) headers["Content-Type"] = "application/json";
     const timer = new AbortController();

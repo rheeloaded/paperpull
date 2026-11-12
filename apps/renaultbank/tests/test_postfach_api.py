@@ -23,6 +23,15 @@ const mode = process.argv[2];
 global.window = {};
 global.location = {origin: 'https://banking.renault-bank-direkt.de'};
 const requests = [];
+let prepared = 0;
+window.okpGlobal={portalContext:{getSecurityService:()=>({
+ getSessionExpiry:()=>Date.now()+(mode==='expired-session'?-60000:60000),
+ ensureTokenForApiCall:()=>({subscribe:observer=>{
+  prepared++;
+  if(mode==='refresh-fails') observer.error(new Error('invented'));
+  else observer.complete();
+ }})
+})}};
 const doc = (id) => ({dokumentId:id, dokumentTitel:'Kontoauszug ' + id,
  erstellDatum:'2026-03-31', roUnterKategorie:{unterKategorieName:'Kontoauszug'},
  zugehoerigesObjekt:{id:'DE00111122223333444455',typ:'IBAN'}});
@@ -81,7 +90,7 @@ global.fetch = async (path, options) => {
   const selected=collected.rows.find(r=>r.item_id.startsWith(mode==='attachment'?'attachment:old':'document:'));
   downloaded=await bridge({op:'download',id:selected.item_id});
  }
- console.log(JSON.stringify({collected,downloaded,requests}));
+ console.log(JSON.stringify({collected,downloaded,requests,prepared}));
 })().catch(()=>process.exit(1));
 """
 
@@ -122,6 +131,18 @@ def test_expired_session_is_identified_without_returning_tokens():
     assert result == {"ok": False, "expired": True, "error": "SESSION_EXPIRED"}
 
 
+@pytest.mark.parametrize("mode", ["expired-session", "refresh-fails"])
+def test_expired_portal_session_stops_before_requests_instead_of_attempting_login(mode):
+    data = run_bridge(mode)
+    assert not data["collected"]["ok"] and data["collected"]["expired"]
+    assert not data["requests"]
+
+
+def test_every_request_uses_the_portals_own_access_cookie_preparation():
+    data = run_bridge()
+    assert data["prepared"] == len(data["requests"])
+
+
 @pytest.mark.parametrize("mode", ["download", "attachment"])
 def test_existing_pdf_download_uses_browser_ticket_and_stays_on_the_allowlist(mode):
     data = run_bridge(mode)
@@ -157,3 +178,33 @@ def test_missing_or_ambiguous_identity_is_not_replaced_with_an_arbitrary_stored_
     with pytest.raises(site.NotToldApart):
         site.resolve_item(None, "Statement", "2026-01-31", "Konto 4455",
                           item_id="old-id", category="Statement", number_rows=lambda rows: [])
+
+
+def test_reusing_a_banking_tab_does_not_restart_the_spa_sign_in():
+    class Page:
+        url = "https://banking.renault-bank-direkt.de/services_cloud/portal/m/banking_start"
+
+        def locator(self, selector):
+            assert selector == "input[type='password']"
+            return type("Locator", (), {"count": lambda self: 0})()
+
+        def goto(self, *args, **kwargs):
+            raise AssertionError("an existing banking tab must not navigate")
+
+    assert site.goto_documents(Page())
+
+
+def test_a_pilot_obeys_an_explicit_smaller_download_limit():
+    from types import SimpleNamespace
+    import renaultbank_docs as app_mod
+    selected = []
+    app = object.__new__(app_mod.App)
+    app.stats = {}
+    app.config = {"pilot_count": 5}
+    app.args = SimpleNamespace(max_docs=1, dry_run=False)
+    app.cmd_discover = lambda: None
+    app._select = lambda limit: selected.append(limit) or ["invented"]
+    app.process = lambda docs, dry_run: None
+    app._pilot_report = lambda docs: None
+    app.cmd_pilot()
+    assert selected == [1]

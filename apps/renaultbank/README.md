@@ -4,9 +4,10 @@ Downloads existing PDFs from the Renault Bank direkt Postfach and archive,
 including statements, tax documents, confirmations and message attachments.
 Requested in [#172](https://github.com/rheeloaded/paperpull/issues/172).
 
-**Status: implemented from the contributor’s recording and a technical
-capture on 2026-11-12, checked against the public Postfach client. Automated
-checks pass; a live-account Pilot is still pending.**
+**Status: tested on one contributor’s real account on 2026-11-12.**
+Discovery read the available history; five recent documents, an older archive
+document and a message attachment were saved as valid PDFs. A repeated Pilot
+saved no new files. A full download of the entire account has not been run.
 
 ## Commands in a checkout
 
@@ -36,6 +37,9 @@ Resume continues a stopped download; Verify checks saved PDFs locally.
 The signed-in page makes same-origin calls to Renault’s Atruvia document
 API. Cookies, customer/document JWTs and download tickets stay in the
 browser. Only document metadata and the requested PDF bytes leave it.
+Before a request, the portal’s own `getSecurityService().ensureTokenForApiCall()`
+prepares its access cookie, as the portal’s HTTP interceptor does. An expired
+login session stops the run; the app never attempts a login or answers a prompt.
 
 - `liefereBerechtigteKunden?institut=BANK` supplies every accessible bank
   customer, including customers outside the currently selected profile.

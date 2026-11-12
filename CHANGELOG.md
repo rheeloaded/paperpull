@@ -10,7 +10,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
-- Renault Bank direkt Postfach and archive PDFs, plus message attachments across accessible bank customers (#172). Uses the observed Atruvia API from inside the browser, with pagination, thread history and DKB-style identity and recovery. Live Pilot pending.
+- Renault Bank direkt Postfach and archive PDFs, plus message attachments across accessible bank customers (#172). Uses the observed Atruvia API from inside the browser, with pagination, thread history and DKB-style identity and recovery. Pilot tested on one contributor’s account, including an archive document and a message attachment; a repeated Pilot saved no duplicates.
 - **An update check that asks only when you press its button (#146).**
   Settings has an Updates card, off until you turn it on. Turning it on
   sends nothing. It shows **Check github.com for an update**, and each press
