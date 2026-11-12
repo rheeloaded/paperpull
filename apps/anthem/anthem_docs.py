@@ -173,30 +173,37 @@ def retire_token_records(progress, discovery) -> int:
     each listing added more, since the token is new each time. The same EOB
     is listed now by the claim number shown beside its token, under an id of
     its own. Only a record whose id names a claim type this app knows and
-    that the guard refuses is set down, and a record either store says was
-    downloaded, or holds a file for, is never touched. No Longer Listed is
-    not a failure and the panel has nothing left to take for it, as Chase's
-    retire_menu_rows does for its menu rows.
+    that the guard refuses is set down, in whichever store holds it, and
+    only while each store leaves it Discovered, Failed or with no state at
+    all. A record either store says was downloaded, or holds a file for, is
+    never touched. No Longer Listed is not a failure and the panel has
+    nothing left to take for it, as Chase's retire_menu_rows does for its
+    menu rows.
     """
     retired = 0
-    done = (State.NO_LONGER_LISTED.value, State.COMPLETED.value, State.PDF_VERIFIED.value)
-    for key, rec in list(discovery.data.items()):
-        if not isinstance(rec, dict):
+    may_go = (State.DISCOVERED.value, State.FAILED.value, None, "")
+    for key in list(dict.fromkeys(list(discovery.data) + list(progress.data))):
+        recs = [r for r in (discovery.get(key), progress.get(key)) if r is not None]
+        if not all(isinstance(r, dict) for r in recs):
             continue
-        doc_id = rec.get("document_id")
-        if (not isinstance(doc_id, str) or doc_id.split("|")[0] not in site.CLAIM_TYPES
+        # Each store that names an id names the same one.
+        ids = [r.get("document_id") for r in recs if r.get("document_id")]
+        if not ids or not all(isinstance(i, str) and i == ids[0] for i in ids):
+            continue
+        doc_id = ids[0]
+        if (doc_id.split("|")[0] not in site.CLAIM_TYPES
                 or site.parse_doc_id(doc_id) is not None):
             continue
-        prog = progress.get(key) or {}
-        if not isinstance(prog, dict):
+        if any(r.get("downloaded_ok") or r.get("pdf_path") or r.get("state") not in may_go
+               for r in recs):
             continue
-        if any(r.get("downloaded_ok") or r.get("pdf_path") or r.get("state") in done
-               for r in (rec, prog)):
-            continue
-        notes = "; ".join(x for x in (prog.get("notes"), TOKEN_ID_NOTE) if x and isinstance(x, str))
-        if prog:
+        prog = progress.get(key)
+        if prog is not None:
+            notes = "; ".join(x for x in (prog.get("notes"), TOKEN_ID_NOTE)
+                              if x and isinstance(x, str))
             progress.update(key, {"state": State.NO_LONGER_LISTED.value, "notes": notes}, save=False)
-        discovery.update(key, {"state": State.NO_LONGER_LISTED.value}, save=False)
+        if discovery.get(key) is not None:
+            discovery.update(key, {"state": State.NO_LONGER_LISTED.value}, save=False)
         retired += 1
     return retired
 

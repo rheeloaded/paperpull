@@ -154,3 +154,49 @@ def test_a_record_value_that_is_not_text_is_passed_over(build):
     first.discovery.update(token, {"document_id": TOKEN_ID}, save=False)
     assert app_mod.retire_token_records(first.progress, first.discovery) == 1
     assert first.progress.get(token)["notes"] == app_mod.TOKEN_ID_NOTE
+
+
+def test_a_token_record_only_progress_holds_is_set_down_too(build):
+    first = build("--all")
+    token = listed(first, TOKEN_ID)
+    failed(first, token)
+    del first.discovery.data[token]
+    saved_to_disk(first)
+    app = build("--all")
+    progress, discovery = on_disk(app)
+    assert progress[token]["state"] == State.NO_LONGER_LISTED.value
+    assert token not in discovery
+
+
+@pytest.mark.parametrize("state", [State.NEEDS_MANUAL_REVIEW.value, State.PDF_SAVED.value,
+                                   State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value,
+                                   "a state of another version"])
+def test_only_a_record_discovered_or_failed_or_with_no_state_is_set_down(build, state):
+    first = build("--all")
+    token = listed(first, TOKEN_ID)
+    failed(first, token)
+    first.progress.update(token, {"state": state}, save=False)
+    saved_to_disk(first)
+    before = on_disk(first)
+    app = build("--all")
+    assert on_disk(app) == before
+
+
+def test_a_record_with_no_state_is_set_down(build):
+    first = build("--all")
+    token = listed(first, TOKEN_ID)
+    first.discovery.data[token].pop("state")
+    saved_to_disk(first)
+    app = build("--all")
+    assert on_disk(app)[1][token]["state"] == State.NO_LONGER_LISTED.value
+
+
+def test_two_stores_naming_two_ids_are_left_as_they_are(build):
+    first = build("--all")
+    token = listed(first, TOKEN_ID)
+    failed(first, token)
+    first.progress.update(token, {"document_id": GOOD_ID}, save=False)
+    saved_to_disk(first)
+    before = on_disk(first)
+    app = build("--all")
+    assert on_disk(app) == before
