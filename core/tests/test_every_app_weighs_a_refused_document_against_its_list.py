@@ -44,11 +44,18 @@ refusal goes through paperpull_core.refused.list_again, which keeps the
 three apart, told to raise a list stop for a list that does not answer,
 one the run stops on with the list unread (the list stop census holds
 how). The read is found in the handler or the loop it goes on in, or in a
-site function or App method they call, two calls down at most.
+site function or App method they call, two calls down at most. Every list
+reader called there goes through list_again, a check of the page before
+the list included, since a page that cannot be read raises there too.
+list_again is told the refusal's own sign-out, and each stop it passes on
+is a stop of the run, so neither a class as wide as Exception nor one the
+loop records as a document's failure lets a 500 through as it is.
 
 Coverage is kept by handler, not by app. MENDED names every handler that
-weighs a refusal, so a second kind of document an app takes its own way
-is named on its own, and a handler found and not named fails. A refusal
+weighs a refusal, by the function it is in and the one that reads the
+refusal, so a second kind of document an app takes its own way is named
+on its own, and a handler found and not named fails. Two handlers in one
+function for the same fetch are one entry, and each is still read. A refusal
 the reading follows to no handler at all, a fetch handed to the method
 that takes it as a function (Anthem's member documents and ID cards, which
 _save_collected takes), is named in UNFOLLOWED with that method, which is
@@ -197,6 +204,29 @@ def is_list_again(call) -> bool:
 
 def keyword(call, name: str):
     return next((k.value for k in call.keywords if k.arg == name), None)
+
+
+def argument(call, at: int, name: str):
+    return call.args[at] if len(call.args) > at else keyword(call, name)
+
+
+def elements(node) -> list:
+    if node is None:
+        return []
+    return list(node.elts) if isinstance(node, (ast.Tuple, ast.List)) else [node]
+
+
+def calls_outside_list_again(node):
+    """The calls in node, a refused.list_again call itself included but
+    nothing inside it."""
+    todo = [node]
+    while todo:
+        n = todo.pop()
+        if isinstance(n, ast.Call):
+            yield n
+            if is_list_again(n):
+                continue
+        todo.extend(ast.iter_child_nodes(n))
 
 
 def label_of(node):
@@ -418,10 +448,13 @@ class Reading:
         return places
 
     def reads(self, call, readers: set) -> bool:
-        """Whether a call is of a list reader, directly or by an App method
-        that reaches one."""
+        """Whether a call is of a list reader, directly, by a site helper
+        that calls one itself, or by an App method that reaches one."""
         f = call.func.id if isinstance(call.func, ast.Name) else attr_of(call.func, "site")
         if f in readers:
+            return True
+        if f in self.funcs and any(isinstance(c.func, ast.Name) and c.func.id in readers
+                                   for c in calls(self.funcs[f])):
             return True
         m = attr_of(call.func, "self")
         return bool(m in self.methods and self.site_calls(self.reached([m])) & readers)
@@ -435,64 +468,85 @@ class Reading:
         return any(self.reads(c, readers)
                    for place in self.places(where, name, handler, attempt) for c in calls(place))
 
-    def asked_again(self, where: str, name: str, handler, attempt, cls: str) -> list:
-        """The class each refused.list_again call is told to raise for a
-        list that does not answer, where that call reads the list, in the
-        handler or the loop it goes on in, or in a site function or App
-        method they call, two calls down at most."""
+    def asked_again(self, where: str, name: str, handler, attempt, cls: str):
+        """How the list is read again, in the handler or the loop it goes on
+        in, and in the site functions and App methods they call, two calls
+        down at most. Returns each refused.list_again call that reads the
+        list, as (the sign-out it is told, the class it raises for a list
+        that does not answer, the stops it passes on), and each list reader
+        called outside one, by name."""
         readers = self.readers(cls)
         todo = [(place, 0) for place in self.places(where, name, handler, attempt)]
-        seen, out = set(), []
+        seen, asked, raw = set(), [], []
         while todo:
             node, depth = todo.pop()
             if id(node) in seen:
                 continue
             seen.add(id(node))
-            for c in calls(node):
+            for c in calls_outside_list_again(node):
                 if is_list_again(c):
                     read = c.args[0] if c.args else keyword(c, "read")
-                    unread = c.args[2] if len(c.args) > 2 else keyword(c, "unread")
                     if read is not None and any(self.reads(r, readers) for r in calls(read)):
-                        out.append(label_of(unread) if unread is not None else None)
-                elif depth < 2:
-                    f = c.func.id if isinstance(c.func, ast.Name) else attr_of(c.func, "site")
-                    m = attr_of(c.func, "self")
-                    if f in self.funcs:
-                        todo.append((self.funcs[f], depth + 1))
-                    elif m in self.methods:
-                        todo.append((self.methods[m], depth + 1))
-        return out
+                        asked.append((label_of(argument(c, 1, "signed_out")),
+                                      label_of(argument(c, 2, "unread")),
+                                      [label_of(s) for s in elements(argument(c, 3, "stops"))]))
+                    continue
+                f = c.func.id if isinstance(c.func, ast.Name) else attr_of(c.func, "site")
+                m = attr_of(c.func, "self")
+                if f in readers:
+                    raw.append(f)
+                elif depth < 2 and f in self.funcs:
+                    todo.append((self.funcs[f], depth + 1))
+                elif depth < 2 and m in self.methods:
+                    todo.append((self.methods[m], depth + 1))
+        return asked, raw
 
-    def a_list_stop(self, cls) -> bool:
-        """Whether a class is one the run stops on with the list unread. It
-        is a list stop (ListStopped, a class built on it, or one the list
-        stop census names), and the loop around download_one names it, or
-        Discover does, so that census follows it through the download."""
+    def a_stop(self, cls) -> bool:
+        """Whether a class is a stop of the run, one of the site module's
+        that the loop around download_one names, or Discover does, so the
+        list stop census follows it through the download."""
         if cls not in self.classes:
-            return False
-        if "ListStopped" not in self.ancestors(cls) and (self.name, cls) not in OTHER_LIST_STOPS:
             return False
         caught = {attr_of(t, "site") for m in self.reached(["cmd_discover"])
                   for n in own_nodes(self.methods[m]) if isinstance(n, ast.ExceptHandler) and n.type
                   for t in (n.type.elts if isinstance(n.type, ast.Tuple) else [n.type])}
         return cls in self.stops or bool(self.ancestors(cls) & caught)
 
+    def a_list_stop(self, cls) -> bool:
+        """Whether a class is one the run stops on with the list unread. It
+        is a list stop (ListStopped, a class built on it, or one the list
+        stop census names), and a stop of the run (a_stop)."""
+        if cls not in self.classes:
+            return False
+        if "ListStopped" not in self.ancestors(cls) and (self.name, cls) not in OTHER_LIST_STOPS:
+            return False
+        return self.a_stop(cls)
+
     def unweighed(self) -> list:
         """Each handler that keeps a refusal and reads the list, where the
-        read that weighs it is not made through refused.list_again, or is
-        told to raise something other than a list stop for a list that
-        does not answer, as (function, what is wrong)."""
+        list is read outside refused.list_again, or list_again is told
+        another sign-out than the refusal's, a class that is no list stop
+        for a list that does not answer, or a stop to pass on that is no
+        stop of the run, as (function, what is wrong)."""
         out = []
         for name, node, cls in self.refusals():
             for end in self.follow("site", name, node, cls):
                 if end[0] != "handler" or not self.reads_the_list(*end[1:], cls):
                     continue
-                asked = self.asked_again(*end[1:], cls)
+                asked, raw = self.asked_again(*end[1:], cls)
                 if not asked:
                     out.append((end[2], "reads the list again outside refused.list_again"))
-                for unread in asked:
+                for f in raw:
+                    out.append((end[2], "reads %s outside refused.list_again" % f))
+                for signed_out, unread, stops in asked:
+                    if signed_out != cls:
+                        out.append((end[2], "tells list_again the sign-out is %s, not %s"
+                                    % (signed_out, cls)))
                     if not self.a_list_stop(unread):
                         out.append((end[2], "reads an unread list as %s, which is no list stop" % unread))
+                    for s in stops:
+                        if not self.a_stop(s):
+                            out.append((end[2], "passes %s on, which is no stop of the run" % s))
         return sorted(set(out))
 
     def unfollowed(self) -> list:
@@ -615,14 +669,34 @@ def test_every_refusal_is_followed_or_named(read, app):
 def test_a_fetch_handed_on_is_weighed_by_the_method_that_takes_it(read, app, fetch):
     """The method calls the fetch it is handed inside a try whose
     SessionExpired handler reads the list again through refused.list_again,
-    told to raise a list stop."""
+    told the refusal's sign-out and a list stop, and a list that does not
+    answer ends the method's pass there, by a return or a raise, rather
+    than going on with that document counted as its own failure.
+
+    Anthem's member documents and ID cards end their pass as their own
+    list does when it will not open (_listing_incomplete), counted as
+    failed with nothing recorded against the document, and the run goes on
+    to the next kind. They do not leave on ListNotRead, since every run
+    lists them afresh, Resume too, so Continue never stops at the same
+    document, and that stop would note the EOB list as one that stopped."""
     method = read[app].methods[UNFOLLOWED[app, fetch]]
     handlers = [h for t in own_nodes(method) if isinstance(t, ast.Try) for h in t.handlers
                 if h.type is not None and label_of(h.type) == "SessionExpired"]
     asked = [c for h in handlers for c in calls(h) if is_list_again(c)]
     assert asked, UNFOLLOWED[app, fetch]
-    assert all(read[app].a_list_stop(label_of(c.args[2] if len(c.args) > 2 else keyword(c, "unread")))
-               for c in asked)
+    for c in asked:
+        assert label_of(argument(c, 1, "signed_out")) == "SessionExpired"
+        unread = label_of(argument(c, 2, "unread"))
+        assert read[app].a_list_stop(unread), unread
+        up = parents_in(method)
+        p = up.get(c)
+        while p is not None and not (isinstance(p, ast.Try) and any(c in calls(s) for s in p.body)):
+            p = up.get(p)
+        assert p is not None, "list_again is not inside a try"
+        ends = [h for h in p.handlers if h.type is not None
+                and unread in {label_of(t) for t in elements(h.type)}]
+        assert ends, "nothing catches %s where the list is read again" % unread
+        assert all(any(isinstance(n, (ast.Return, ast.Raise)) for n in own_nodes(h)) for h in ends)
 
 
 def test_the_other_list_stops_are_the_list_stop_censuss():
@@ -826,6 +900,7 @@ def test_a_list_read_again_on_its_own_is_found(tmp_path):
     """A 500 or a timeout there reaches the loop as one document's failure,
     and the run goes on with no session shown."""
     assert sample(tmp_path, WEIGHED).unweighed() == [
+        ("download_bill", "reads _read outside refused.list_again"),
         ("download_bill", "reads the list again outside refused.list_again")]
 
 
@@ -836,7 +911,53 @@ def test_a_list_again_that_reads_no_list_is_not_counted(tmp_path):
                          "            _read(page)\n"
                          "            refused.list_again(lambda: _RUN['bills'], SessionExpired, ListStopped)")
     assert sample(tmp_path, site).unweighed() == [
+        ("download_bill", "reads _read outside refused.list_again"),
         ("download_bill", "reads the list again outside refused.list_again")]
+
+
+def test_a_list_read_outside_list_again_beside_one_inside_is_found(tmp_path):
+    """First Horizon's shape. A check of the page before the list is read
+    again through list_again, made on its own, lets a page that cannot be
+    read reach the loop as one document's failure."""
+    site = ASKED.replace("            refused.list_again(lambda: _read(page), SessionExpired, ListStopped)",
+                         "            collect_download_docs(page)\n"
+                         "            refused.list_again(lambda: _read(page), SessionExpired, ListStopped)")
+    assert sample(tmp_path, site).unweighed() == [
+        ("download_bill", "reads collect_download_docs outside refused.list_again")]
+
+
+def test_a_read_through_a_helper_inside_list_again_passes(tmp_path):
+    site = ASKED.replace("lambda: _read(page)", "lambda: _again(page)") + """
+
+def _again(page):
+    collect_download_docs(page)
+    return _read(page)
+"""
+    app = sample(tmp_path, site)
+    assert app.wrong() == [] and app.unweighed() == []
+
+
+@pytest.mark.parametrize("signed_out", ["Exception", "ListStopped"])
+def test_a_sign_out_told_as_anything_but_the_refusals_is_found(tmp_path, signed_out):
+    """list_again(read, Exception, ...) would pass every failure on as it
+    is, the 500 and the timeout among them."""
+    site = ASKED.replace("lambda: _read(page), SessionExpired, ListStopped",
+                         "lambda: _read(page), %s, ListStopped" % signed_out)
+    assert sample(tmp_path, site).unweighed() == [
+        ("download_bill", "tells list_again the sign-out is %s, not SessionExpired" % signed_out)]
+
+
+@pytest.mark.parametrize("stop", ["Exception", "RuntimeError", "NotAStop"])
+def test_a_stop_passed_on_that_is_no_stop_of_the_run_is_found(tmp_path, stop):
+    """Passed on as it is, it reaches the loop as one document's failure."""
+    site = ASKED.replace("lambda: _read(page), SessionExpired, ListStopped",
+                         "lambda: _read(page), SessionExpired, ListStopped, stops=(%s,)" % stop) + """
+
+class NotAStop(Exception):
+    pass
+"""
+    assert sample(tmp_path, site).unweighed() == [
+        ("download_bill", "passes %s on, which is no stop of the run" % stop)]
 
 
 def test_an_unread_list_told_as_a_sign_out_is_found(tmp_path):

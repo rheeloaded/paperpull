@@ -160,13 +160,15 @@ addresses and words out of their logs.
   you are signed out, and the run stops as before. A list that still reads
   leaves that document counted as failed with nothing saved, the run goes
   on to the others, and the next run tries it again. A list that does not
-  answer, times out, answers with something else or holds nothing says
-  neither, so the run stops there without calling you signed out, nothing
-  is recorded against the document, and the panel offers Get new documents,
-  which reads the list first and asks for it again. Ziply Fiber, Cetera,
-  Verizon Mobile and NW Natural now read a list that times out or stops
-  answering after a refusal that way too, where it counted the bill as
-  failed and went on. Anthem's member documents and ID cards read their own
+  answer, times out, comes back with a server's error page or holds
+  nothing says neither, so the run stops there without calling you signed
+  out, nothing is recorded against the document, and the panel offers Get
+  new documents, which reads the list first and asks for it again. Ziply
+  Fiber, Cetera, Verizon Mobile and NW Natural now read a list that times
+  out or stops answering after a refusal that way too, where it counted
+  the bill as failed and went on, and so do Cetera, NW Natural and
+  Portland General Electric when they read the list for a bill this run
+  holds no list for. Anthem's member documents and ID cards read their own
   lists again the same way, and a list there that does not answer ends that
   kind of document for the run, counted as failed, as it does when it will
   not open. A document is not asked for twice, apart from the one more ask

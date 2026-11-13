@@ -25,7 +25,11 @@ document's failure, so the run went on with no session shown (Affirm), and
 a list that held nothing, or never came, was read as a sign-out, which
 nothing in it said (Affirm, FedEx, myPay, Stripe, UPS). list_again() is the
 one way an app reads its list again after a refusal, so the three stay
-apart in every app, and the census above holds each app to it.
+apart in every app, and the census above holds each app to it. Cetera, NW
+Natural and Portland General Electric read their list through it too when
+they hold none from this run, or the one they hold lacks the document,
+since that document was listed before, so a list that does not answer
+there says the same. Its words say only that the list was read again.
 """
 from __future__ import annotations
 
@@ -51,10 +55,10 @@ def list_again(read: Callable[[], list], signed_out: Type[BaseException],
     except keep:
         raise
     except Exception as e:
-        raise unread("the list did not answer when it was read again after a refusal (%s)"
+        raise unread("the list did not answer when it was read again (%s)"
                      % type(e).__name__) from None
     if not isinstance(got, list):
-        raise unread("the list read again after a refusal did not answer as a list")
+        raise unread("the list read again did not answer as a list")
     if not got:
-        raise unread("the list read again after a refusal held nothing")
+        raise unread("the list read again held nothing")
     return got
