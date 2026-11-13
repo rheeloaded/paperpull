@@ -199,6 +199,13 @@ ITS_OWN = {
         "again. A sign-out or a list that stops shows there and reaches the run, and a "
         "list that still reads leaves the refusal that bill's alone, so one bill SDG&E "
         "will not give never stops every later run at it",
+    ("simmons", "download_document", ("_catch_document",)):
+        "a refusal of one document's PDF address, asked once more after its row was "
+        "pressed, after which the documents list is read again. A sign-out shows there "
+        "and reaches the run, a list that stops stops it with the list unread, and a list "
+        "that still reads leaves the refusal that document's alone, so one document "
+        "Simmons Bank will not give never stops every later run at it. The row is not "
+        "pressed again",
     ("ing", "download_document", ("_fetch",)):
         "a refusal of one document's link, a 401, a 403 or a sign-in page, after which "
         "its list is opened by its own address and read again. A sign-out or a list that "

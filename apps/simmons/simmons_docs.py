@@ -654,9 +654,11 @@ class App:
                 print("\nInterrupted. Progress is saved, and --resume carries on from here.")
                 raise
             except site.SessionExpired:
-                # The bank answered as a signed-out session. Every document
-                # after it would get the same answer, so the run stops here,
-                # with nothing recorded against this one.
+                # The documents list, read for this document or read again
+                # after the document was refused, answered as a signed-out
+                # session. Every document after it would get the same
+                # answer, so the run stops here, with nothing recorded
+                # against this one.
                 self.session_ended()
             except Exception as e:
                 # Neither the key nor the message, which can carry the
