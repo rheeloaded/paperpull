@@ -23,9 +23,11 @@ instead, like `2026-02-14 UPS Shipping Invoice.pdf`.
 
 An invoice UPS answers with a 401, a 403 or a redirect off `ups.com` has
 My Invoices read again. A list refused too means you are signed out, and
-the run stops. A list that still reads leaves that invoice failed with
-nothing saved, the run goes on to the others, and the next run tries it
-again.
+the run stops. A list that does not answer, never comes, or shows no
+invoice says neither, so the run stops with nothing recorded against that
+invoice, and Get new documents reads the list first and tries it again. A
+list that still reads leaves that invoice failed with nothing saved, the
+run goes on to the others, and the next run tries it again.
 
 **What it does not cover.** Supporting documents (freight bills,
 brokerage and import forms) and the CSV and XML versions of an invoice.

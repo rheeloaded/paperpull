@@ -60,6 +60,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 from paperpull_core import intake
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 # Everything on its way into a diagnostic file goes through here. It
@@ -303,6 +304,18 @@ class NeedsPerson(RuntimeError):
     cloned from this shape. UPS has no step like that seen so far."""
 
 
+class ListStopped(Exception):
+    """My Invoices, read again after one invoice was refused, did not
+    answer (a 500, a timeout), never came, or showed no invoice, though it
+    listed that one. That says neither that the session ended nor that it
+    holds, so the run stops with the list unread. Its words are this
+    module's own, never the page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
+
+
 def goto_documents(page) -> bool:
     """Be on a signed-in Billing Center page."""
     try:
@@ -447,15 +460,6 @@ def _row_for(page, document_id: str) -> Tuple[Optional[dict], dict]:
     return None, _captured["headers"]
 
 
-def _still_listed(rows: Optional[list]) -> list:
-    """My Invoices read again after one invoice was refused. A list that
-    shows no invoice at all, or never came, is no list, since that invoice
-    was listed, and raises SessionExpired."""
-    if not rows:
-        raise SessionExpired("My Invoices read empty after a refused invoice")
-    return rows
-
-
 def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
                   title: str = "", document_id: str = "") -> bool:
     """Ask for one invoice's PDF from inside the page and write it. The row
@@ -463,9 +467,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     nothing but its id. `dl_dir` and `href` are unused.
 
     A PDF answered with a 401, a 403 or a redirect off ups.com has My
-    Invoices read again, with the same call that proves a session. A list
-    refused too, or showing no invoice at all, raises SessionExpired, which
-    stops the run. A list that still reads leaves the invoice failed alone
+    Invoices read again, with the same call that proves a session
+    (refused.list_again). A list refused too, or a sign-in page, raises
+    SessionExpired, which stops the run as signed out. A list that does not
+    answer (a 500, a timeout), never comes or shows no invoice raises
+    ListStopped, which stops the run with the list unread, since it says
+    neither. A list that still reads leaves the invoice failed alone
     (False), and the next run tries it again."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -492,11 +499,14 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
         # A refusal may be the session ending or this one invoice. My
         # Invoices is read again, the way Discover reads it, and a session
         # that ended is refused there too and stops the run. A list that
+        # does not answer, never comes or shows no invoice raises
+        # ListStopped, which stops it with the list unread. A list that
         # still reads leaves the refusal this invoice's own, so it fails
         # alone and never stops every later run at the same invoice. It is
         # not asked for a second time, and the next invoice goes with the
         # headers the page sent just now.
-        _still_listed(capture_list(page)[0])
+        refused.list_again(lambda: capture_list(page)[0], SessionExpired, ListStopped,
+                           stops=(NeedsPerson,))
         log.info("the invoice dated %s was refused while the list still reads", iso_date)
         return False
     if not r.get("b64"):

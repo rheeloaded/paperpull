@@ -8,6 +8,12 @@ invoice is refused, the same way Discover reads it. A session that ended
 is refused the list too, and that stops the run. A list that still reads
 leaves the invoice failed alone, nothing saved, and the next run tries it
 again. The invoice is asked for once.
+
+A list that does not answer when it is read again (a 500, a timeout),
+never comes or shows no invoice says nothing either way, so the run stops
+with the list unread, nothing recorded against the invoice, and a run that
+lists first takes it again. It is neither a sign-out nor the invoice's own
+failure (the review of 2026-11-13).
 """
 import base64
 import io
@@ -25,6 +31,7 @@ import storage  # noqa: E402,F401  binds this provider's AppSpec
 import ups_site as site  # noqa: E402
 import ups_docs as docs  # noqa: E402
 from paperpull_core import testkit  # noqa: E402
+from paperpull_core.run_reporting import ListNotRead  # noqa: E402
 
 PDF = testkit.text_pdf(["UPS made-up shipping invoice"])
 DAYS = {"row3": "2031-03-14", "row2": "2031-02-14", "row1": "2031-01-14"}
@@ -69,11 +76,14 @@ class Page:
     """A signed-in Billing Center tab. Opening My Invoices makes it receive
     the list. Each invoice's PDF is answered from inside the page, refused
     with `refusal` for the invoices in `refused`. A session that ends at the
-    refusal (`signs_out`) answers the list with a 401 from then on."""
+    refusal (`signs_out`) answers the list with a 401 from then on, and a
+    list that stops answering then (`list_then`, a status, "timeout",
+    "empty" or "never") answers that way."""
 
-    def __init__(self, refused=(), refusal="401", signs_out=False):
+    def __init__(self, refused=(), refusal="401", signs_out=False, list_then=None):
         self.url = site.BASE + "/home"
-        self.refused, self.refusal, self.signs_out = set(refused), REFUSALS[refusal], signs_out
+        self.refused, self.refusal = set(refused), REFUSALS[refusal]
+        self.list_then = 401 if signs_out else list_then
         self.list_status, self.rows = 200, ROWS
         self.listeners, self.asked, self.lists_read = [], [], 0
         # Where the next read of My Invoices leaves the tab instead, with
@@ -88,6 +98,8 @@ class Page:
         self.listeners.remove(fn)
 
     def goto(self, url, **_):
+        if url == site.INVOICES_PAGE and self.list_status == "timeout":
+            raise TimeoutError("Timeout 60000ms exceeded")
         self.url = url
         if url != site.INVOICES_PAGE:
             return
@@ -96,7 +108,8 @@ class Page:
             self.url, self.lands_off = self.lands_off, None
         if self.rows is None:
             return
-        for resp in [Resp('{"invoiceStatus":["OPEN"]}', []), Resp("{}", self.rows, self.list_status)]:
+        body = {"error": "made-up server error"} if self.list_status >= 500 else self.rows
+        for resp in [Resp('{"invoiceStatus":["OPEN"]}', []), Resp("{}", body, self.list_status)]:
             for fn in list(self.listeners):
                 fn(resp)
 
@@ -114,8 +127,10 @@ class Page:
         number = body["invoices"][0]["invoiceNumber"]
         self.asked.append(number)
         if number in self.refused:
-            if self.signs_out:
-                self.list_status = 401
+            if self.list_then in ("empty", "never"):
+                self.rows = [] if self.list_then == "empty" else None
+            elif self.list_then is not None:
+                self.list_status = self.list_then
             return dict(self.refusal)
         return {"status": 200, "ct": "application/pdf", "url": site.DOWNLOAD_API,
                 "b64": base64.b64encode(PDF).decode()}
@@ -158,14 +173,26 @@ def test_an_invoice_refused_and_the_list_refused_after_it_is_a_sign_out(tmp_path
 
 
 @pytest.mark.parametrize("rows", [[], None])
-def test_a_list_read_empty_after_a_refusal_is_no_list(tmp_path, rows):
+def test_a_list_read_empty_after_a_refusal_is_unread_not_a_sign_out(tmp_path, rows):
     """A list that shows nothing, or never came, after this invoice was
-    listed is not a list that still reads."""
+    listed is not a list that still reads, and nothing in it says the
+    session ended."""
     page = Page(refused={row(2)["invoiceNumber"]}, refusal="403")
     site.collect_download_docs(page)
     page.rows = rows
-    with pytest.raises(site.SessionExpired):
+    with pytest.raises(site.ListStopped):
         take(page, tmp_path / "i.pdf")
+    assert page.asked == [row(2)["invoiceNumber"]]
+
+
+@pytest.mark.parametrize("then", [500, 503, "timeout"])
+def test_a_list_that_does_not_answer_after_a_refusal_is_unread(tmp_path, then):
+    page = Page(refused={row(2)["invoiceNumber"]}, refusal="403", list_then=then)
+    site.collect_download_docs(page)
+    out = tmp_path / "i.pdf"
+    with pytest.raises(site.ListStopped):
+        take(page, out)
+    assert not out.exists()
     assert page.asked == [row(2)["invoiceNumber"]]
 
 
@@ -265,3 +292,22 @@ def test_one_invoice_refused_and_the_list_after_it_stop_the_run(tmp_path):
     assert "session has expired" in said
     assert "Nothing was saved" not in said
     assert page.asked == [row(3)["invoiceNumber"]]
+
+
+@pytest.mark.parametrize("then", [500, "timeout", "empty", "never"])
+def test_one_invoice_refused_and_the_list_unread_after_it_stop_with_the_list_unread(tmp_path, then):
+    """A 500 or a timeout there reached the loop as the invoice's own
+    failure, and the run went on with no session shown. A list with no
+    invoice, or none at all, was read as a sign-out. Now the run stops with
+    the list unread, nothing recorded against the invoice, so Get new
+    documents takes it again."""
+    page = Page(refused={row(2)["invoiceNumber"]}, refusal="403", list_then=then)
+    app, ended, said = run_with(tmp_path, page)
+    assert isinstance(ended, ListNotRead), said
+    states = {v["document_id"]: v["state"] for v in app.progress.data.values()}
+    assert states == {"row3": "Completed"}
+    assert app.stats["failed"] == 0
+    assert "session has expired" not in said
+    assert "Nothing was saved" not in said
+    assert "could not be read again" in said
+    assert page.asked == [row(3)["invoiceNumber"], row(2)["invoiceNumber"]]
