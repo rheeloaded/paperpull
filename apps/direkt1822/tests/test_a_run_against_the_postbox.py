@@ -528,6 +528,24 @@ def test_a_twin_beside_one_saved_fails_when_its_id_did_not_last(home):
     assert home.on_disk() == ["K1"]
 
 
+def test_a_kontoauszug_the_bank_tags_as_another_kind_is_saved_once(home):
+    """ADV is an Other Document, and its title says Kontoauszug, so its
+    record is a Statement. The download looked for an Other Document, found
+    no row, and the document failed on every run, never saved."""
+    home.bank.inbox = [document("A1", "Kontoauszug 3/2031", "2031-04-02T10:00:00", "ADV"),
+                       document("P1")]
+    code, _said = home.run_all()
+    assert code == 0
+    assert home.on_disk() == ["A1", "P1"]
+    assert home.states() == {"A1": "Completed", "P1": "Completed"}
+    assert {rec["category"] for rec in home.store("discovery.json").values()} == {"Statement"}
+    code, said = home.run_all()
+    assert code == 0
+    assert home.bank.fetched == []
+    assert said.count("Already downloaded and verified - skipping.") == 2
+    assert home.on_disk() == ["A1", "P1"]
+
+
 def test_a_document_gone_from_the_list_fails_and_says_so(home):
     home.bank.inbox = [document("P1")]
     home.run("--discover")
