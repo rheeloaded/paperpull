@@ -317,7 +317,13 @@ async (args) => {
       const response = await fetch(path, {method, headers,
         credentials: "same-origin", mode: "same-origin", redirect: "error",
         signal: controller.signal, ...(body === undefined ? {} : {body: JSON.stringify(body)})});
-      if ([401, 403].includes(response.status)) fail("SESSION_EXPIRED");
+      // A 401 or a 403 for one PDF is that file's refusal. benutzerInfo
+      // answered just before it, and the list is read again in Python
+      // before the document fails alone, so a session that has ended shows
+      // there. A bank that refuses one PDF answers every run the same way,
+      // and taken as a sign-out it ended every run at that document.
+      if ([401, 403].includes(response.status))
+        fail(pdf ? "download refused with HTTP " + response.status : "SESSION_EXPIRED");
       if (!response.ok) fail("Postbox returned HTTP " + response.status);
       if (pdf) {
         const bytes = await ppRead(response);
@@ -421,7 +427,7 @@ async (args) => {
     if (ppRefused(error)) throw error;
     // Return only our fixed messages, never a URL, a payload or a token.
     const message = String(error?.message || "");
-    const safe = /^(SESSION_EXPIRED|refused request|Postbox |invalid Postbox|download did not|document must|unknown operation|multiple customer|incomplete )/;
+    const safe = /^(SESSION_EXPIRED|refused request|Postbox |invalid Postbox|download did not|download refused|document must|unknown operation|multiple customer|incomplete )/;
     return {ok: false, expired: message === "SESSION_EXPIRED",
       error: safe.test(message) ? message : "Postbox request failed"};
   }
@@ -667,12 +673,12 @@ def download_document(page, title, date, out_path, occurrence=0, item_hint="",
         result = _execute(page, "download", stop=NoFile, id=row["item_id"])
         data = intake.decode(result["data"], validate=True)
         why = "" if data.startswith(b"%PDF-") else "not a PDF (%d bytes)" % len(data)
-    except (SessionExpired, NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
+    except (NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
         # By its type and kind, since what an answer or an error says can
-        # carry the bank's words. A 401 or a 403 for this one file reads as
-        # signed out in the page, and a bank that refuses one document
-        # answers every run the same way, so it is weighed against the list
-        # here like any other failure, never taken as the run's end.
+        # carry the bank's words. A 401 or a 403 for this one file arrives
+        # here as NoFile (the page script's download refused), and
+        # benutzerInfo answering as signed out first raises SessionExpired,
+        # which stops the run.
         why = "%s, %s" % (type(e).__name__, failure.error_kind(e))
     if why:
         log.warning("no PDF for one %s of %s: %s", category, date, why)

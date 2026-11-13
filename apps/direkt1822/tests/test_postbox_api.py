@@ -28,7 +28,7 @@ global.fetch=async(path,options)=>{
    authAttached:!!options.headers['X-JOBA-AUTH'],csrfAttached:!!options.headers['X-CSRF-TOKEN']});
  let data={jobaMeldungen:[]};
  if(path.endsWith('benutzerInfo?complete=false')) {
-  if(mode==='expired')return {ok:false,status:401};
+  if(mode==='expired'||(mode==='expired-at-download'&&sessions>0))return {ok:false,status:401};
   sessions++;data.benutzerInfo={token:'PRIVATE_AUTH_'+sessions,csrfToken:'PRIVATE_CSRF_'+sessions,
     hatMehrereKundenverbindungen:mode==='multiple',stammNrsDisplay:['9999999999']};
   if(mode==='missing-csrf')delete data.benutzerInfo.csrfToken;
@@ -64,6 +64,7 @@ global.fetch=async(path,options)=>{
   }
  }else if(path.includes('/postboxnachricht/download/')){
   if(options.headers.Accept!=='*/*')return {ok:false,status:406};
+  if(mode.startsWith('refuse-'))return {ok:false,status:Number(mode.slice(7))};
   if(options.headers['X-JOBA-AUTH']!=='PRIVATE_AUTH_'+sessions)throw new Error('stale session');
   const bytes=Buffer.from(mode==='not-pdf'?'<html>login</html>':'%PDF-1.4\nINVENTED PDF');
   return {ok:true,status:200,headers:{get:()=> 'application/pdf'},
@@ -74,7 +75,7 @@ global.fetch=async(path,options)=>{
 (async()=>{
  const collected=await bridge({op:'collect',include_trash:mode!=='no-trash'});
  let downloaded;
- if(collected.ok&&['download','not-pdf'].includes(mode))downloaded=await bridge({op:'download',id:collected.rows[0].item_id});
+ if(collected.ok&&(['download','not-pdf','expired-at-download'].includes(mode)||mode.startsWith('refuse-')))downloaded=await bridge({op:'download',id:collected.rows[0].item_id});
  console.log(JSON.stringify({collected,downloaded,requests,sessions}));
 })().catch(()=>process.exit(1));
 """
@@ -187,6 +188,22 @@ def test_html_is_never_saved_as_pdf():
     assert not data["downloaded"]["ok"] and "data" not in data["downloaded"]
 
 
+@pytest.mark.parametrize("status", [401, 403])
+def test_a_refusal_of_one_pdf_is_that_files_and_not_a_sign_out(status):
+    """benutzerInfo answered just before, so a 401 or a 403 for the PDF is
+    that file's refusal (NoFile in Python, weighed against the list there).
+    Read as a sign-out, it ended every run at that one document."""
+    data = run("refuse-%d" % status)
+    assert data["downloaded"] == {"ok": False, "expired": False,
+                                  "error": "download refused with HTTP %d" % status}
+
+
+def test_a_sign_out_before_the_pdf_is_still_a_sign_out():
+    data = run("expired-at-download")
+    assert data["downloaded"]["expired"] and not data["downloaded"]["ok"]
+    assert not any("/postboxnachricht/download/" in r["path"] for r in data["requests"])
+
+
 @pytest.mark.parametrize("code,category", [("MEGA", "Statement"), ("MEKA", "Credit Card Statement"),
     ("EWOM", "Securities Document"), ("EWJA", "Securities Document"), ("JSTB", "Tax Document"),
     ("ADV", "Other Document"), ("INFO", "Message"), ("BRIEF", "Message")])
@@ -239,12 +256,12 @@ def test_attaching_during_the_account_holders_login_waits_without_clicking_or_re
     assert page.waits == 2
 
 
-@pytest.mark.parametrize("refusal", [site.intake.TooLarge, site.NoFile, site.SessionExpired])
+@pytest.mark.parametrize("refusal", [site.intake.TooLarge, site.NoFile])
 @pytest.mark.parametrize("list_error", [None, site.SessionExpired, site.ListStopped])
 def test_a_refused_pdf_is_weighed_against_a_fresh_list(monkeypatch, tmp_path, refusal, list_error):
-    """A 401 or a 403 for one PDF reads as signed out in the page. It is
-    weighed against the list like any other refusal, so one document the
-    bank refuses fails alone while a list that answers signed out stops."""
+    """One document the bank refuses (a 401 or a 403 for its PDF arrives
+    as NoFile) fails alone while the list still answers, and a list that
+    answers signed out or stops ends the run."""
     monkeypatch.setattr(site, "resolve_item", lambda *args, **kwargs: {"item_id": "invented"})
 
     def refused(*args, **kwargs):

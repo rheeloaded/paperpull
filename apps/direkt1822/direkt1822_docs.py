@@ -516,7 +516,7 @@ class App:
         # from it call the run finished (paperpull_core.listing).
         listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
-        for line in not_opened_lines():
+        for line in self._note_unopened():
             print(line)
 
         if not quiet:
@@ -538,6 +538,16 @@ class App:
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
+
+    def _note_unopened(self) -> list:
+        """Keep what the last listing left unopened for the run summary,
+        and answer what Discover says of it. Discover and each download's
+        listing call it, so a Resume, which lists nothing of its own, says
+        it too."""
+        lines = not_opened_lines()
+        self.stats["conversations_not_opened"] = sum(site.not_opened())
+        self.stats["not_opened_lines"] = lines
+        return lines
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -702,6 +712,7 @@ class App:
             print("     browser, re-list your statements, then run Resume.")
             self.stats["session_expired"] = 1
             raise
+        self._note_unopened()
         if not saved:
             self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
@@ -1072,11 +1083,11 @@ class App:
         dates = sorted(d for d in s["dates"] if d)
         new_files = s.get("new_files", [])
         # Said only when this run read the list, since a run that did not
-        # cannot know.
+        # cannot know (_note_unopened).
         unopened = []
-        if getattr(site, "_summary", None):
-            unopened = ["Conversations not opened:  %d" % sum(site.not_opened()),
-                        *not_opened_lines()]
+        if "conversations_not_opened" in s:
+            unopened = ["Conversations not opened:  %d" % s["conversations_not_opened"],
+                        *s.get("not_opened_lines", [])]
         atomic_write_text(self.paths.run_summary, "\n".join([
             "1822direkt Documents - run summary",
             "=" * 40,
