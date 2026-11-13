@@ -1,12 +1,24 @@
 # Amazon Visa
 
-Downloads card statement PDFs and other PDFs from the [Amazon Visa portal](https://kunden.openbankpay.com/amazon/login). It reads the statement history for each visible card contract and the documents in each category the portal lists. Requested in [#171](https://github.com/rheeloaded/paperpull/issues/171).
+Downloads the card statement PDFs and other PDFs the
+[Amazon Visa portal](https://kunden.openbankpay.com/amazon/login) already
+holds, the statement history of each card contract the sign-in shows and
+the documents in each category the portal lists. Requested in
+[#171](https://github.com/rheeloaded/paperpull/issues/171) and contributed
+by [@MelleD](https://github.com/MelleD) in
+[#214](https://github.com/rheeloaded/paperpull/pull/214). Its CDP port is
+9315.
 
-The template uses CDP port **9315**.
+**Run on the contributor's own account.** Discover listed 28 PDFs, 26 of
+them card statements. Three statements, one contract and one other PDF
+were saved, and all five passed verification. Downloading the statements
+again saved no duplicates. A whole run and a second account have not been
+reported yet.
 
 ## Sign in and download
 
-Run the following commands from the PaperPull checkout. Run setup once with Python 3.11 or later, then create your local config.
+Run the following commands from the PaperPull checkout. Run setup once with
+Python 3.11 or later, then create your local config.
 
 ```sh
 ./paperpull --root ./apps amazonvisa setup
@@ -20,7 +32,8 @@ cp apps/amazonvisa/config.example.json apps/amazonvisa/config.json
 ./paperpull --root ./apps amazonvisa login
 ```
 
-Sign in yourself and leave the Amazon Visa window open. To check the list and save the newest few PDFs:
+Sign in yourself, answer your own two-factor prompt, and leave the Amazon
+Visa window open. Then check the list and save the newest few PDFs.
 
 ```sh
 ./paperpull --root ./apps amazonvisa discover
@@ -30,10 +43,49 @@ Sign in yourself and leave the Amazon Visa window open. To check the list and sa
 ./paperpull --root ./apps amazonvisa pilot
 ```
 
-Use `all` for a full download, `resume` to continue an interrupted run, and `verify` to recheck saved files. The local `config.json` controls the output folder and document types. The index and progress file let later runs skip PDFs already saved.
+Use `all` for a full download, `resume` to carry on with a run that
+stopped, and `verify` to check the saved files. The local `config.json`
+sets the output folder and the document types. The index and progress
+file let later runs skip PDFs already saved.
 
-## What it reads
+## How it reads documents
 
-PaperPull uses the portal's own signed-in client for read requests. It keeps the session and signed PDF links inside the page. PDFs are fetched from the portal's document store and saved locally. Documents without a PDF and other file types are reported and skipped.
+The signed-in page asks the portal's own client for the lists and tickets,
+so the session and each signed PDF link stay in the browser, and only each
+document's description and the PDF asked for leave it. The PDF itself
+comes from the portal's document store, asked for without cookies. No
+control is pressed and the app never signs in or answers a prompt.
 
-On one contributor's account, Discover listed 28 distinct PDFs, including 26 card statements. Trial downloads saved three statements, one contract and one other PDF. All five passed verification, and repeating the statement download saved no duplicates. A full download and additional accounts have yet to be tested.
+- The card list names every card contract, and each contract's statement
+  history is read whole. A statement with no PDF yet is counted and said.
+- Each document category the portal lists is read, and a document that is
+  not a PDF is counted and said. A document that is also a statement is
+  listed once.
+- A statement without the fields that name its PDF, an answer with no card
+  in it, a category answer without its list, its documents or its size, a
+  category whose documents fill the whole answer of 100, or a statement
+  list with records still pending stops Discover before any of the list is
+  recorded.
+- A date that comes with a time and a zone is its day in Berlin. A plain
+  day is taken as it is.
+- A call the portal never answers is given up on after 30 seconds.
+
+Documents are told apart by kind, date, the last four of the card contract
+and the title, and a stored id is a hint the list is checked against.
+Documents alike that cannot be told apart fail rather than be saved as
+each other. A document whose PDF does not come (a refused or failed
+ticket, a sign-in page in its place, no link, or an answer that is not a
+PDF) has the list read again. If the list answers as signed out, the run
+stops there. If it still answers, that document fails alone, the run goes
+on, and the next run asks for it again.
+
+## Development checks
+
+```sh
+python -m pytest apps/amazonvisa/tests -q
+```
+
+The in-page tests run the app's own page script against made-up answers,
+in Node for the page script alone and in Playwright's Chromium for whole
+runs through the app's main, with the webpack runtime and client module
+the page script asks for. No account is used.

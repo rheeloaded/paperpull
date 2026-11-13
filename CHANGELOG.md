@@ -7,6 +7,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Amazon Visa, card statements and the portal's other PDFs (#171).** It
+  reads the Amazon Visa portal at kunden.openbankpay.com through the
+  portal's own client from inside the signed-in page, the statement
+  history of every card contract the sign-in shows and the PDFs in each
+  document category the portal lists. Each signed PDF link stays in the
+  page, and nothing is pressed. Before merging, a 401 or 403 on one
+  document's PDF ticket fails that document alone once the list read
+  again still answers, where it had ended every run there as signed out
+  so nothing older was ever saved. A statement row without the fields
+  that name its PDF, an answer with no card in it, and a category answer
+  without its list, its documents or its size stop the listing rather
+  than read as nothing there, and so does a category whose documents
+  fill the whole answer. A date that comes with a time and a zone is its
+  day in Berlin, not in UTC, and a call the portal never answers is given
+  up on after 30 seconds. Run on the contributor's own account, where
+  Discover listed 28 PDFs, five were saved and passed verification, and
+  downloading the statements again saved no duplicates.
+  Contributed by @MelleD.
+
 ## [0.66.0] - 2026-11-13
 
 Renault Bank direkt is new, contributed by @MelleD. One bill Ziply Fiber
@@ -18,10 +40,6 @@ cannot finish opens PaperPull again, and five more apps keep page
 addresses and words out of their logs.
 
 ### Added
-- **Amazon Visa card statements and portal PDFs (#171).** Reads the
-  statement history for every visible card contract and the PDFs in the
-  portal's document categories. Tested on one account with 28 PDFs listed
-  and five saved and verified.
 - **Renault Bank direkt, the Postfach, its archive and message attachments
   (#172).** Contributed by @MelleD and run on the contributor's own
   account, where a Pilot saved recent documents, an older archive document

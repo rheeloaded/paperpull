@@ -78,7 +78,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`ally`](apps/ally) | Ally Bank | Account statements, tax forms | JSON API; same-dated statements named from the PDF |
 | [`alpaca`](apps/alpaca) | Alpaca | Brokerage and crypto statements, trade confirmations | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 22 documents saved on a full run.** Each row's own Download pressed once, and only the download from the link the page hands that press is kept. A Paper account is never read |
 | [`amazon`](apps/amazon) | Amazon (any country's store, `marketplace` setting) | Order invoices (full history) | Per-year order pagination |
-| [`amazonvisa`](apps/amazonvisa) | Amazon Visa (Openbank Pay) | Card statements, contracts and other portal PDFs | Tested on one account. Lists each visible card contract and document category. Requested in [#171](https://github.com/rheeloaded/paperpull/issues/171) |
+| [`amazonvisa`](apps/amazonvisa) | Amazon Visa (Openbank Pay) | Card statements, contracts and other portal PDFs | **Contributed by [@MelleD](https://github.com/MelleD), run on the contributor's own account** ([#214](https://github.com/rheeloaded/paperpull/pull/214)). The portal's own client from inside the page, nothing clicked, for every card contract and document category it lists. Five PDFs were saved and passed verification, and a whole run has not been reported yet. Requested in [#171](https://github.com/rheeloaded/paperpull/issues/171) |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements and any tax form listed with them | **Untested, built without an account. Have one? [Help test it](apps/amfam/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). |
 | [`amex`](apps/amex) | American Express | Statements, Year-End Summary | Click-nav SPA; in-memory session |
 | [`amexbanking`](apps/amexbanking) | American Express Banking (deposit accounts) | Business Checking statements and 1099-INT tax forms | **Contributed by [@appchamp](https://github.com/appchamp), 61 documents saved on the contributor's own Business Checking account** ([#168](https://github.com/rheeloaded/paperpull/pull/168)). The list the Documents and Statements page asks for itself, heard as it answers, and each PDF asked for by its own id from inside the page, nothing clicked. One account a run, the one the page shows. Personal Checking and Savings are untested. American Express cards are the `amex` app |
@@ -925,11 +925,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ **Ninety-three** apps have automated tests, including eighty-four supported
-  providers, five waiting for a tester and four first shells. Most are in regular
-  use by the author. The rest were built or confirmed by people who hold those
-  accounts, named in the table above and in [Thanks](#thanks).
-- ✅ All **ninety-two** apps pass their tests, the eighty-three that are
+- ✅ All **ninety-three** apps pass their tests, the eighty-four that are
   supported, the five still waiting for a tester and the Scalable Capital,
   Consorsbank, CIBC and MBNA shells, 40,590 of them
   across the repo. Most are in regular use by the author. The rest were built or

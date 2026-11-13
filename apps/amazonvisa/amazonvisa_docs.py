@@ -11,7 +11,7 @@ Usage:
     python amazonvisa_docs.py --dry-run     plan filenames, save nothing
 
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
-         --max-docs N  --type Statement|"Tax Document"|Message|...
+         --max-docs N  --type "Credit Card Statement"|"Contract Information"|...
 
 READ-ONLY. Reads the Amazon Visa card statements and documents that the
 signed-in portal makes available, and saves existing PDFs locally. All
@@ -1112,7 +1112,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--start-date")
     ap.add_argument("--end-date")
     ap.add_argument("--max-docs", type=int)
-    ap.add_argument("--type", help="Statement or 'Tax Document'")
+    ap.add_argument("--type", help="'Credit Card Statement', 'Contract Information' or another kind")
     ap.add_argument("--yes", action="store_true", help="skip the --all confirmation")
     ap.add_argument("--redownload", action="store_true",
                     help="re-download everything in scope, ignoring the "
