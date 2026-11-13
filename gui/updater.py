@@ -1081,14 +1081,14 @@ def remove_kept_installers(temp: Optional[Path] = None) -> None:
     the temp folder, and any folder holding anything else, is left as it is."""
     temp = Path(temp or tempfile.gettempdir())
     try:
-        entries = list(os.scandir(temp))
+        entries = sorted(os.scandir(temp), key=lambda e: e.name)
     except OSError:
         return
     for entry in entries:
         if not (_WORK.match(entry.name) and entry.is_dir(follow_symlinks=False) and _not_a_link(entry)):
             continue
         try:
-            inside = list(os.scandir(entry.path))
+            inside = sorted(os.scandir(entry.path), key=lambda f: f.name)
         except OSError:
             continue
         if not all(_WORK_FILE.match(f.name) and f.is_file(follow_symlinks=False) and _not_a_link(f)
