@@ -149,7 +149,9 @@ def is_safe_control(name: str) -> bool:
 class SessionExpired(Exception):
     """American Express answered the list or a PDF as a session it no
     longer holds, a 401 or a 403, or a redirect where an answer was asked
-    for. Every request after it would get the same, so the run stops."""
+    for. Every request after it would get the same, so the run stops. A PDF
+    refused that way stops it only when the list, read again, does not
+    answer either (App.download_one)."""
 
 
 # ---------------------------------------------------------------------------
@@ -650,8 +652,9 @@ def amexbanking_download(page, doc: RawDoc, out_path: Path,
                          session: Optional[BankingSession] = None, **kw) -> bool:
     """Save the PDF of `doc`, asked for by its own id with the token of the
     account its list was asked for. A document with either missing is not
-    asked for. A 401, a 403 or a redirect raises SessionExpired. A PDF whose
-    bytes are those of another document saved this run is not written."""
+    asked for. A 401, a 403 or a redirect raises SessionExpired, which the
+    caller weighs against the list read again. A PDF whose bytes are those
+    of another document saved this run is not written."""
     session = session or SESSION
     doc_id = getattr(doc, "document_id", "") or ""
     token = getattr(doc, "account_token", "") or ""

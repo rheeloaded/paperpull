@@ -87,9 +87,15 @@ bot checks.
 - **A list that answers with no documents** is what a new account shows, and
   a list that did not load can look the same, so it is not noted as read
   whole, and the run does not stop for it.
-- **Signed out.** A list or a PDF that American Express answers with a 401,
-  a 403 or a redirect stops the run once, with nothing recorded against the
-  document it was on. Sign in again and press Resume.
+- **Signed out.** A list that American Express answers with a 401, a 403 or
+  a redirect stops the run once, with nothing recorded against the document
+  it was on. Sign in again and press Resume.
+- **One document refused.** A PDF answered with a 401, a 403 or a redirect
+  has the list read again. A list refused too, or one that does not answer,
+  stops the run as signed out, and a list of another account stops it as
+  Discover does. A list that still answers leaves that document failed with
+  nothing saved, the run goes on, and the next run tries it again. The
+  document is never asked for twice.
 - **A document is done by its own record.** A PDF already in the folder with
   the same date is never taken for a document, since it may be another
   account's statement of that month.

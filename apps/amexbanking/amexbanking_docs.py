@@ -597,9 +597,10 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except site.SessionExpired:
-                # American Express answered a document as a signed-out
-                # session. Every document after it would get the same, so the
-                # run stops here, with nothing recorded against this one.
+                # The documents list, read again after a document was
+                # refused, answered as a signed-out session. Every document
+                # after it would get the same, so the run stops here, with
+                # nothing recorded against this one.
                 self.session_ended()
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
@@ -607,10 +608,26 @@ class App:
                 self.stats["failed"] += 1
             self._delay()
 
+    def _read_the_list_again(self, page) -> None:
+        """Documents and Statements loaded again after one document was
+        refused, and its list read the way Discover reads it. A list refused
+        raises SessionExpired, which the loop stops the run on. A page that
+        looks signed out, or a list that does not answer as a list, stops the
+        run as signed out here, and a list of another account than the
+        records hold stops it as Discover does. Returns only when the list
+        answers for this config's account."""
+        if not site.goto_documents(page):
+            self.session_ended()
+        raw = site.collect_documents(page)
+        if raw is None or not site.answers_its_list(page):
+            self.session_ended()
+        self._stop_if_another_account(raw)
+
     def download_one(self, page, doc: Document, filename: str):
         """Download one document's PDF straight to its final path, asked for
         by the document's own id and its own account's token, never by its
-        place in the list."""
+        place in the list. A document refused as a signed-out session fails
+        alone when the list, read again, still answers."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
@@ -623,12 +640,25 @@ class App:
             title=doc.title, date_text=doc.date, href=doc.href,
             category=doc.category, tag=doc.document_id, document_id=doc.document_id,
             account=doc.account, account_token=doc.account_token)
-        saved = site.amexbanking_download(page, raw_doc, out_path)
+        refused = False
+        try:
+            saved = site.amexbanking_download(page, raw_doc, out_path)
+        except site.SessionExpired:
+            # A refusal may be the session ending or this one document. The
+            # list is read again the way Discover reads it, and a session
+            # that ended shows there and stops the run. A list that still
+            # answers for this account leaves this document failed alone,
+            # so it never stops every later run at the same document. It is
+            # not asked for a second time.
+            self._read_the_list_again(page)
+            log.info("the document dated %s was refused while the list still reads", doc.date)
+            saved, refused = False, True
         if not saved:
             # Nothing was saved, so nothing is in Manual Review. A failure,
             # which the next run tries again (#152).
             self._record(doc, State.FAILED,
-                         notes="Could not capture the document PDF (see the log)")
+                         notes=("Refused by American Express while its documents list still reads"
+                                if refused else "Could not capture the document PDF (see the log)"))
             self._write_row(doc, "Capture failed", State.FAILED.value)
             self.write_failure('capture the document', 'the document would not render')
             self.stats["failed"] += 1

@@ -180,6 +180,11 @@ ITS_OWN = {
         "or a list that stops shows there and reaches the run, and a list that still "
         "reads leaves the refusal that bill's alone, so one bill Ziply will not give "
         "never stops every later run at it",
+    ("amexbanking", "download_one", ("amexbanking_download",)):
+        "a refusal of one document's PDF, after which the list is loaded again and read "
+        "as Discover reads it. A refused list reaches the run, a list that does not "
+        "answer or shows another account stops it, and a list that still answers leaves "
+        "the refusal that document's alone",
 }
 
 # A handler in a download path that turns a list stop into a stop of the run

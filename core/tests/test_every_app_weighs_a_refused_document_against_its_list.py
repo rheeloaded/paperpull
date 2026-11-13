@@ -57,7 +57,6 @@ REFUSED_STATUSES = (401, 403, "401", "403")
 # by the site function where it is read, not yet looked at. Each was seen
 # on 2026-11-12. Ziply Fiber was mended that day.
 LEFT = {
-    "amexbanking": "amexbanking_download",
     "anthem": "download_document",
     "bilt": "_take",
     "bofa": "document_bytes",
