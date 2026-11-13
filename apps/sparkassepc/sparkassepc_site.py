@@ -1,25 +1,47 @@
-"""Read the Sparkasse Pforzheim Calw Postfach and its direct PDFs."""
+"""Read the Sparkasse Pforzheim Calw Postfach and its direct PDFs.
+
+The Postfach is read in the person's own tab, folder by folder and page by
+page, as the bank's pages show it. A page is turned by pressing the page's
+own numbered pager button, the press a person makes, and it is read only
+once the page shows that page number. This app never sends a form of its
+own.
+
+A document's PDF comes from pressing the direct download link in its own
+row, the row found by its identity. That press starts the bank's own
+prepare step, and the navigation it then starts toward the bank's PDF
+service is held in the browser, so the tab stays in the Postfach. That one
+address is then asked for once from inside the tab. Whether the bank marks
+a document read when its PDF is taken has not been checked. Nothing else
+is pressed.
+"""
 from __future__ import annotations
 
 from hashlib import sha256
 import logging
+import random
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
 import re
 from typing import Optional
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 
 from paperpull_core import failure
-from paperpull_core import intake, redirects
+from paperpull_core import intake, pressing
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
-from paperpull_core.recorder import DRAWN_PASSWORD_FIELD as PASSWORD_FIELD
 from paperpull_core.urls import is_safe_url as _host_allows, join
+from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("sparkassepc_docs.site")
+
+
+def _words():
+    """This app's own words for paperpull_core.words."""
+    return _words_for("Sparkasse Pforzheim Calw", sys.modules[__name__])
 
 # Every host this app will read from. Anything else is refused.
 ALLOWED_HOSTS = ("www.sparkasse-pforzheim-calw.de",)
@@ -36,6 +58,23 @@ URLS = {
     "login": BASE + "/de/home/login-online-banking.html",
     "documents": BASE + FOLDERS["Posteingang"],
 }
+
+# The Postfach's own parts, as the contributor's account showed them.
+ROW_CSS = "form.postfach tr.postbox-message-row"
+LINK_CSS = "a.postbox-message-direct-download"
+PAGER_CSS = 'form.postfach .bpager .pagerbuttons input[type="submit"]'
+# Where the direct download's navigation goes, held in the browser.
+PDF_ROUTE = "**/services/download.service/**"
+
+# How many rows a Postfach page holds was not measured. A page with no pager
+# that holds this many rows or more stops the listing, since a pager that
+# went missing would otherwise read as the last page. A page of this run's
+# that had a next page says how many a page holds, and is used once seen.
+FULL_PAGE = 10
+
+# The steps a press stops at, for the failure file (paperpull_core.pressing).
+TURN_STEP = "turn a postfach page"
+TAKE_STEP = "take a document"
 
 
 class SessionExpired(RuntimeError):
@@ -183,7 +222,7 @@ def looks_signed_out(page) -> bool:
     if not is_safe_url(url) or any(m in url for m in LOGIN_URL_MARKERS):
         return True
     try:
-        if page.locator("input[type='password']:visible").count() > 0:
+        if page.locator("input[type='password']").count() > 0:
             return True
     except Exception:
         return True
@@ -258,7 +297,7 @@ def _page_summary(page) -> dict:
             pass
     out["controls"] = controls
     try:
-        out["password_fields"] = page.locator("input[type='password']:visible").count()
+        out["password_fields"] = page.locator("input[type='password']").count()
     except Exception:
         pass
     return out
@@ -277,11 +316,15 @@ def survey(page, dwell_ms: int = 2000) -> dict:
     return report
 
 
-def _folder(page, folder):
-    """Open the exact folder linked by the Postfach navigation."""
+def _folder(page, folder, fresh=False):
+    """Open the exact folder linked by the Postfach navigation. A tab
+    already showing it is left there, unless the list is to be read
+    `fresh`, since a page the tab drew a while ago shows the folder as it
+    was then."""
     if not is_safe_url(page.url) or looks_signed_out(page):
         raise SessionExpired("Sign in to Sparkasse Pforzheim Calw again.")
-    if urlsplit(page.url).path == FOLDERS[folder] and page.locator("form.postfach").count():
+    if (not fresh and urlsplit(page.url).path == FOLDERS[folder]
+            and page.locator("form.postfach").count()):
         return
     slug = FOLDERS[folder].rsplit("/", 1)[-1].removesuffix(".html")
     links = page.locator(f'a.nbf-guided-tour-navigation_{slug}[href^="{FOLDERS[folder]}?"]:visible')
@@ -295,18 +338,32 @@ def _folder(page, folder):
     if not is_safe_url(href) or urlsplit(href).path != FOLDERS[folder]:
         raise ListStopped("The Postfach folder address changed.")
     page.goto(href, wait_until="domcontentloaded", timeout=15000)
-    page.wait_for_url(lambda url: is_safe_url(url) and urlsplit(url).path == FOLDERS[folder],
-                      timeout=10000)
+    # A sign-in page in its place is a session that ended, never a list
+    # that stopped.
+    if looks_signed_out(page):
+        raise SessionExpired("Sign in to Sparkasse Pforzheim Calw again.")
+    if urlsplit(page.url).path != FOLDERS[folder]:
+        raise ListStopped("The Postfach folder did not open.")
     page.locator("form.postfach").wait_for(timeout=8000)
 
 
 def goto_documents(page):
+    """The Postfach in this tab, and whether it shows signed in.
+
+    A tab off the site, a blank tab of the run's own say, is sent to the
+    Postfach by its address first, as renaultbank_site.py does. The bank
+    keeps its session in a cookie that tab shares, so it is judged only
+    once it is there. A tab of the person's off the site is never handed
+    here (the app's page() and paperpull_core.tabs)."""
     try:
+        if not is_safe_url(page.url or ""):
+            page.goto(URLS["documents"], wait_until="domcontentloaded", timeout=30000)
         if looks_signed_out(page):
             return False
         if urlsplit(page.url).path not in FOLDERS.values():
             page.goto(URLS["documents"], wait_until="domcontentloaded", timeout=15000)
-        return is_safe_url(page.url) and page.locator("form.postfach").count() == 1
+        return (is_safe_url(page.url) and not looks_signed_out(page)
+                and page.locator("form.postfach").count() == 1)
     except Exception:
         return False
 
@@ -316,7 +373,13 @@ def ensure_statements(page):
 
 
 def answers_its_list(page):
-    return bool(_read_page(page))
+    """Whether the Postfach answers with its list now. The folder the tab
+    shows is asked for afresh by its address, since a page the tab drew
+    before says nothing of the session now. A sign-in page in its place
+    raises SessionExpired and a list that will not read ListStopped."""
+    path = urlsplit(page.url or "").path
+    folder = next((name for name, known in FOLDERS.items() if known == path), "Posteingang")
+    return bool(_list_answers(page, folder))
 
 
 _LIST_JS = r"""
@@ -324,117 +387,248 @@ _LIST_JS = r"""
   const form = document.querySelector("form.postfach");
   if (!form) return null;
   const pager = form.querySelector(".bpager");
-  const active = pager?.querySelector(".active input");
-  const next = pager?.querySelector(".next input:enabled");
+  const value = (input) => input ? input.getAttribute("value") : null;
+  const actives = pager ? [...pager.querySelectorAll(".active input")] : [];
+  const nexts = pager ? [...pager.querySelectorAll(".next input:enabled")] : [];
+  const offered = pager ? [...pager.querySelectorAll('.pagerbuttons input[type="submit"]:enabled')]
+    .map(value) : [];
   const period = form.querySelector(".select-time select");
   const search = form.querySelector("input.mkp-input-with-icon");
   const rows = [...form.querySelectorAll("tr.postbox-message-row")].map((row, index) => {
-    const link = row.querySelector("a.postbox-message-direct-download");
-    const title = link?.getAttribute("title") || link?.textContent.trim();
-    const identity = row.querySelector('input[type="checkbox"]')?.value;
-    return {index, title, identity, date: row.cells[3]?.textContent.trim(),
-            downloadable: Boolean(link), unread: row.classList.contains("tablerowmarked")};
+    const links = row.querySelectorAll("a.postbox-message-direct-download");
+    const link = links[0];
+    const box = row.querySelector('input[type="checkbox"]');
+    return {index, links: links.length,
+            title: link ? (link.getAttribute("title") || link.textContent || "").trim() : "",
+            identity: box ? box.getAttribute("value") : null,
+            date: row.cells[3] ? row.cells[3].textContent.trim() : "",
+            unread: row.classList.contains("tablerowmarked")};
   });
-  return {rows, number: Number(active?.value || 1), next: Number(next?.value || 0),
+  return {rows, pager: Boolean(pager), actives: actives.length, active: value(actives[0]),
+          nexts: nexts.length, next: value(nexts[0]), offered,
           filtered: Boolean(search?.value.trim() || (period &&
               period.selectedOptions[0]?.text.trim() !== "Gesamtzeitraum")),
           failed: Boolean(form.querySelector(".failure-msg, .error-msg"))};
 }
 """
 
+_NUMBER = re.compile(r"[1-9]\d{0,2}")
+
+# How long a page is given to show what a press or an address asked for.
+SETTLE_SECONDS = 20
+
+
+def _row_shape(row):
+    """One row as the list read it, held to the shape this app reads. A row
+    with no direct download is kept and counted, never read as nothing
+    there. A row with more than one, or a downloadable row with no identity,
+    and any row whose unread mark is not read, stop the listing."""
+    if not isinstance(row, dict) or not isinstance(row.get("links"), int):
+        raise ListStopped("A Postfach row cannot be read.")
+    if row["links"] > 1:
+        raise ListStopped("A Postfach row offers more than one direct download.")
+    if not isinstance(row.get("unread"), bool):
+        raise ListStopped("A Postfach row's unread mark cannot be read.")
+    downloadable = row["links"] == 1
+    token = row.get("identity")
+    if downloadable and (not isinstance(token, str) or not token or len(token) > 2048):
+        raise ListStopped("A listed PDF has no document identity.")
+    return dict(row, downloadable=downloadable)
+
 
 def _read_page(page):
+    """The Postfach page the tab shows, whole or not at all.
+
+    Its rows, its page number and the page after it as the pager says them,
+    and the numbers the pager offers to press. A pager that shows no page
+    number this can read stops the listing. A page with no pager reads as
+    page 1 with no page after it, which only a short page may be
+    (_collect)."""
     if not is_safe_url(page.url) or looks_signed_out(page):
         raise SessionExpired("Sign in to Sparkasse Pforzheim Calw again.")
     if urlsplit(page.url).path not in FOLDERS.values():
         raise ListStopped("The browser left the Postfach.")
     result = page.evaluate(_LIST_JS)
-    if not result or result.get("failed") or not isinstance(result.get("rows"), list):
+    if not isinstance(result, dict) or result.get("failed") or not isinstance(result.get("rows"), list):
         raise ListStopped("The Postfach list is missing.")
-    if result["filtered"]:
+    if result.get("filtered"):
         raise ListStopped("Clear the Postfach search and select Gesamtzeitraum before running.")
-    return result
+    rows = [_row_shape(row) for row in result["rows"]]
+    if not result.get("pager"):
+        return {"rows": rows, "pager": False, "number": 1, "next": 0, "offered": set()}
+    active = result.get("active")
+    if result.get("actives") != 1 or not isinstance(active, str) or not _NUMBER.fullmatch(active):
+        raise ListStopped("The Postfach's active page number cannot be read.")
+    following = result.get("next")
+    if result.get("nexts") not in (0, 1) or (result.get("nexts") and not (
+            isinstance(following, str) and _NUMBER.fullmatch(following))):
+        raise ListStopped("The Postfach's next page number cannot be read.")
+    offered = {int(v) for v in result.get("offered") or ()
+               if isinstance(v, str) and _NUMBER.fullmatch(v)}
+    return {"rows": rows, "pager": True, "number": int(active),
+            "next": int(following) if result.get("nexts") else 0, "offered": offered}
 
 
-_PAGE_FORM = r"""
+def _settled(page, target=None):
+    """The page once it reads, and reads the same twice running, with the
+    page number `target` when one is given. A page still changing, between
+    a press and the bank's answer, is read again until it holds still. When
+    it never does within SETTLE_SECONDS, the last reason it would not read
+    stops it."""
+    deadline = time.monotonic() + SETTLE_SECONDS
+    last, why = None, ListStopped("The Postfach did not reach the requested page.")
+    while True:
+        try:
+            now = _read_page(page)
+            if target is not None and not (now["pager"] and now["number"] == target):
+                now = None
+                why = ListStopped("The Postfach did not reach the requested page.")
+        except (SessionExpired, ListStopped) as e:
+            now, why = None, e
+        except Exception:
+            now, why = None, ListStopped("The Postfach page did not finish loading.")
+        if now is not None and last is not None and _same(now, last):
+            return now
+        last = now
+        if time.monotonic() >= deadline:
+            raise why
+        try:
+            page.wait_for_timeout(250)
+        except Exception:
+            pass
+
+
+def _same(one, other):
+    return ((one["number"], one["next"], one["pager"]) == (other["number"], other["next"], other["pager"])
+            and [r.get("identity") for r in one["rows"]] == [r.get("identity") for r in other["rows"]])
+
+
+_PAGER_JS = r"""
 (target) => {
   const form = document.querySelector("form.postfach");
-  const pager = form?.querySelector(".bpager .pagerbuttons");
-  const controls = [...(pager?.querySelectorAll('input[type="submit"]:enabled') || [])];
-  const selected = controls.filter(input => input.value === String(target));
-  if (selected.length !== 1 || selected[0].form !== form ||
-      form.querySelector('input[type="checkbox"]:checked') ||
-      form.method !== "post" || form.enctype !== "application/x-www-form-urlencoded")
-    return null;
-  return {action: form.action, body: new URLSearchParams(new FormData(form, selected[0])).toString()};
+  if (!form) return {why: "no form"};
+  const found = [...form.querySelectorAll('.bpager .pagerbuttons input[type="submit"]:enabled')]
+    .filter(input => input.getAttribute("value") === String(target));
+  if (found.length !== 1) return {why: "not one button"};
+  const button = found[0];
+  if (button.form !== form) return {why: "another form"};
+  if (["formaction", "formmethod", "formtarget", "formenctype"].some(name => button.hasAttribute(name)))
+    return {why: "a target of its own"};
+  const window_ = form.getAttribute("target");
+  if (window_ && window_ !== "_self") return {why: "another window"};
+  if (form.querySelector('input[type="checkbox"]:checked')) return {why: "rows selected"};
+  return {why: "", action: new URL(form.getAttribute("action") || location.href, location.href).href};
 }
 """
 
 
-def _turn(page, target):
-    """Submit only the observed numeric pager action of the Postfach form."""
+def _pause(config=None):
+    """The config's own pause between two page turns, as between documents."""
+    config = config or {}
+    try:
+        low = max(0.0, float(config.get("delay_min_seconds", 2.5)))
+        high = max(low, float(config.get("delay_max_seconds", 5.0)))
+    except (TypeError, ValueError):
+        low, high = 2.5, 5.0
+    if high > 0:
+        time.sleep(random.uniform(low, high))
+
+
+def _turn(page, target, config=None):
+    """Press the Postfach's own numbered pager button for `target`, the press
+    a person makes, and answer the page once it shows that page number.
+
+    The button is the one enabled submit button of the Postfach form's pager
+    whose value is that number, and digits are all a pager button may say
+    (is_safe_control). Its form has to send to the folder's own address and
+    stay in this tab, with no row ticked, since a ticked row would go with
+    the press. Nothing else of the form is touched, and the page itself
+    sends what its press sends."""
     path = urlsplit(page.url).path
     if path not in FOLDERS.values() or not is_safe_url(page.url) or not is_safe_control(str(target)):
         raise ListStopped("The Postfach page control is outside the mailbox.")
-    form = page.evaluate(_PAGE_FORM, target)
-    if not form:
-        raise ListStopped("The Postfach page control is missing or ambiguous. Clear any selections.")
-    parts = urlsplit(form["action"])
-    if not is_safe_url(form["action"]) or parts.path != path or parts.fragment:
+    found = page.evaluate(_PAGER_JS, target)
+    if not isinstance(found, dict) or found.get("why") != "":
+        raise ListStopped("The Postfach page control is missing or ambiguous. "
+                          "Clear any selected rows in the Postfach.")
+    action = str(found.get("action") or "")
+    parts = urlsplit(action)
+    if not is_safe_url(action) or parts.path != path or parts.fragment:
         raise ListStopped("The Postfach paging address changed.")
-    endpoint = urlunsplit(parts._replace(path=path.removesuffix(".html") + ".ajstep.html"))
-    destination = BASE + path.removesuffix(".html") + ".ajstep.html"
-    answer = redirects.post_to_listing(
-        page.request, endpoint, destination, is_safe_url, data=form["body"], timeout=12000,
-        headers={"Content-Type": "application/x-www-form-urlencoded",
-                 "X-Requested-With": "XMLHttpRequest"})
-    try:
-        if not answer.ok or answer.url != destination:
-            raise ListStopped("The Postfach did not return the requested page.")
-    finally:
-        answer.dispose()
-    page.goto(BASE + path, wait_until="domcontentloaded", timeout=15000)
-    result = _read_page(page)
-    if result["number"] != target:
-        raise ListStopped("The Postfach did not reach the requested page.")
-    return result
+    button = page.locator('%s[value="%d"]:enabled' % (PAGER_CSS, target))
+    if button.count() != 1:
+        raise ListStopped("The Postfach page control is missing or ambiguous.")
+    _pause(config)
+    pressing.click(page, button, css=pressing.BUTTONS, words=_words(), step=TURN_STEP,
+                   what="the Postfach's page %d button" % target)
+    return _settled(page, target)
 
 
-def _rewind(page, result):
-    while result["number"] > 1:
-        # Use the numbered first page when the pager currently offers it.
-        first = page.locator('form.postfach .bpager .pagerbuttons input[type="submit"][value="1"]:enabled:visible')
-        result = _turn(page, 1 if first.count() == 1 else result["number"] - 1)
-    return result
+def _goto_page(page, listed, target, config=None):
+    """Turn the folder to page `target` from the page it shows, by the
+    pager's own numbered buttons, the one for `target` when the pager
+    offers it and otherwise the nearest one toward it. A folder already on
+    that page is not turned at all."""
+    for _ in range(500):
+        if listed["number"] == target:
+            return listed
+        if not listed["pager"]:
+            raise ListStopped("The Postfach pager is missing.")
+        number, offered = listed["number"], listed["offered"]
+        if target in offered:
+            step = target
+        elif target > number:
+            step = max((n for n in offered if number < n < target), default=0)
+        else:
+            step = min((n for n in offered if target < n < number), default=0)
+        if not step:
+            raise ListStopped("The Postfach pager does not offer the page.")
+        listed = _turn(page, step, config)
+    raise ListStopped("The Postfach reached the page limit.")
 
 
 _cache = None
 _summary = {}
 
 
-def _collect(page):
+def _collect(page, config=None):
+    """Every downloadable row of every folder, read page by page from page 1.
+
+    A part of the list that is missing stops it, never reads as nothing
+    there. That is a pager missing from a full page, a page number that
+    cannot be read or that skips, and a row shape with no direct download
+    link anywhere while rows are listed. A folder of one short page with no
+    pager is listed as it is."""
     global _summary
     rows = []
-    skipped = 0
+    listed = skipped = 0
+    full = 0
     for folder in FOLDERS:
-        _folder(page, folder)
-        result = _rewind(page, _read_page(page))
+        _folder(page, folder, fresh=True)
+        result = _goto_page(page, _settled(page), 1, config)
+        expected = 1
         while True:
             number = result["number"]
-            if number < 1 or number > 500:
-                raise ListStopped("The Postfach reached the page limit.")
+            if number != expected or number > 500:
+                raise ListStopped("The Postfach page sequence changed.")
+            if not result["pager"] and len(result["rows"]) >= (full or FULL_PAGE):
+                raise ListStopped("The Postfach shows a full page with no pager.")
             for row in result["rows"]:
+                listed += 1
                 if not row["downloadable"]:
                     skipped += 1
                     continue
-                row.update(folder=folder, number=number)
-                rows.append(_normalize(row))
+                rows.append(_normalize(dict(row, folder=folder, number=number)))
             target = result["next"]
             if not target:
                 break
             if target != number + 1:
                 raise ListStopped("The Postfach page sequence changed.")
-            result = _turn(page, target)
+            full = max(full, len(result["rows"]))
+            result = _turn(page, target, config)
+            expected = target
+    if listed and not rows:
+        raise ListStopped("No Postfach row offers a direct download, so the rows have changed.")
     unique = {}
     for row in rows:
         key = row["item_id"]
@@ -450,13 +644,17 @@ def listed_rows(page, config=None, fresh=False):
     if fresh or not _cache or _cache[0] is not page:
         try:
             page.bring_to_front()
-            _cache = (page, _collect(page))
+            _cache = (page, _collect(page, config))
         except (SessionExpired, ListStopped):
             raise
         except Exception:
             raise ListStopped("The Postfach listing did not finish.") from None
     wanted = set((config or {}).get("document_types") or storage_categories())
     return [dict(row) for row in _cache[1] if row["category"] in wanted]
+
+
+def _digest(token):
+    return sha256(str(token).encode("utf-8")).hexdigest()
 
 
 def _normalize(row):
@@ -473,75 +671,147 @@ def _normalize(row):
     token = row.get("identity")
     if not isinstance(token, str) or not token or len(token) > 2048:
         raise ListStopped("A listed PDF has no document identity.")
-    identity = sha256(token.encode("utf-8")).hexdigest()
     return {"title": title, "date": date, "account": "Konto " + tail if tail else "",
-            "category": classify("", title), "item_id": identity, "client_id": "",
+            "category": classify("", title), "item_id": _digest(token), "client_id": "",
             "href": BASE + FOLDERS[row["folder"]], "folder": row["folder"],
             "number": row["number"], "index": row["index"]}
 
 
-def _take_pdf(page, row):
+def _css_string(text):
+    """`text` as a quoted CSS string, every quote and backslash escaped."""
+    out = []
+    for ch in text:
+        if ch in '"\\':
+            out.append("\\" + ch)
+        elif ord(ch) < 0x20 or ord(ch) == 0x7f:
+            out.append("\\%x " % ord(ch))
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
+def _take_pdf(page, row, config=None):
+    """The PDF of one listed row, from pressing that row's own direct
+    download link.
+
+    The folder is turned to the row's page from where it stands, and the
+    row is found there by its identity and has to be the document listed.
+    The press is held to the control itself, never to the subject it shows,
+    which is the document's own words. It is the one direct download link
+    of that row, by its class, and its address is the folder's own. The
+    navigation it starts toward the PDF service is held in the browser, and
+    that one address is then asked for once."""
     _folder(page, row["folder"])
-    listed = _read_page(page)
-    target = row["number"]
-    if target < listed["number"]:
-        listed = _rewind(page, listed)
-    while listed["number"] != target:
-        listed = _turn(page, listed["number"] + 1)
+    listed = _goto_page(page, _settled(page), row["number"], config)
     page.bring_to_front()
     page.wait_for_load_state("load", timeout=15000)
-    i = row["index"]
-    if i >= len(listed["rows"]):
+    mine = [r for r in listed["rows"] if r["downloadable"] and _digest(r["identity"]) == row["item_id"]]
+    if len(mine) != 1:
         raise ListStopped("The document moved since the Postfach was listed.")
-    current = listed["rows"][i]
-    if not current["downloadable"]:
-        raise ListStopped("The listed document no longer has its download link.")
-    current.update(folder=row["folder"], number=target)
-    matching = _normalize(current)
+    current = mine[0]
+    matching = _normalize(dict(current, folder=row["folder"], number=row["number"]))
     if any(matching[k] != row[k] for k in ("item_id", "title", "date", "account", "category")):
         raise ListStopped("The document moved since the Postfach was listed.")
-    link = page.locator("form.postfach tr.postbox-message-row").nth(i).locator(
-        "a.postbox-message-direct-download:visible")
-    if link.count() != 1 or not is_safe_control(link.get_attribute("title")):
-        raise NoFile("The direct download control changed.")
+    own = page.locator(ROW_CSS).filter(
+        has=page.locator('input[type="checkbox"][value=%s]' % _css_string(current["identity"])))
+    if own.count() != 1:
+        raise ListStopped("The document moved since the Postfach was listed.")
+    link = own.locator(LINK_CSS)
+    if link.count() != 1:
+        raise NoFile("The row's direct download link is not one link.")
     href = join(page.url, link.get_attribute("href") or "")
-    if not is_safe_url(href) or urlsplit(href).path != FOLDERS[row["folder"]]:
+    if not href or not is_safe_url(href) or urlsplit(href).path != FOLDERS[row["folder"]]:
         raise NoFile("The direct download link is outside the Postfach.")
 
-    # The portal prepares a download, then navigates to its PDF service.
-    # Hold that request with a 204 so the tab stays in the Postfach.
-    downloads = []
-    route_pattern = "**/services/download.service/**"
+    # Every request toward the PDF service is held, and only a plain GET of
+    # a PDF's own address is noted. Aborted, never answered with an empty
+    # page, since a navigation answered with nothing leaves Playwright
+    # waiting for it to finish.
+    held = []
 
-    def hold_pdf(route):
-        if is_safe_url(route.request.url) and _pdf_path(route.request.url) and route.request.method == "GET":
-            downloads.append(route.request.url)
-        route.fulfill(status=204)
+    def hold(route):
+        request = route.request
+        if request.method == "GET" and is_safe_url(request.url) and _pdf_path(request.url):
+            held.append(request.url)
+        route.abort("aborted")
 
-    page.route(route_pattern, hold_pdf)
+    page.route(PDF_ROUTE, hold)
     try:
-        link.click(timeout=8000, no_wait_after=True)
+        pressing.click(page, link, css=LINK_CSS, words=_words(), step=TAKE_STEP,
+                       what="the direct download link of the document of %s" % row["date"])
         deadline = time.monotonic() + 15
-        while not downloads and time.monotonic() < deadline:
+        while not held and time.monotonic() < deadline:
             page.wait_for_timeout(150)
+        page.wait_for_timeout(300)
     finally:
-        page.unroute(route_pattern, hold_pdf)
-    if len(downloads) != 1:
+        page.unroute(PDF_ROUTE, hold)
+    if len(held) != 1:
         raise NoFile("The direct download did not give exactly one PDF.")
-    after = _read_page(page)
-    if (after["number"] != target or i >= len(after["rows"]) or
-            after["rows"][i]["unread"] != current["unread"] or
-            after["rows"][i]["identity"] != current["identity"] or
-            after["rows"][i]["title"] != current["title"]):
-        raise ListStopped("The Postfach row changed during the download.")
-    response = page.request.get(downloads[0], max_redirects=0, timeout=30000)
-    if not response.ok:
-        response.dispose()
-        raise NoFile("The Postfach PDF service did not give the file.")
+    _note_unread(page, current)
     try:
-        return intake.body(response)
-    finally:
-        response.dispose()
+        result = intake.evaluate(page, _FETCH_JS, held[0])
+    except intake.TooLarge:
+        raise
+    except Exception:
+        raise NoFile("The Postfach PDF request did not finish.") from None
+    if not isinstance(result, dict) or not result.get("ok"):
+        raise NoFile("The Postfach PDF service did not give the file.")
+    return intake.decode(result.get("data"), validate=True)
+
+
+# The PDF the held navigation was going to, asked for once from inside the
+# tab, the way its own navigation would have asked, with no redirect
+# followed. Only the bank's PDF service on its own host is asked, and only
+# PDF bytes leave the page, never what the bank said.
+_FETCH_JS = r"""
+async (url) => {
+  const origin = "https://www.sparkasse-pforzheim-calw.de";
+  const target = new URL(url, origin);
+  if (location.origin !== origin || target.origin !== origin || target.search || target.hash ||
+      target.username || target.password ||
+      !/^\/services\/download\.service\/sk-pforzheim-calw\/[A-Za-z0-9_-]+\/[^/]+\.pdf$/i.test(target.pathname))
+    return {ok: false, error: "refused request outside the PDF service"};
+  const timer = new AbortController();
+  const limit = setTimeout(() => timer.abort(), 30000);
+  try {
+    const response = await fetch(target.href, {method: "GET", credentials: "same-origin",
+      mode: "same-origin", redirect: "error", signal: timer.signal});
+    if (!response.ok) return {ok: false, error: "PDF service returned HTTP " + response.status};
+    const bytes = await ppRead(response);
+    let binary = "";
+    for (let n = 0; n < bytes.length; n += 32768) binary += String.fromCharCode(...bytes.subarray(n, n + 32768));
+    return {ok: true, data: btoa(binary)};
+  } catch (error) {
+    if (ppRefused(error)) throw error;
+    return {ok: false, error: "PDF request failed"};
+  } finally { clearTimeout(limit); }
+}
+"""
+
+
+def _note_unread(page, before):
+    """Whether the row's unread mark changed with its download, to the log
+    alone. Nobody has measured whether the bank marks a document read when
+    its PDF is taken, and a change never stops the run."""
+    try:
+        after = [r for r in _read_page(page)["rows"] if r.get("identity") == before["identity"]]
+    except Exception:
+        return
+    if len(after) == 1 and after[0]["unread"] != before["unread"]:
+        log.info("a Postfach row's unread mark changed with its download")
+
+
+def _list_answers(page, folder):
+    """The folder's list, asked for afresh by its address, which proves the
+    session still holds after a document gave no PDF. A sign-in page in its
+    place raises SessionExpired, and a list that will not read ListStopped.
+    The bank keeps the folder on the page it was turned to, so only that page
+    is read. Reading every page again here would press through the whole
+    Postfach for each such document."""
+    if not is_safe_url(page.url or ""):
+        raise SessionExpired("Open the signed-in Sparkasse Pforzheim Calw tab.")
+    page.goto(BASE + FOLDERS[folder], wait_until="domcontentloaded", timeout=15000)
+    return _settled(page)
 
 
 def _pdf_path(url):
@@ -635,23 +905,25 @@ def download_document(page, title, date, out_path, occurrence=0, item_hint="",
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins, config=config)
     try:
-        data = _take_pdf(page, row)
+        data = _take_pdf(page, row, config)
         why = "" if data.startswith(b"%PDF-") else "not a PDF (%d bytes)" % len(data)
     except (SessionExpired, ListStopped):
         raise
     except Exception as e:
         # By its type and kind, since what an answer or an error says can
-        # carry the bank's words.
+        # carry the bank's words. A stop at a press is no Exception and
+        # goes on to the run (paperpull_core.pressing).
         why = "%s, %s" % (type(e).__name__, failure.error_kind(e))
     if why:
         log.warning("no PDF for one %s of %s: %s", category, date, why)
         # A sign-in page served in place of the PDF, or a redirect to one,
         # says nothing this app can tell from a file the bank will not give.
-        # The list is the proof, so it is read again here, and an answer as
-        # signed out (SessionExpired) or a list that stops (ListStopped) ends
-        # the run with nothing recorded against this document. Only a list
-        # that still answers makes this one document's failure.
-        listed_rows(page, config, fresh=True)
+        # The list is the proof, so the folder's list is asked for again
+        # here, and an answer as signed out (SessionExpired) or a list that
+        # stops (ListStopped) ends the run with nothing recorded against this
+        # document. Only a list that still answers makes this one document's
+        # failure.
+        _list_answers(page, row["folder"])
         return ""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

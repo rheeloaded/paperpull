@@ -13,13 +13,24 @@ Usage:
 Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
          --max-docs N  --type Statement|"Tax Document"|Message|...
 
-Reads existing documents in the signed-in Sparkasse Postfach. Uses
-PaperPull's shared document workflow for identity, progress and indexing.
+READ-ONLY: this tool only reads the Sparkasse Pforzheim Calw Postfach,
+its Posteingang, Gesendet and Papierkorb folders, and downloads PDFs the
+bank already holds. It never moves money, never changes an account or a
+setting, and presses only the Postfach's own numbered page buttons and a
+document row's own direct download link. Whether the bank marks a document
+read when its PDF is taken has not been checked. Everything stays on this
+machine. Nothing is sent to any external service.
+
+Uses DKB's orchestration for identity, progress, indexing and recovery
+(apps/dkb/dkb_docs.py), by way of Renault Bank direkt's copy. The Postfach
+is read in sparkassepc_site.py, mapped on the contributor's own account
+(#175, #216).
 """
 from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import pressing
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core import tabs
@@ -640,7 +651,8 @@ class App:
 
         The document's own row is found again in a recent listing, by its
         title, date and account and the number Discover gave it, and its
-        PDF is asked for by that row's id. Nothing is pressed.
+        PDF comes from pressing that row's own direct download link, the
+        row found on its page by its identity (site._take_pdf).
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
@@ -653,9 +665,10 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Each PDF comes back from the Postfach download call, made
-        # from inside the page. Nothing is clicked. The document is looked
-        # up again by kind, account and date first.
+        # Each PDF comes from pressing the row's own direct download link in
+        # this tab, after turning its folder to its page with the pager's
+        # own buttons. Nothing else is pressed. The document is looked up
+        # again by kind, account and date first.
         if not site.ensure_statements(page):
             self.check_session(page)
             site.ensure_statements(page)
@@ -914,7 +927,7 @@ class App:
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None) -> None:
+                      postmortem: dict = None, extra: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
         Written without anybody having to know to ask for it, because a
@@ -923,10 +936,14 @@ class App:
 
         One per run. A run where thirty documents fail for one reason
         does not need thirty files, and the first is taken while the page
-        is still sitting on the thing that broke."""
+        is still sitting on the thing that broke. `extra` holds only our
+        own words, counts and yes or no, such as a press's stop's facts."""
         if self.stats.get("failure_files"):
             return
-        extra = {"postmortem": postmortem} if postmortem else None
+        extra = dict(extra or {})
+        if postmortem:
+            extra["postmortem"] = postmortem
+        extra = extra or None
         # A checkpoint at the moment it gave up. It is also what makes the
         # journal when nothing had written to it yet, and every tester file
         # sent in on 2026-09-25 came back without one for that reason.
@@ -990,12 +1007,13 @@ class App:
             info["challenge"] = site.detect_security_challenge(page)
             info["mapped"] = not getattr(site, "NOT_MAPPED", "")
             # The survey stays, for the day the site changes. Read only,
-            # www.sparkasse-pforzheim-calw.de pages only, the only links it follows are the few whose
-            # text is exactly a document word, account numbers
-            # are masked and JSON bodies are recorded as shape only.
+            # www.sparkasse-pforzheim-calw.de pages only, it follows and
+            # presses nothing, and account numbers are masked. The listing
+            # after it turns the Postfach's pages with the pager's own
+            # numbered buttons, as a run does, and downloads nothing.
             info["survey"] = site.survey(page)
             try:
-                docs = site.collect_documents(page)
+                docs = site.collect_documents(page, config=self.config)
             except Exception as e:
                 # This read `except site.NotMapped`, a name no module in
                 # this repository defines. An except clause is evaluated
@@ -1158,6 +1176,11 @@ def main(argv=None):
         else:
             build_parser().print_help()
             return 0
+    except pressing.Stop as stop:
+        # Something over a pager button or a direct download link, or a
+        # press that did not go through, stops the run here, with the
+        # reason said and the failure file written.
+        pressing.stop_run(app, stop)
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
         return 130

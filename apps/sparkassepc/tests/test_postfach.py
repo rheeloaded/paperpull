@@ -34,38 +34,27 @@ def test_download_service_path_is_specific(path):
 
 
 def test_incomplete_paging_never_returns_a_partial_list(monkeypatch):
-    monkeypatch.setattr(site, "_folder", lambda *args: None)
-    monkeypatch.setattr(site, "_read_page", lambda page: {"number": 1, "rows": [], "next": 3})
+    monkeypatch.setattr(site, "_folder", lambda *args, **kwargs: None)
+    monkeypatch.setattr(site, "_settled", lambda page, target=None: {
+        "number": 1, "rows": [], "next": 3, "pager": True, "offered": {2, 3}})
     with pytest.raises(site.ListStopped):
         site._collect(object())
 
 
-@pytest.mark.parametrize("location, followed", [
-    ("/listing", True),
-    ("https://example.invalid/listing", False),
-    ("/another-action", False),
-])
-def test_paging_follows_only_its_exact_redirect(location, followed):
-    from types import SimpleNamespace
+@pytest.mark.parametrize("number", ["1", "2", "12", "999"])
+def test_a_pager_number_passes_the_control_guard(number):
+    assert site.is_safe_control(number)
 
-    requests = []
-    first = SimpleNamespace(status=302, url=site.BASE + "/pager",
-                            headers={"location": location}, dispose=lambda: None)
 
-    def post(url, **kwargs):
-        requests.append(("POST", url, kwargs["max_redirects"]))
-        return first
+@pytest.mark.parametrize("number", ["0", "1000", "-1", "1 2", ""])
+def test_anything_else_a_pager_could_say_is_refused(number):
+    assert not site.is_safe_control(number)
 
-    def get(url, **kwargs):
-        requests.append(("GET", url, kwargs["max_redirects"]))
-        return object()
 
-    client = SimpleNamespace(post=post, get=get)
-    destination = site.BASE + "/listing"
-    response = site.redirects.post_to_listing(client, first.url, destination,
-                                              site.is_safe_url, data="page=2")
-    assert (response is not first) == followed
-    assert requests == [("POST", first.url, 0)] + ([("GET", destination, 0)] if followed else [])
+def test_core_has_no_post_helper_for_this_app():
+    """Paging is the page's own press, so the core never sends a form."""
+    from paperpull_core import redirects
+    assert not hasattr(redirects, "post_to_listing")
 
 
 def test_document_identity_does_not_depend_on_its_page_position():
