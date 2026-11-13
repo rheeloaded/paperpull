@@ -25,6 +25,12 @@ clicked.
 Fee invoices land in `Fee Invoices\`, tax forms in `Tax Documents\`. A
 document is identified by the id Stripe gave it.
 
+A document Stripe answers with a 401, a 403 or a redirect off
+`stripe.com` has both lists read again. Lists refused too mean you are
+signed out, and the run stops. Lists that still read leave that document
+failed with nothing saved, the run goes on to the others, and the next run
+tries it again.
+
 **What it does not cover.** Payouts, payments and balance reports are
 data exports, not documents. A 1099 can sit behind a step that asks for
 your tax ID. The app never answers that. It marks the form for manual

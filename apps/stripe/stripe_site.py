@@ -264,7 +264,9 @@ def is_safe_control(name: str) -> bool:
 
 
 class SessionExpired(RuntimeError):
-    """Stripe answered with a sign-in page instead of the thing asked for."""
+    """Stripe answered with a sign-in page instead of the thing asked for. A
+    document's file refused that way raises it only when the lists, read
+    again, are refused too (download_bill)."""
 
 
 class NeedsPerson(RuntimeError):
@@ -578,12 +580,27 @@ def _fetch_file(page, link: str) -> dict:
             "b64": base64.b64encode(body).decode() if body[:5] == b"%PDF-" else ""}
 
 
+def _still_listed(docs: list) -> list:
+    """The lists read again after one document was refused. Lists that
+    show no document at all, or never came, are no lists, since that
+    document was listed, and raise SessionExpired."""
+    if not docs:
+        raise SessionExpired("the lists read empty after a refused document")
+    return docs
+
+
 def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
                   title: str = "", document_id: str = "") -> bool:
     """Fetch one document's PDF from its own link, from inside the page, and
     write it. The link is looked up again when the one on record may have
     expired. A form with no link at all, which is how a 1099 behind a tax ID
-    step would look, raises NeedsPerson. `dl_dir` is unused."""
+    step would look, raises NeedsPerson. `dl_dir` is unused.
+
+    A file answered with a 401, a 403 or a redirect off stripe.com has the
+    lists read again, with the same calls that prove a session. Lists
+    refused too, or showing no document at all, raise SessionExpired, which
+    stops the run. Lists that still read leave the document failed alone
+    (False), and the next run tries it again."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
@@ -592,16 +609,27 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     link = link or (href if is_safe_url(href) else "")
     if not link:
         raise NeedsPerson("Stripe lists %s with no download link" % (title or "a document"))
-    r = _fetch_file(page, link)
-    if r.get("json") is not None:
-        body = r["json"] if isinstance(r["json"], dict) else {}
-        words = " ".join(str(k) for k in body).lower() + " " + str(body.get("error", "")).lower()
-        if "challenge" in words or "tin" in words.split():
-            raise NeedsPerson("Stripe asked for the tax ID before %s" % (title or "this form"))
-        # A JSON answer may carry the real file address one level down.
-        inner = row_link(body)
-        if inner and inner != link:
-            r = _fetch_file(page, inner)
+    try:
+        r = _fetch_file(page, link)
+        if r.get("json") is not None:
+            body = r["json"] if isinstance(r["json"], dict) else {}
+            words = " ".join(str(k) for k in body).lower() + " " + str(body.get("error", "")).lower()
+            if "challenge" in words or "tin" in words.split():
+                raise NeedsPerson("Stripe asked for the tax ID before %s" % (title or "this form"))
+            # A JSON answer may carry the real file address one level down.
+            inner = row_link(body)
+            if inner and inner != link:
+                r = _fetch_file(page, inner)
+    except SessionExpired:
+        # A refusal may be the session ending or this one document. The
+        # lists are read again, the way Discover reads them, and a session
+        # that ended is refused there too and stops the run. Lists that
+        # still read leave the refusal this document's own, so it fails
+        # alone and never stops every later run at the same document. It
+        # is not asked for a second time.
+        _still_listed(list_documents(page))
+        log.info("the document dated %s was refused while the lists still read", iso_date)
+        return False
     if not r.get("b64"):
         log.info("no PDF for %s: status %s, %s", iso_date, r.get("status"), r.get("ct"))
         return False

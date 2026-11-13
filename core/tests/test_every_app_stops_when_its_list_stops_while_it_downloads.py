@@ -231,6 +231,11 @@ ITS_OWN = {
         "as Discover reads it. A refused list reaches the run, a list that does not "
         "answer or shows another account stops it, and a list that still answers leaves "
         "the refusal that document's alone",
+    ("stripe", "download_bill", ("_fetch_file", "row_link")):
+        "a refusal of one document's file, after which both lists are read again. A "
+        "sign-out shows there and reaches the run, and lists that still read leave the "
+        "refusal that document's alone, so one document Stripe will not give never stops "
+        "every later run at it. Lists that show nothing are no lists and reach the run",
     ("bilt", "download_statement", ("_catch_statement",)):
         "a statement answered as signed out once its button was pressed, its tab on the "
         "sign-in page or a refusal at its PDF address, after which the wallet's list is "
