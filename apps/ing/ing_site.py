@@ -609,6 +609,13 @@ def _safe_download(href: str) -> bool:
 SKIPS = ("unread", "no_link", "unclear", "refused")
 
 
+def _rows_again(page, source: str, settings: Optional[dict]) -> list:
+    """The rows of one list, opened by its own address and read whole
+    again after one of its documents was refused (refused.list_again)."""
+    area = _read_area(page, source, settings, again=True)
+    return area["rows"]
+
+
 def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool = True,
                scroll: bool = True, again: bool = False) -> dict:
     """One list, "postbox" or "archive", read whole or not at all.
@@ -1070,9 +1077,8 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
             # nothing, stops it with the list unread. One that still reads
             # leaves this document failed, so it never stops every later run
             # at the same document.
-            refused.list_again(
-                lambda: _read_area(page, row["source"], config, again=True)["rows"],
-                SessionExpired, ListStopped)
+            refused.list_again(lambda: _rows_again(page, row["source"], config),
+                               SessionExpired, ListStopped)
             log.info("the document dated %s was refused while the list still reads", date)
             return ""
         if data:
