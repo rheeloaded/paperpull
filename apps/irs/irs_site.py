@@ -313,7 +313,8 @@ class SessionExpired(Exception):
     """The Online Account answered as a signed-out session: a sign-in page,
     an identity host, a redirect where a document was asked for, a 401 or
     403, or an HTML or JSON body where a PDF was expected. The run stops for
-    the account holder."""
+    the account holder. A transcript refused that way raises it only when
+    the list, read again, refuses too (download_bill)."""
 
 
 class OtpRequired(SessionExpired):
@@ -836,7 +837,9 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
     """GET the document's own address with the session's cookies, no
     redirect followed, and keep it only when it is a PDF (application/pdf
     and a body starting %PDF). A redirect, a 401 or 403, or an HTML or JSON
-    body is the account saying the session has ended."""
+    body raises SessionExpired, which download_bill weighs against the list
+    read again. Any other answer that is not a PDF fails this transcript
+    alone."""
     if not is_download_url(url):
         if trace is not None:
             trace.append({"note": "document address refused"})
@@ -899,8 +902,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     transcript online for a window of years that moves forward every year,
     so a transcript discovery recorded and no run has saved yet can drop
     off the list, and that is this record's matter alone. SessionExpired
-    propagates to the run, and so does ListStopped when the list cannot be
-    read again or holds the record more than once."""
+    from reading the list propagates to the run, and so does ListStopped
+    when the list cannot be read again or holds the record more than once.
+
+    A transcript answered with a redirect, a 401, a 403 or a page has the
+    list read again, with the same call that proves a session. A session
+    that has ended is refused the list too, and its SessionExpired stops
+    the run there. A list that still reads leaves the refusal this
+    transcript's own, so it fails alone, since a stop here would stop every
+    run at this transcript for good. The transcript is not asked for a
+    second time."""
     out_path = Path(out_path)
     doc_id = (document_id or "").strip()
     if not _DOC_ID_RE.fullmatch(doc_id) or not is_download_url(BASE + (href or "")):
@@ -926,7 +937,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         # One record listed twice is a list this app cannot read, so the run
         # stops rather than choose between them.
         raise ListStopped("the transcript list holds the record more than once")
-    return _fetch(page, BASE + found[0].href, out_path, trace)
+    try:
+        return _fetch(page, BASE + found[0].href, out_path, trace)
+    except SessionExpired:
+        # A refusal may be the session ending or this one transcript. The
+        # list is read again, and a session that ended shows there and
+        # stops the run. One that still reads leaves this transcript failed,
+        # so it never stops every later run at the same transcript.
+        _transcripts(page)
+        log.info("the transcript dated %s was refused while the list still reads", iso_date)
+        if trace is not None:
+            trace.append({"note": "refused, the list still reads"})
+        return False
 
 
 # ---------------------------------------------------------------------------

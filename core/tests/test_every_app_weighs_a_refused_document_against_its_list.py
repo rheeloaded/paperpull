@@ -57,7 +57,6 @@ REFUSED_STATUSES = (401, 403, "401", "403")
 # by the site function where it is read, not yet looked at. Each was seen
 # on 2026-11-12. Ziply Fiber was mended that day.
 LEFT = {
-    "irs": "_fetch",
     "mtb": "download_statement",
     "mypay": "download_document",
     "portlandgeneral": "_fetch",

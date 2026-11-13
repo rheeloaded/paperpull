@@ -620,10 +620,11 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except site.SessionExpired:
-                # The account answered as a signed-out session, or ID.me is
-                # asking for a code. Every document after it would get the
-                # same answer, so the run stops here, with nothing recorded
-                # against this one.
+                # The list, read for this transcript or read again after the
+                # transcript was refused, answered as a signed-out session,
+                # or ID.me is asking for a code. Every document after it
+                # would get the same answer, so the run stops here, with
+                # nothing recorded against this one.
                 self.session_ended()
             except site.ListStopped as stop:
                 # The list could not be read again, or holds this document

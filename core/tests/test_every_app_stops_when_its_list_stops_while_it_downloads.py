@@ -192,6 +192,12 @@ ITS_OWN = {
         "stops shows there and reaches the run, and a list that still reads leaves the "
         "refusal that document's alone, so one document ING will not give never stops "
         "every later run at it",
+    ("irs", "download_bill", ("_fetch",)):
+        "a refusal of one transcript's PDF, after which the transcript page is opened and "
+        "its list read again. A sign-out or ID.me shows there and reaches the run, a list "
+        "that stops stops it with the list unread, and a list that still reads leaves the "
+        "refusal that transcript's alone, so one transcript the IRS will not give never "
+        "stops every later run at it",
     ("firsthorizon", "download_statement", ("_catch_statement",)):
         "a statement whose own address was refused once its Download PDF was pressed, a "
         "401, a 403, a redirect, a page or the sign-in page, with every page the press "
