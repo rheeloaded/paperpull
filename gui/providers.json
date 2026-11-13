@@ -81,6 +81,7 @@
     "simmons": {"gets": "Loan statements, notices and tax forms", "group": "loans", "note": "One account per sign-in"},
     "smud": {"gets": "Monthly bills", "group": "bills"},
     "spectrum": {"gets": "Internet and Mobile statements, about a year online", "group": "bills"},
+    "sparkassepc": {"gets": "Account statements and other Postfach PDFs", "group": "banks", "note": "Direct downloads preserve the read status"},
     "statefarm": {"gets": "Bills, renewal notices, ID cards, receipts, policy documents", "group": "insurance"},
     "stripe": {"gets": "Fee invoices and tax forms such as the 1099-K", "group": "banks", "tested": false},
     "target": {"gets": "Online and in-store receipts", "group": "shopping"},

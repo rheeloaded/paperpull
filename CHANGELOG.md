@@ -7,6 +7,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **Sparkasse Pforzheim Calw (#175).** Reads the Postfach history and saves
+  direct PDF downloads while preserving their read status.
+
 ## [0.66.0] - 2026-11-13
 
 Renault Bank direkt is new, contributed by @MelleD. One bill Ziply Fiber

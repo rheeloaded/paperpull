@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-three providers are supported today, all built on the same pattern.
+Eighty-four providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -144,6 +144,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`simmons`](apps/simmons) | Simmons Bank (Banno online banking) | Loan statements, notices, tax forms | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 27 documents saved on a full run.** Only a document row's own button is pressed, and the download taken only when it is that document's own. One loan so far, so a sign-in with a second account stops the list. A paid-off loan's documents stay online only until a date the bank names |
 | [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills | **Confirmed by [@watling777](https://github.com/watling777)**, whose Pilot took the newest five and whose full run took the rest of the history ([#34](https://github.com/rheeloaded/paperpull/issues/34)) |
 | [`spectrum`](apps/spectrum) | Spectrum (Internet and Mobile) | Internet statements, about a year online, and Mobile statements printed from their pages | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 11 Internet statements saved on a full run.** Mobile statements listed live, a whole Mobile run still to come. Each statement chosen by its own row. Two statements of one date, after an account transfer, are left for you to save by hand |
+| [`sparkassepc`](apps/sparkassepc) | Sparkasse Pforzheim Calw | Account statements and other Postfach PDFs | Reads all pages of the Postfach and preserves read status on direct download ([#175](https://github.com/rheeloaded/paperpull/issues/175)) |
 | [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | Fee invoices, tax forms such as the 1099-K | **Untested, built on an account with no documents yet. Have Stripe invoices or tax forms? [Help test it](apps/stripe/README.md#help-test-it-no-programming-needed)** Requested in [#53](https://github.com/rheeloaded/paperpull/issues/53) |
 | [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents | **Confirmed by [@watling777](https://github.com/watling777)**, whose full run saved every document State Farm lists for his policies ([#37](https://github.com/rheeloaded/paperpull/issues/37)) |
 | [`target`](apps/target) | Target | Receipts (Online + In-Store) | Print-capture |
@@ -924,10 +925,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-two** apps pass their tests, the eighty-three that are
-  supported, the five still waiting for a tester and the Scalable Capital,
-  Consorsbank, CIBC and MBNA shells, 40,590 of them
-  across the repo. Most are in regular use by the author. The rest were built or
+- ✅ **Ninety-three** apps have automated tests, including eighty-four supported
+  providers, five waiting for a tester and four first shells. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with

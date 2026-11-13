@@ -85,6 +85,17 @@ def get(client, url: str, is_safe_url, *, hops: int = HOPS, params=None, **kwarg
     raise TooManyRedirects("more than %d redirects" % hops)
 
 
+def post_to_listing(client, url: str, destination: str, is_safe_url, *, data, **kwargs):
+    """Send a paging form once and read its exact expected 302 destination."""
+    if not is_safe_url(url) or not is_safe_url(destination):
+        raise ValueError("refusing to ask an address off the app's own hosts")
+    resp = client.post(url, data=data, max_redirects=0, **kwargs)
+    if resp.status != 302 or join_url(resp.url or url, resp.headers.get("location") or "") != destination:
+        return resp
+    _let_go(resp)
+    return client.get(destination, max_redirects=0, **kwargs)
+
+
 def _let_go(resp) -> None:
     """Free a redirect's answer once its Location has been read."""
     try:
