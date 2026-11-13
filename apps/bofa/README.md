@@ -48,9 +48,13 @@ guess.
 
 A statement whose PDF the bank answers with a 401, a 403 or a redirect off
 its site has its account's list read again. A list refused too means you
-are signed out, and the run stops. A list that still reads leaves that
-statement failed with nothing saved, the run goes on to the others, and
-the next run tries it again. The statement is never asked for twice.
+are signed out, and the run stops. A list that does not answer, holds a
+statement this app cannot read, or comes back empty says neither, so the
+run stops without calling you signed out, nothing is recorded against that
+statement, and the run it names, which reads the list first, asks for it
+again. A list that still reads leaves that statement failed with nothing
+saved, the run goes on to the others, and the next run tries it again. The
+statement is never asked for twice.
 
 ## Help test it, no programming needed
 

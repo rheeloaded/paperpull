@@ -103,7 +103,7 @@ import time
 from typing import List, Optional, Tuple
 from urllib.parse import quote, urlsplit
 
-from paperpull_core import intake, pressing
+from paperpull_core import intake, pressing, refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE, control_labels
 from paperpull_core.characters import whole_json
 from paperpull_core.dates import checked as _checked_date, full_year
@@ -1765,13 +1765,15 @@ def document_bytes(page, *, account_ref: str, date: str, document_id: str,
     again, and NotLearned or ListCut for this statement's own PDF.
 
     A PDF answered with a 401, a 403 or a redirect off the site has this
-    account's list for the year read again, with the same call that lists
-    it. A session that has ended is refused the list too, and its
-    SessionExpired stops the run there. A list that still reads leaves the
-    refusal this statement's own, so it fails alone with (b"", ""), since a
-    stop here would stop every run at this statement for good. A list that
-    cannot be read raises ListUnread. The statement is not asked for a
-    second time."""
+    account's list for the year read again, the way Discover reads it
+    (paperpull_core.refused). A session that has ended is refused the list
+    too, and its SessionExpired stops the run there. A list that does not
+    answer, answers with a row this app cannot read, or holds nothing,
+    though it listed this statement, says neither, and raises ListUnread. A
+    list that still reads leaves the refusal this statement's own, so it
+    fails alone with (b"", ""), since a stop here would stop every run at
+    this statement for good. The statement is not asked for a second
+    time."""
     try:
         call = learned(page, form=True)
     except (NotLearned, ListCut) as e:
@@ -1796,14 +1798,19 @@ def document_bytes(page, *, account_ref: str, date: str, document_id: str,
     try:
         r = _ask_pdf(page, call.pdf, row) if url is None else _ask_link(page, url)
     except SessionExpired:
-        # A refusal may be the session ending or this one statement. The
-        # list is read again, and a session that ended shows there and
-        # stops the run. One that still reads leaves this statement failed,
-        # so it never stops every later run at the same statement.
+        # A refusal may be the session ending or this one statement. This
+        # account's year is read again as Discover reads it, and a session
+        # that ended shows there and stops the run. A list that does not
+        # answer, or holds nothing, stops it with the list unread. One that
+        # still reads leaves this statement failed, so it never stops every
+        # later run at the same statement. The account is the one fresh_row
+        # found the statement's row under above.
         account = next(a for a in call.accounts if a.get(call.account_key) == account_ref)
         try:
-            _post_list(page, call, _body_for(call, account, year))
+            refused.list_again(lambda: list_account_year(page, call, account, year)[0],
+                               SessionExpired, ListUnread, stops=(NotThere, ListCut))
         except ListCut as e:
+            # The list's own words for why it was not whole, kept.
             raise ListUnread(e) from e
         log.info("the statement dated %s was refused while the list still reads", date)
         return b"", ""

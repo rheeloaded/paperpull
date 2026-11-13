@@ -349,7 +349,11 @@ class App:
         statement and stop again (#124), and the run leaves as one whose
         list did not end whole, which only a run that lists carries on from
         (listing.read_again_stopped)."""
-        self.write_failure("download a statement", getattr(e, "reason", "") or str(e),
+        # A list read again after a refusal raises ListUnread with the
+        # helper's own sentence, which carries capitals and the kind of
+        # exception in brackets, so the failure file's reason is ours.
+        self.write_failure("download a statement",
+                           getattr(e, "reason", "") or "the list did not answer",
                            postmortem=getattr(e, "facts", None) or None)
         text = ("Bank of America's statements list did not answer the way this app "
                 "knows when it was read again for a statement, because %s. Nothing was "

@@ -508,6 +508,46 @@ def test_one_statement_refused_while_the_list_reads_fails_alone_and_the_rest_are
     assert bank.pdfs.count(sb.LINK_BASE + REFUSED) == 2
 
 
+# What the list read again after a refusal can answer that says neither
+# that the session ended nor that it still holds.
+NOT_ANSWERED = {
+    "500": lambda bank: setattr(bank, "list_status", 500),
+    "timeout": lambda bank: setattr(bank, "list_raises", TimeoutError("Timeout 30000ms exceeded")),
+    "empty": lambda bank: setattr(bank, "answer_list", lambda body: []),
+}
+
+
+@pytest.mark.parametrize("how", sorted(NOT_ANSWERED))
+def test_a_list_that_does_not_answer_after_a_refusal_stops_the_run_with_the_list_unread(
+        tmp_path, bank, capsys, how):
+    """Every statement after it reads the same list, so the run stops with
+    the list unread, and the refused statement is left as it was for the
+    next run that lists. It is neither a sign-out nor its own failure."""
+    real = bank.evaluate
+
+    def refuse(js, arg=None):
+        if "content-disposition" in js and isinstance(arg, str) and arg.endswith(REFUSED):
+            bank.pdfs.append(arg)
+            NOT_ANSWERED[how](bank)
+            return {"status": 403, "url": arg, "ct": "text/html", "cd": "", "b64": ""}
+        return real(js, arg)
+    bank.evaluate = refuse
+    code = run(tmp_path, "--pilot")
+    out = capsys.readouterr().out
+    got = result(out)
+    assert got["stopped"] == 1 and got.get("list_not_read") == 1, out
+    assert got["failed"] == 0 and got["manual_review"] == 0
+    assert code != 1
+    assert "session has expired" not in out and "Nothing was saved, and the next run" not in out
+    assert "reads the list first" in out
+    states = {r["document_id"]: r["state"] for r in records(tmp_path).values()}
+    assert REFUSED not in states
+    assert bank.pdfs.count(sb.LINK_BASE + REFUSED) == 1
+    # The failure file says why in our own words, never "unnamed step".
+    (written,) = list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    assert json.loads(written.read_text(encoding="utf-8"))["reason"] == "the list did not answer"
+
+
 def test_run_all_asks_for_yes_first(tmp_path, bank, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", lambda *_a: "no")
     run(tmp_path, "--all")

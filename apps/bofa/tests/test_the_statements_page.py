@@ -783,6 +783,46 @@ def test_a_list_that_fails_when_read_after_a_refusal_is_the_list_unread(way):
     assert statements_asked(page, way) == ["DOC000000000101"]
 
 
+def after_the_pdf(page, change):
+    """A page that `change`s once a statement's PDF has been asked for, so
+    the list read again after the refusal is what it answers then."""
+    real = page.evaluate
+
+    def evaluate(js, arg=None):
+        got = real(js, arg)
+        if "content-disposition" in js:
+            change(page)
+        return got
+    page.evaluate = evaluate
+    return page
+
+
+# What the list read again after a refusal can answer that says neither
+# that the session ended nor that it still holds.
+NOT_ANSWERED = {
+    "500": lambda page: setattr(page, "list_status", 500),
+    "timeout": lambda page: setattr(page, "list_raises", TimeoutError("Timeout 30000ms exceeded")),
+    "empty": lambda page: setattr(page, "answer_list", lambda body: []),
+    "a row it cannot read": lambda page: setattr(
+        page, "answer_list", lambda body: [{"docCategoryId": "CAT-STMT"}]),
+}
+
+
+@pytest.mark.parametrize("how", sorted(NOT_ANSWERED))
+@pytest.mark.parametrize("way", ["link", "call"])
+def test_a_list_that_does_not_answer_after_a_refusal_is_the_list_unread_not_a_sign_out(way, how):
+    """A list that answered 500 or nothing was the list unread already, but
+    one that came back empty, or with a row this app cannot read, was taken
+    as a list that still reads, so the statement failed alone with nothing
+    shown of the session. None of them says the session ended either."""
+    page = after_the_pdf(learned_page(way), NOT_ANSWERED[how])
+    page.pdf_status = 403
+    with pytest.raises(site.ListUnread) as stop:
+        take_january(page)
+    assert not isinstance(stop.value, site.SessionExpired)
+    assert statements_asked(page, way) == ["DOC000000000101"]
+
+
 def test_the_list_read_after_a_refusal_leaves_the_next_statement_to_be_taken():
     page = learned_page("link")
     page.pdf_status = 403
