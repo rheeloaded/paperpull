@@ -1105,9 +1105,9 @@ def download_document(page, doc_id: str, out_path) -> bool:
         start, end = _date_window()
         try:
             _summary_rows(page, claim_type, start, end)
-        except ListingIncomplete as e:
-            log.warning("Anthem's %s EOB list did not come after its %s was refused (%s)",
-                        claim_type, doc_kind, e)
+        except ListingIncomplete:
+            log.warning("Anthem's %s EOB list did not come after its %s was refused",
+                        claim_type, doc_kind)
             return False
         log.info("the %s %s was refused while the list still reads", claim_type, doc_kind)
         return False

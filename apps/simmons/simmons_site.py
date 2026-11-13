@@ -1696,7 +1696,7 @@ def download_document(page, run: Run, dl_dir, out_path, *, record_id: str, iso_d
             read_listing(page, run)
         except ListStopped as stop:
             log.info("the list stopped when read again after the document dated %s was "
-                     "refused: %s", iso_date, stop)
+                     "refused", iso_date)
             _note(trace, note="the list stopped")
             raise _page_stopped(stop)
         log.info("the document dated %s was refused while the list still reads", iso_date)
