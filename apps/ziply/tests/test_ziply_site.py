@@ -15,6 +15,7 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 import ziply_site as site  # noqa: E402
 import ziply_docs as docs  # noqa: E402
+from paperpull_core import testkit  # noqa: E402
 from paperpull_core.run_reporting import ListNotRead  # noqa: E402
 
 FAKE_ACCOUNT = "98765432100001234"
@@ -58,11 +59,11 @@ class Locator:
 
 class Page:
     def __init__(self, rows=ROWS, settled=None, asks=True, headers=None, listing=None, pdf=PDF, pdf_status=200,
-                 accounts=(FAKE_ACCOUNT,)):
+                 accounts=(FAKE_ACCOUNT,), pdf_answer=None):
         self.rows, self.asks, self.headers, self.listing = rows, asks, headers, listing
         self.settled = settled or site.DOCUMENTS_URL
         self.url = "about:blank"
-        self.pdf, self.pdf_status = pdf, pdf_status
+        self.pdf, self.pdf_status, self.pdf_answer = pdf, pdf_status, pdf_answer
         self.accounts = accounts
         self.handlers, self.asked = [], []
         self.loads = 0
@@ -91,12 +92,45 @@ class Page:
         self.asked.append(arg)
         if arg[0] == site.API_URL:
             return self.listing or {"status": 200, "data": answer(self.rows)}
+        if self.pdf_answer is not None:
+            return dict(self.pdf_answer)
         if self.pdf_status != 200:
             return {"status": self.pdf_status, "type": "text/html"}
         return {"status": 200, "type": "application/pdf", "b64": base64.b64encode(self.pdf).decode()}
 
     def lists_asked(self):
         return sum(1 for a in self.asked if a[0] == site.API_URL)
+
+    def bills_asked(self):
+        return [a[0] for a in self.asked if a[0] != site.API_URL]
+
+
+# What one bill's PDF can be answered with that read as a sign-out, a 401, a
+# 403, a redirect, and a page where the PDF should be.
+REFUSALS = {
+    "401": {"pdf_status": 401},
+    "403": {"pdf_status": 403},
+    "redirect": {"pdf_answer": {"status": 0, "redirected": True}},
+    "page": {"pdf": b"<!doctype html><title>Sign in</title><p>made-up page words 4417</p>"},
+}
+
+
+class SignsOutAtTheBill(Page):
+    """A session that ends as the bill is asked for. The bill is refused
+    and so is the list read after it, by the sign-in page or by the API."""
+
+    def __init__(self, how="sign-in page", **kw):
+        super().__init__(**kw)
+        self.how = how
+
+    def evaluate(self, js, arg=None):
+        got = super().evaluate(js, arg)
+        if arg[0] != site.API_URL:
+            if self.how == "sign-in page":
+                self.settled, self.asks = "https://ziplyfiber.com/login", False
+            else:
+                self.listing = {"status": 401}
+        return got
 
 
 class Hosts(unittest.TestCase):
@@ -278,13 +312,70 @@ class Download(unittest.TestCase):
                                    document_id="bill-1234-50000002")
             self.assertFalse(self.out.exists())
 
-    def test_refused_and_sign_in_answers_raise_and_save_nothing(self):
-        for page in (Page(pdf_status=401), Page(pdf=b"<html>sign in</html>")):
-            site._RUN.clear()
-            with self.assertRaises(site.SessionExpired):
-                site.download_bill(page, None, "2026-09-13", self.out, href=site.DOWNLOAD_PATH,
-                                   document_id="bill-1234-50000002")
-            self.assertFalse(self.out.exists())
+    def _take(self, page, inv="50000002", day="2026-09-13", trace=None):
+        return site.download_bill(page, None, day, self.out, href=site.DOWNLOAD_PATH,
+                                  document_id=f"bill-1234-{inv}", trace=trace)
+
+    def test_a_bill_refused_while_the_list_still_reads_fails_alone(self):
+        """A 401, a 403, a redirect or a page for one bill was read as a
+        sign-out, so every run stopped at that bill and Continue stopped
+        there again (#124). The list is read again with the call that proves
+        a session, and a list that still reads leaves the refusal that
+        bill's own."""
+        for how, kw in REFUSALS.items():
+            for kept in (False, True):
+                site._RUN.clear()
+                page = Page(**kw)
+                if kept:
+                    site.collect_download_docs(page)
+                trace = []
+                self.assertFalse(self._take(page, trace=trace), (how, kept))
+                self.assertFalse(self.out.exists(), (how, kept))
+                # The list is read once more after the refusal, and the bill
+                # is asked for once, never a second time.
+                self.assertEqual((page.loads, page.lists_asked()), (2, 2), (how, kept))
+                self.assertEqual(page.bills_asked(), [site.invoice_url("50000002")], (how, kept))
+                self.assertIn({"note": "refused, the list still reads"}, trace, (how, kept))
+                self.assertNotIn("made-up page words", json.dumps(trace))
+
+    def test_the_list_read_after_a_refusal_serves_the_next_bill(self):
+        page = Page(pdf_status=403)
+        site.collect_download_docs(page)
+        self.assertFalse(self._take(page))
+        page.pdf_status = 200
+        self.assertTrue(self._take(page, inv="50000001", day="2026-08-13"))
+        self.assertEqual(self.out.read_bytes(), PDF)
+        self.assertEqual((page.loads, page.lists_asked()), (2, 2))
+
+    def test_a_bill_refused_and_a_list_refused_after_it_is_a_sign_out(self):
+        """A session that ended refuses the list too, and only that stops
+        the run as signed out."""
+        for how in ("sign-in page", "401"):
+            for kept in (False, True):
+                site._RUN.clear()
+                page = SignsOutAtTheBill(how, pdf_status=401)
+                if kept:
+                    site.collect_download_docs(page)
+                with self.assertRaises(site.SessionExpired, msg=(how, kept)):
+                    self._take(page)
+                self.assertFalse(self.out.exists())
+                self.assertEqual(len(page.bills_asked()), 1, (how, kept))
+
+    def test_a_list_read_after_a_refusal_that_stops_or_shows_another_account_reaches_the_run(self):
+        page = Page(pdf_status=403)
+        site.collect_download_docs(page)
+        page.rows = []
+        with self.assertRaises(site.ListStopped):
+            self._take(page)
+        site._RUN.clear()
+        page = Page(pdf_status=403)
+        site.collect_download_docs(page)
+        page.accounts = (OTHER_ACCOUNT,)
+        with self.assertRaises(site.OtherAccountShown) as shown:
+            self._take(page)
+        self.assertEqual((shown.exception.wanted, shown.exception.shown), ("1234", "5678"))
+        self.assertFalse(self.out.exists())
+        self.assertEqual(len(page.bills_asked()), 1)
 
     def test_a_json_answer_fails_that_bill_alone(self):
         """A JSON error for one bill was read as a sign-out, which stopped
@@ -338,6 +429,65 @@ class Orchestrator(unittest.TestCase):
         self.assertEqual(page.loads, 1)
         self.assertNotIn("Nothing was saved", out.getvalue())
         self.assertEqual(app.progress.data, {})
+
+    def _run_with(self, page):
+        """A Run All's downloads over the three listed bills, with what it
+        printed and logged."""
+        app = self._listed_then(page)
+        app._delay = lambda *a, **k: None
+        seen = io.StringIO()
+        handler = logging.StreamHandler(seen)
+        root = logging.getLogger()
+        root.addHandler(handler)
+        old = root.level
+        root.setLevel(logging.DEBUG)
+        ended = None
+        try:
+            with redirect_stdout(seen):
+                app.process(app._select())
+        except SystemExit as e:
+            ended = e
+        finally:
+            root.removeHandler(handler)
+            root.setLevel(old)
+        return app, ended, seen.getvalue()
+
+    def test_one_bill_refused_while_the_list_reads_fails_alone_and_the_rest_are_saved(self):
+        """The refused bill stopped the run before, so the bills after it
+        were never asked for, and every later run stopped at it again."""
+        class RefusesOne(Page):
+            def evaluate(self, js, arg=None):
+                if arg[0] == site.invoice_url("50000002"):
+                    self.asked.append(arg)
+                    return {"status": 200, "type": "text/html",
+                            "b64": base64.b64encode(REFUSALS["page"]["pdf"]).decode()}
+                return super().evaluate(js, arg)
+        page = RefusesOne(pdf=testkit.text_pdf(["Ziply Fiber made-up bill"]))
+        app, ended, said = self._run_with(page)
+        self.assertIsNone(ended, said)
+        states = {k: v["state"] for k, v in app.progress.data.items()}
+        self.assertEqual(states, {"id:XXXX-1234:bill-1234-50000003": "Completed",
+                                  "id:XXXX-1234:bill-1234-50000002": "Failed",
+                                  "id:XXXX-1234:bill-1234-50000001": "Completed"})
+        self.assertEqual((app.stats["failed"], len(app.stats["new_files"])), (1, 2))
+        self.assertEqual(said.count("Nothing was saved, and the next run tries it again"), 1)
+        self.assertNotIn("signed out", said)
+        self.assertEqual(page.bills_asked().count(site.invoice_url("50000002")), 1)
+        written = "".join(p.read_text(errors="ignore") for p in app.paths.root.rglob("*")
+                          if p.is_file() and p.suffix in (".json", ".csv", ".txt", ".log"))
+        self.assertIn("refused, the list still reads", written)
+        for word in ("made-up page words", "4417", FAKE_ACCOUNT, FAKE_TOKEN):
+            self.assertNotIn(word, said + written)
+
+    def test_one_bill_refused_and_the_list_after_it_stop_the_run_as_signed_out(self):
+        page = SignsOutAtTheBill(pdf_status=403)
+        app, ended, said = self._run_with(page)
+        self.assertIsInstance(ended, SystemExit)
+        self.assertNotIsInstance(ended, ListNotRead)
+        self.assertIn("answered as signed out", " ".join(said.split()))
+        self.assertNotIn("Nothing was saved", said)
+        self.assertEqual(app.progress.data, {})
+        self.assertEqual(len(page.bills_asked()), 1)
 
     def test_a_page_on_another_account_stops_the_run_once_and_names_it(self):
         page = Page(accounts=(OTHER_ACCOUNT,))

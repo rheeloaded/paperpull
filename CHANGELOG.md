@@ -125,6 +125,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   still a folder of that name. On PaperPull Server the home folder is
   outside the data folder, so a run stops before saving anything there and
   the panel reads nothing from it, as for any folder outside it.
+- **One bill Ziply Fiber refuses no longer stops every run.** A bill whose
+  PDF Ziply answered with a 401, a 403, a redirect or a page was read as a
+  sign-out, so the run stopped at that bill, and every run after it,
+  Continue included, stopped at the same bill. Now the bill list is read
+  again when one bill is refused. A list refused too means you are signed
+  out, and the run stops as before. A list that still reads leaves that
+  bill counted as failed with nothing saved, the run goes on to the other
+  bills, and the next run tries it again. The bill is never asked for
+  twice. A new census holds every document app to this, and names the apps
+  that still stop a run at one refused document, to be looked at one by
+  one.
 
 ## [0.65.0] - 2026-11-12
 
