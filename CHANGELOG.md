@@ -30,6 +30,28 @@ All notable changes to PaperPull are recorded here. Versioning follows
   since Record does that through the fixed list of words. Run on the
   contributor's own account, where a Pilot saved five documents and a
   second Pilot saved nothing new. Contributed by @MelleD.
+- **Amazon Visa, card statements and the portal's other PDFs (#171).** It
+  reads the Amazon Visa portal at kunden.openbankpay.com through the
+  portal's own client from inside the signed-in page, the statement
+  history of every card contract the sign-in shows and the PDFs in each
+  document category the portal lists. Each signed PDF link stays in the
+  page, and nothing is pressed. Before merging, a 401 or 403 on one
+  document's PDF ticket fails that document alone once the list read
+  again still answers, where it had ended every run there as signed out
+  so nothing older was ever saved. An answer with no card in it, a card
+  whose statement rows all leave out the fields that name their PDFs, a
+  categories answer that holds something but not their list, and a
+  category without its documents or its size stop the listing rather
+  than read as nothing there, and so does a category whose documents
+  fill the whole answer. One statement row without those fields beside
+  others is a statement with no PDF yet, and an empty categories answer
+  is no categories, as the contributor's run read them. A date that comes
+  with a time and a zone is its day in Berlin, not in UTC, and a call the
+  portal never answers is given up on after 30 seconds. Run on the
+  contributor's own account, where Discover listed 28 PDFs, five were
+  saved and passed verification, and downloading the statements again
+  saved no duplicates.
+  Contributed by @MelleD.
 
 ## [0.66.0] - 2026-11-13
 
