@@ -1458,7 +1458,10 @@ def test_brackets_in_a_path_never_start_another_file(tmp_path, monkeypatch, stub
         ran.unlink()
     setup.parent.mkdir()
     setup.write_bytes(stub_exe)
-    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(0.2).pid)
+    # A panel still there when the script says it is waiting, as a real one
+    # is, since a script with an installer that does not match ends so soon
+    # after that it could end between two of the panel's looks.
+    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(2.0).pid)
     _after(proc, seen, "PaperPull.exe")
     assert _ran(seen, "python.exe")[0] == str(app / "python" / "python.exe")
     assert _ran(seen, "python.exe")[2] == ["-m", "uvicorn", "--version"]
@@ -1467,7 +1470,10 @@ def test_brackets_in_a_path_never_start_another_file(tmp_path, monkeypatch, stub
 
 def test_the_script_never_runs_an_installer_that_changed(tmp_path, monkeypatch, stub_exe):
     seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
-    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(0.2).pid)
+    # A panel still there when the script says it is waiting, as a real one
+    # is, since a script with an installer that does not match ends so soon
+    # after that it could end between two of the panel's looks.
+    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(2.0).pid)
     log = _after(proc, seen, "PaperPull.exe")
     assert not (seen / (SETUP + ".ran")).exists()
     assert "not the one the panel checked" in log and (seen / "PaperPull.exe.ran").exists()
@@ -1742,7 +1748,10 @@ def test_an_installer_that_was_not_the_one_checked_is_never_opened(tmp_path, mon
     way to finish anything."""
     seen, app, setup, sha = _install_box(tmp_path, monkeypatch, stub_exe)
     Path(str(app / "python" / "python.exe") + ".exit").write_text("1")
-    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(0.2).pid)
+    # A panel still there when the script says it is waiting, as a real one
+    # is, since a script with an installer that does not match ends so soon
+    # after that it could end between two of the panel's looks.
+    proc = updater.start_installer(app, setup, "0" * 64, "0.61.0", pid=_panel_for(2.0).pid)
     log = _after(proc, seen, "python.exe")
     time.sleep(1.0)
     assert not (seen / (SETUP + ".ran")).exists() and not (seen / "PaperPull.exe.ran").exists()
