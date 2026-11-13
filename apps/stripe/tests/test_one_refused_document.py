@@ -8,6 +8,12 @@ one document is refused, the same way Discover reads them. A session that
 ended is refused the lists too, and that stops the run. Lists that still
 read leave the document failed alone, nothing saved, and the next run
 tries it again. The document is asked for once.
+
+Lists that do not answer when they are read again (a 500, a timeout) or
+show no document say nothing either way, so the run stops with the lists
+unread, nothing recorded against the document, and a run that lists first
+takes it again. It is neither a sign-out nor the document's own failure
+(the review of 2026-11-13).
 """
 import base64
 import io
@@ -26,6 +32,7 @@ import storage  # noqa: E402,F401  binds this provider's AppSpec
 import stripe_site as site  # noqa: E402
 import stripe_docs as docs  # noqa: E402
 from paperpull_core import testkit  # noqa: E402
+from paperpull_core.run_reporting import ListNotRead  # noqa: E402
 
 ACCT = "https://dashboard.stripe.com/acct_TEST123"
 INV_API = "https://dashboard.stripe.com" + site.INVOICES_API
@@ -91,11 +98,14 @@ class Page:
     list. Each document's file is answered from inside the page, refused
     with `how` for the links in `refused`. A link `blocked` to a page
     script is asked through the session instead. A session that ends at
-    the refusal (`signs_out`) answers the lists with a 401 from then on."""
+    the refusal (`signs_out`) answers the lists with a 401 from then on, and
+    lists that stop answering then (`lists_then`, a status, "timeout" or
+    "empty") answer that way."""
 
-    def __init__(self, refused=(), how=401, blocked=False, signs_out=False):
+    def __init__(self, refused=(), how=401, blocked=False, signs_out=False, lists_then=None):
         self.url = ACCT + "/dashboard"
-        self.refused, self.how, self.blocked, self.signs_out = set(refused), how, blocked, signs_out
+        self.refused, self.how, self.blocked = set(refused), how, blocked
+        self.lists_then = 401 if signs_out else lists_then
         self.list_status = 200
         self.rows = ROWS
         self.listeners, self.asked, self.lists_read = [], [], 0
@@ -106,8 +116,10 @@ class Page:
         self.lands_off = None
 
     def refuse_now(self):
-        if self.signs_out:
-            self.list_status = 401
+        if self.lists_then == "empty":
+            self.rows = []
+        elif self.lists_then is not None:
+            self.list_status = self.lists_then
 
     def on(self, _event, fn):
         self.listeners.append(fn)
@@ -116,15 +128,20 @@ class Page:
         self.listeners.remove(fn)
 
     def goto(self, url, **_):
-        self.url = url
         path = "/" + urlparse(url).path.split("/", 2)[2]
+        if self.list_status == "timeout" and path in (site.INVOICES_PATH, site.TAX_PATH):
+            raise TimeoutError("Timeout 60000ms exceeded")
+        self.url = url
+        failed = {"error": {"message": "made-up server error"}}
         if path == site.INVOICES_PATH:
             self.lists_read += 1
             if self.rows is None:
                 return
-            resp = Resp(INV_API, {"data": self.rows, "has_more": False}, status=self.list_status)
+            resp = Resp(INV_API, failed if self.list_status >= 500 else
+                        {"data": self.rows, "has_more": False}, status=self.list_status)
         elif path == site.TAX_PATH:
-            resp = Resp(TAX_API, {"object": "list", "data": [], "has_more": False}, status=self.list_status)
+            resp = Resp(TAX_API, failed if self.list_status >= 500 else
+                        {"object": "list", "data": [], "has_more": False}, status=self.list_status)
         else:
             return
         for fn in list(self.listeners):
@@ -192,14 +209,26 @@ def test_a_document_refused_and_the_lists_refused_after_it_is_a_sign_out(tmp_pat
 
 
 @pytest.mark.parametrize("rows", [[], None])
-def test_lists_read_empty_after_a_refusal_are_no_lists(tmp_path, rows):
+def test_lists_read_empty_after_a_refusal_are_unread_not_a_sign_out(tmp_path, rows):
     """Lists that show nothing, or never came, after this document was
-    listed are not lists that still read."""
+    listed are not lists that still read, and nothing in them says the
+    session ended."""
     page = Page(refused={"https://files.stripe.com/f2"}, how=403)
     site.collect_download_docs(page)
     page.rows = rows
-    with pytest.raises(site.SessionExpired):
+    with pytest.raises(site.ListStopped):
         take(page, tmp_path / "i.pdf")
+    assert page.asked == ["https://files.stripe.com/f2"]
+
+
+@pytest.mark.parametrize("then", [500, 503, "timeout"])
+def test_lists_that_do_not_answer_after_a_refusal_are_unread(tmp_path, then):
+    page = Page(refused={"https://files.stripe.com/f2"}, how=403, lists_then=then)
+    site.collect_download_docs(page)
+    out = tmp_path / "i.pdf"
+    with pytest.raises(site.ListStopped):
+        take(page, out)
+    assert not out.exists()
     assert page.asked == ["https://files.stripe.com/f2"]
 
 
@@ -301,3 +330,22 @@ def test_one_document_refused_and_the_lists_after_it_stop_the_run(tmp_path):
     assert "session has expired" in said
     assert "Nothing was saved" not in said
     assert page.asked == ["https://files.stripe.com/f3"]
+
+
+@pytest.mark.parametrize("then", [500, "timeout", "empty"])
+def test_one_document_refused_and_the_lists_unread_after_it_stop_with_the_lists_unread(tmp_path, then):
+    """A 500 or a timeout there reached the loop as the document's own
+    failure, and the run went on with no session shown. Lists with no
+    document were read as a sign-out. Now the run stops with the lists
+    unread, nothing recorded against the document, so Get new documents
+    takes it again."""
+    page = Page(refused={"https://files.stripe.com/f2"}, how=403, lists_then=then)
+    app, ended, said = run_with(tmp_path, page)
+    assert isinstance(ended, ListNotRead), said
+    states = {v["document_id"]: v["state"] for v in app.progress.data.values()}
+    assert states == {"inv_3": "Completed"}
+    assert app.stats["failed"] == 0
+    assert "session has expired" not in said
+    assert "Nothing was saved" not in said
+    assert "could not be read again" in said
+    assert page.asked == ["https://files.stripe.com/f3", "https://files.stripe.com/f2"]

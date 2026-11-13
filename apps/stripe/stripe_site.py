@@ -66,6 +66,7 @@ from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
 from paperpull_core import intake
 from paperpull_core import redirects
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 # Everything on its way into a diagnostic file goes through here. It
@@ -272,6 +273,18 @@ class SessionExpired(RuntimeError):
 class NeedsPerson(RuntimeError):
     """Stripe asked for something only the account holder may give, such
     as the tax ID before a 1099. Never answered here."""
+
+
+class ListStopped(Exception):
+    """The lists, read again after one document was refused, did not answer
+    (a 500, a timeout) or showed no document, though they listed that one.
+    That says neither that the session ended nor that it holds, so the run
+    stops with the lists unread. Its words are this module's own, never the
+    page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 def goto_documents(page) -> bool:
@@ -580,15 +593,6 @@ def _fetch_file(page, link: str) -> dict:
             "b64": base64.b64encode(body).decode() if body[:5] == b"%PDF-" else ""}
 
 
-def _still_listed(docs: list) -> list:
-    """The lists read again after one document was refused. Lists that
-    show no document at all, or never came, are no lists, since that
-    document was listed, and raise SessionExpired."""
-    if not docs:
-        raise SessionExpired("the lists read empty after a refused document")
-    return docs
-
-
 def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
                   title: str = "", document_id: str = "") -> bool:
     """Fetch one document's PDF from its own link, from inside the page, and
@@ -597,10 +601,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     step would look, raises NeedsPerson. `dl_dir` is unused.
 
     A file answered with a 401, a 403 or a redirect off stripe.com has the
-    lists read again, with the same calls that prove a session. Lists
-    refused too, or showing no document at all, raise SessionExpired, which
-    stops the run. Lists that still read leave the document failed alone
-    (False), and the next run tries it again."""
+    lists read again, with the same calls that prove a session
+    (refused.list_again). Lists refused too raise SessionExpired, which
+    stops the run as signed out. Lists that do not answer (a 500, a
+    timeout) or show no document raise ListStopped, which stops the run
+    with the lists unread, since they say neither. Lists that still read
+    leave the document failed alone (False), and the next run tries it
+    again."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
@@ -629,11 +636,13 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     except SessionExpired:
         # A refusal may be the session ending or this one document. The
         # lists are read again, the way Discover reads them, and a session
-        # that ended is refused there too and stops the run. Lists that
-        # still read leave the refusal this document's own, so it fails
-        # alone and never stops every later run at the same document. It
-        # is not asked for a second time.
-        _still_listed(list_documents(page))
+        # that ended is refused there too and stops the run. Lists that do
+        # not answer or show no document raise ListStopped, which stops it
+        # with the lists unread. Lists that still read leave the refusal
+        # this document's own, so it fails alone and never stops every
+        # later run at the same document. It is not asked for a second time.
+        refused.list_again(lambda: list_documents(page), SessionExpired, ListStopped,
+                           stops=(NeedsPerson,))
         log.info("the document dated %s was refused while the lists still read", iso_date)
         return False
     if not r.get("b64"):
