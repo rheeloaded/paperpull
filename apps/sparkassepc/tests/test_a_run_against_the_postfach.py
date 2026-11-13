@@ -62,7 +62,10 @@ PAGE_JS = """
 window.bankDownload = async (event, link) => {
   event.preventDefault();
   const answer = await fetch(link.href, {method: "POST", headers: {"X-Requested-With": "XMLHttpRequest"}});
-  if (answer.ok) location.href = await answer.text();
+  if (!answer.ok) return;
+  const to = await answer.text();
+  if (window.bankMarksRead) link.closest("tr").classList.remove("tablerowmarked");
+  location.href = to;
 };
 document.addEventListener("submit", async (event) => {
   const form = event.target;
@@ -112,8 +115,8 @@ class Bank:
     `link_class` names the direct download links. A name in `refuse` answers
     that status for its PDF, one in `not_pdf` answers a sign-in page with
     200, and once `signs_out`'s PDF is asked for the bank answers as signed
-    out from then on. `marks_read` clears a row's unread mark when its PDF
-    is taken."""
+    out from then on. `marks_read` clears a row's unread mark, on the page
+    and at the bank, as its download is prepared."""
 
     def __init__(self):
         self.folders = {folder: [] for folder in site.FOLDERS}
@@ -186,8 +189,9 @@ class Bank:
             for name, path in site.FOLDERS.items())
         return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>Postfach</title></head>"
                 "<body><h1>Elektronisches Postfach</h1><nav>%s</nav>%s<script>"
-                "window.bankPagerScript = %s;%s</script></body></html>"
-                % (nav, self.form(folder), "true" if self.pager == "script" else "false", PAGE_JS))
+                "window.bankPagerScript = %s; window.bankMarksRead = %s;%s</script></body></html>"
+                % (nav, self.form(folder), "true" if self.pager == "script" else "false",
+                   "true" if self.marks_read else "false", PAGE_JS))
 
     # -- what the bank answers ---------------------------------------------
 
@@ -226,6 +230,8 @@ class Bank:
     def _prepare(self, route, folder, identity):
         m = next(m for m in self.folders[folder] if m["identity"] == identity)
         self.prepared.append(m["name"])
+        if self.marks_read:
+            m["unread"] = False
         ticket = "T%04d" % len(self.tickets)
         self.tickets[ticket] = m
         return route.fulfill(status=200, content_type="text/plain",
@@ -244,8 +250,6 @@ class Bank:
             return route.fulfill(status=200, content_type="text/html", body=SIGN_IN)
         if name in self.not_pdf:
             return route.fulfill(status=200, content_type="text/html", body=SIGN_IN)
-        if self.marks_read:
-            m["unread"] = False
         return route.fulfill(status=200, content_type="application/pdf", body=pdf_of(name))
 
 
@@ -462,6 +466,7 @@ def test_a_row_whose_unread_mark_changes_with_its_download_is_still_saved(home):
     code, said = home.run_all()
     assert code == 0, said
     assert home.on_disk() == ["P1", "P2"]
+    assert not any(m["unread"] for m in home.bank.folders["Posteingang"])
 
 
 # -- one document that will not download ----------------------------------------
