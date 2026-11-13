@@ -28,6 +28,8 @@ const client = {get: async ({endpoint, pathParams}) => {
   calls.push(endpoint);
   if (mode === "hangs") return new Promise(() => {});
   if (mode === "signed-out") return [{}, {status: 401}];
+  if (mode.startsWith("ticket-") && /(versions\/:version|uri\/:id)$/.test(endpoint))
+    return [{}, {status: Number(mode.slice(-3))}];
   let data;
   if (endpoint.endsWith("/global-position")) {
     data = {resource: {cardsInfo: {cards: [
@@ -61,7 +63,7 @@ global.fetch = async (url, options) => {
 };
 (async () => {
   const listed = await bridge({op: "collect"});
-  const downloaded = listed.ok && ["download", "document", "foreign"].includes(mode)
+  const downloaded = listed.ok && ["download", "document", "foreign", "ticket-401", "ticket-403"].includes(mode)
     ? await bridge({op: "download", id: mode === "document" ? "document:other" : listed.rows[0].item_id})
     : null;
   console.log(JSON.stringify({listed, downloaded, fetched, calls}));
@@ -109,6 +111,18 @@ def test_both_ticket_types_download_pdfs_without_returning_the_signed_url(mode):
 def test_a_signed_url_on_an_unlisted_host_is_refused_before_fetch():
     result = run_bridge("foreign")
     assert not result["downloaded"]["ok"]
+    assert result["fetched"] == 0
+
+
+@pytest.mark.parametrize("mode", ["ticket-401", "ticket-403"])
+def test_a_refused_ticket_is_that_documents_failure_and_not_a_sign_out(mode):
+    """A 401 or 403 on one document's ticket read as signed out, so the run
+    stopped there without the list being asked. It is that document's own
+    failure, and the list read again says whether the session ended."""
+    result = run_bridge(mode)
+    assert result["listed"]["ok"]
+    assert result["downloaded"] == {"ok": False, "expired": False,
+                                    "error": "The portal refused this document"}
     assert result["fetched"] == 0
 
 

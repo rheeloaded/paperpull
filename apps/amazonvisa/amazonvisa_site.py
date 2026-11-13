@@ -300,7 +300,7 @@ async (args) => {
     const client = requireModule?.(17724)?.Tz;
     if (typeof client?.get !== "function") fail("Portal document client is unavailable");
 
-    const get = async (endpoint, options = {}) => {
+    const get = async (endpoint, options = {}, refused = "SESSION_EXPIRED") => {
       // The portal's client takes no signal, so an answer that never comes
       // is given up on here rather than hold the run forever.
       let timer;
@@ -314,9 +314,10 @@ async (args) => {
         clearTimeout(timer);
       }
       const [data, meta] = Array.isArray(answer) ? answer : [];
-      // A refusal reads as signed out here. For one document's ticket the
-      // list read again decides whether it is (download_document).
-      if (meta?.status === 401 || meta?.status === 403) fail("SESSION_EXPIRED");
+      // A refusal of the list is a session that ended. A refusal of one
+      // document's ticket may be that document's alone, so it fails as
+      // that document's, and the list read again decides (download_document).
+      if (meta?.status === 401 || meta?.status === 403) fail(refused);
       if (meta?.status !== 200 || !data || typeof data !== "object")
         fail("The portal did not return the requested document data");
       return data;
@@ -326,10 +327,11 @@ async (args) => {
       const document = window[stateKey]?.items.get(args.id);
       if (!document) fail("List documents again before downloading");
       const {id, version} = document;
+      const refused = "The portal refused this document";
       const ticket = version
         ? await get("mb-api-documents/v2/documents/:documentId/versions/:version",
-                    {pathParams: {documentId: id, version}})
-        : await get(root + "documents/uri/:id", {pathParams: {id}});
+                    {pathParams: {documentId: id, version}}, refused)
+        : await get(root + "documents/uri/:id", {pathParams: {id}}, refused);
       const signed = version ? ticket.documentUri : ticket.uri;
       if (typeof signed !== "string") fail("The portal did not give a PDF link");
       const url = new URL(signed);
@@ -436,7 +438,7 @@ async (args) => {
       "The portal did not return the whole statement list", "The portal did not list its document categories",
       "The portal did not return the whole document category", "A listed document has no file type",
       "A listed statement is missing its document fields", "The portal did not answer in time",
-      "A document category reached the most one answer holds"
+      "A document category reached the most one answer holds", "The portal refused this document"
     ];
     return {ok: false, expired: message === "SESSION_EXPIRED",
             error: fixed.includes(message) ? message : "The portal document request failed"};
@@ -644,17 +646,18 @@ def download_document(page, title, date, out_path, occurrence=0, item_hint="",
                       twins=1, config=None):
     """Save one document, and answer the id its bytes came from, or "" when
     the portal gave no PDF for it, which fails that document alone. Which
-    row is its own is resolve_item's to say. Whatever the download answers,
-    a list that answers as signed out raises SessionExpired and a list that
-    cannot be read again ListStopped, since both hold for every document
-    after it."""
+    row is its own is resolve_item's to say. A 401 or 403 on the document's
+    ticket comes back from the page as that document's own failure (NoFile),
+    never as a signed-out answer. Once a download brings no PDF, a list that
+    answers as signed out raises SessionExpired and a list that cannot be
+    read again ListStopped, since both hold for every document after it."""
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins, config=config)
     try:
         result = _execute(page, "download", stop=NoFile, id=row["item_id"])
         data = intake.decode(result["data"], validate=True)
         why = "" if data.startswith(b"%PDF-") else "not a PDF (%d bytes)" % len(data)
-    except (NoFile, SessionExpired, intake.TooLarge, ValueError, KeyError, TypeError) as e:
+    except (NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
         # By its type and kind, since what an answer or an error says can
         # carry the portal's words.
         why = "%s, %s" % (type(e).__name__, failure.error_kind(e))
