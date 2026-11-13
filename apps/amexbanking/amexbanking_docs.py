@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import refused
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core import tabs
@@ -602,6 +603,12 @@ class App:
                 # after it would get the same, so the run stops here, with
                 # nothing recorded against this one.
                 self.session_ended()
+            except site.ListStopped as stop:
+                # The documents list, read again after a document was
+                # refused, did not answer as a list. Every document after it
+                # reads the same list, so the run stops here, with nothing
+                # recorded against this one.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -610,35 +617,48 @@ class App:
 
     def _read_the_list_again(self, page) -> None:
         """Documents and Statements loaded again after one document was
-        refused, and its list read the way Discover reads it. A list refused
-        raises SessionExpired, which the loop stops the run on, and a page
-        that looks signed out stops it as signed out here. A list that does
-        not answer as a list proves no session either, and Discover reads it
-        as a list not read whole, not as a sign-out, so the run stops with
-        the list unread (_list_not_read_again). A list of another account
-        than the records hold stops it as Discover does. Returns only when
-        the list answers for this config's account."""
+        refused, and its list read the way Discover reads it
+        (refused.list_again). A list refused raises SessionExpired, which
+        the loop stops the run on, and a page that looks signed out stops it
+        as signed out here. A list that does not answer as a list, does not
+        answer in time or holds no document proves no session either, and
+        Discover reads it as a list not read whole, not as a sign-out, so it
+        raises ListStopped and the run stops with the list unread
+        (list_changed). A list of another account than the records hold
+        stops it as Discover does. Returns only when the list answers for
+        this config's account with a document in it."""
+        refused.list_again(lambda: self._list_answered(page),
+                           site.SessionExpired, site.ListStopped)
+
+    def _list_answered(self, page):
+        """The documents the page's list answered with once Documents and
+        Statements was loaded again, or None when the page did not open or
+        its list did not answer as a list, which refused.list_again reads as
+        a list unread. A page that looks signed out stops the run as signed
+        out, and a list of another account stops it as Discover does, both
+        before its documents are weighed."""
         if not site.goto_documents(page):
             if site.looks_signed_out(page):
                 self.session_ended()
-            self._list_not_read_again()
+            return None
         raw = site.collect_documents(page)
         if raw is None or not site.answers_its_list(page):
-            self._list_not_read_again()
+            return None
         self._stop_if_another_account(raw)
+        return raw
 
-    def _list_not_read_again(self) -> None:
+    def list_changed(self, stop) -> None:
         """Stop the run because the documents list, read again after one
-        document was refused, did not answer as a list. Nothing is recorded
-        against the document, the listing is noted as one that stopped, and
-        the run leaves on ListNotRead, so the panel offers a run that lists
-        first rather than Continue, which would stop at the same document
-        again (#124)."""
-        log.info("the documents list did not answer when it was read again")
-        self.write_failure("read the documents list again", "the documents list did not answer")
+        document was refused, could not be read. Nothing is recorded against
+        the document, the listing is noted as one that stopped, and the run
+        leaves on ListNotRead, so the panel offers a run that lists first
+        rather than Continue, which would stop at the same document again
+        (#124)."""
+        log.info("the documents list could not be read again after a document was refused")
+        self.write_failure("read the documents list again", "the documents list could not be read again")
         listing.read_again_stopped(self, (
-            "American Express Banking's documents list did not answer when it was "
-            "read again, so this run stops here."))
+            "American Express Banking's documents list could not be read again, so "
+            "this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Download one document's PDF straight to its final path, asked for

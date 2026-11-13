@@ -92,11 +92,13 @@ bot checks.
   it was on. Sign in again and press Resume.
 - **One document refused.** A PDF answered with a 401, a 403 or a redirect
   has the list read again. A list refused too, or a page that looks signed
-  out, stops the run as signed out. A list that answers 500 or nothing stops
-  it with the list unread, so the next run reads the list first, and a list
-  of another account stops it as Discover does. A list that still answers
-  leaves that document failed with nothing saved, the run goes on, and the
-  next run tries it again. The document is never asked for twice.
+  out, stops the run as signed out. A list that answers 500, answers
+  nothing, holds no document or cannot be read at all stops it with the
+  list unread and nothing recorded against the document, so the next run
+  reads the list first, and a list of another account stops it as Discover
+  does. A list that still answers leaves that document failed with nothing
+  saved, the run goes on, and the next run tries it again. The document is
+  never asked for twice.
 - **A document is done by its own record.** A PDF already in the folder with
   the same date is never taken for a document, since it may be another
   account's statement of that month.

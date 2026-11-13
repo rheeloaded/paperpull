@@ -507,15 +507,36 @@ REFUSALS = {
 ANSWERS = dict(REFUSALS, other={"status": 500, "redirected": False})
 
 
+def _times_out(*_a, **_k):
+    raise TimeoutError("Timeout 30000ms exceeded")
+
+
 class Answering(Page):
     """Documents and Statements, whose document asks are answered by the
     document's own id and whose every load answers the list with
-    `list_status` for `list_token`, or with nothing when it is None."""
+    `list_status` for `list_token`, holding `list_rows` (one statement when
+    None), or with nothing when the status is None. `after` makes a load
+    time out, or closes the tab once a document was refused, after which
+    the tab answers nothing at all."""
 
-    def __init__(self, refused=(), how="403", list_status=200, list_token="tok-checking"):
+    closed = False
+
+    @property
+    def url(self):
+        if self.closed:
+            raise RuntimeError("Target page, context or browser has been closed")
+        return self._url
+
+    @url.setter
+    def url(self, value):
+        self._url = value
+
+    def __init__(self, refused=(), how="403", list_status=200, list_token="tok-checking",
+                 list_rows=None, after=""):
         super().__init__(name="Business Checking", number="•••• 1234")
         self.refused, self.how = set(refused), how
         self.list_status, self.list_token = list_status, list_token
+        self.list_rows, self.after = list_rows, after
         self.asked, self.loads = [], 0
 
     def title(self):
@@ -533,13 +554,17 @@ class Answering(Page):
 
     def _load(self):
         self.loads += 1
+        if self.after == "load times out":
+            _times_out()
         if self.list_status is not None:
-            _answer(self, token=self.list_token, status=self.list_status)
+            _answer(self, token=self.list_token, status=self.list_status,
+                    statements=self.list_rows)
 
     def evaluate(self, js, arg):
         doc_id = arg[1]["bankingDocument"]["identifier"]
         self.asked.append(doc_id)
         if doc_id in self.refused:
+            self.closed = self.after == "tab closes"
             return dict(ANSWERS[self.how])
         pdf = testkit.text_pdf(["made-up statement %s" % doc_id])
         return {"status": 200, "redirected": False,
@@ -621,23 +646,42 @@ def test_a_document_refused_and_a_list_refused_after_it_stop_the_run_as_signed_o
     assert app.stats["failed"] == 0
 
 
-@pytest.mark.parametrize("list_status", [500, None])
+# What the list can do once a document was refused that says nothing of
+# the session, answer 500, answer nothing, hold no document, time out
+# loading, or not be read at all, the tab closed under it.
+UNREAD = {
+    "500": dict(list_status=500),
+    "nothing": dict(list_status=None),
+    "empty": dict(list_rows=[]),
+    "load times out": dict(after="load times out"),
+    "tab closes": dict(after="tab closes"),
+}
+
+
+@pytest.mark.parametrize("unread", sorted(UNREAD))
 def test_a_document_refused_and_a_list_that_does_not_answer_after_it_stop_the_run_unread(
-        app_env, monkeypatch, capsys, list_status):
-    """A list that answers 500 or nothing proves no session, and Discover
-    reads it as a list not read whole, not as a sign-out. So the run stops
-    with the list unread, and the panel offers a run that lists first, not
-    Continue, which would read the same list for its first document and
-    stop there again (#124)."""
+        app_env, monkeypatch, capsys, unread):
+    """A list that answers 500, nothing or no document, or times out,
+    proves no session, and Discover reads it as a list not read whole, not
+    as a sign-out. An empty one read as a list that still answers, and a
+    tab that closed reached the loop as the document's own failure, so the
+    run went on with no session shown. So the run stops with the list
+    unread, and the panel offers a run that lists first, not Continue,
+    which would read the same list for its first document and stop there
+    again (#124)."""
     app, _ = app_env
-    page = Answering(refused={"URN:DOC:BS:1"}, list_status=list_status)
+    page = Answering(refused={"URN:DOC:BS:1"}, **UNREAD[unread])
     docs, ended, said = _run_over(app, monkeypatch, page, capsys)
     assert isinstance(ended, ListNotRead), (type(ended), said)
     assert "signed out" not in said
-    assert "documents list did not answer when it was read again" in said
+    assert "documents list could not be read again" in said
     assert listing.last(app) == listing.STOPPED
-    assert app.failures == [("read the documents list again", "the documents list did not answer")]
-    assert page.asked == ["URN:DOC:BS:1"] and page.loads == 1
+    assert app.failures == [("read the documents list again",
+                             "the documents list could not be read again")]
+    # Each document is asked for once, and the list loaded once more, or
+    # not at all once the tab closed.
+    assert page.asked == ["URN:DOC:BS:1"]
+    assert page.loads == (0 if unread == "tab closes" else 1)
     assert app.progress.get(docs[0].key) is None and app.progress.get(docs[1].key) is None
     assert app.stats["failed"] == 0
 

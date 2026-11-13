@@ -154,6 +154,19 @@ class SessionExpired(Exception):
     is refused too or the page looks signed out (App.download_one)."""
 
 
+class ListStopped(Exception):
+    """The documents list, read again after one document was refused, did
+    not answer as a list, did not answer in time or held no document, none
+    of which says the session ended. Every document after it would read the
+    same list, so the run stops with the list unread. `docs` holds what was
+    read before it stopped. Its words are this module's own, never the
+    page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
+
+
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
