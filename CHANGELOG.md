@@ -33,11 +33,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ### Changed
 - **The update check also accepts installers signed by TNE Enterprises
   LLC.** On Windows, an installer signed by TNE Enterprises LLC, the company
-  behind PaperPull, now passes the update check as one signed by Bryan Rhee
-  does, so signing can move to the company later without the copies already
-  installed refusing the update. The signature must still be valid, come
-  from Microsoft's ID Verified code signing and say it is the new version.
-  PRIVACY.md says so.
+  behind PaperPull, now passes the update check as one signed by its
+  current publisher does, so signing can move to the company later
+  without the copies already installed refusing the update. The signature
+  must still be valid, come from Microsoft's ID Verified code signing and
+  say it is the new version. PRIVACY.md says so.
 
 ### Fixed
 - **The tester steps in the app READMEs name the panel's buttons as it
@@ -124,7 +124,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   sign-in browser. A name that only starts with `~`, such as `~archive`, is
   still a folder of that name. On PaperPull Server the home folder is
   outside the data folder, so a run stops before saving anything there and
-  the panel reads nothing from it, as for any folder outside it.
+  the panel reads nothing from it, as for any folder outside it. If a run
+  before this one kept its record of what was downloaded in such a folder
+  named `~`, the run stops before downloading anything, says where that
+  folder is, and asks you to move it to your home folder or write the full
+  path, so nothing is downloaded a second time.
 - **One bill Ziply Fiber refuses no longer stops every run.** A bill whose
   PDF Ziply answered with a 401, a 403, a redirect or a page was read as a
   sign-out, so the run stopped at that bill, and every run after it,

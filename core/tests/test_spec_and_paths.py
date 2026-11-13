@@ -526,6 +526,61 @@ def test_a_folder_under_the_home_folder_is_read_from_there(
     assert no_tilde_folder(tmp_path)
 
 
+@pytest.mark.parametrize("started", ["in its folder", "elsewhere"])
+def test_a_history_left_in_a_folder_named_tilde_stops_the_run_before_it_downloads_again(
+        tmp_path, monkeypatch, home_folder, started):
+    """0.65.0 and before read "~/Documents/..." as a folder named "~" in the
+    install and kept the record of what was downloaded there. Read now as
+    the home folder, a run would find no record and take the whole history
+    a second time, so it stops first, saying where the record is, and makes
+    no folder in the home folder."""
+    install = an_install(tmp_path)
+    (install / "config.json").write_text(
+        json.dumps({"output_dir": "~/Documents/Example Statements"}), encoding="utf-8")
+    old = install / "~" / "Documents" / "Example Statements"
+    old.mkdir(parents=True)
+    (old / "progress.json").write_text("{}", encoding="utf-8")
+    elsewhere = tmp_path / "Elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(install if started == "in its folder" else elsewhere)
+    with pytest.raises(SystemExit) as stop:
+        storage.load_config(install / "config.json" if started == "elsewhere" else None)
+    said = str(stop.value)
+    assert "stopped before downloading anything again" in said
+    assert str(old) in said and str(home_folder / "Documents" / "Example Statements") in said
+    assert list(home_folder.iterdir()) == []
+    assert (old / "progress.json").read_text(encoding="utf-8") == "{}"
+
+
+def test_a_history_moved_to_the_home_folder_lets_the_run_go_on(
+        tmp_path, monkeypatch, home_folder):
+    """Once the home folder holds a record of its own, the old folder named
+    "~" is left alone and the run reads the home folder."""
+    install = an_install(tmp_path)
+    (install / "config.json").write_text(
+        json.dumps({"output_dir": "~/Documents/Example Statements"}), encoding="utf-8")
+    for folder in (install / "~" / "Documents" / "Example Statements",
+                   home_folder / "Documents" / "Example Statements"):
+        folder.mkdir(parents=True)
+        (folder / "progress.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(install)
+    cfg = storage.load_config(None)
+    assert Path(cfg["output_dir"]) == home_folder / "Documents" / "Example Statements"
+
+
+def test_a_folder_named_tilde_with_no_record_in_it_does_not_stop_the_run(
+        tmp_path, monkeypatch, home_folder):
+    """Only a record of what was downloaded stops the run. An empty or stray
+    folder named "~" does not."""
+    install = an_install(tmp_path)
+    (install / "config.json").write_text(
+        json.dumps({"output_dir": "~/Documents/Example Statements"}), encoding="utf-8")
+    (install / "~" / "Documents" / "Example Statements").mkdir(parents=True)
+    monkeypatch.chdir(install)
+    cfg = storage.load_config(None)
+    assert Path(cfg["output_dir"]) == home_folder / "Documents" / "Example Statements"
+
+
 @pytest.mark.parametrize("written,under", [
     ("~", ()),
     ("~/Example Profile", ("Example Profile",)),

@@ -184,6 +184,31 @@ def start_in_config_folder(cfg: dict, path) -> None:
             "the control panel does." % (Path(path).name, base, e))
 
 
+def _stop_for_history_in_a_tilde_folder(written, cfg: dict, path) -> None:
+    """Stop a run whose output_dir starts with "~" while the record of what
+    it downloaded is still in the folder named "~" that 0.65.0 and before
+    made of it (#166). They read "~/Documents/Statements" as a folder named
+    "~" in the install, or in the config's folder for a run started
+    elsewhere, and kept progress.json there. Read now as the home folder,
+    the run would find no record there and download the whole history a
+    second time. Nothing is moved for the person, since which copy to keep
+    is theirs to say, and once the home folder holds a record of its own the
+    run goes on."""
+    if not written or (Path(cfg["output_dir"]) / "progress.json").exists():
+        return
+    for base in (Path(path).parent, Path(spec().project_dir)):
+        old = Path(os.path.normpath(os.path.join(str(base), written)))
+        if (old / "progress.json").is_file():
+            raise SystemExit(
+                "output_dir in %s is written as %s, which PaperPull now reads as a "
+                "folder in your home folder, %s. Until now it was read as a folder named "
+                "~ in %s, and the record of what was downloaded is there, so this run "
+                "stopped before downloading anything again. Move the folder %s to %s, or "
+                "write output_dir as the full path of the folder it is in now, and run "
+                "again." % (Path(path).name, one_line(written), one_line(cfg["output_dir"]),
+                            one_line(base), one_line(old), one_line(cfg["output_dir"])))
+
+
 def _given(path) -> str:
     return os.path.normpath(str(path)) if path else ""
 
@@ -225,10 +250,14 @@ def load_config(path: Optional[Path] = None) -> dict:
             "Open it and fix the syntax - a trailing comma is the usual cause.")
     # A folder written from the home folder, "~/Documents/Statements" say, is
     # read as that folder before anything judges or prints it (#166).
+    home_written = None
     if isinstance(cfg, dict):
         for key in _NAMED_SETTINGS:
             if key in cfg:
-                cfg[key] = with_home(cfg[key])
+                read = with_home(cfg[key])
+                if key == "output_dir" and read != cfg[key]:
+                    home_written = cfg[key]
+                cfg[key] = read
     held = _not_on_one_line(cfg, path)
     if held:
         raise SystemExit(
@@ -239,6 +268,7 @@ def load_config(path: Optional[Path] = None) -> dict:
     # Named in full first, since the run may move to another folder, and
     # before the server's checks, so they judge the folders the run uses.
     path = Path(path).absolute()
+    _stop_for_history_in_a_tilde_folder(home_written, cfg, path)
     start_in_config_folder(cfg, path)
     if os.environ.get("PAPERPULL_SERVER") == "1":
         hold_to_the_server(cfg, path)
