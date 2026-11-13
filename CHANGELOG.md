@@ -7,6 +7,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **BBVA Germany (#209).** Downloads account statements and other PDFs from
+  the web Postfach, following the bank's pagination.
+
 ## [0.66.0] - 2026-11-13
 
 Renault Bank direkt is new, contributed by @MelleD. One bill Ziply Fiber
