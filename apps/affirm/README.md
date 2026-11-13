@@ -34,6 +34,11 @@ one gives a loan's created date, one gives its Details tab, where the
 page, which the app fetches the same way and renders to PDF in a temporary
 tab of the same browser. Nothing on the page is clicked.
 
+An agreement Affirm answers with a 401 or 403 has the loan list read
+again. A list refused too means you are signed out, and the run stops. A
+list that still reads leaves that agreement failed with nothing saved, the
+run goes on to the others, and the next run tries it again.
+
 ## Safety
 
 This is a lender's account. The site can make a payment, set up autopay,

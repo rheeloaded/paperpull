@@ -78,7 +78,9 @@ LOGIN_URL_MARKERS = ["/login", "/logon", "/signin", "/sign-in", "/mfa",
 
 
 class SessionExpired(RuntimeError):
-    """Affirm answered with a sign-in page instead of the thing asked for."""
+    """Affirm answered with a sign-in page instead of the thing asked for. A
+    loan agreement refused that way raises it only when the loan list, read
+    again, is refused too (download_document)."""
 
 
 def is_safe_url(url: str) -> bool:
@@ -351,9 +353,25 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
     return rows
 
 
+def _still_listed(loans: list) -> list:
+    """The loan list read again after one agreement was refused. A list
+    with no loan at all, which is what a sign-in page answered through a
+    redirect reads as, is no list, since that loan was listed, and raises
+    SessionExpired."""
+    if not loans:
+        raise SessionExpired("the loan list read empty after a refused agreement")
+    return loans
+
+
 def download_document(page, title: str, date: str, out_path: Path, occurrence: int = 0,
                       item_hint: str = "", client_hint: str = "", account: str = "") -> bool:
-    """Fetch the agreement page through the signed-in page and render it to PDF."""
+    """Fetch the agreement page through the signed-in page and render it to PDF.
+
+    An agreement answered with a 401 or 403 has the loan list read again,
+    with the same call that proves a session. A list refused too, or one
+    with no loan at all, raises SessionExpired, which stops the run. A list
+    that still reads leaves the agreement failed alone (False), and the
+    next run tries it again."""
     from paperpull_core import receipt_pdf
     url = terms_url(page, item_hint) if item_hint else ""
     url = url or client_hint
@@ -367,7 +385,15 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
     except intake.TooLarge:
         return False
     if res.get("status") in (401, 403):
-        raise SessionExpired("Affirm answered %s" % res["status"])
+        # A refusal may be the session ending or this one agreement. The
+        # loan list is read again, and a session that ended is refused
+        # there too, which raises SessionExpired and stops the run. A list
+        # that still reads leaves the refusal this agreement's own, so it
+        # fails alone and never stops every later run at the same loan. It
+        # is not asked for a second time.
+        _still_listed(list_loans(page))
+        log.warning("the loan agreement dated %s was refused while the loan list still reads", date)
+        return False
     html = res.get("text") or ""
     if res.get("status") != 200 or "html" not in (res.get("ct") or "") or len(html) < 2000:
         log.warning("loan terms for %s %s did not come back as a page (%s, %s)",
