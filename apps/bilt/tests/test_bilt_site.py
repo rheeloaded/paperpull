@@ -992,6 +992,52 @@ def test_a_list_that_stops_when_read_after_a_refusal_stops_the_run_unread(tmp_pa
     assert len([p for p in w.presses if p.startswith("Download")]) == 1
 
 
+def _times_out_once_the_list_shows(wallet):
+    """The wallet's waits time out once the statements show, as a page
+    that stops answering does."""
+    wait = wallet.wait_for_timeout
+
+    def timed_out(ms):
+        if wallet.list_open:
+            raise TimeoutError("Timeout 30000ms exceeded")
+        wait(ms)
+    wallet.wait_for_timeout = timed_out
+
+
+def _holds_nothing(wallet):
+    wallet.statements = []
+
+
+# What the list read again after a refusal can do that says nothing of the
+# session. Each stops the run with the list unread, never as signed out and
+# never as one statement's failure.
+LIST_UNREAD = {
+    "500": lambda w: setattr(w, "list_answers", lambda: [list_resp(w.statements, status=500)]),
+    "timeout": _times_out_once_the_list_shows,
+    "empty": _holds_nothing,
+}
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_a_list_that_does_not_answer_after_a_refusal_stops_the_run_unread(tmp_path, how):
+    """A timeout reached the loop as the statement's own failure, so the
+    run went on with no session shown, and a list that held nothing was
+    read as one that still reads. Neither says the session holds."""
+    w = refused_wallet("403")
+
+    def on_goto(wallet):
+        if len(wallet.gotos) == 2:
+            LIST_UNREAD[how](wallet)
+    w.on_goto = on_goto
+    with pytest.raises(pressing.Stop) as stop:
+        take(w, tmp_path)
+    assert stop.value.list_unread
+    assert [p for p in w.presses if p.startswith("Download")] == [
+        "Download statement for October 06, 2026"]
+    assert len(w.gotos) == 2 and no_tab_open(w)
+    assert not (tmp_path / "statements").exists()
+
+
 def test_a_tab_opened_by_another_tab_is_left_alone(tmp_path):
     w = Wallet()
     other = SimpleNamespace()
@@ -1439,6 +1485,31 @@ def test_one_statement_refused_and_the_list_after_it_stop_the_run_as_signed_out(
     assert "Nothing was saved" not in said
     assert app.progress.data == {}
     assert len([p for p in w.presses if p.startswith("Download")]) == 1
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_one_statement_refused_and_a_list_that_does_not_answer_after_it_stop_the_run_unread(
+        tmp_path, monkeypatch, caplog, how):
+    """The run stops at the refused statement with the list unread, so the
+    panel offers a run that lists first. Nothing is recorded against the
+    statement, and nothing after it is pressed."""
+    refused = "2026-09-06"
+    w = Wallet()
+    w.tab_status = lambda iso: 403 if iso == refused else 200
+    app = wallet_app(tmp_path, monkeypatch, w)
+
+    def on_goto(wallet):
+        # The load that reads the list again after the refusal.
+        if "Download statement for September 06, 2026" in wallet.presses:
+            LIST_UNREAD[how](wallet)
+    w.on_goto = on_goto
+    ended, said = run_all(app, caplog)
+    assert isinstance(ended, pressing.Stop) and ended.list_unread, said
+    states = {r["date"]: r["state"] for r in app.progress.data.values()}
+    assert states == {"2026-10-06": docs.State.COMPLETED.value}
+    assert "signed out" not in said and "Nothing was saved" not in said
+    assert [p for p in w.presses if p.startswith("Download")] == [
+        "Download statement for October 06, 2026", "Download statement for September 06, 2026"]
 
 
 def test_one_id_under_two_dates_stops_the_list_and_keeps_the_record(tmp_path, monkeypatch):

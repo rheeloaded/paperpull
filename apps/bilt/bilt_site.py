@@ -127,10 +127,13 @@ stops, and asks for a sign-in again. A wallet that shows neither the
 sign-in nor one Bilt Card still stops the list. A statement whose details
 call answers a 401, 403 or redirect, whose tab lands on the sign-in page,
 or whose PDF address answers a 401, 403 or redirect, has the list read
-again. A list refused too stops the run as signed out, and a list that
-still reads fails that statement alone, and the next run tries it again. A
-tab such a statement opened that will not close stops the run. What Bilt
-shows for a statement it will not give has not been seen.
+again. A list refused too stops the run as signed out, a list that
+still reads fails that statement alone, and the next run tries it again.
+A list that does not answer, times out or holds nothing says nothing of
+the session, so it stops the run with the list unread, nothing recorded
+against the statement, and a run that lists first takes it. A tab such
+a statement opened that will not close stops the run. What Bilt shows
+for a statement it will not give has not been seen.
 
 KNOWN CEILINGS
   * One Bilt Card. A wallet that shows none, or more than one, stops the
@@ -156,6 +159,7 @@ from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core import pressing
 from paperpull_core import redirects
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -1813,7 +1817,9 @@ def download_statement(page, run: Run, out_path, *, card_id: str, statement_id: 
     the same call that proves a session. Its details call's refusal is
     forgotten first (_Watch.forget_refused_details), so the list is judged
     by its own answer. A session that has ended is refused the list too,
-    and its SessionExpired stops the run there. A list that still reads
+    and its SessionExpired stops the run there. A list that does not
+    answer, times out or holds nothing stops it with the list unread
+    (refused.list_again). A list that still reads
     leaves the refusal this statement's own, so it fails alone (False),
     since a stop here would stop every run at this statement for good. Its
     button is not pressed a second time, and a tab it opened that will not
@@ -1851,10 +1857,13 @@ def download_statement(page, run: Run, out_path, *, card_id: str, statement_id: 
         # so it never stops every later run at the same statement. Its
         # button is not pressed a second time. A refusal of this statement's
         # details call would raise again on the list's first look, so it is
-        # forgotten first. A refused list answer is kept.
+        # forgotten first. A refused list answer is kept. A list that times
+        # out or holds nothing says nothing of the session, so it stops the
+        # run with the list unread (refused.list_again).
         run.watch.forget_refused_details(page)
         try:
-            read_listing(page, run)
+            refused.list_again(lambda: read_listing(page, run).statements,
+                               SessionExpired, ListStopped)
         except ListStopped as stop:
             log.info("the list stopped when read again after the statement dated %s was "
                      "refused", iso_date)
