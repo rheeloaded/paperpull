@@ -132,6 +132,18 @@ def test_an_export_that_answers_a_sign_in_page_is_an_expired_session(signed_in):
         site.list_claims_summaries(page, TODAY)
 
 
+@pytest.mark.parametrize("status", [500, 502, 503])
+def test_a_gateways_error_page_is_a_refused_export_not_a_sign_out(signed_in, status):
+    """A page where the list should be says the session ended only when it
+    came with a 200. A gateway's own error page is a server that did not
+    answer."""
+    page = FakePage()
+    page.evaluate = lambda js, arg=None: {"status": status, "html": True}
+    got = site.list_claims_summaries(page, TODAY)
+    assert list(got) == []
+    assert got.refused == [p["label"] for p in site.claims_summary_periods(TODAY)]
+
+
 # -- the PDF -----------------------------------------------------------------
 
 def test_the_pdf_is_a_table_of_every_column_and_claim_with_nothing_unescaped(printed):

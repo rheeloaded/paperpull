@@ -141,6 +141,10 @@ def test_an_eob_refused_and_a_list_refused_after_it_is_a_sign_out(monkeypatch, t
 UNREAD = {
     "500": {"status": 500},
     "429": {"status": 429},
+    # A gateway's own error page, not JSON, is a server that did not
+    # answer, not Anthem's sign-in.
+    "502 page": {"status": 502, "html": True},
+    "503 page": {"status": 503, "html": True},
     "timeout": TimeoutError("Timeout 30000ms exceeded on made-up-host 4417"),
     "empty": {"status": 200, "body": {"result": {"data": []}}},
     "not a list": {"status": 200, "body": {"result": "made-up page words 4417"}},

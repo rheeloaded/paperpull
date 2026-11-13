@@ -883,9 +883,10 @@ def _summary_rows(page, claim_type: str, start: str, end: str) -> List[dict]:
     """The current session's raw EOB summary rows for one claim type.
 
     Primes the captured auth headers if missing, and re-primes once if the token
-    has gone stale (401). Raises SessionExpired if it still cannot authenticate,
-    and ListingIncomplete, saying its status alone, for any other answer but
-    200, which is a list that did not come rather than an empty one.
+    has gone stale (401). Raises SessionExpired if it still cannot authenticate
+    or answers a page with a 200, and ListingIncomplete, saying its status
+    alone, for any other answer but 200, a gateway's error page included,
+    which is a list that did not come rather than an empty one.
     """
     arg = {"claimType": claim_type, "start": start, "end": end}
     res = page.evaluate(_SUMMARY_JS, arg) or {}
@@ -893,7 +894,10 @@ def _summary_rows(page, claim_type: str, start: str, end: str) -> List[dict]:
         if prime_session(page, force=True):
             res = page.evaluate(_SUMMARY_JS, arg) or {}
     status = res.get("status")
-    if res.get("noauth") or res.get("html") or status in (401, 403):
+    # A page where the list should be is Anthem's sign-in only when it came
+    # with a 200. A gateway's own error page, a 502 or a 503, is a list
+    # that did not come, which says nothing of the session.
+    if res.get("noauth") or (res.get("html") and status == 200) or status in (401, 403):
         raise SessionExpired(
             "Anthem would not authenticate an EOB listing "
             f"(status {status}); the signed-in session is no longer valid")
@@ -1957,7 +1961,8 @@ def _period_summary(page, p: dict) -> Optional[dict]:
         if prime_session(page, force=True):
             res = _ask_export(page, arg, p["period"])
     status = res.get("status")
-    if res.get("noauth") or res.get("html") or status in (401, 403):
+    # A page is the sign-in only with a 200, as for the EOB list.
+    if res.get("noauth") or (res.get("html") and status == 200) or status in (401, 403):
         raise SessionExpired("Anthem would not authenticate the claims list "
                              f"(status {status})")
     if status != 200:
