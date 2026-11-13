@@ -18,6 +18,10 @@ cannot finish opens PaperPull again, and five more apps keep page
 addresses and words out of their logs.
 
 ### Added
+- **1822direkt, the 84th supported provider (#174).** Downloads PDFs from
+  the Postbox, including conversation attachments when you allow the app
+  to mark conversations as read. A trial download on one account saved
+  five PDFs, and a repeat saved no duplicates. Uses CDP port 9314.
 - **Renault Bank direkt, the Postfach, its archive and message attachments
   (#172).** Contributed by @MelleD and run on the contributor's own
   account, where a Pilot saved recent documents, an older archive document

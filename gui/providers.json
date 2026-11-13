@@ -34,6 +34,7 @@
     "coinbase": {"gets": "Monthly statements, One Card statements and tax documents", "group": "investing", "note": "One Card statements tested on one account"},
     "consorsbank": {"gets": "Statements, securities documents and tax certificates", "group": "banks", "tested": false, "shell": true, "note": "Not built yet, it opens the site for you to sign in and nothing more"},
     "costco": {"gets": "Warehouse, gas, pharmacy and costco.com receipts", "group": "shopping", "note": "Tested on one membership so far"},
+    "direkt1822": {"gets": "Account and card statements, tax documents and confirmations", "group": "banks", "note": "Allow marking conversations as read to download their attachments"},
     "discoverbank": {"gets": "Checking and savings statements", "group": "banks", "note": "Tested on checking and savings. For a Discover credit card, choose Discover"},
     "discovercard": {"gets": "Credit card statements", "group": "banks", "note": "For a card moved to Capital One, choose Capital One"},
     "dkb": {"gets": "Kontoauszüge, card statements, securities documents and tax certificates", "group": "banks", "note": "Tested on one account"},

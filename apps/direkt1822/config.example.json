@@ -1,0 +1,25 @@
+{
+  "owner": "",
+  "owner_in_filename": false,
+  "output_dir": ".",
+  "profile_dir": "./direkt1822-browser-profile",
+  "cdp_url": "http://127.0.0.1:9314",
+  "document_types": [
+    "Statement",
+    "Credit Card Statement",
+    "Securities Document",
+    "Tax Document",
+    "Contract Information",
+    "Message",
+    "Other Document"
+  ],
+  "default_start_date": "",
+  "min_pdf_bytes": 2000,
+  "max_path_length": 240,
+  "delay_min_seconds": 2.5,
+  "delay_max_seconds": 5.0,
+  "pilot_count": 5,
+  "browser": "auto",
+  "include_trash": true,
+  "open_conversations": false
+}
