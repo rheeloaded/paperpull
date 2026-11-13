@@ -4,11 +4,13 @@ A 401, a 403 or a sign-in page where one document's PDF should be was read
 as a sign-out, so the run stopped at that document, and every run after
 it, Continue included, stopped at the same document (#124). Now the list
 of that document's type is read again with the call Discover reads it
-with. A session that ended answers that list with a page too, or with no
-document at all, and only that stops the run. A list that still holds its
-documents leaves the refusal that document's own, so it fails with nothing
-saved, the run goes on, and the next run tries it again. The document is
-never asked for twice.
+with. A session that ended answers that list with a 401, a 403 or a page
+where the list should be, and only that stops the run as signed out. A list
+that answers 500, times out or holds no document says nothing of the
+session, so the run stops with the list unread and nothing recorded against
+the document. A list that still holds its documents leaves the refusal that
+document's own, so it fails with nothing saved, the run goes on, and the
+next run tries it again. The document is never asked for twice.
 
 Every document, date and page word here is made up, and nothing reaches
 DFAS myPay.
@@ -43,11 +45,24 @@ REFUSALS = {
          '<p>%s</p></html>' % PAGE_WORDS).encode()).decode()},
 }
 
-# What the history of a type can be answered with once a PDF was refused,
-# the list as before, a sign-in page, or a JSON refusal holding nothing.
+# What the history of a type can be answered with once a PDF was refused
+# that says the session ended, a page where the list should be (what an
+# expired myPay session answers with), or a 401 or a 403.
 AFTER = {
     "page": {"status": 200, "html": True},
     "nothing": {"status": 401, "body": {"Succeeded": False}},
+    "page 403": {"status": 403, "html": True},
+}
+
+# What it can be answered with that says nothing of the session, an error
+# page, an error, an answer that did not succeed, no document at all, or no
+# answer in time.
+UNREAD = {
+    "page 500": {"status": 500, "html": True},
+    "500": {"status": 500, "body": {"Succeeded": False}},
+    "not succeeded": {"status": 200, "body": {"Succeeded": False}},
+    "empty": {"status": 200, "body": {"Succeeded": True, "JsonResult": []}},
+    "timeout": TimeoutError,
 }
 
 
@@ -85,7 +100,10 @@ class Page:
         if "/api/document/history/" in js:
             self.histories.append(arg)
             if self.after != "list" and self.was_refused:
-                return dict(AFTER[self.after])
+                answer = {**AFTER, **UNREAD}[self.after]
+                if answer is TimeoutError:
+                    raise TimeoutError("Timeout 30000ms exceeded")
+                return dict(answer)
             rows = [{"Id": i, "DateDiscriminator": d + "T00:00:00", "DataFound": True}
                     for i, d in self.ids().items()] if arg == 21 else []
             return {"status": 200, "body": {"Succeeded": True, "JsonResult": rows}}
@@ -124,6 +142,21 @@ def test_a_document_refused_and_a_list_that_will_not_read_after_it_is_a_sign_out
     assert page.pdfs == [100] and page.histories == [21, 21]
 
 
+@pytest.mark.parametrize("after", sorted(UNREAD))
+def test_a_document_refused_and_a_list_that_does_not_answer_after_it_is_unread(tmp_path, after):
+    """A list that answers 500, times out or holds no document was read as
+    a sign-out, or its timeout reached the loop as the document's own
+    failure and the run went on with no session shown. It says nothing of
+    the session, so it stops the run with the list unread."""
+    page = Page(refused={100}, how="403", after=after)
+    out = tmp_path / "statement.pdf"
+    with pytest.raises(site.ListStopped) as got:
+        site.download_document(page, DOC_IDS[0], out)
+    assert not isinstance(got.value, site.SessionExpired)
+    assert not out.exists()
+    assert page.pdfs == [100] and page.histories == [21, 21]
+
+
 def test_a_document_that_comes_is_saved_with_one_read_of_its_list(tmp_path):
     page = Page()
     out = tmp_path / "statement.pdf"
@@ -134,7 +167,8 @@ def test_a_document_that_comes_is_saved_with_one_read_of_its_list(tmp_path):
 
 def test_discover_reads_each_type_with_the_same_call():
     """The list read again after a refusal is the one Discover reads, so a
-    page in its place stops Discover as signed out too."""
+    page in its place stops Discover as signed out too. Discover reads any
+    page that way, as it did before."""
     page = Page()
     rows = site.collect_documents(page)
     assert [r["doc_id"] for r in rows] == DOC_IDS
@@ -203,6 +237,26 @@ def test_one_document_refused_and_its_list_after_it_stop_the_run(tmp_path, monke
     app, docs, ended, said = _run(tmp_path, monkeypatch, capsys, page)
     assert isinstance(ended, SystemExit)
     assert "Stopped. Everything downloaded so far is saved." in said
+    assert page.pdfs == [100]
+    assert app.progress.get(docs[0].key) is None and app.progress.get(docs[1].key) is None
+    assert app.stats["failed"] == 0
+
+
+@pytest.mark.parametrize("after", sorted(UNREAD))
+def test_one_document_refused_and_a_list_that_does_not_answer_stop_the_run_unread(
+        tmp_path, monkeypatch, capsys, after):
+    """The run stops at the refused document with nothing recorded against
+    either document, the listing is noted as one that stopped, and the
+    panel offers a run that lists first, not Continue, which would read the
+    same list for the same document and stop there again (#124)."""
+    from paperpull_core import listing
+    from paperpull_core.run_reporting import ListNotRead
+    page = Page(refused={100}, how="401", after=after)
+    app, docs, ended, said = _run(tmp_path, monkeypatch, capsys, page)
+    assert isinstance(ended, ListNotRead), (type(ended), said)
+    assert "could not be read again" in said
+    assert "sign-in page" not in said and "session has expired" not in said
+    assert listing.last(app) == listing.STOPPED
     assert page.pdfs == [100]
     assert app.progress.get(docs[0].key) is None and app.progress.get(docs[1].key) is None
     assert app.stats["failed"] == 0

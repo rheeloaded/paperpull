@@ -492,11 +492,28 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.ListStopped as stop:
+                # The list of this document's type, read again after it was
+                # refused, did not answer as a list. Every document after it
+                # reads a list the same way, so the run stops here, with
+                # nothing recorded against this one.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because a document's list could not be read again
+        after the document was refused. Nothing is recorded against the
+        document, and the run leaves as one whose list did not end whole,
+        which only a run that lists carries on from
+        (listing.read_again_stopped)."""
+        log.info("a document's list could not be read again after it was refused")
+        self.write_failure("read the documents list again", "the documents list could not be read again")
+        listing.read_again_stopped(self, (
+            "myPay's documents list could not be read again, so this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Download one document PDF straight to its final path.
