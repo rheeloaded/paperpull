@@ -47,7 +47,8 @@ The `.gitignore` already blocks all of the following. Do not override it.
     American Family, Apple Card, AT&T, Bank of America, Best Buy, Bilt, Chase, Chase Business,
     Coinbase, Costco, Discover, Discover Bank, Dominion, eBay, E*TRADE, Fairfax Water, First
     Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Nelnet, Newrez,
-    PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD, Spectrum,
+    PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD,
+    Sparkasse Pforzheim Calw, Spectrum,
     State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
     Wells Fargo) decide which of the page's controls may be
     pressed with `is_safe_control()`, a hard blocklist (`FORBIDDEN_CONTROL_RE`,
@@ -77,7 +78,12 @@ The `.gitignore` already blocks all of the following. Do not override it.
     document word, `is_safe_control()` would refuse them. So the heading
     has a guard of its own, the blocklists plus its whole words, a year
     with at most the few words a heading carries beside it, and a year left
-    closed stops the run rather than leave the list short. Besides those,
+    closed stops the run rather than leave the list short. Sparkasse
+    Pforzheim Calw presses only the Postfach's own numbered page buttons,
+    which `is_safe_control()` passes only as a bare page number, and a
+    document's own direct download link, found by its row's identity and
+    held to its class and its folder's own address, never to the subject
+    it shows, which is the document's own words. Besides those,
     an app may press a control it finds by a selector or by words written
     in the app, such as a session dialog's "Continue session", an
     accordion, a year menu or a list's "Next", which a document allowlist
