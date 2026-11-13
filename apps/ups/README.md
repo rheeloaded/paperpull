@@ -21,6 +21,12 @@ An invoice is identified by the id UPS gave it. The invoice number
 carries your account number inside it, so filenames use the date
 instead, like `2026-02-14 UPS Shipping Invoice.pdf`.
 
+An invoice UPS answers with a 401, a 403 or a redirect off `ups.com` has
+My Invoices read again. A list refused too means you are signed out, and
+the run stops. A list that still reads leaves that invoice failed with
+nothing saved, the run goes on to the others, and the next run tries it
+again.
+
 **What it does not cover.** Supporting documents (freight bills,
 brokerage and import forms) and the CSV and XML versions of an invoice.
 Receipts in Shipping History on ups.com belong to shipments made from

@@ -293,7 +293,9 @@ def is_safe_control(name: str) -> bool:
 
 
 class SessionExpired(RuntimeError):
-    """UPS answered with a sign-in page instead of the thing asked for."""
+    """UPS answered with a sign-in page instead of the thing asked for. An
+    invoice refused that way raises it only when My Invoices, read again,
+    is refused too (download_bill)."""
 
 
 class NeedsPerson(RuntimeError):
@@ -445,11 +447,26 @@ def _row_for(page, document_id: str) -> Tuple[Optional[dict], dict]:
     return None, _captured["headers"]
 
 
+def _still_listed(rows: Optional[list]) -> list:
+    """My Invoices read again after one invoice was refused. A list that
+    shows no invoice at all, or never came, is no list, since that invoice
+    was listed, and raises SessionExpired."""
+    if not rows:
+        raise SessionExpired("My Invoices read empty after a refused invoice")
+    return rows
+
+
 def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
                   title: str = "", document_id: str = "") -> bool:
     """Ask for one invoice's PDF from inside the page and write it. The row
     is looked up fresh, with the headers the page sent, so a record needs
-    nothing but its id. `dl_dir` and `href` are unused."""
+    nothing but its id. `dl_dir` and `href` are unused.
+
+    A PDF answered with a 401, a 403 or a redirect off ups.com has My
+    Invoices read again, with the same call that proves a session. A list
+    refused too, or showing no invoice at all, raises SessionExpired, which
+    stops the run. A list that still reads leaves the invoice failed alone
+    (False), and the next run tries it again."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not document_id:
@@ -464,7 +481,19 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     if row_date(row) != iso_date:
         log.info("the listed invoice's date does not match the record's %s", iso_date)
         return False
-    r = _post(page, DOWNLOAD_API, headers, download_body(row))
+    try:
+        r = _post(page, DOWNLOAD_API, headers, download_body(row))
+    except SessionExpired:
+        # A refusal may be the session ending or this one invoice. My
+        # Invoices is read again, the way Discover reads it, and a session
+        # that ended is refused there too and stops the run. A list that
+        # still reads leaves the refusal this invoice's own, so it fails
+        # alone and never stops every later run at the same invoice. It is
+        # not asked for a second time, and the next invoice goes with the
+        # headers the page sent just now.
+        _still_listed(capture_list(page)[0])
+        log.info("the invoice dated %s was refused while the list still reads", iso_date)
+        return False
     if not r.get("b64"):
         log.info("no PDF for %s: status %s, %s", iso_date, r.get("status"), r.get("ct"))
         return False

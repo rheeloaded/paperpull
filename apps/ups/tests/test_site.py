@@ -183,8 +183,17 @@ def test_a_record_whose_invoice_is_gone_or_redated_is_not_fetched(tmp_path):
 
 
 def test_a_sign_in_answer_stops_the_run(tmp_path):
+    """A 401 for the PDF stops the run only when My Invoices, read again,
+    is refused too (test_one_refused_invoice holds the rest)."""
     _fresh()
-    page = _Page([_row(1, "2031-02-14")], {"status": 401, "url": site.DOWNLOAD_API})
+    page = _Page([_row(1, "2031-02-14")])
+    site.capture_list(page)
+
+    def refused_then_signed_out(_js, args):
+        page.url = "https://www.ups.com/lasso/login"
+        return {"status": 401, "url": site.DOWNLOAD_API}
+    page.evaluate = refused_then_signed_out
+    page.goto = lambda url, **_: None
     with pytest.raises(site.SessionExpired):
         site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="row1")
     page = _Page([])

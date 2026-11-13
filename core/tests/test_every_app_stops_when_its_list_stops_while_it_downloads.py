@@ -241,6 +241,11 @@ ITS_OWN = {
         "sign-out shows there and reaches the run, and lists that still read leave the "
         "refusal that document's alone, so one document Stripe will not give never stops "
         "every later run at it. Lists that show nothing are no lists and reach the run",
+    ("ups", "download_bill", ("_post", "download_body")):
+        "a refusal of one invoice's PDF, after which My Invoices is read again. A sign-out "
+        "or a list that shows nothing reaches the run, and a list that still reads leaves "
+        "the refusal that invoice's alone, so one invoice UPS will not give never stops "
+        "every later run at it",
     ("bilt", "download_statement", ("_catch_statement",)):
         "a statement answered as signed out once its button was pressed, its tab on the "
         "sign-in page or a refusal at its PDF address, after which the wallet's list is "
