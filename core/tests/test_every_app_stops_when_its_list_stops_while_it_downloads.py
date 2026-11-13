@@ -233,9 +233,11 @@ ITS_OWN = {
         "statement's alone. Download PDF is not pressed again",
     ("amexbanking", "download_one", ("amexbanking_download",)):
         "a refusal of one document's PDF, after which the list is loaded again and read "
-        "as Discover reads it. A refused list reaches the run, a list that does not "
-        "answer or shows another account stops it, and a list that still answers leaves "
-        "the refusal that document's alone",
+        "as Discover reads it. A refused list reaches the run, a page that looks signed "
+        "out stops it as signed out, a list that answers 500 or nothing stops it with the "
+        "list unread (listing.read_again_stopped), a list of another account stops it as "
+        "Discover does, and a list that still answers leaves the refusal that document's "
+        "alone",
     ("stripe", "download_bill", ("_fetch_file", "row_link")):
         "a refusal of one document's file, after which both lists are read again. A "
         "sign-out shows there and reaches the run, and lists that still read leave the "

@@ -150,8 +150,8 @@ class SessionExpired(Exception):
     """American Express answered the list or a PDF as a session it no
     longer holds, a 401 or a 403, or a redirect where an answer was asked
     for. Every request after it would get the same, so the run stops. A PDF
-    refused that way stops it only when the list, read again, does not
-    answer either (App.download_one)."""
+    refused that way stops it as signed out only when the list, read again,
+    is refused too or the page looks signed out (App.download_one)."""
 
 
 # ---------------------------------------------------------------------------
