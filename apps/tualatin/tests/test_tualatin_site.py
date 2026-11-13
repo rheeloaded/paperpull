@@ -108,6 +108,65 @@ class SignsOutAtTheBill(Page):
         return got
 
 
+
+class ListFailsAfterTheBill(Page):
+    """A bill refused while the session still holds, after which Activity
+    does not read. "500" draws the portal's error page with no table,
+    "timeout" a table that times out as it is read, "malformed" an answer
+    that is not the table's, "dead" a tab whose address can no longer be
+    read, and "empty" an Activity without a bill. None of them says the
+    session ended. `refused` is the bill number refused, None for every
+    bill asked."""
+
+    dead = False
+
+    def __init__(self, how, refused=None, **kw):
+        self.how, self.refused, self.failing = how, refused, False
+        super().__init__(**kw)
+
+    @property
+    def url(self):
+        if self.dead:
+            raise RuntimeError("Target page, context or browser has been closed")
+        return self._url
+
+    @url.setter
+    def url(self, value):
+        self._url = value
+
+    def wait_for_function(self, js, **k):
+        if self.failing and self.how == "500":
+            raise TimeoutError("no table")
+        super().wait_for_function(js, **k)
+
+    def evaluate(self, js, arg=None):
+        if arg is None and self.failing:
+            if self.how == "timeout":
+                raise TimeoutError("Timeout 30000ms exceeded")
+            if self.how == "malformed" and js == site._ROWS_JS:
+                return "<html>Service Unavailable</html>"
+            if self.how == "empty":
+                self.rows = [payment("10/05/2026")]
+        if arg is None:
+            return super().evaluate(js, arg)
+        number = next(n for n in PRINTED_DAYS if arg[0] == site.print_url(n))
+        if self.refused is None or number == self.refused:
+            self.asked.append(arg[0])
+            self.failing = True
+            self.dead = self.how == "dead"
+            return {"status": 403, "type": "text/html"}
+        day = PRINTED_DAYS[number]
+        self.asked.append(arg[0])
+        return {"status": 200, "type": "text/html; charset=utf-8",
+                "html": PRINTED.replace("8/31/2026", day), "said": SAID.replace("8/31/2026", day),
+                "password": False, "dropped": [], "inlined": {"css": 1, "img": 0}}
+
+
+# Each listed bill's Billing Date as its print page says it.
+PRINTED_DAYS = {"10000003": "9/30/2026", "10000002": "8/31/2026", "10000001": "7/31/2026"}
+UNREAD = ("500", "timeout", "malformed", "dead", "empty")
+
+
 def drawn(page, html, out_path, base=None):
     """The inert render, drawing the page's text as a real PDF."""
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
@@ -294,6 +353,20 @@ class Download(unittest.TestCase):
             self.assertEqual(page.opened, 2, how)
             self.assertFalse(self.out.exists(), how)
 
+    def test_a_list_that_does_not_read_after_a_refusal_is_unread_not_a_sign_out(self):
+        """A 500, a timeout, an answer that is not the table, a tab that
+        cannot be read or an Activity with no bill, after one bill's
+        refusal, says nothing of the session. Each stops the run with the
+        list unread, never as signed out and never as that bill's own
+        failure, and the bill is asked for once."""
+        for how in UNREAD:
+            page = ListFailsAfterTheBill(how)
+            with self.assertRaises(site.ListStopped, msg=how):
+                self.save(page)
+            self.assertEqual(page.asked, [site.print_url("10000002")], how)
+            self.assertEqual(page.opened, 2, how)
+            self.assertFalse(self.out.exists(), how)
+
     def test_a_list_that_stops_after_a_refusal_reaches_the_run(self):
         class PagerAfter(Page):
             def evaluate(self, js, arg=None):
@@ -367,6 +440,55 @@ class Orchestrator(unittest.TestCase):
             site.download_bill = original
         self.assertIn("signed out", said.getvalue())
         self.assertEqual(app.progress.data, {})
+
+
+    def _run_with(self, page):
+        """A Run All's downloads over the three listed bills, with what it
+        printed and logged."""
+        app = make_app(tempfile.mkdtemp(), "--all")
+        for r in site.bills_of(HEADS, ROWS):
+            app._record_rawdoc(r, site.BILLING_URL)
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        app._delay = lambda *a, **k: None
+        seen = io.StringIO()
+        handler = logging.StreamHandler(seen)
+        root = logging.getLogger()
+        root.addHandler(handler)
+        old = root.level
+        root.setLevel(logging.DEBUG)
+        ended = None
+        try:
+            with redirect_stdout(seen), mock.patch("paperpull_core.receipt_pdf.print_html_inert_to_pdf",
+                                                   side_effect=drawn):
+                app.process(app._select())
+        except SystemExit as e:
+            ended = e
+        finally:
+            root.removeHandler(handler)
+            root.setLevel(old)
+        return app, ended, seen.getvalue()
+
+    def test_one_bill_refused_and_a_list_that_does_not_read_stop_the_run_unread(self):
+        """The list read again after a refusal answered with an error page,
+        timed out, answered with something else, could not be read or held
+        no bill. That proves no session and no sign-out, so the run stops
+        with the list unread, nothing is recorded against the refused bill,
+        and a run that lists first takes it again. A list that failed this
+        way was recorded as that bill's failure, and the run went on with
+        no session shown."""
+        from paperpull_core.run_reporting import ListNotRead
+        for how in UNREAD:
+            page = ListFailsAfterTheBill(how, refused="10000002")
+            app, ended, said = self._run_with(page)
+            self.assertIsInstance(ended, ListNotRead, (how, said))
+            states = {k: v["state"] for k, v in app.progress.data.items()}
+            self.assertEqual(states, {"id:10000003": "Completed"}, how)
+            self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0, how)
+            text = " ".join(said.split())
+            self.assertIn("so this run stops here", text, how)
+            self.assertNotIn("signed out", text, how)
+            self.assertEqual(page.asked, [site.print_url("10000003"), site.print_url("10000002")], how)
 
 
 class Privacy(unittest.TestCase):

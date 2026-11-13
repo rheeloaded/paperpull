@@ -56,6 +56,7 @@ from urllib.parse import urlsplit
 
 from paperpull_core import intake
 from paperpull_core import pdf_reader
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -876,11 +877,15 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
 
     A print page answered with a redirect, a 401 or 403, or a page asking
     for a password has Activity read again, the same read that proves a
-    session. A session that has ended goes to the sign-in page there, and
-    its SessionExpired stops the run. A list that still reads leaves the
-    refusal this bill's own, so it fails alone, since a stop here would
-    stop every run at this bill for good. The bill is not asked for a
-    second time."""
+    session (refused.list_again). A session that has ended goes to the
+    sign-in page there, and its SessionExpired stops the run. A list that
+    does not read, a table that does not draw, an answer that is not the
+    table, a tab that cannot be read, or an Activity with no bill, raises
+    ListStopped, which says nothing of the session, so the run stops with
+    the list unread and nothing recorded against the bill. A list that
+    still reads leaves the refusal this bill's own, so it fails alone,
+    since a stop here would stop every run at this bill for good. The bill
+    is not asked for a second time."""
     out_path = Path(out_path)
     number = (document_id or "").strip()
     if not BILL_NUMBER_RE.fullmatch(number) or href != bill_path(number):
@@ -904,9 +909,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     except SessionExpired:
         # A refusal may be the session ending or this one bill. Activity is
         # read again, and a session that ended shows the sign-in page there
-        # and stops the run. One that still reads leaves this bill failed,
-        # so it never stops every later run at the same bill.
-        _bills(_open(page))
+        # and stops the run. One that does not read stops it with the list
+        # unread, and one that still reads leaves this bill failed, so it
+        # never stops every later run at the same bill.
+        refused.list_again(lambda: collect_download_docs(page), SessionExpired, ListStopped)
         log.info("the bill dated %s was refused while the list still reads", iso_date)
         if trace is not None:
             trace.append({"note": "refused, the list still reads"})
