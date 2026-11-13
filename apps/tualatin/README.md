@@ -64,8 +64,8 @@ site is never used.
   too, the run stops and keeps what it saved. Sign in again and run Resume.
   When Activity still reads, that bill is counted as failed with nothing
   saved, the run goes on to the other bills, and the next run tries it
-  again. When Activity does not read then, its table does not draw, it
-  answers with something that is not its table, the tab cannot be read,
+  again. When Activity does not read then, it does not open, its table
+  does not draw, it answers with something that is not its table, the tab cannot be read,
   or it shows no bill, nothing says the session ended. The run stops there
   with nothing recorded against that bill, as below. Any other answer that
   is not a printed bill fails that one bill too.

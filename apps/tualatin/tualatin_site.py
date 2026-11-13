@@ -429,13 +429,19 @@ def _open(page, timeout_ms: int = 30000) -> dict:
     cookie, and read its transaction table as drawn. Raises SessionExpired
     when the portal shows its sign-in page and ListStopped when the table
     never draws. Nothing is pressed."""
+    opened = True
     try:
         page.goto(DOCUMENTS_URL, wait_until="domcontentloaded", timeout=60000)
     except Exception as e:
+        opened = False
         log.info("opening Activity failed (%s)", type(e).__name__)
     if looks_signed_out(page):
         raise SessionExpired("the payment portal showed its sign-in page")
     if not _settled_here(page):
+        # An address that did not open leaves the tab where it was, or on
+        # Chromium's own error page, which says nothing of the session.
+        if not opened:
+            raise ListStopped("Activity did not open")
         raise SessionExpired("the payment portal sent Activity somewhere else")
     try:
         page.wait_for_function(_TABLE_DRAWN_JS, timeout=timeout_ms)

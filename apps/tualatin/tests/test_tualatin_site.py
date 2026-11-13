@@ -114,9 +114,10 @@ class ListFailsAfterTheBill(Page):
     does not read. "500" draws the portal's error page with no table,
     "timeout" a table that times out as it is read, "malformed" an answer
     that is not the table's, "dead" a tab whose address can no longer be
-    read, and "empty" an Activity without a bill. None of them says the
-    session ended. `refused` is the bill number refused, None for every
-    bill asked."""
+    read, "empty" an Activity without a bill, and "network" an address that
+    does not open, which leaves the tab on Chromium's own error page. None
+    of them says the session ended. `refused` is the bill number refused,
+    None for every bill asked."""
 
     dead = False
 
@@ -133,6 +134,13 @@ class ListFailsAfterTheBill(Page):
     @url.setter
     def url(self, value):
         self._url = value
+
+    def goto(self, url, **k):
+        if self.failing and self.how == "network":
+            self.url = "chrome-error://chromewebdata/"
+            self.opened += 1
+            raise RuntimeError("net::ERR_CONNECTION_RESET at made-up-host 4417")
+        super().goto(url, **k)
 
     def wait_for_function(self, js, **k):
         if self.failing and self.how == "500":
@@ -164,7 +172,7 @@ class ListFailsAfterTheBill(Page):
 
 # Each listed bill's Billing Date as its print page says it.
 PRINTED_DAYS = {"10000003": "9/30/2026", "10000002": "8/31/2026", "10000001": "7/31/2026"}
-UNREAD = ("500", "timeout", "malformed", "dead", "empty")
+UNREAD = ("500", "timeout", "malformed", "dead", "empty", "network")
 
 
 def drawn(page, html, out_path, base=None):
