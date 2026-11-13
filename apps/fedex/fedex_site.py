@@ -49,6 +49,7 @@ from urllib.parse import urlparse
 
 from paperpull_core import intake
 from paperpull_core import redirects
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 # Everything on its way into a diagnostic file goes through here. It
@@ -235,8 +236,20 @@ def is_safe_control(name: str) -> bool:
 class SessionExpired(RuntimeError):
     """FedEx answered with a sign-in page instead of the thing asked for.
     An invoice's PDF refused with a 401, a 403 or a redirect off fedex.com
-    raises it only when the invoice list, read again, will not read either
-    (download_bill)."""
+    raises it only when the invoice list, read again, shows the sign-in
+    page (download_bill)."""
+
+
+class ListStopped(Exception):
+    """The invoice list, read again after one invoice was refused, did not
+    answer, answered with something else, or held no invoice, none of which
+    says the session ended. Every invoice after it would read the same
+    list, so the run stops with the list unread. `docs` holds what was read
+    before it stopped. Its words are this module's own, never the page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 class NeedsPerson(RuntimeError):
@@ -462,16 +475,6 @@ def _fresh_link(page, document_id: str) -> str:
     return ""
 
 
-def _invoices_read_again(answers: List[dict]) -> List[dict]:
-    """The invoices of the list read again after one invoice was refused.
-    One that shows no invoice raises SessionExpired, since the list showed
-    invoices before and a session that ended shows none."""
-    found = invoices_in(answers)
-    if not found:
-        raise SessionExpired("the invoice list, read again, showed no invoice")
-    return found
-
-
 def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
                   title: str = "", document_id: str = "") -> bool:
     """Fetch one invoice's PDF from its own link and write it. A row with no
@@ -479,12 +482,15 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     download it by hand and send a Diagnose file. `dl_dir` is unused.
 
     An invoice's PDF refused with a 401, a 403 or a redirect off fedex.com
-    has the list read again, with the call Discover reads it with. A session
-    that has ended shows the sign-in page there, or no invoice at all, and
-    its SessionExpired stops the run. A list that still shows invoices
-    leaves the refusal this invoice's own, so it fails alone, since a stop
-    here would stop every run at this invoice for good. The invoice is not
-    asked for a second time."""
+    has the list read again, with the call Discover reads it with
+    (refused.list_again). A session that has ended shows the sign-in page
+    there, and its SessionExpired stops the run. A list that never came,
+    answered with an error, timed out or holds no invoice raises
+    ListStopped, which stops the run with the list unread, since Discover
+    reads none of those as a sign-out either. A list that still shows
+    invoices leaves the refusal this invoice's own, so it fails alone, since
+    a stop here would stop every run at this invoice for good. The invoice
+    is not asked for a second time."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
@@ -498,9 +504,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     except SessionExpired:
         # A refusal may be the session ending or this one invoice. The list
         # is read again, and a session that ended shows there and stops the
-        # run. One that still reads leaves this invoice failed, so it never
-        # stops every later run at the same invoice.
-        _invoices_read_again(capture_answers(page))
+        # run. One that does not answer stops it with the list unread. One
+        # that still reads leaves this invoice failed, so it never stops
+        # every later run at the same invoice.
+        refused.list_again(lambda: invoices_in(capture_answers(page)),
+                           SessionExpired, ListStopped, stops=(NeedsPerson,))
         log.info("the invoice dated %s was refused while the list still reads", iso_date)
         return False
     if not r.get("b64"):

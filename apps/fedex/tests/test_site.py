@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage  # binds this provider's AppSpec
 import fedex_site as site
-from paperpull_core import doc_types
+from paperpull_core import doc_types, testkit
 
 PDF = b"%PDF-1.4 fake"
 API = "https://api.fedex.com"
@@ -220,7 +220,28 @@ class _Opens(_Page):
                 return
             if changed and self.after == "connect":
                 self.connect = True
+            if changed and self.after == "timeout":
+                raise TimeoutError("Timeout 60000ms exceeded")
+            if changed and self.after in LIST_ANSWERS:
+                # Billing Online answers the list, with no invoice in it.
+                self.url = url
+                status, body = LIST_ANSWERS[self.after]
+                for fn in list(self.listeners):
+                    fn(_Resp(API + "/bill/v1/invoices/retrieve", body, status=status))
+                return
         super().goto(url, **kw)
+
+
+# What Billing Online can answer the invoice list with once an invoice was
+# refused, each with no invoice in it. Discover reads none of them as a
+# sign-out, a 401 and a 403 among them, so the list read again does not
+# either.
+LIST_ANSWERS = {
+    "list 401": (401, {"errors": [{"code": "NOT.AUTHORIZED"}]}),
+    "list 403": (403, None),
+    "list 500": (500, None),
+    "list empty": (200, {"output": {"invoices": []}}),
+}
 
 
 @pytest.mark.parametrize("kept", [False, True])
@@ -259,17 +280,37 @@ def test_the_list_read_after_a_refusal_serves_the_next_invoice(tmp_path):
     assert page.opened == 2
 
 
-@pytest.mark.parametrize("after", ["sign-in", "nothing"])
-def test_an_invoice_refused_and_a_list_that_will_not_read_after_it_is_a_sign_out(tmp_path, after):
-    """A session that ended shows the sign-in page where the list was, or
-    no invoice at all, and only that stops the run as signed out."""
+def test_an_invoice_refused_and_a_sign_in_page_after_it_is_a_sign_out(tmp_path):
+    """A session that ended shows the sign-in page where the list was, and
+    only that stops the run as signed out."""
     _fresh()
-    page = _Opens(INVOICES, after=after, fetch={LINK: dict(REFUSALS["401"])})
+    page = _Opens(INVOICES, after="sign-in", fetch={LINK: dict(REFUSALS["401"])})
     site.collect_download_docs(page)
     with pytest.raises(site.SessionExpired):
         site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2")
     assert not (tmp_path / "i.pdf").exists()
     assert page.fetched == [LINK] and page.opened == 2
+
+
+UNREAD = ["nothing", "list 401", "list 403", "list 500", "list empty", "timeout"]
+
+
+@pytest.mark.parametrize("after", UNREAD)
+def test_an_invoice_refused_and_a_list_that_does_not_answer_after_it_is_unread(tmp_path, after):
+    """A list that never came, answered with an error, held no invoice or
+    timed out says nothing Discover reads as a sign-out. It was read as one,
+    or the timeout reached the loop as the invoice's own failure and the
+    run went on with no session shown. Now it stops the run with the list
+    unread."""
+    _fresh()
+    page = _Opens(INVOICES, after=after, fetch={LINK: dict(REFUSALS["403"])})
+    site.collect_download_docs(page)
+    with pytest.raises(site.ListStopped) as got:
+        site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2")
+    assert not isinstance(got.value, site.SessionExpired)
+    assert not (tmp_path / "i.pdf").exists()
+    assert page.fetched == [LINK] and page.opened == 2
+    assert page.listeners == []
 
 
 def test_an_invoice_refused_and_the_connect_form_after_it_stops_as_not_connected(tmp_path):
@@ -279,6 +320,88 @@ def test_an_invoice_refused_and_the_connect_form_after_it_stops_as_not_connected
     with pytest.raises(site.NotConnected):
         site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2")
     assert page.fetched == [LINK]
+
+
+# -- the run ---------------------------------------------------------------------
+
+LINK_1 = "https://www.fedex.com/doc/INV-1.pdf"
+TWO_INVOICES = [(API + "/bill/v1/invoices/retrieve",
+                 {"invoices": [{"invoiceNumber": "INV-2", "invoiceDate": "2031-02-14", "pdfUrl": LINK},
+                               {"invoiceNumber": "INV-1", "invoiceDate": "2031-01-24",
+                                "pdfUrl": LINK_1}]})]
+GOOD = {"status": 200, "ct": "application/pdf",
+        "b64": base64.b64encode(testkit.text_pdf(["FedEx made-up invoice INV-1"])).decode()}
+
+
+def _run(tmp_path, page):
+    """A Run All over the two invoices Discover listed, the newest asked
+    for first, with how it ended and what it printed."""
+    import contextlib
+    import io
+    import fedex_docs as docs
+    config = json.loads((Path(docs.__file__).parent / "config.example.json").read_text())
+    config.update({"owner": "Tester Example", "output_dir": str(tmp_path / "out"),
+                   "delay_min_seconds": 0, "delay_max_seconds": 0, "min_pdf_bytes": 10})
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(config))
+    app = docs.App(docs.build_parser().parse_args(["--resume", "--config", str(cfg)]))
+    _fresh()
+    for r in site.collect_download_docs(page):
+        app._record_rawdoc(r, site.BILLING_URL)
+    app.discovery.save()
+    app.check_session = lambda p: None
+    app._on_its_site = lambda: page
+    app._dl_dir = None
+    app._delay = lambda *a, **k: None
+    seen, ended = io.StringIO(), None
+    try:
+        with contextlib.redirect_stdout(seen):
+            app.process(app._select())
+    except SystemExit as e:
+        ended = e
+    return app, ended, " ".join(seen.getvalue().split())
+
+
+@pytest.mark.parametrize("after", UNREAD)
+def test_an_invoice_refused_and_a_list_that_does_not_answer_stop_the_run_unread(tmp_path, after):
+    """The run stops at the refused invoice with nothing recorded against
+    it, the listing is noted as one that stopped, and the panel offers a
+    run that lists first, not Continue, which would read the same list
+    for the same invoice and stop there again (#124)."""
+    from paperpull_core import listing
+    from paperpull_core.run_reporting import ListNotRead
+    page = _Opens(TWO_INVOICES, after=after,
+                  fetch={LINK: dict(REFUSALS["403"], url=LINK), LINK_1: dict(GOOD, url=LINK_1)})
+    app, ended, said = _run(tmp_path, page)
+    assert isinstance(ended, ListNotRead), (type(ended), said)
+    assert "could not be read again" in said
+    assert "session has expired" not in said and "signed out" not in said
+    assert listing.last(app) == listing.STOPPED
+    assert page.fetched == [LINK]
+    assert all(v.get("state") != "Failed" for v in app.progress.data.values())
+    assert app.stats["failed"] == 0
+
+
+def test_an_invoice_refused_while_the_list_reads_fails_alone_in_the_run(tmp_path):
+    page = _Opens(TWO_INVOICES, fetch={LINK: dict(REFUSALS["403"], url=LINK),
+                                       LINK_1: dict(GOOD, url=LINK_1)})
+    app, ended, said = _run(tmp_path, page)
+    assert ended is None, said
+    states = {v["document_id"]: v["state"] for v in app.progress.data.values()}
+    assert states == {"INV-2": "Failed", "INV-1": "Completed"}
+    assert said.count("Nothing was saved, and the next run tries it again") == 1
+    assert page.fetched == [LINK, LINK_1]
+
+
+def test_an_invoice_refused_and_a_sign_in_page_stop_the_run_signed_out(tmp_path):
+    from paperpull_core.run_reporting import ListNotRead
+    page = _Opens(TWO_INVOICES, after="sign-in",
+                  fetch={LINK: dict(REFUSALS["403"], url=LINK), LINK_1: dict(GOOD, url=LINK_1)})
+    app, ended, said = _run(tmp_path, page)
+    assert isinstance(ended, SystemExit) and not isinstance(ended, ListNotRead)
+    assert "session has expired" in said
+    assert page.fetched == [LINK]
+    assert app.stats["failed"] == 0
 
 
 def test_diagnose_carries_shapes_never_values():

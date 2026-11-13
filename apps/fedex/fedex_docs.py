@@ -518,6 +518,12 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.ListStopped as stop:
+                # The invoice list, read again after this invoice was
+                # refused, did not answer as a list. Every invoice after it
+                # reads the same list, so the run stops here, with nothing
+                # recorded against this one.
+                self.list_changed(stop)
             except site.NotConnected as e:
                 # Every invoice after this one would meet the same, so the
                 # run stops here rather than leave each one for review.
@@ -530,6 +536,18 @@ class App:
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the invoice list could not be read again
+        after an invoice was refused. Nothing is recorded against the
+        invoice, and the run leaves as one whose list did not end whole,
+        which only a run that lists carries on from
+        (listing.read_again_stopped)."""
+        log.info("the invoice list could not be read again after an invoice was refused")
+        self.write_failure("read the invoice list again", "the invoice list could not be read again")
+        listing.read_again_stopped(self, (
+            "FedEx Billing Online's invoice list could not be read again, so this "
+            "run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one statement. The site layer asks for the PDF from

@@ -80,10 +80,13 @@ at all. It opens the invoices page, keeps what the page receives, and
 fetches a PDF from an invoice's own link, every address on `fedex.com`.
 An expired session stops the run rather than reporting an empty success.
 An invoice FedEx answers with a 401, a 403 or a redirect off fedex.com
-has the invoices page read again. A page that signs you out or shows no
-invoice means you are signed out, and the run stops. A page that still
-lists invoices leaves that invoice failed with nothing saved, the run goes
-on to the others, and the next run tries it again.
+has the invoices page read again. A sign-in page there means you are
+signed out, and the run stops. A list that never comes, answers with an
+error, times out or shows no invoice says nothing of your session, so the
+run stops with the list unread, nothing is recorded against that invoice,
+and Get new documents reads the list first. A page that still lists invoices leaves that
+invoice failed with nothing saved, the run goes on to the others, and the
+next run tries it again.
 
 ## Commands
 
