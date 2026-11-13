@@ -161,7 +161,10 @@ ITS_OWN = {
         "ListStopped raised next, which reaches the run",
     ("portlandgeneral", "download_bill", ("_fetch",)):
         "a refusal of the authorization this run kept from an earlier read, which "
-        "reads the list again once. A refusal of a list just read reaches the run",
+        "reads the list again once, or of one right after a list that answered with "
+        "the same authorization, which is that bill's alone, so one bill Portland "
+        "General will not give never stops every later run at it. A sign-out or a list "
+        "that stops shows on the list and reaches the run",
     ("nwnatural", "download_bill", ("_fetch",)):
         "a refusal of a View address read earlier in this run, which reads the list "
         "again once, or of one right after a list that answered, which is that bill's "

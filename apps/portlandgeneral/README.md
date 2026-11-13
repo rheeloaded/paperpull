@@ -50,9 +50,12 @@ another site is never used.
   the account it was listed under. When it shows another, the run stops
   and names the last four digits of the account it wants. Choose that
   account on the site and run Resume.
-- **Signing out.** A 401, a 403 or a redirect on a list just read stops
-  the run and keeps what it saved. Sign in again and run Resume. Any other
-  answer that is not a PDF fails that one bill.
+- **Signing out.** A 401, a 403 or a redirect for the list stops the run
+  and keeps what it saved. Sign in again and run Resume. A bill's PDF
+  refused that way has the list read again first. A list that still reads
+  leaves that bill counted as failed with nothing saved, the run goes on to
+  the other bills, and the next run tries it again. Any other answer that
+  is not a PDF fails that one bill too.
 
 ## Validation status
 

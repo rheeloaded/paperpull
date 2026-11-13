@@ -248,8 +248,9 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
 
 class SessionExpired(Exception):
     """portlandgeneral.com answered as a signed-out session: its sign-in
-    page, or a 401, 403 or redirect from the account API on a list just
-    read again. The run stops for the account holder."""
+    page, or a 401, 403 or redirect from the account API for the list. The
+    run stops for the account holder. A bill's PDF refused that way raises
+    it only on a list kept from earlier, which download_bill reads again."""
 
 
 def looks_signed_out(page) -> bool:
@@ -879,8 +880,8 @@ def _fetch(page, history: _History, bill: RawDoc, out_path: Path, trace: Optiona
     """Ask the API for the bill's detailed PDF the way the page's own
     "Detailed Bill (PDF)" link does, from inside the page with its own
     headers, and keep it only when the body is a PDF. A 401, 403 or
-    redirect raises SessionExpired; any other answer that is not a PDF
-    fails this bill alone."""
+    redirect raises SessionExpired, which download_bill weighs against the
+    list. Any other answer that is not a PDF fails this bill alone."""
     if not is_download_url(PDF_URL):
         return False
     body = {"encryptedBillId": bill.bill_ref, "isSummary": False, "isNonDetailed": False}
@@ -925,9 +926,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     the bill was recorded under raises OtherAccountShown, with no reread,
     since the account shown is the person's choice on the site. `dl_dir`
     is unused: nothing goes through the browser's downloads. Nothing is
-    pressed. SessionExpired from a list just read propagates to the run,
+    pressed. SessionExpired from reading the list propagates to the run,
     and so does ListStopped when the list cannot be read again, since every
-    bill after this one would read the same list."""
+    bill after this one would read the same list.
+
+    A 401, a 403 or a redirect for the bill's PDF on a list kept from
+    earlier has the list read again, with the same call that proves a
+    session, and the bill asked for once more with the bill id and
+    authorization of that reading. A session that has ended is refused the
+    list, and its SessionExpired stops the run there. A refusal right after
+    a list that answered fails this bill alone, since a stop here would
+    stop every run at this bill for good. The bill is not asked for again
+    after that."""
     out_path = Path(out_path)
     m = BILL_ID_RE.fullmatch(document_id or "")
     if href != DOWNLOAD_PATH or not m or m.group(2) != iso_date:
@@ -954,12 +964,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         try:
             if _fetch(page, history, found[0], out_path, trace):
                 return True
+            why = "the bill's PDF was refused"
         except SessionExpired:
             # A refusal of what this run read earlier may be its
-            # authorization running out, so the list is read again first.
-            if fresh:
-                raise
-        why = "the bill's PDF was refused"
+            # authorization running out, so the list is read again first,
+            # and a session that ended shows there and stops the run.
+            # Refused right after a list that answered with the same
+            # authorization, it is this bill's alone, so it fails alone and
+            # never stops every later run at the same bill.
+            why = "the bill was refused right after the list was read" if fresh \
+                else "the bill's PDF was refused"
     log.info("the bill dated %s was not taken: %s", iso_date, why)
     if trace is not None:
         trace.append({"note": "not taken", "why": why})
