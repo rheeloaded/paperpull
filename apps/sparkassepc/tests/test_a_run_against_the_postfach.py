@@ -112,7 +112,8 @@ class Bank:
     "script", "form", or None for a Postfach whose pager went missing.
     `active` False draws the pager with no active page number this can read,
     `pager_leaves` drops the pager once a folder is turned past page 1, and
-    `link_class` names the direct download links. A name in `refuse` answers
+    `link_class`, `row_class` and `next_class` name the direct download
+    links, the rows and the pager's next arrow. A name in `refuse` answers
     that status for its PDF, one in `not_pdf` answers a sign-in page with
     200, and once `signs_out`'s PDF is asked for the bank answers as signed
     out from then on. `marks_read` clears a row's unread mark, on the page
@@ -126,6 +127,8 @@ class Bank:
         self.active = True
         self.pager_leaves = False
         self.link_class = "postbox-message-direct-download"
+        self.row_class = "postbox-message-row"
+        self.next_class = "next"
         self.refuse = {}
         self.not_pdf = set()
         self.signs_out = None
@@ -150,9 +153,10 @@ class Bank:
                     % (self.link_class, subject, site.FOLDERS[folder], m["identity"], subject))
         else:
             cell = "<span>%s</span>" % subject
-        return ('<tr class="postbox-message-row%s"><td><input type="checkbox" name="sel" value="%s">'
+        return ('<tr class="%s%s"><td><input type="checkbox" name="sel" value="%s">'
                 '</td><td></td><td>%s</td><td>%s</td></tr>'
-                % (" tablerowmarked" if m["unread"] else "", m["identity"], cell, m["day"]))
+                % (self.row_class, " tablerowmarked" if m["unread"] else "", m["identity"], cell,
+                   m["day"]))
 
     def _pager(self, folder, number):
         pages = self.pages(folder)
@@ -166,8 +170,8 @@ class Bank:
                 buttons.append('<li class="active">%s</li>' % inner)
             else:
                 buttons.append('<li><input type="submit" name="pg" value="%d"></li>' % p)
-        following = ('<span class="next"><input type="submit" name="pg" value="%d"></span>'
-                     % (number + 1) if number < pages else "")
+        following = ('<span class="%s"><input type="submit" name="pg" value="%d"></span>'
+                     % (self.next_class, number + 1) if number < pages else "")
         return '<div class="bpager"><ul class="pagerbuttons">%s</ul>%s</div>' % (
             "".join(buttons), following)
 
@@ -573,6 +577,57 @@ def test_a_ticked_row_is_never_sent_with_a_page_press(home):
     with pytest.raises(site.ListStopped, match="Clear any selected rows"):
         site._turn(home.page, 2, home.config)
     assert home.bank.presses == []
+
+
+def test_a_renamed_next_arrow_stops_the_listing_rather_than_read_page_one_only(home):
+    """The pager still offers page 2, and no next arrow this can read says
+    there is one. Read as the last page, the listing ended at page 1."""
+    home.bank.next_class = "pager-next"
+    home.bank.folders["Posteingang"] = many("P", 25)
+    said = discover_stops(home)
+    assert "offers a later page and no next page" in said
+    assert home.bank.presses == []
+
+
+def test_renamed_rows_beside_a_pager_stop_the_listing_rather_than_read_empty(home):
+    """Rows of a class this does not read showed as no rows at all, so a
+    Postfach of three pages was listed whole with nothing in it. A short
+    folder with no pager and no rows still reads as empty, which only the
+    bank's own empty notice could tell apart."""
+    home.bank.row_class = "postbox-row-v2"
+    home.bank.folders["Posteingang"] = many("P", 25)
+    said = discover_stops(home)
+    assert "a pager and no rows" in said
+
+
+def test_a_row_ticked_during_the_pause_is_never_sent_with_the_press(home, monkeypatch):
+    """The pause comes before the look for ticked rows, so a row the person
+    ticks while the run waits is seen before the press, not after it."""
+    home.bank.folders["Posteingang"] = many("P", 15)
+    home.page.goto(BASE + site.FOLDERS["Posteingang"])
+
+    def pause(config=None):
+        home.page.locator('input[type="checkbox"]').first.check()
+    monkeypatch.setattr(site, "_pause", pause)
+    with pytest.raises(site.ListStopped, match="Clear any selected rows"):
+        site._turn(home.page, 2, home.config)
+    assert home.bank.presses == []
+
+
+def test_a_statement_the_postfach_files_as_other_is_found_again_and_saved(home, monkeypatch):
+    """The record files a row of no known kind whose subject says
+    Kontoauszug as a Statement, and the download has to find its row the
+    same way (filed_category). The app's own classify already files such
+    a subject as a Statement, so a narrower one stands in for it here, as
+    a later change to its words could make it."""
+    monkeypatch.setattr(site, "classify", lambda kind, title="": "Other Document")
+    home.bank.folders["Posteingang"] = [message("P2", "Kontoauszug 2/2031", "02.03.2031"),
+                                        message("P1", "Ihre Unterlagen", "02.02.2031")]
+    code, said = home.run_all()
+    assert code == 0, said
+    assert home.on_disk() == ["P1", "P2"]
+    categories = {rec["title"]: rec["category"] for rec in home.store("progress.json").values()}
+    assert categories == {"Kontoauszug 2/2031": "Statement", "Ihre Unterlagen": "Other Document"}
 
 
 def test_a_list_that_stops_while_documents_download_stops_the_run_once(home):

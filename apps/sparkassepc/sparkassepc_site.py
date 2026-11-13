@@ -447,9 +447,14 @@ def _look(page):
 
     What it lists is its rows, its page number and the page after it as the
     pager says them, and the numbers the pager offers to press. A pager that
-    shows no page number this can read stops the listing. A page with no
+    shows no page number this can read stops the listing, and so does one
+    that offers a page after this one while saying there is no next page,
+    or one beside no rows at all, since a renamed arrow or row would
+    otherwise read as the last page or an empty folder. A page with no
     pager reads as page 1 with no page after it, which only a short page
-    may be (_collect)."""
+    may be (_collect). A short folder with no rows and no pager reads as
+    empty, which only the bank's own empty notice could tell from rows
+    renamed, and none has been recorded."""
     if not is_safe_url(page.url) or looks_signed_out(page):
         return SIGNED_OUT, "Sign in to Sparkasse Pforzheim Calw again."
     if urlsplit(page.url).path not in FOLDERS.values():
@@ -467,6 +472,8 @@ def _look(page):
         rows.append(dict(row, downloadable=row["links"] == 1))
     if not result.get("pager"):
         return "page", {"rows": rows, "pager": False, "number": 1, "next": 0, "offered": set()}
+    if not rows:
+        return STOPPED, "The Postfach shows a pager and no rows, so the rows have changed."
     active = result.get("active")
     if result.get("actives") != 1 or not isinstance(active, str) or not _NUMBER.fullmatch(active):
         return STOPPED, "The Postfach's active page number cannot be read."
@@ -476,6 +483,8 @@ def _look(page):
         return STOPPED, "The Postfach's next page number cannot be read."
     offered = {int(v) for v in result.get("offered") or ()
                if isinstance(v, str) and _NUMBER.fullmatch(v)}
+    if not result.get("nexts") and any(n > int(active) for n in offered):
+        return STOPPED, "The Postfach offers a later page and no next page, so the pager has changed."
     return "page", {"rows": rows, "pager": True, "number": int(active),
                     "next": int(following) if result.get("nexts") else 0, "offered": offered}
 
@@ -559,11 +568,13 @@ def _turn(page, target, config=None):
     whose value is that number, and digits are all a pager button may say
     (is_safe_control). Its form has to send to the folder's own address and
     stay in this tab, with no row ticked, since a ticked row would go with
-    the press. Nothing else of the form is touched, and the page itself
-    sends what its press sends."""
+    the press. The pause comes first and all of this is read after it, right
+    before the press, so a row ticked during the pause is seen. Nothing else
+    of the form is touched, and the page itself sends what its press sends."""
     path = urlsplit(page.url).path
     if path not in FOLDERS.values() or not is_safe_url(page.url) or not is_safe_control(str(target)):
         raise ListStopped("The Postfach page control is outside the mailbox.")
+    _pause(config)
     found = page.evaluate(_PAGER_JS, target)
     if not isinstance(found, dict) or found.get("why") != "":
         raise ListStopped("The Postfach page control is missing or ambiguous. "
@@ -575,7 +586,6 @@ def _turn(page, target, config=None):
     button = page.locator('%s[value="%d"]:enabled' % (PAGER_CSS, target))
     if button.count() != 1:
         raise ListStopped("The Postfach page control is missing or ambiguous.")
-    _pause(config)
     pressing.click(page, button, css=pressing.BUTTONS, words=_words(), step=TURN_STEP,
                    what="the Postfach's page %d button" % target)
     return _settled(page, target)
@@ -667,7 +677,7 @@ def listed_rows(page, config=None, fresh=False):
         except Exception:
             raise ListStopped("The Postfach listing did not finish.") from None
     wanted = set((config or {}).get("document_types") or storage_categories())
-    return [dict(row) for row in _cache[1] if row["category"] in wanted]
+    return [dict(row) for row in _cache[1] if filed_category(row) in wanted]
 
 
 def _digest(token):
@@ -857,7 +867,17 @@ def classify(kind, title=""):
 
 
 def filed_category(row):
-    return row.get("category") or classify(row.get("kind"), row.get("title"))
+    """The category a listed row's document is recorded under. The row's
+    own, except that one of no known kind whose subject says it is a
+    statement is recorded as one (sparkassepc_docs._record_statement_doc),
+    as DKB's filed_category reads it. Discover numbers the rows by it and a
+    download finds its row by it, so the two read a row as the record holds
+    it."""
+    category = row.get("category") or classify(row.get("kind"), row.get("title"))
+    title = re.sub(r"\s+", " ", str(row.get("title") or "")).strip() or "Statement"
+    if category == "Other Document" and re.search(r"statement|kontoauszug", title, re.I):
+        return "Statement"
+    return category
 
 
 def parse_date(value):
