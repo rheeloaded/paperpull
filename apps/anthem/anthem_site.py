@@ -496,7 +496,9 @@ _DOWNLOAD_JS = r"""async (a) => {
 
 
 class SessionExpired(Exception):
-    """The server answered a document request with a sign-in page or 401."""
+    """The server answered a request with a sign-in page or 401. An EOB
+    refused that way raises it only when its list, read again, refuses too
+    (download_document)."""
 
 
 class ListingIncomplete(Exception):
@@ -1064,7 +1066,16 @@ def download_document(page, doc_id: str, out_path) -> bool:
     alphanumeric claim number, so the request cannot be pointed elsewhere. The
     opaque eobId is resolved fresh from a current summary and the PDF is
     base64-decoded from the download envelope's result.data.file. Raises
-    SessionExpired when Anthem will not authenticate the request.
+    SessionExpired when Anthem will not authenticate the tab, the session or
+    the summary.
+
+    An EOB's PDF answered with a 401, a 403, no session headers or a sign-in
+    page has its claim type's list read again, with the same call that
+    proves a session. A session that has ended is refused the list too, and
+    its SessionExpired stops the run there. A list that still reads, or one
+    that did not come, leaves the refusal this EOB's own, so it fails alone,
+    since a stop here would stop every run at this EOB for good. The EOB is
+    not asked for after the list is read again.
     """
     parsed = parse_doc_id(doc_id)
     if not parsed:
@@ -1083,6 +1094,33 @@ def download_document(page, doc_id: str, out_path) -> bool:
     eob_id, claim_ref = found
     arg = {"claimId": claim_ref, "claimType": claim_type, "eobId": eob_id}
     try:
+        return _fetch_eob(page, arg, out_path)
+    except SessionExpired:
+        # A refusal may be the session ending or this one EOB. The list is
+        # read again, and a session that ended shows there and stops the
+        # run. One that still reads leaves this EOB failed, so it never
+        # stops every later run at the same EOB. A list that did not come
+        # fails this EOB alone, as it does in resolve_eob_id, and a session
+        # that ended shows at the next EOB's own list.
+        start, end = _date_window()
+        try:
+            _summary_rows(page, claim_type, start, end)
+        except ListingIncomplete as e:
+            log.warning("Anthem's %s EOB list did not come after its %s was refused (%s)",
+                        claim_type, doc_kind, e)
+            return False
+        log.info("the %s %s was refused while the list still reads", claim_type, doc_kind)
+        return False
+
+
+def _fetch_eob(page, arg: dict, out_path) -> bool:
+    """GET one EOB's PDF through the download envelope with the session's
+    captured headers, taken again once when they are refused, and keep the
+    body only when it is a PDF. A 401, a 403, no session headers or a
+    sign-in page where the PDF should be raises SessionExpired, which
+    download_document weighs against the list read again. Any other answer
+    that is not a PDF fails this EOB alone."""
+    try:
         res = intake.evaluate(page, _DOWNLOAD_JS, arg) or {}
     except Exception as e:
         log.warning("download fetch failed: %s", str(e).splitlines()[0][:100])
@@ -1096,8 +1134,7 @@ def download_document(page, doc_id: str, out_path) -> bool:
                 return False
     status = res.get("status")
     if res.get("noauth") or status in (401, 403):
-        raise SessionExpired("Anthem refused the document request (%s), which "
-                             "means the session has expired" % status)
+        raise SessionExpired("Anthem refused the document request (%s)" % status)
     if status != 200:
         log.warning("download returned %s", status)
         return False

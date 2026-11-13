@@ -185,6 +185,11 @@ ITS_OWN = {
         "as Discover reads it. A refused list reaches the run, a list that does not "
         "answer or shows another account stops it, and a list that still answers leaves "
         "the refusal that document's alone",
+    ("anthem", "download_document", ("_fetch_eob",)):
+        "a refusal of one EOB's PDF, after which its claim type's list is read again. A "
+        "sign-out shows there and reaches the run, and a list that still reads, or one "
+        "that did not come as resolve_eob_id fails it, leaves the refusal that EOB's "
+        "alone, so one EOB Anthem will not give never stops every later run at it",
 }
 
 # A handler in a download path that turns a list stop into a stop of the run

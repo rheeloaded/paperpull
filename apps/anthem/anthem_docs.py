@@ -712,10 +712,12 @@ class App:
         try:
             saved = site.download_document(page, doc.document_id, out_path)
         except site.SessionExpired:
-            # Stop the whole run. Continuing would file every remaining
-            # document as "manual review" and finish looking successful while
-            # having saved nothing.
-            print("\n  !! Anthem returned a sign-in page instead of a document.")
+            # The EOB list, read for this EOB or read again after the EOB was
+            # refused, answered as a signed-out session. Stop the whole run.
+            # Continuing would file every remaining document as "manual
+            # review" and finish looking successful while having saved
+            # nothing.
+            print("\n  !! Anthem answered as a signed-out session instead of a document.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, re-list your statements, then run Resume.")
             self.stats["session_expired"] = 1
