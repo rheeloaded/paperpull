@@ -418,17 +418,16 @@ def collect_documents(page) -> List[dict]:
         return rows
 
     for type_id, title in DOCUMENT_TYPES.items():
+        # The same call a download reads its type's list with, again after a
+        # document was refused (download_document).
         try:
-            res = page.evaluate(_HISTORY_JS, type_id) or {}
+            docs = _history_docs(page, type_id)
+        except SessionExpired:
+            raise
         except Exception as e:
             log.info("history for type %s failed: %s", type_id,
                      str(e).splitlines()[0][:80])
             continue
-        if res.get("html"):
-            raise SessionExpired(
-                "myPay answered a document listing with a page instead of "
-                "data, which means the signed-in session is no longer valid")
-        docs = _documents_from(res.get("body"))
         if not docs:
             continue
         kept = 0
@@ -478,7 +477,9 @@ def is_mypay_frame_page(page) -> bool:
 # ---------------------------------------------------------------------------
 
 class SessionExpired(Exception):
-    """The server answered a document request with a sign-in page."""
+    """The server answered a document request with a sign-in page. A PDF
+    refused that way, or with a 401 or a 403, stops the run only when its
+    type's list, read again, will not read either (download_document)."""
 
 
 def _looks_like_login_html(body: bytes) -> bool:
@@ -548,12 +549,30 @@ def resolve_document_id(page, type_id: int, date: str, ordinal: int = 0):
         return None
 
 
+def _listed_again(listed: List[dict]) -> List[dict]:
+    """A type's list read again after one of its documents was refused. One
+    that holds no document raises SessionExpired, since it held that
+    document a moment before and a session that ended is answered with an
+    error that holds none."""
+    if not listed:
+        raise SessionExpired("myPay's list, read again, held no document")
+    return listed
+
+
 def download_document(page, doc_id: str, out_path) -> bool:
     """Save one document by its (type, id) identity, never by a URL.
 
     The identity is validated to two integers and the type must be one this app
     knows, so the request cannot be pointed anywhere else. Raises SessionExpired
-    when myPay answers with a page instead of a document.
+    when myPay answers its type's list with a page instead of data.
+
+    A PDF refused with a 401, a 403 or a sign-in page has its type's list read
+    again, with the call Discover reads it with. A session that has ended
+    answers that list with a page or with no document at all, and its
+    SessionExpired stops the run. A list that still holds its documents leaves
+    the refusal this document's own, so it fails alone, since a stop here would
+    stop every run at this document for good. The document is not asked for a
+    second time.
     """
     parsed = parse_doc_id(doc_id)
     if not parsed:
@@ -569,14 +588,31 @@ def download_document(page, doc_id: str, out_path) -> bool:
                     DOCUMENT_TYPES.get(type_id, type_id), date)
         return False
     try:
+        return _fetch(page, type_id, ident, out_path)
+    except SessionExpired:
+        # A refusal may be the session ending or this one document. Its
+        # type's list is read again, and a session that ended shows there
+        # and stops the run. One that still reads leaves this document
+        # failed, so it never stops every later run at the same document.
+        _listed_again(_history_docs(page, type_id))
+        log.info("the %s dated %s was refused while its list still reads",
+                 DOCUMENT_TYPES.get(type_id, type_id), date)
+        return False
+
+
+def _fetch(page, type_id: int, ident: int, out_path) -> bool:
+    """Ask for one document's PDF by its type and its current Id and write it.
+    A 401, a 403 or a sign-in page where the PDF should be raises
+    SessionExpired, which download_document weighs against the list read
+    again. Any other answer that is not a PDF fails this document alone."""
+    try:
         res = intake.evaluate(page, _PDF_JS, {"t": type_id, "id": ident}) or {}
     except Exception as e:
         log.warning("fetch failed: %s", str(e).splitlines()[0][:100])
         return False
     status = res.get("status")
     if status in (401, 403):
-        raise SessionExpired("myPay refused the document request (%s), which "
-                             "means the session has expired" % status)
+        raise SessionExpired("myPay refused the document request (%s)" % status)
     if status != 200:
         log.warning("fetch returned %s", status)
         return False

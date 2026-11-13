@@ -180,6 +180,11 @@ ITS_OWN = {
         "or a list that stops shows there and reaches the run, and a list that still "
         "reads leaves the refusal that bill's alone, so one bill Ziply will not give "
         "never stops every later run at it",
+    ("mypay", "download_document", ("_fetch",)):
+        "a refusal of one document's PDF, after which its type's list is read again "
+        "with the call Discover reads it with. A page or a list holding nothing raises "
+        "SessionExpired there and reaches the run, and a list that still holds its "
+        "documents leaves the refusal that document's alone",
     ("fedex", "download_bill", ("_fetch_file",)):
         "a refusal of one invoice's PDF, after which the invoices page is opened and its "
         "answers read again. A sign-in page or a list with no invoice raises "
