@@ -7,7 +7,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.66.0] - 2026-11-13
+
+Renault Bank direkt is new, contributed by @MelleD. One bill Ziply Fiber
+refuses no longer stops every run, and Discover Bank no longer calls a run
+Nothing new when an account's list answers empty. A run started from a
+terminal in another folder finds its files as the panel's runs do, and a
+folder written with `~` is in your home folder. A Windows update that
+cannot finish opens PaperPull again, and five more apps keep page
+addresses and words out of their logs.
 
 ### Added
 - **Renault Bank direkt, the Postfach, its archive and message attachments
