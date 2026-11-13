@@ -149,6 +149,35 @@ REFUSALS = [Resp(302, ctype="text/html", body=b"", location="https://api.id.me/"
             Resp(body=b"<!doctype html>"), Resp(body=b' {"error":1}')]
 
 
+class CutResp(Resp):
+    """An answer whose body never all came, as when the connection drops
+    while it is read."""
+
+    def body(self):
+        raise RuntimeError("net::ERR_CONNECTION_RESET")
+
+
+# What the list read again after a refusal can answer that says neither that
+# the session ended nor that it still holds.
+NOT_ANSWERED = {"500": lambda: Resp(500, ctype="application/json", body=b"{}"),
+                "empty": lambda: jresp([]),
+                "cut off": lambda: CutResp(ctype="application/json")}
+
+
+def list_after_the_transcript(page, answer):
+    """The list answers `answer` once a transcript has been asked for."""
+    request = page.context.request
+    before = request.get
+
+    def get(url, **kw):
+        got = before(url, **kw)
+        if url != API:
+            request.list_answer = answer
+        return got
+    request.get = get
+    return page
+
+
 def signs_out_at_the_transcript(page, how="401"):
     """A session that ends as a transcript is asked for. The transcript is
     refused, and so is the list read after it, by a 401 for the list or by
@@ -491,6 +520,20 @@ class Download(unittest.TestCase):
             self.fetch(page)
         self.assertEqual([u for u, _ in later.asked], [API, T_ACCT, API])
 
+    def test_a_list_that_does_not_answer_after_a_refusal_is_the_list_unread_not_a_sign_out(self):
+        """A list that answered 500 stopped already. One that came back
+        empty was taken as a list that still reads, so the transcript failed
+        alone with nothing shown of the session, and one whose answer was
+        cut off reached the run as the transcript's own failure. None of
+        them says the session ended either."""
+        for how, answer in NOT_ANSWERED.items():
+            page = list_after_the_transcript(Page(answers=[Resp(403, ctype="text/plain", body=b"no")]),
+                                             answer())
+            with self.assertRaises(site.ListStopped, msg=how) as stop:
+                self.fetch(page)
+            self.assertNotIsInstance(stop.exception, site.SessionExpired, how)
+            self.assertEqual([u for u, _ in page.context.request.asked], [API, T_ACCT, API], how)
+
     def test_other_non_pdfs_are_refused_without_a_file(self):
         for answer in [Resp(500, ctype="text/plain"), Resp(ctype="application/octet-stream"),
                        Resp(body=b"not a pdf")]:
@@ -665,7 +708,7 @@ class Orchestrator(unittest.TestCase):
         self.assertNotIn((T_ACCT, 0), pages[0].context.request.asked)
         self.assertEqual(listing.last(app), listing.COMPLETE)
 
-    def _refused_run(self, signs_out=False):
+    def _refused_run(self, signs_out=False, list_after=None):
         """A Run All over the four listed transcripts with the 2024 account
         transcript refused by a 403, the list still read or, with
         `signs_out`, refused after it. What it printed, and every page."""
@@ -693,6 +736,8 @@ class Orchestrator(unittest.TestCase):
             request.get = get
             if signs_out:
                 signs_out_at_the_transcript(page)
+            if list_after is not None:
+                list_after_the_transcript(page, list_after())
             pages.append(page)
             return page
         app._on_its_site = page_for_the_next
@@ -744,6 +789,24 @@ class Orchestrator(unittest.TestCase):
         self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0)
         self.assertNotIn("id:transcript-account-202412-30", app.progress.data)
         self.assertEqual(asked.count(T_ACCT), 1)
+
+    def test_one_transcript_refused_and_a_list_that_does_not_answer_after_it_leave_the_list_unread(self):
+        """Every transcript after it reads the same list, so the run stops
+        with the list unread and the refused transcript left as it was for
+        the next run that lists, neither a sign-out nor its own failure."""
+        from paperpull_core import listing
+        from paperpull_core.run_reporting import ListNotRead
+        for how, answer in NOT_ANSWERED.items():
+            with self.subTest(how):
+                self.tmp = Path(tempfile.mkdtemp())
+                app, ended, said, asked = self._refused_run(list_after=answer)
+                self.assertIsInstance(ended, ListNotRead, said)
+                self.assertNotIn("signed out", said)
+                self.assertNotIn("Nothing was saved", said)
+                self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0)
+                self.assertNotIn("id:transcript-account-202412-30", app.progress.data)
+                self.assertEqual(asked.count(T_ACCT), 1)
+                self.assertNotEqual(listing.last(app), listing.COMPLETE)
 
     def test_a_record_saved_before_its_sibling_appeared_is_renamed_in_discovery(self):
         app = make_app(self.tmp, "--discover")

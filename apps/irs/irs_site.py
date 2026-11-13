@@ -91,7 +91,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
-from paperpull_core import intake
+from paperpull_core import intake, refused
 from paperpull_core.urls import host_matches, host_of
 from paperpull_core import redirects
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -906,12 +906,15 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     when the list cannot be read again or holds the record more than once.
 
     A transcript answered with a redirect, a 401, a 403 or a page has the
-    list read again, with the same call that proves a session. A session
-    that has ended is refused the list too, and its SessionExpired stops
-    the run there. A list that still reads leaves the refusal this
-    transcript's own, so it fails alone, since a stop here would stop every
-    run at this transcript for good. The transcript is not asked for a
-    second time."""
+    list read again, with the same call that proves a session
+    (paperpull_core.refused). A session that has ended is refused the list
+    too, and its SessionExpired stops the run there. A list that does not
+    answer, whose answer is cut off, or that holds no transcript, though it
+    listed this one, says neither, and raises ListStopped, which stops the
+    run with the list unread. A list that still reads leaves the refusal
+    this transcript's own, so it fails alone, since a stop here would stop
+    every run at this transcript for good. The transcript is not asked for
+    a second time."""
     out_path = Path(out_path)
     doc_id = (document_id or "").strip()
     if not _DOC_ID_RE.fullmatch(doc_id) or not is_download_url(BASE + (href or "")):
@@ -942,9 +945,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     except SessionExpired:
         # A refusal may be the session ending or this one transcript. The
         # list is read again, and a session that ended shows there and
-        # stops the run. One that still reads leaves this transcript failed,
-        # so it never stops every later run at the same transcript.
-        _transcripts(page)
+        # stops the run. A list that does not answer, or holds nothing,
+        # stops it with the list unread. One that still reads leaves this
+        # transcript failed, so it never stops every later run at the same
+        # transcript.
+        refused.list_again(lambda: _transcripts(page), SessionExpired, ListStopped)
         log.info("the transcript dated %s was refused while the list still reads", iso_date)
         if trace is not None:
             trace.append({"note": "refused, the list still reads"})
