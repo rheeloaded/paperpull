@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
 from typing import Optional
@@ -39,11 +39,10 @@ class ListStopped(RuntimeError):
 
 
 class NoFile(RuntimeError):
-    """The bank lists a document and gives no PDF for it, an HTTP error for
-    that one file, no download ticket, or an answer that is not a PDF. Only
-    that document fails, and the run goes on to the next, as DKB's does. It
-    was ListStopped, which ended every run at the first such document, and
-    since runs go newest first nothing older was ever saved."""
+    """The portal lists a document and gives no PDF for it, an error for
+    that one document's ticket or file, no PDF link, or an answer that is
+    not a PDF. Once the list read again still answers, only that document
+    fails and the run goes on to the next (download_document)."""
 
 
 class NotToldApart(RuntimeError):
@@ -274,12 +273,18 @@ async (args) => {
   const bucket = "prod-de-mbgdcs-documents01.s3.eu-west-1.amazonaws.com";
   const root = "cb-api-doc-manager/v4/";
   const stateKey = "__paperpullAmazonVisaV1";
+  // How many documents one category is asked for at once.
+  const limit = 100;
+  // How long one answer of the portal's client is waited for.
+  const wait = 30000;
   const fail = (message) => { throw new Error(message); };
   const token = (value) => {
     if (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,160}$/.test(value))
       fail("Invalid document or contract identifier");
     return value;
   };
+  const has = (value, key) => value !== null && typeof value === "object" &&
+    Object.prototype.hasOwnProperty.call(value, key);
   try {
     if (location.origin !== portal || !location.pathname.startsWith("/amazon/"))
       fail("Open the Amazon Visa portal");
@@ -296,7 +301,21 @@ async (args) => {
     if (typeof client?.get !== "function") fail("Portal document client is unavailable");
 
     const get = async (endpoint, options = {}) => {
-      const [data, meta] = await client.get({endpoint, ...options});
+      // The portal's client takes no signal, so an answer that never comes
+      // is given up on here rather than hold the run forever.
+      let timer;
+      const late = new Promise((resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("The portal did not answer in time")), wait);
+      });
+      let answer;
+      try {
+        answer = await Promise.race([client.get({endpoint, ...options}), late]);
+      } finally {
+        clearTimeout(timer);
+      }
+      const [data, meta] = Array.isArray(answer) ? answer : [];
+      // A refusal reads as signed out here. For one document's ticket the
+      // list read again decides whether it is (download_document).
       if (meta?.status === 401 || meta?.status === 403) fail("SESSION_EXPIRED");
       if (meta?.status !== 200 || !data || typeof data !== "object")
         fail("The portal did not return the requested document data");
@@ -338,8 +357,10 @@ async (args) => {
     const summary = {contracts: 0, categories: 0, statements: 0, documents: 0, non_pdf: 0, without_pdf: 0};
     const position = await get("cb-api-global-position/v3/global-position");
     const cards = position.resource?.cardsInfo?.cards;
-    if (!Array.isArray(cards)) fail("The portal did not list its cards");
-    const contracts = new Set(cards.map(card => token(card.cardContractId)));
+    // Whoever is signed in holds at least one card, so an answer with no
+    // card in it is a list that was not read, never a list of nothing.
+    if (!Array.isArray(cards) || !cards.length) fail("The portal did not list its cards");
+    const contracts = new Set(cards.map(card => token(card?.cardContractId)));
     for (const contract of contracts) {
       const list = await get("cb-api-cards-contra/v1/card-contracts/:cardContractId/statements",
                              {pathParams: {cardContractId: contract}});
@@ -347,6 +368,12 @@ async (args) => {
         fail("The portal did not return the whole statement list");
       summary.contracts++;
       for (const row of list.elements) {
+        // A statement with no PDF yet may carry both fields empty. A field
+        // that is not there at all is an answer this app does not know,
+        // and reading it as no PDF would leave a statement out of a list
+        // still called whole.
+        if (!has(row, "documentId") || !has(row, "version"))
+          fail("A listed statement is missing its document fields");
         if (!row.documentId && !row.version) {
           summary.without_pdf++;
           continue;
@@ -363,14 +390,18 @@ async (args) => {
       }
     }
     const available = await get(root + "categories");
-    const categories = available.categories ?? (Object.keys(available).length === 0 ? [] : null);
-    if (!Array.isArray(categories)) fail("The portal did not list its document categories");
-    for (const category of new Set(categories)) {
-      const list = await get(root + "documents", {queryParams: {categories: [token(category)], limit: 100}});
-      // The endpoint reports size and returned all rows even when asked
-      // for ten. If it ever reports a partial answer, stop the whole list.
-      if (!Array.isArray(list.documents) || list.size !== list.documents.length)
+    // An answer without its categories is not an empty list of them.
+    if (!Array.isArray(available.categories)) fail("The portal did not list its document categories");
+    for (const category of new Set(available.categories)) {
+      const list = await get(root + "documents", {queryParams: {categories: [token(category)], limit}});
+      // Both the documents and their size must be there and agree.
+      if (!Array.isArray(list.documents) || !Number.isSafeInteger(list.size) ||
+          list.size !== list.documents.length)
         fail("The portal did not return the whole document category");
+      // The size may count only the documents that came back, so an answer
+      // holding as many as were asked for may have been cut there.
+      if (list.documents.length >= limit)
+        fail("A document category reached the most one answer holds");
       summary.categories++;
       for (const row of list.documents) {
         if (typeof row.fileExtension !== "string" || !row.fileExtension)
@@ -403,7 +434,9 @@ async (args) => {
       "The PDF link is outside the permitted document store", "The document store did not return the PDF",
       "The download is not a PDF", "Unknown document operation", "The portal did not list its cards",
       "The portal did not return the whole statement list", "The portal did not list its document categories",
-      "The portal did not return the whole document category", "A listed document has no file type"
+      "The portal did not return the whole document category", "A listed document has no file type",
+      "A listed statement is missing its document fields", "The portal did not answer in time",
+      "A document category reached the most one answer holds"
     ];
     return {ok: false, expired: message === "SESSION_EXPIRED",
             error: fixed.includes(message) ? message : "The portal document request failed"};
@@ -438,11 +471,11 @@ def _execute(page, operation, stop=ListStopped, **values):
 
 
 def goto_documents(page):
-    """Reuse the banking tab; the list API, not its URL, proves sign-in.
+    """Reuse the portal tab the person left open. The list answering, never
+    the address, proves a sign-in.
 
-    Reopening the SPA's deep link can take it through an OAuth callback.
-    Reading from the existing tab avoids both that race and discarding the
-    session the person just opened. A tab of the run's own may navigate.
+    Reading from the open tab keeps the session the person just opened. A
+    tab of the run's own may navigate.
     """
     if is_safe_url(page.url or ""):
         return not looks_signed_out(page)
@@ -480,8 +513,47 @@ def filed_category(row):
     return row.get("category") or classify(row.get("kind"), row.get("title"))
 
 
+def _last_sunday(year: int, month: int) -> int:
+    day = 31
+    while datetime(year, month, day).weekday() != 6:
+        day -= 1
+    return day
+
+
+def _berlin(when):
+    """A moment in Berlin time, by the EU rule, summer time from 01:00 UTC
+    on the last Sunday of March to 01:00 UTC on the last Sunday of October.
+    Worked out here because Windows' Python has no time zone data without
+    an extra package."""
+    u = when.astimezone(timezone.utc)
+    start = datetime(u.year, 3, _last_sunday(u.year, 3), 1, tzinfo=timezone.utc)
+    end = datetime(u.year, 10, _last_sunday(u.year, 10), 1, tzinfo=timezone.utc)
+    return u + timedelta(hours=2 if start <= u < end else 1)
+
+
+_STAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[Tt ](\d{2}:\d{2}(?::\d{2})?)(\.\d+)?([Zz]|[+-]\d{2}:?\d{2})$")
+
+
 def parse_date(value):
+    """A day as the portal means it, YYYY-MM-DD, or "" when it names none.
+
+    A date that comes as a moment with a zone is read as its day in Berlin,
+    since one stamped after midnight there is the day before in UTC. The
+    day is in each document's identity and its file name. A plain day is
+    taken as it is."""
     value = str(value or "").strip()
+    stamp = _STAMP_RE.match(value)
+    if stamp:
+        zone = stamp.group(4)
+        if zone in ("Z", "z"):
+            zone = "+00:00"
+        elif ":" not in zone:
+            zone = zone[:3] + ":" + zone[3:]
+        try:
+            when = datetime.fromisoformat(stamp.group(1) + "T" + stamp.group(2) + zone)
+            return _berlin(when).strftime("%Y-%m-%d")
+        except (ValueError, OverflowError):
+            return ""
     for fmt, pattern in (("%Y-%m-%d", r"^\d{4}-\d{2}-\d{2}(?!\d)"),
                          ("%d.%m.%Y", r"^\d{2}\.\d{2}\.\d{4}(?!\d)"),
                          ("%Y%m%d", r"^\d{8}(?!\d)")):
@@ -544,8 +616,10 @@ def undated():
 
 def resolve_item(page, title, date, account, occurrence=0, item_id="", *,
                  category, number_rows, twins=1, config=None):
-    """DKB's identity matching, without falling back to an unlisted id,
-    since the page holds a download's tokens only for the rows it listed."""
+    """The listed row this document is, by its title, date, contract and
+    kind and the number Discover gave it among documents alike. An id the
+    list no longer shows is never asked for, since the page holds a
+    download's ticket only for the rows it listed."""
     rows = listed_rows(page, config)
     numbers = number_rows(rows)
     alike = [i for i, row in enumerate(rows) if
@@ -569,28 +643,31 @@ def download_document(page, title, date, out_path, occurrence=0, item_hint="",
                       client_hint="", account="", *, category, number_rows,
                       twins=1, config=None):
     """Save one document, and answer the id its bytes came from, or "" when
-    the bank gave no PDF for it, which fails that document alone. Which row
-    is its own is resolve_item's to say. A signed-out answer raises
-    SessionExpired and a list that cannot be read again ListStopped, since
-    both hold for every document after it."""
+    the portal gave no PDF for it, which fails that document alone. Which
+    row is its own is resolve_item's to say. Whatever the download answers,
+    a list that answers as signed out raises SessionExpired and a list that
+    cannot be read again ListStopped, since both hold for every document
+    after it."""
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins, config=config)
     try:
         result = _execute(page, "download", stop=NoFile, id=row["item_id"])
         data = intake.decode(result["data"], validate=True)
         why = "" if data.startswith(b"%PDF-") else "not a PDF (%d bytes)" % len(data)
-    except (NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
+    except (NoFile, SessionExpired, intake.TooLarge, ValueError, KeyError, TypeError) as e:
         # By its type and kind, since what an answer or an error says can
-        # carry the bank's words.
+        # carry the portal's words.
         why = "%s, %s" % (type(e).__name__, failure.error_kind(e))
     if why:
         log.warning("no PDF for one %s of %s: %s", category, date, why)
-        # A sign-in page served in place of the PDF, or a redirect to one,
-        # says nothing this app can tell from a file the bank will not give.
-        # The list is the proof, so it is read again here, and an answer as
-        # signed out (SessionExpired) or a list that stops (ListStopped) ends
-        # the run with nothing recorded against this document. Only a list
-        # that still answers makes this one document's failure.
+        # A 401 or 403 on one document's ticket, a sign-in page served in
+        # its place, or a file that is not a PDF says nothing this app can
+        # tell of the session, since the portal may refuse one document
+        # alone. The list is the proof, so it is read again here, and an
+        # answer as signed out (SessionExpired) or a list that stops
+        # (ListStopped) ends the run with nothing recorded against this
+        # document. Only a list that still answers makes this one
+        # document's failure.
         listed_rows(page, config, fresh=True)
         return ""
     out_path = Path(out_path)

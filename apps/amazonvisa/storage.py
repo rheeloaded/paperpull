@@ -26,7 +26,9 @@ CONTRACT = "Contract Information"
 TAX = "Tax Document"
 MESSAGE = "Message"
 OTHER = "Other Document"
-ALL_CATEGORIES = [CARD, CONTRACT, TAX, MESSAGE, OTHER]
+# Every kind is here from the first build, in the order config.example.json
+# lists them, since an install keeps the document_types it was set up with.
+ALL_CATEGORIES = [CARD, TAX, CONTRACT, MESSAGE, OTHER]
 FALLBACK_SUMMARY = {
     CARD: "Kreditkartenabrechnung",
     CONTRACT: "Vertragsinformation",

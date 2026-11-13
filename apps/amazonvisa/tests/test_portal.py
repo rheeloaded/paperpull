@@ -20,8 +20,13 @@ const calls = [];
 const ticket = "https://" + (mode === "foreign" ? "example.invalid" : bucket) +
                "/invented.pdf?X-Amz-Signature=INVENTED_SIGNATURE";
 const row = (id, ext = ".pdf") => ({id, date: "2026-02-03", fileExtension: ext});
+// In "hangs" mode the portal never answers, and a wait of the bridge's
+// is cut short so the test does not sit through it.
+const realSetTimeout = setTimeout;
+global.setTimeout = (fn, ms, ...rest) => realSetTimeout(fn, mode === "hangs" ? 5 : ms, ...rest);
 const client = {get: async ({endpoint, pathParams}) => {
   calls.push(endpoint);
+  if (mode === "hangs") return new Promise(() => {});
   if (mode === "signed-out") return [{}, {status: 401}];
   let data;
   if (endpoint.endsWith("/global-position")) {
@@ -105,3 +110,12 @@ def test_a_signed_url_on_an_unlisted_host_is_refused_before_fetch():
     result = run_bridge("foreign")
     assert not result["downloaded"]["ok"]
     assert result["fetched"] == 0
+
+
+def test_a_portal_that_never_answers_is_given_up_on():
+    """The portal's client takes no signal, so a call that never answered
+    held the run there for good."""
+    result = run_bridge("hangs")["listed"]
+    assert not result["ok"] and not result["expired"]
+    assert result["error"] == "The portal did not answer in time"
+    assert "rows" not in result

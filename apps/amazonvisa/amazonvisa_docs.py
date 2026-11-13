@@ -84,7 +84,7 @@ class Document:
         self.period = period
         self.date_text = date_text  # the row's raw date string, for re-matching
         self.document_id = document_id  # unused here, identity is subject + date
-        self.item_id = item_id          # the document portal document id, a hint only, re-resolved
+        self.item_id = item_id          # the portal's id for the document, a hint only, re-resolved
         self.client_id = client_id      # goes with it on the content call
         self.occurrence = occurrence    # nth document with this title and date
         # Sticky "was successfully downloaded at least once" marker. Once set,
@@ -104,15 +104,11 @@ class Document:
 
     @property
     def key(self) -> str:
-        """Kind, date, account and subject, never the document portal id. The id is looked up fresh
-        at download time. myPay's ids died with the session, and there is no
-        reason to find out the hard way whether Amazon Visa's do."""
-        # The whole subject, not its first sixty letters. Amazon Visa's run past
-        # that ("Abrechnung Kauf WKN ... zu Depot ... Ordernr. ..."), and two
-        # orders of one day differ only in the part that was cut off, so
-        # they shared a key and one of them was never listed.
-        # The account too, so two accounts' documents of one title and day
-        # are two documents.
+        """Kind, date, contract and title, never the portal's id. The id is
+        looked up fresh at download time, so an id that lasts no longer
+        than one session never names a saved document."""
+        # The contract too, so two cards' statements of one day are two
+        # documents.
         acct = f"{sanitize_component(self.account)}:" if self.account else ""
         base = f"{self.category}:{self.date}:{acct}{sanitize_component(self.title)}"
         return base if not self.occurrence else f"{base}#{self.occurrence}"
@@ -327,13 +323,13 @@ class App:
         ok = site.goto_documents(page)
         challenge = site.detect_security_challenge(page)
         # A kunden.openbankpay.com address without a sign-in form says nothing of
-        # the session. Amazon Visa answering the document portal list does.
+        # the session. Amazon Visa answering the document list does.
         listed = False
         if ok and not challenge:
             try:
                 listed = site.answers_its_list(page)
             except (site.SessionExpired, site.ListStopped) as e:
-                log.info("the document portal list did not answer (%s, %s)", type(e).__name__,
+                log.info("the document list did not answer (%s, %s)", type(e).__name__,
                          failure.error_kind(e))
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
@@ -341,7 +337,7 @@ class App:
             print("Connected, but Amazon Visa shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         elif listed:
-            print("Success: connected, and Amazon Visa answers with your document portal list.")
+            print("Success: connected, and Amazon Visa answers with your document list.")
             print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         else:
             print("Connected, but the Documents list did not load, so this cannot say")
@@ -390,7 +386,7 @@ class App:
                            saved=saved, key_of=listed_key)
 
     def _record_statement_doc(self, d: dict, occurrence: int = 0, sure: bool = True) -> int:
-        """Record one document portal row {title, date, account, category, item_id, client_id}. Returns 1 if new.
+        """Record one portal row {title, date, account, category, item_id, client_id}. Returns 1 if new.
         A row that cannot be told apart from one saved keeps no id
         (keys.told_apart), so it is never downloaded in its place."""
         title = tidy(d.get("title")) or "Statement"
@@ -399,7 +395,7 @@ class App:
             return 0
         category, summary, confidence = doc_types.classify_document(title, self.rules)
         if d.get("category"):
-            # The document portal says which kind a document is. Rules only choose the
+            # The portal says which kind a document is. Rules only choose the
             # wording inside the filename.
             category = d["category"]
             if confidence != doc_types.HIGH or summary in ("", "Other Document", "Document"):
@@ -454,7 +450,7 @@ class App:
                 raise SystemExit(0)
         self.check_session(page)
 
-        # The document portal, read through its own API. Two documents can share a
+        # The portal, read through its own client. Two documents can share a
         # title and a date (a statement and its supplement, say), so the
         # nth such pair is keyed with its number.
         try:
@@ -472,7 +468,7 @@ class App:
             print("   call the list read. Look at the browser window, then run it again.")
             self.write_failure("read the documents list", "the list stopped partway")
             raise SystemExit(1)
-        log.info("Amazon Visa: %d document(s) in the document portal", len(raw))
+        log.info("Amazon Visa: %d document(s) in the portal", len(raw))
         # A document with no date the app can read has no key, so it is
         # left out of the list and said here rather than vanish.
         left_out = site.undated()
@@ -658,7 +654,7 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # Each PDF comes back from the document portal download call, made
+        # Each PDF comes back from the portal's download call, made
         # from inside the page. Nothing is clicked. The document is looked
         # up again by kind, account and date first.
         if not site.ensure_statements(page):
