@@ -38,6 +38,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   waits a minute for a download that never comes. M&T stays as it was,
   since its list is the one you opened in your own tab, and nothing can
   read that again without wiping it.
+- **FedEx reads an invoice list it refuses as a sign-out.** When FedEx
+  Billing Online answered every call of the invoices page with a 401 or a
+  403, Discover took that for a list with no invoices, said Discovery
+  complete and found nothing new with the session ended. After one refused
+  invoice, the list read again stopped the run as a list that did not
+  answer and never said you were signed out. Both now stop the run as
+  signed out. A list that answers with a server's error, times out, never
+  comes or holds no invoice is still not read as one, and nor is one call
+  refused while another answers. A FedEx tab that fedex.com will not open
+  in now stops the run with the list unread, where it was called a
+  sign-out.
 
 ## [0.66.0] - 2026-11-13
 

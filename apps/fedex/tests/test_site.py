@@ -94,7 +94,8 @@ class _Resp:
 
 class _Page:
     """A signed-in fedex.com tab. Opening the invoices page makes it
-    receive the scripted answers, or land on the connect-account form."""
+    receive the scripted answers, or land on the connect-account form. An
+    answer is (address, body) for a 200, or (address, body, status)."""
 
     def __init__(self, answers, connect=False, fetch=None):
         self.url = "https://www.fedex.com/en-us/logged-in-home.html"
@@ -112,9 +113,9 @@ class _Page:
             self.url = "https://www.fedex.com/register/connect-account/ean?linkApp=fbo"
             return
         self.url = url
-        for u, body in self.answers:
+        for u, body, *status in self.answers:
             for fn in list(self.listeners):
-                fn(_Resp(u, body))
+                fn(_Resp(u, body, *status))
 
     def wait_for_timeout(self, _ms):
         pass
@@ -175,11 +176,13 @@ def test_an_invoice_without_a_link_goes_to_the_person(tmp_path):
         site.download_bill(page, None, "2031-01-24", tmp_path / "i.pdf", document_id="INV-1")
 
 
-def test_a_sign_in_page_where_the_list_was_stops_the_run(tmp_path):
-    """The list read for an invoice shows the sign-in page, so nothing is
-    asked for."""
+@pytest.mark.parametrize("after", ["sign-in", "list 401", "list 403"])
+def test_a_sign_in_page_where_the_list_was_stops_the_run(tmp_path, after):
+    """The list read for an invoice shows the sign-in page, or Billing
+    Online refuses it, so nothing is asked for. A refused list was read as
+    one with no invoice in it, and the invoice went to the person."""
     _fresh()
-    page = _Opens(INVOICES, after="sign-in", from_fetch=0,
+    page = _Opens(INVOICES, after=after, from_fetch=0,
                   fetch={LINK: {"status": 200, "ct": "application/pdf", "url": LINK,
                                 "b64": base64.b64encode(PDF).decode()}})
     with pytest.raises(site.SessionExpired):
@@ -198,17 +201,29 @@ REFUSALS = {
 }
 
 
+OFF_FEDEX = "chrome-error://chromewebdata/"
+
+
 class _Opens(_Page):
     """_Page, counting each time the invoices page is opened. `after`
     says what the invoices page does once `from_fetch` PDFs were asked
     for, list as before, land on a sign-in page, list nothing, or the
-    connect form."""
+    connect form. "off fedex" leaves the tab on an error page once a PDF
+    was asked for, where fedex.com does not open again."""
 
     def __init__(self, answers, after="list", from_fetch=1, **kw):
         super().__init__(answers, **kw)
         self.after, self.from_fetch, self.opened = after, from_fetch, 0
 
+    def evaluate(self, js, url):
+        got = super().evaluate(js, url)
+        if self.after == "off fedex" and len(self.fetched) >= self.from_fetch:
+            self.url = OFF_FEDEX
+        return got
+
     def goto(self, url, **kw):
+        if self.url == OFF_FEDEX:
+            raise RuntimeError("net::ERR_INTERNET_DISCONNECTED (made up)")
         if url == site.INVOICES_PAGE:
             self.opened += 1
             changed = len(self.fetched) >= self.from_fetch
@@ -233,9 +248,9 @@ class _Opens(_Page):
 
 
 # What Billing Online can answer the invoice list with once an invoice was
-# refused, each with no invoice in it. Discover reads none of them as a
-# sign-out, a 401 and a 403 among them, so the list read again does not
-# either.
+# refused, each with no invoice in it. A 401 or a 403 refuses the list,
+# which Discover reads as a sign-out, and so does the list read again. A
+# 500 or an empty list says nothing of the session, in either.
 LIST_ANSWERS = {
     "list 401": (401, {"errors": [{"code": "NOT.AUTHORIZED"}]}),
     "list 403": (403, None),
@@ -280,19 +295,27 @@ def test_the_list_read_after_a_refusal_serves_the_next_invoice(tmp_path):
     assert page.opened == 2
 
 
-def test_an_invoice_refused_and_a_sign_in_page_after_it_is_a_sign_out(tmp_path):
-    """A session that ended shows the sign-in page where the list was, and
-    only that stops the run as signed out."""
+SIGNED_OUT = ["sign-in", "list 401", "list 403"]
+
+
+@pytest.mark.parametrize("after", SIGNED_OUT)
+def test_an_invoice_refused_and_a_sign_in_page_after_it_is_a_sign_out(tmp_path, after):
+    """A session that ended shows the sign-in page where the list was, or
+    has the list refused with a 401 or a 403, and only that stops the run
+    as signed out. A refused list with no invoice in it was read as a list
+    that did not answer, since Discover read it as an empty one, so the run
+    stopped with the list unread and never said the session had ended."""
     _fresh()
-    page = _Opens(INVOICES, after="sign-in", fetch={LINK: dict(REFUSALS["401"])})
+    page = _Opens(INVOICES, after=after, fetch={LINK: dict(REFUSALS["401"])})
     site.collect_download_docs(page)
     with pytest.raises(site.SessionExpired):
         site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2")
     assert not (tmp_path / "i.pdf").exists()
     assert page.fetched == [LINK] and page.opened == 2
+    assert page.listeners == []
 
 
-UNREAD = ["nothing", "list 401", "list 403", "list 500", "list empty", "timeout"]
+UNREAD = ["nothing", "list 500", "list empty", "timeout", "off fedex"]
 
 
 @pytest.mark.parametrize("after", UNREAD)
@@ -301,7 +324,8 @@ def test_an_invoice_refused_and_a_list_that_does_not_answer_after_it_is_unread(t
     timed out says nothing Discover reads as a sign-out. It was read as one,
     or the timeout reached the loop as the invoice's own failure and the
     run went on with no session shown. Now it stops the run with the list
-    unread."""
+    unread. So does a tab that fedex.com no longer opens in, which was read
+    as a sign-out though nothing on it was a sign-in page."""
     _fresh()
     page = _Opens(INVOICES, after=after, fetch={LINK: dict(REFUSALS["403"])})
     site.collect_download_docs(page)
@@ -309,7 +333,8 @@ def test_an_invoice_refused_and_a_list_that_does_not_answer_after_it_is_unread(t
         site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2")
     assert not isinstance(got.value, site.SessionExpired)
     assert not (tmp_path / "i.pdf").exists()
-    assert page.fetched == [LINK] and page.opened == 2
+    # A tab fedex.com does not open in never reaches the invoices page.
+    assert page.fetched == [LINK] and page.opened == (1 if after == "off fedex" else 2)
     assert page.listeners == []
 
 
@@ -333,18 +358,23 @@ GOOD = {"status": 200, "ct": "application/pdf",
         "b64": base64.b64encode(testkit.text_pdf(["FedEx made-up invoice INV-1"])).decode()}
 
 
-def _run(tmp_path, page):
-    """A Run All over the two invoices Discover listed, the newest asked
-    for first, with how it ended and what it printed."""
-    import contextlib
-    import io
+def _app(tmp_path, command):
+    """The app over a made-up install in tmp_path, for one command."""
     import fedex_docs as docs
     config = json.loads((Path(docs.__file__).parent / "config.example.json").read_text())
     config.update({"owner": "Tester Example", "output_dir": str(tmp_path / "out"),
                    "delay_min_seconds": 0, "delay_max_seconds": 0, "min_pdf_bytes": 10})
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(config))
-    app = docs.App(docs.build_parser().parse_args(["--resume", "--config", str(cfg)]))
+    return docs.App(docs.build_parser().parse_args([command, "--config", str(cfg)]))
+
+
+def _run(tmp_path, page):
+    """A Run All over the two invoices Discover listed, the newest asked
+    for first, with how it ended and what it printed."""
+    import contextlib
+    import io
+    app = _app(tmp_path, "--resume")
     _fresh()
     for r in site.collect_download_docs(page):
         app._record_rawdoc(r, site.BILLING_URL)
@@ -393,15 +423,202 @@ def test_an_invoice_refused_while_the_list_reads_fails_alone_in_the_run(tmp_path
     assert page.fetched == [LINK, LINK_1]
 
 
-def test_an_invoice_refused_and_a_sign_in_page_stop_the_run_signed_out(tmp_path):
+@pytest.mark.parametrize("after", SIGNED_OUT)
+def test_an_invoice_refused_and_a_sign_in_page_stop_the_run_signed_out(tmp_path, after):
     from paperpull_core.run_reporting import ListNotRead
-    page = _Opens(TWO_INVOICES, after="sign-in",
+    page = _Opens(TWO_INVOICES, after=after,
                   fetch={LINK: dict(REFUSALS["403"], url=LINK), LINK_1: dict(GOOD, url=LINK_1)})
     app, ended, said = _run(tmp_path, page)
-    assert isinstance(ended, SystemExit) and not isinstance(ended, ListNotRead)
-    assert "session has expired" in said
+    assert isinstance(ended, SystemExit) and not isinstance(ended, ListNotRead), said
+    assert "session has expired" in said and "could not be read again" not in said
     assert page.fetched == [LINK]
     assert app.stats["failed"] == 0
+    assert all(v.get("state") != "Failed" for v in app.progress.data.values())
+
+
+# -- Discover, a list refused and a tab fedex.com will not open ---------------------
+
+BALANCE = API + "/bill/v1/accounts/balancesummaries/retrieve"
+LIST = API + "/bill/v1/invoices/retrieve"
+
+# Billing Online refusing every call the invoices page made, each with a
+# 401 or a 403, with no invoice anywhere.
+REFUSED = {
+    "list 401": [(LIST, {"errors": [{"code": "NOT.AUTHORIZED"}]}, 401)],
+    "list 403": [(LIST, None, 403)],
+    "every call": [(BALANCE, None, 401), (LIST, None, 403)],
+}
+
+# Lists with no invoice that are no sign-out. FedEx answered a signed-in
+# login's first call with a 401 when its shipping account was not connected
+# (2026-09-25), so a call refused while another answered is not one either.
+NOT_SIGNED_OUT = {
+    "never came": [],
+    "list 500": [(LIST, None, 500)],
+    "list empty": [(LIST, {"output": {"invoices": []}})],
+    "one call answered": [(BALANCE, {"output": {"balances": [{"amount": 3}]}}), (LIST, None, 403)],
+    "a 500 beside a 401": [(BALANCE, None, 500), (LIST, None, 401)],
+}
+
+
+@pytest.mark.parametrize("how", sorted(REFUSED))
+def test_a_list_billing_online_refused_is_a_sign_out(how):
+    """Billing Online refusing the invoices page's calls with a 401 or a 403
+    was read as a list with no invoice in it, so Discover finished, noted
+    the list as read whole and found nothing new with the session ended."""
+    _fresh()
+    page = _Page(REFUSED[how])
+    with pytest.raises(site.SessionExpired):
+        site.collect_download_docs(page)
+    assert page.listeners == []
+
+
+@pytest.mark.parametrize("how", sorted(NOT_SIGNED_OUT))
+def test_a_list_not_refused_by_every_call_is_no_sign_out(how):
+    _fresh()
+    assert site.collect_download_docs(_Page(NOT_SIGNED_OUT[how])) == []
+
+
+class _LateConnect(_Page):
+    """_Page that lands on the connect-account form some time after the
+    invoices page opened, once that many milliseconds were waited."""
+
+    def __init__(self, answers, after_ms):
+        super().__init__(answers)
+        self.after_ms, self.waited = after_ms, 0
+
+    def wait_for_timeout(self, ms):
+        self.waited += ms
+        if self.waited >= self.after_ms and self.url == site.INVOICES_PAGE:
+            self.url = "https://www.fedex.com/register/connect-account/ean?linkApp=fbo"
+
+
+def test_a_refused_call_and_the_connect_form_after_it_is_not_a_sign_out():
+    """A refused call followed by the connect form, later than the page's
+    answers settle, is an account not connected. A page whose every answer
+    refused is watched for the whole wait before it is called signed out,
+    so the form is never taken for a sign-out."""
+    _fresh()
+    page = _LateConnect([(BALANCE, None, 401)], after_ms=8000)
+    with pytest.raises(site.NotConnected):
+        site.collect_download_docs(page)
+
+
+class _Off(_Page):
+    """A tab on an error page that fedex.com will not open in, or that
+    opens on the sign-in page when `lands` is given."""
+
+    def __init__(self, lands=""):
+        super().__init__([])
+        self.url, self.lands, self.tried = OFF_FEDEX, lands, 0
+
+    def goto(self, url, **_):
+        self.tried += 1
+        if not self.lands:
+            raise RuntimeError("net::ERR_INTERNET_DISCONNECTED (made up)")
+        self.url = self.lands
+
+
+def test_a_tab_fedex_will_not_open_in_stops_the_list_unread():
+    """A tab off fedex.com that fedex.com would not open in was called a
+    sign-out, which nothing on it said."""
+    _fresh()
+    with pytest.raises(site.ListStopped) as got:
+        site.collect_download_docs(_Off())
+    assert not isinstance(got.value, site.SessionExpired)
+    assert "fedex.com" in str(got.value)
+
+
+def test_a_tab_that_opens_on_the_sign_in_page_is_a_sign_out():
+    _fresh()
+    with pytest.raises(site.SessionExpired):
+        site.collect_download_docs(_Off(lands=site.URLS["login"]))
+
+
+def _discover(tmp_path, page):
+    """Discover over the page given, with how it ended, what it printed,
+    and each address the session check was asked about."""
+    import contextlib
+    import io
+    app = _app(tmp_path, "--discover")
+    app.stats["mode"] = "discover"
+    _fresh()
+    checked = []
+    app.page = lambda: page
+    app.check_session = lambda p: checked.append(p.url)
+    seen, ended = io.StringIO(), None
+    try:
+        with contextlib.redirect_stdout(seen):
+            app.cmd_discover()
+    except (SystemExit, Exception) as e:
+        ended = e
+    return app, ended, " ".join(seen.getvalue().split()), checked
+
+
+@pytest.mark.parametrize("after", ["list 401", "list 403"])
+def test_discover_stops_signed_out_on_a_list_billing_online_refused(tmp_path, after):
+    """Discover read the invoice list Billing Online refused as one with
+    nothing in it, said Discovery complete and noted the list as read whole
+    with the session ended. Now the session check is asked, the list is
+    read once more, and a list refused again stops the run as signed out
+    with nothing listed."""
+    from paperpull_core import listing
+    page = _Opens(INVOICES, after=after, from_fetch=0)
+    app, ended, said, checked = _discover(tmp_path, page)
+    assert type(ended) is SystemExit and ended.code == 0, (ended, said)
+    assert "signed out" in said and "Discovery complete" not in said
+    assert listing.last(app) == listing.STOPPED
+    assert app.discovery.data == {}
+    assert page.opened == 2 and checked
+    assert page.listeners == []
+
+
+def test_discover_stops_with_the_list_unread_on_a_tab_fedex_will_not_open(tmp_path):
+    """A tab fedex.com would not open in raised SessionExpired, which
+    Discover met with the session check and a second read that let it out
+    as an error. Nothing on it says the session ended, so Discover stops
+    with the list unread and says so."""
+    from paperpull_core import listing
+    page = _Off()
+    app, ended, said, _ = _discover(tmp_path, page)
+    assert type(ended) is SystemExit and ended.code == 1, (ended, said)
+    assert "could not be read" in said and "signed out" not in said
+    assert listing.last(app) == listing.STOPPED
+    assert app.discovery.data == {}
+
+
+def test_discover_stops_signed_out_on_a_tab_that_opens_on_the_sign_in_page(tmp_path):
+    """A sign-in page where the list was, seen again after the session
+    check, left Discover on SessionExpired, reported as an error."""
+    from paperpull_core import listing
+    app, ended, said, checked = _discover(tmp_path, _Off(lands=site.URLS["login"]))
+    assert type(ended) is SystemExit and ended.code == 0, (ended, said)
+    assert "signed out" in said
+    assert listing.last(app) == listing.STOPPED
+    assert checked
+
+
+class _ConnectSecond(_Opens):
+    """_Opens whose invoices page answers 401 the first time and lands on
+    the connect form after that."""
+
+    def __init__(self):
+        super().__init__([], after="list 401", from_fetch=0)
+
+    def goto(self, url, **kw):
+        if url == site.INVOICES_PAGE and self.opened == 1:
+            self.opened += 1
+            self.url = "https://www.fedex.com/register/connect-account/ean?linkApp=fbo"
+            return
+        super().goto(url, **kw)
+
+
+def test_discover_stops_on_the_connect_form_after_a_refused_list(tmp_path):
+    """The list read once more after the session check went out of
+    Discover unhandled when it met the connect form."""
+    app, ended, said, _ = _discover(tmp_path, _ConnectSecond())
+    assert type(ended) is SystemExit and ended.code == 0, (ended, said)
+    assert "connect your shipping account" in said and "signed out" not in said
 
 
 def test_diagnose_carries_shapes_never_values():

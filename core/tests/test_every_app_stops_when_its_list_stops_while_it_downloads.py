@@ -190,10 +190,11 @@ ITS_OWN = {
         "documents leaves the refusal that document's alone",
     ("fedex", "download_bill", ("_fetch_file",)):
         "a refusal of one invoice's PDF, after which the invoices page is opened and its "
-        "answers read again. A sign-in page or a list with no invoice raises "
-        "SessionExpired there and reaches the run, the connect form stops it as "
-        "NotConnected, and a list that still shows invoices leaves the refusal that "
-        "invoice's alone",
+        "answers read again. A sign-in page or every call refused with a 401 or a 403 "
+        "raises SessionExpired there and reaches the run, a list that does not answer "
+        "or holds no invoice raises ListStopped, which reaches it with the list unread, "
+        "the connect form stops it as NotConnected, and a list that still shows "
+        "invoices leaves the refusal that invoice's alone",
     ("sdge", "download_bill", ("_fetch",)):
         "a refusal of one bill's PDF, after which Billing History is opened and read "
         "again. A sign-out or a list that stops shows there and reaches the run, and a "
