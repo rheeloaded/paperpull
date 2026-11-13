@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (83, plus five built and waiting for a tester, and four first shells)
+## Supported (84, plus five built and waiting for a tester, and four first shells)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -86,6 +86,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`simmons`](apps/simmons) | Simmons Bank (Banno online banking, a loan) | Loan statements, notices and tax forms from the Documents page. Only a document row's own button is pressed, and the download taken only when it is that document's own. One account per sign-in, a second account stops the list. A paid-off loan's documents stay online only until the date the bank names. Built and run on a contributor's own paid-off mortgage, 27 documents | Bank / mortgage |
 | [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | Monthly bills. Confirmed by @watling777 on issue #34, whose Pilot took the newest five and whose full run took the rest of the history | Utility |
 | [`spectrum`](apps/spectrum) | Spectrum (Charter) | Internet statements, about a year online. An older statement is chosen by pressing its own row, then one "View Printable Statement" is pressed and the PDF the page makes is kept only when its text prints the statement's date, never a tab. Two statements of one date are left for a manual save. Mobile statements, which the site has no PDF of, are opened by their own row, expanded with Expand All and printed from the page. Internet run on the contributor's own account, 11 statements saved. A whole Mobile run is still to come | Telecom |
+| [`sparkassepc`](apps/sparkassepc) | Sparkasse Pforzheim Calw | Account statements and other Postfach PDFs with a direct download link (#175) | Bank |
 | [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | Fee invoices and tax forms such as the 1099-K. UNTESTED, built on an account with no documents yet. Have some? Run Diagnose and attach the file to issue #53 | Payments |
 | [`statefarm`](apps/statefarm) | State Farm | Bills, renewal notices, ID cards, receipts, policy documents. Confirmed by @watling777, whose full run saved every document State Farm lists for his policies (#37) | Insurance |
 | [`target`](apps/target) | Target | Receipts (online + in-store) | Retail |
