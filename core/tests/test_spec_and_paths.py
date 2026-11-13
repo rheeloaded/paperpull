@@ -548,24 +548,111 @@ def test_a_history_left_in_a_folder_named_tilde_stops_the_run_before_it_download
     said = str(stop.value)
     assert "stopped before downloading anything again" in said
     assert str(old) in said and str(home_folder / "Documents" / "Example Statements") in said
+    # Moving the folder would leave every document put aside for review
+    # behind its record, so the way on is its full path, never a move.
+    assert "Write output_dir as the full path of that folder, %s," % old in said
+    assert "Move" not in said and "move" not in said
     assert list(home_folder.iterdir()) == []
     assert (old / "progress.json").read_text(encoding="utf-8") == "{}"
 
 
+def test_a_history_in_a_folder_named_tilde_where_the_run_started_stops_it(
+        tmp_path, monkeypatch, home_folder):
+    """Before 0.62.0 a run started from a terminal read a relative folder
+    from the folder it started in, so a history from then is there, beside
+    neither the config nor the install."""
+    install = an_install(tmp_path)
+    configs = tmp_path / "Configs"
+    configs.mkdir()
+    (configs / "config.json").write_text(
+        json.dumps({"output_dir": "~/Documents/Example Statements"}), encoding="utf-8")
+    started = tmp_path / "Started Here"
+    old = started / "~" / "Documents" / "Example Statements"
+    old.mkdir(parents=True)
+    (old / "progress.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(started)
+    with pytest.raises(SystemExit) as stop:
+        storage.load_config(configs / "config.json")
+    said = str(stop.value)
+    assert "stopped before downloading anything again" in said and str(old) in said
+    assert list(home_folder.iterdir()) == []
+    assert not (install / "~").exists()
+
+
 def test_a_history_moved_to_the_home_folder_lets_the_run_go_on(
         tmp_path, monkeypatch, home_folder):
-    """Once the home folder holds a record of its own, the old folder named
-    "~" is left alone and the run reads the home folder."""
+    """Once the record is in the home folder and no folder named "~" holds
+    one, the run reads the home folder."""
     install = an_install(tmp_path)
     (install / "config.json").write_text(
         json.dumps({"output_dir": "~/Documents/Example Statements"}), encoding="utf-8")
-    for folder in (install / "~" / "Documents" / "Example Statements",
-                   home_folder / "Documents" / "Example Statements"):
+    home = home_folder / "Documents" / "Example Statements"
+    home.mkdir(parents=True)
+    (home / "progress.json").write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(install)
+    cfg = storage.load_config(None)
+    assert Path(cfg["output_dir"]) == home
+
+
+def test_a_record_in_both_folders_stops_the_run_until_one_is_named(
+        tmp_path, monkeypatch, home_folder):
+    """A history imported into the home folder while runs went on keeping
+    theirs in the folder named "~" leaves two records, each missing what
+    the other saw, so the run stops and names both rather than take one."""
+    install = an_install(tmp_path)
+    (install / "config.json").write_text(
+        json.dumps({"output_dir": "~/Documents/Example Statements"}), encoding="utf-8")
+    old = install / "~" / "Documents" / "Example Statements"
+    home = home_folder / "Documents" / "Example Statements"
+    for folder in (old, home):
         folder.mkdir(parents=True)
         (folder / "progress.json").write_text("{}", encoding="utf-8")
     monkeypatch.chdir(install)
+    with pytest.raises(SystemExit) as stop:
+        storage.load_config(None)
+    said = str(stop.value)
+    assert "Write output_dir as the full path of that folder, %s," % old in said
+    assert "Your home folder holds a record too" in said
+    assert "write its full path, %s, instead" % home in said
+
+
+def test_the_old_folder_written_out_in_full_lets_the_run_go_on_there(
+        tmp_path, monkeypatch, home_folder):
+    """The way on the stop gives. The run then keeps using the old folder,
+    where a document put aside for review is still where its record says."""
+    install = an_install(tmp_path)
+    old = install / "~" / "Documents" / "Example Statements"
+    (old / "Manual Review").mkdir(parents=True)
+    (old / "progress.json").write_text("{}", encoding="utf-8")
+    (old / "Manual Review" / "example.pdf").write_bytes(b"%PDF-1.4\n")
+    (install / "config.json").write_text(json.dumps({"output_dir": str(old)}),
+                                         encoding="utf-8")
+    monkeypatch.chdir(install)
     cfg = storage.load_config(None)
-    assert Path(cfg["output_dir"]) == home_folder / "Documents" / "Example Statements"
+    assert Path(cfg["output_dir"]) == old
+    recorded = os.path.join("~", "Documents", "Example Statements", "Manual Review",
+                            "example.pdf")
+    assert Path(recorded).is_file()
+    assert list(home_folder.iterdir()) == []
+
+
+@pytest.mark.parametrize("written", ["NaN", "5", "null", "[\"~/x\"]"])
+def test_an_output_dir_that_is_not_text_is_not_taken_for_a_home_folder(
+        tmp_path, monkeypatch, home_folder, written):
+    """Python's json reads NaN, which is never equal to itself, so it looked
+    like a folder the home folder had changed."""
+    install = an_install(tmp_path)
+    (install / "config.json").write_text('{"output_dir": %s}' % written, encoding="utf-8")
+    monkeypatch.chdir(install)
+    calls = []
+    real = storage._stop_for_history_in_a_tilde_folder
+    monkeypatch.setattr(storage, "_stop_for_history_in_a_tilde_folder",
+                        lambda written, *a: (calls.append(written), real(written, *a)))
+    try:
+        storage.load_config(None)
+    except SystemExit:
+        pass
+    assert calls == [None]
 
 
 def test_a_folder_named_tilde_with_no_record_in_it_does_not_stop_the_run(

@@ -188,25 +188,47 @@ def _stop_for_history_in_a_tilde_folder(written, cfg: dict, path) -> None:
     """Stop a run whose output_dir starts with "~" while the record of what
     it downloaded is still in the folder named "~" that 0.65.0 and before
     made of it (#166). They read "~/Documents/Statements" as a folder named
-    "~" in the install, or in the config's folder for a run started
-    elsewhere, and kept progress.json there. Read now as the home folder,
-    the run would find no record there and download the whole history a
-    second time. Nothing is moved for the person, since which copy to keep
-    is theirs to say, and once the home folder holds a record of its own the
-    run goes on."""
-    if not written or (Path(cfg["output_dir"]) / "progress.json").exists():
+    "~" in the install, in the config's folder for a run started elsewhere
+    since 0.62.0, and in the folder a run started in before that, and kept
+    progress.json there. Read now as the home folder, the run would find no
+    record there and download the whole history a second time.
+
+    The way on is to write the old folder's full path. Moving it would not
+    do, since a document put aside for review is recorded by the path it
+    was saved at, "~/Documents/Statements/Manual Review/..." from the
+    install, and counts as done only while a file is there, so every one of
+    them would download again. Nothing is moved for the person, and a
+    record in the home folder too does not let the run go on, since which
+    record to keep is theirs to say."""
+    if not written:
         return
-    for base in (Path(path).parent, Path(spec().project_dir)):
+    home = Path(cfg["output_dir"])
+    bases = [Path(path).parent]
+    try:
+        bases.append(Path.cwd())
+    except OSError:
+        pass
+    bases.append(Path(spec().project_dir))
+    looked = set()
+    for base in bases:
         old = Path(os.path.normpath(os.path.join(str(base), written)))
+        if os.path.normcase(str(old)) in looked:
+            continue
+        looked.add(os.path.normcase(str(old)))
         if (old / "progress.json").is_file():
+            also = ""
+            if (home / "progress.json").exists():
+                also = (" Your home folder holds a record too. If that one is the one to "
+                        "keep, write its full path, %s, instead." % one_line(home))
             raise SystemExit(
                 "output_dir in %s is written as %s, which PaperPull now reads as a "
                 "folder in your home folder, %s. Until now it was read as a folder named "
                 "~ in %s, and the record of what was downloaded is there, so this run "
-                "stopped before downloading anything again. Move the folder %s to %s, or "
-                "write output_dir as the full path of the folder it is in now, and run "
-                "again." % (Path(path).name, one_line(written), one_line(cfg["output_dir"]),
-                            one_line(base), one_line(old), one_line(cfg["output_dir"])))
+                "stopped before downloading anything again. Write output_dir as the full "
+                "path of that folder, %s, and run again. Leave the folder where it is, "
+                "since the documents put aside for review are recorded there.%s"
+                % (Path(path).name, one_line(written), one_line(home), one_line(base),
+                   one_line(old), also))
 
 
 def _given(path) -> str:
@@ -255,7 +277,7 @@ def load_config(path: Optional[Path] = None) -> dict:
         for key in _NAMED_SETTINGS:
             if key in cfg:
                 read = with_home(cfg[key])
-                if key == "output_dir" and read != cfg[key]:
+                if key == "output_dir" and isinstance(cfg[key], str) and read != cfg[key]:
                     home_written = cfg[key]
                 cfg[key] = read
     held = _not_on_one_line(cfg, path)

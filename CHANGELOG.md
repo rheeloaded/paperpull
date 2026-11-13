@@ -127,8 +127,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the panel reads nothing from it, as for any folder outside it. If a run
   before this one kept its record of what was downloaded in such a folder
   named `~`, the run stops before downloading anything, says where that
-  folder is, and asks you to move it to your home folder or write the full
-  path, so nothing is downloaded a second time.
+  folder is, and asks you to write its full path as `output_dir` and leave
+  it where it is, so nothing is downloaded a second time. It stops the same
+  way when your home folder holds a record too, and names both.
 - **One bill Ziply Fiber refuses no longer stops every run.** A bill whose
   PDF Ziply answered with a 401, a 403, a redirect or a page was read as a
   sign-out, so the run stopped at that bill, and every run after it,
