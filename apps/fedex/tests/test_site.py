@@ -175,12 +175,110 @@ def test_an_invoice_without_a_link_goes_to_the_person(tmp_path):
         site.download_bill(page, None, "2031-01-24", tmp_path / "i.pdf", document_id="INV-1")
 
 
-def test_a_sign_in_answer_stops_the_run(tmp_path):
+def test_a_sign_in_page_where_the_list_was_stops_the_run(tmp_path):
+    """The list read for an invoice shows the sign-in page, so nothing is
+    asked for."""
     _fresh()
-    link = "https://www.fedex.com/doc/INV-2.pdf"
-    page = _Page(INVOICES, fetch={link: {"status": 401, "url": link}})
+    page = _Opens(INVOICES, after="sign-in", from_fetch=0,
+                  fetch={LINK: {"status": 200, "ct": "application/pdf", "url": LINK,
+                                "b64": base64.b64encode(PDF).decode()}})
     with pytest.raises(site.SessionExpired):
         site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2")
+    assert page.fetched == []
+    assert not (tmp_path / "i.pdf").exists()
+
+
+# What one invoice's PDF can be answered with that reads as a sign-out, a
+# 401, a 403, and a redirect that ends off fedex.com.
+LINK = "https://www.fedex.com/doc/INV-2.pdf"
+REFUSALS = {
+    "401": {"status": 401, "ct": "text/html", "url": LINK},
+    "403": {"status": 403, "ct": "text/html", "url": LINK},
+    "redirect": {"status": 200, "ct": "text/html", "url": "https://sign-in.example/made-up"},
+}
+
+
+class _Opens(_Page):
+    """_Page, counting each time the invoices page is opened. `after`
+    says what the invoices page does once `from_fetch` PDFs were asked
+    for, list as before, land on a sign-in page, list nothing, or the
+    connect form."""
+
+    def __init__(self, answers, after="list", from_fetch=1, **kw):
+        super().__init__(answers, **kw)
+        self.after, self.from_fetch, self.opened = after, from_fetch, 0
+
+    def goto(self, url, **kw):
+        if url == site.INVOICES_PAGE:
+            self.opened += 1
+            changed = len(self.fetched) >= self.from_fetch
+            if changed and self.after == "sign-in":
+                self.url = "https://www.fedex.com/secure-login/made-up"
+                return
+            if changed and self.after == "nothing":
+                self.url = url
+                return
+            if changed and self.after == "connect":
+                self.connect = True
+        super().goto(url, **kw)
+
+
+@pytest.mark.parametrize("kept", [False, True])
+@pytest.mark.parametrize("how", sorted(REFUSALS))
+def test_an_invoice_refused_while_the_list_still_reads_fails_alone(tmp_path, how, kept):
+    """A 401, a 403 or a redirect for one invoice was read as a sign-out,
+    so every run stopped at that invoice and Continue stopped there again
+    (#124). The list is read again with the call Discover reads it with,
+    and a list that still shows invoices leaves the refusal that invoice's
+    own."""
+    _fresh()
+    page = _Opens(INVOICES, fetch={LINK: dict(REFUSALS[how])})
+    if kept:
+        site.collect_download_docs(page)
+    before = page.opened
+    out = tmp_path / "i.pdf"
+    assert site.download_bill(page, None, "2031-02-14", out, document_id="INV-2") is False
+    assert not out.exists()
+    # The invoice is asked for once, never a second time, and the list is
+    # read once more after the refusal.
+    assert page.fetched == [LINK]
+    assert page.opened - before == (1 if kept else 2)
+    assert page.listeners == []
+
+
+def test_the_list_read_after_a_refusal_serves_the_next_invoice(tmp_path):
+    _fresh()
+    page = _Opens(INVOICES, fetch={LINK: dict(REFUSALS["403"])})
+    site.collect_download_docs(page)
+    assert site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2") is False
+    page.fetch[LINK] = {"status": 200, "ct": "application/pdf", "url": LINK,
+                        "b64": base64.b64encode(PDF).decode()}
+    out = tmp_path / "j.pdf"
+    assert site.download_bill(page, None, "2031-02-14", out, document_id="INV-2")
+    assert out.read_bytes() == PDF
+    assert page.opened == 2
+
+
+@pytest.mark.parametrize("after", ["sign-in", "nothing"])
+def test_an_invoice_refused_and_a_list_that_will_not_read_after_it_is_a_sign_out(tmp_path, after):
+    """A session that ended shows the sign-in page where the list was, or
+    no invoice at all, and only that stops the run as signed out."""
+    _fresh()
+    page = _Opens(INVOICES, after=after, fetch={LINK: dict(REFUSALS["401"])})
+    site.collect_download_docs(page)
+    with pytest.raises(site.SessionExpired):
+        site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2")
+    assert not (tmp_path / "i.pdf").exists()
+    assert page.fetched == [LINK] and page.opened == 2
+
+
+def test_an_invoice_refused_and_the_connect_form_after_it_stops_as_not_connected(tmp_path):
+    _fresh()
+    page = _Opens(INVOICES, after="connect", fetch={LINK: dict(REFUSALS["403"])})
+    site.collect_download_docs(page)
+    with pytest.raises(site.NotConnected):
+        site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="INV-2")
+    assert page.fetched == [LINK]
 
 
 def test_diagnose_carries_shapes_never_values():

@@ -564,10 +564,12 @@ class App:
             self.stats["manual_review"] += 1
             return
         except site.SessionExpired:
-            # Stop the whole run. Continuing would file every remaining
-            # statement as "manual review" and finish looking successful
-            # while having saved nothing.
-            print("\n  !! FedEx answered with a sign-in page instead of a document.")
+            # The invoice list, read for this invoice or read again after
+            # the invoice was refused, answered as signed out. Stop the
+            # whole run. Continuing would file every remaining statement as
+            # "manual review" and finish looking successful while having
+            # saved nothing.
+            print("\n  !! FedEx answered with a sign-in page instead of your invoices.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, then run:  paperpull fedex resume")
             self._record(doc, State.DISCOVERED, notes="Session expired before download")

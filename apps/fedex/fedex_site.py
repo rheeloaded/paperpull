@@ -233,7 +233,10 @@ def is_safe_control(name: str) -> bool:
 
 
 class SessionExpired(RuntimeError):
-    """FedEx answered with a sign-in page instead of the thing asked for."""
+    """FedEx answered with a sign-in page instead of the thing asked for.
+    An invoice's PDF refused with a 401, a 403 or a redirect off fedex.com
+    raises it only when the invoice list, read again, will not read either
+    (download_bill)."""
 
 
 class NeedsPerson(RuntimeError):
@@ -421,7 +424,9 @@ _FETCH_JS = r"""async (url) => {
 
 def _fetch_file(page, link: str) -> dict:
     """A file from its own link, from inside the page, or through the
-    browser's own session when the page may not read that host."""
+    browser's own session when the page may not read that host. A 401, a
+    403 or an answer that ended off fedex.com raises SessionExpired, which
+    download_bill weighs against the list read again."""
     if not is_safe_url(link):
         raise ValueError("refusing to fetch off fedex.com: %r" % redact(link))
     try:
@@ -457,11 +462,29 @@ def _fresh_link(page, document_id: str) -> str:
     return ""
 
 
+def _invoices_read_again(answers: List[dict]) -> List[dict]:
+    """The invoices of the list read again after one invoice was refused.
+    One that shows no invoice raises SessionExpired, since the list showed
+    invoices before and a session that ended shows none."""
+    found = invoices_in(answers)
+    if not found:
+        raise SessionExpired("the invoice list, read again, showed no invoice")
+    return found
+
+
 def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
                   title: str = "", document_id: str = "") -> bool:
     """Fetch one invoice's PDF from its own link and write it. A row with no
     link raises NeedsPerson, so it goes to manual review with a note to
-    download it by hand and send a Diagnose file. `dl_dir` is unused."""
+    download it by hand and send a Diagnose file. `dl_dir` is unused.
+
+    An invoice's PDF refused with a 401, a 403 or a redirect off fedex.com
+    has the list read again, with the call Discover reads it with. A session
+    that has ended shows the sign-in page there, or no invoice at all, and
+    its SessionExpired stops the run. A list that still shows invoices
+    leaves the refusal this invoice's own, so it fails alone, since a stop
+    here would stop every run at this invoice for good. The invoice is not
+    asked for a second time."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
@@ -470,7 +493,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     link = link or (href if is_safe_url(href) else "")
     if not link:
         raise NeedsPerson("FedEx lists this invoice with no download link the app understands")
-    r = _fetch_file(page, link)
+    try:
+        r = _fetch_file(page, link)
+    except SessionExpired:
+        # A refusal may be the session ending or this one invoice. The list
+        # is read again, and a session that ended shows there and stops the
+        # run. One that still reads leaves this invoice failed, so it never
+        # stops every later run at the same invoice.
+        _invoices_read_again(capture_answers(page))
+        log.info("the invoice dated %s was refused while the list still reads", iso_date)
+        return False
     if not r.get("b64"):
         log.info("no PDF for %s: status %s, %s", iso_date, r.get("status"), r.get("ct"))
         return False

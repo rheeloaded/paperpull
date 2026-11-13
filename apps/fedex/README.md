@@ -79,6 +79,11 @@ Billing Online takes payments and disputes. This app activates no control
 at all. It opens the invoices page, keeps what the page receives, and
 fetches a PDF from an invoice's own link, every address on `fedex.com`.
 An expired session stops the run rather than reporting an empty success.
+An invoice FedEx answers with a 401, a 403 or a redirect off fedex.com
+has the invoices page read again. A page that signs you out or shows no
+invoice means you are signed out, and the run stops. A page that still
+lists invoices leaves that invoice failed with nothing saved, the run goes
+on to the others, and the next run tries it again.
 
 ## Commands
 
