@@ -199,6 +199,11 @@ ITS_OWN = {
         "again. A sign-out or a list that stops shows there and reaches the run, and a "
         "list that still reads leaves the refusal that bill's alone, so one bill SDG&E "
         "will not give never stops every later run at it",
+    ("tualatin", "download_bill", ("_fetch",)):
+        "a refusal of one bill's print page, after which Activity is opened and read "
+        "again. A sign-out or a list that stops shows there and reaches the run, and a "
+        "list that still reads leaves the refusal that bill's alone, so one bill "
+        "Tualatin Water will not give never stops every later run at it",
     ("simmons", "download_document", ("_catch_document",)):
         "a refusal of one document's PDF address, asked once more after its row was "
         "pressed, after which the documents list is read again. A sign-out shows there "

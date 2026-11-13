@@ -78,6 +78,13 @@ class FakePortal:
         # The bill number whose print page gives another Billing Date.
         self.other_date_for = ""
         self.print_redirect = False
+        # The bill number whose print page alone is answered with a
+        # redirect to the sign-in page, and whether a print page answered
+        # that way ends the session, so Activity goes to the sign-in page
+        # from then on.
+        self.refuse_print_of = ""
+        self.sign_out_at_print = False
+        self.ended = False
         # The port of a second server on the portal's own host name.
         self.other_port = 0
         # More <link> elements in each print page's head, and how many "&"
@@ -128,6 +135,11 @@ class _Handler(BaseHTTPRequestHandler):
         SITE.seen.append(("GET", self._host(), path))
         if self._host() != HOST:
             return self._send(200, b"body { color: red }", "text/css")
+        if path == "/secure/Activity" and SITE.ended:
+            return self._redirect("/LoginRedirect.aspx")
+        if path == "/LoginRedirect.aspx":
+            return self._send(200, b"<!doctype html><title>Sign in</title><input type=password>",
+                              "text/html; charset=utf-8")
         if path == "/secure/Activity":
             html = ACTIVITY % {"rows": _rows(), "pager": SITE.pager + SITE.activity_extra,
                                "filter": SITE.filter}
@@ -137,7 +149,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._redirect("/LoginRedirect.aspx")
         for shown, iso, number in BILLS:
             if path == "/secure/MyBill/%s/Print" % number:
-                if SITE.print_redirect:
+                if SITE.print_redirect or number == SITE.refuse_print_of:
+                    SITE.ended = SITE.sign_out_at_print
                     return self._redirect("/LoginRedirect.aspx")
                 billed = "1/15/2026" if number == SITE.other_date_for else shown.lstrip("0").replace("/0", "/")
                 port = self.server.server_address[1]
@@ -371,15 +384,47 @@ def test_a_print_page_of_another_billing_date_is_not_saved(attached, server, tmp
     assert out.count("Nothing was saved, and the next run tries it again") == 1, folded(out)
 
 
-def test_a_redirect_on_a_print_page_stops_the_run_as_signed_out(attached, server, tmp_path, capsys):
-    SITE.print_redirect = True
+def test_a_redirect_on_a_print_page_and_on_activity_after_it_stops_the_run_as_signed_out(
+        attached, server, tmp_path, capsys):
+    """The session ends as the first bill is asked for. Its print page and
+    Activity read again after it both go to the sign-in page, so the run
+    stops as signed out at that bill, and no other bill is asked for."""
+    SITE.print_redirect = SITE.sign_out_at_print = True
     their_tab(attached, server)
 
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
     assert "answered as signed out" in folded(out), folded(out)
+    assert "Nothing was saved" not in out, folded(out)
     assert saved(tmp_path) == []
+    assert sum(asked("/secure/MyBill/%s/Print" % number) for _, _, number in BILLS) == 1, SITE.seen
+
+
+@pytest.mark.parametrize("refused", ["10000002", "every bill"])
+def test_print_pages_refused_while_activity_still_reads_fail_alone(attached, server, tmp_path, capsys,
+                                                                   refused):
+    """A print page answered with a redirect to the sign-in page while
+    Activity still reads is that bill's own refusal. It fails alone and the
+    run goes on to the other bills, where it used to stop at that bill on
+    every run and every Continue (#124)."""
+    if refused == "every bill":
+        SITE.print_redirect = True
+    else:
+        SITE.refuse_print_of = refused
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    failed = len(BILLS) if refused == "every bill" else 1
+    assert "signed out" not in out, folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == failed, folded(out)
+    assert len(saved(tmp_path)) == len(BILLS) - failed, folded(out)
+    for _, _, number in BILLS:
+        assert asked("/secure/MyBill/%s/Print" % number) == 1, SITE.seen
     assert asked("/LoginRedirect.aspx") == 0, SITE.seen
+    attempts = list((tmp_path / "out").rglob("download-attempt.json"))
+    assert len(attempts) == 1, attempts
+    assert "refused, the list still reads" in attempts[0].read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("change, said", [

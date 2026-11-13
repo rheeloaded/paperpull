@@ -220,7 +220,9 @@ def parse_period_date(text: str) -> Tuple[Optional[str], str]:
 class SessionExpired(Exception):
     """CivicPay Online answered as a signed-out session: its sign-in page,
     a redirect where a bill was asked for, a 401 or 403, or a print page
-    asking for a password. The run stops for the account holder."""
+    asking for a password. The run stops for the account holder. A bill
+    refused that way raises it only when Activity, read again, goes to the
+    sign-in page too (download_bill)."""
 
 
 def looks_signed_out(page) -> bool:
@@ -771,7 +773,8 @@ def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[lis
     own stylesheets and images from the portal host written into it, and
     draw it as a PDF with every script, frame and form taken out, offline
     (receipt_pdf.print_html_inert_to_pdf). A redirect, a refusal or a page
-    asking for a password is the portal saying the session has ended. A
+    asking for a password raises SessionExpired, which download_bill weighs
+    against Activity read again. A
     page that is not a printed bill, or is one of another Billing Date than
     the Activity row's, is refused without a file, and so is a PDF whose
     own text does not read as that bill, a stylesheet having hidden part of
@@ -867,9 +870,17 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     """Save the bill discovery recorded with bill number `document_id`,
     dated `iso_date`. Activity is opened again and the bill is fetched only
     when exactly one Billing row there carries that number and date.
-    `dl_dir` is unused. Nothing is pressed. SessionExpired propagates, and
-    so does ListStopped when Activity cannot be read again, since every
-    bill after this one would read the same list."""
+    `dl_dir` is unused. Nothing is pressed. SessionExpired from reading
+    Activity propagates, and so does ListStopped when Activity cannot be
+    read again, since every bill after this one would read the same list.
+
+    A print page answered with a redirect, a 401 or 403, or a page asking
+    for a password has Activity read again, the same read that proves a
+    session. A session that has ended goes to the sign-in page there, and
+    its SessionExpired stops the run. A list that still reads leaves the
+    refusal this bill's own, so it fails alone, since a stop here would
+    stop every run at this bill for good. The bill is not asked for a
+    second time."""
     out_path = Path(out_path)
     number = (document_id or "").strip()
     if not BILL_NUMBER_RE.fullmatch(number) or href != bill_path(number):
@@ -888,7 +899,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         if trace is not None:
             trace.append({"note": "no single row matches the record", "matches": len(found)})
         return False
-    return _fetch(page, number, iso_date, out_path, trace)
+    try:
+        return _fetch(page, number, iso_date, out_path, trace)
+    except SessionExpired:
+        # A refusal may be the session ending or this one bill. Activity is
+        # read again, and a session that ended shows the sign-in page there
+        # and stops the run. One that still reads leaves this bill failed,
+        # so it never stops every later run at the same bill.
+        _bills(_open(page))
+        log.info("the bill dated %s was refused while the list still reads", iso_date)
+        if trace is not None:
+            trace.append({"note": "refused, the list still reads"})
+        return False
 
 
 # ---------------------------------------------------------------------------

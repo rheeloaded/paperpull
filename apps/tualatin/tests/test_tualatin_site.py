@@ -50,8 +50,11 @@ class Locator:
 class Page:
     def __init__(self, rows=ROWS, settled=None, table=True, printed=PRINTED, print_status=200,
                  print_type="text/html; charset=utf-8", said=SAID, password=False, dropped=(),
-                 extra=None):
+                 extra=None, redirected=False):
         self.rows, self.table = rows, table
+        # Whether a print page is answered with a redirect, and how many
+        # times Activity was opened.
+        self.redirected, self.opened = redirected, 0
         self.said, self.password, self.dropped = said, password, list(dropped)
         # More of what the Activity script returns: a pager, a count, a
         # date filter, a choice of accounts.
@@ -63,6 +66,7 @@ class Page:
 
     def goto(self, url, **k):
         self.url = self.settled
+        self.opened += 1
 
     def wait_for_timeout(self, ms):
         pass
@@ -80,9 +84,28 @@ class Page:
             return dict({"table": self.table, "heads": HEADS, "rows": self.rows, "account": [FAKE_ACCOUNT]},
                         **self.extra)
         self.asked.append(arg[0])
+        if self.redirected:
+            return {"status": 0, "redirected": True}
         return {"status": self.print_status, "type": self.print_type, "html": self.printed,
                 "said": self.said, "password": self.password, "dropped": self.dropped,
                 "inlined": {"css": 1, "img": 0}}
+
+
+# What one bill's print page can be answered with that reads as a sign-out,
+# a 401, a 403, a redirect, and a page asking for a password.
+REFUSALS = {"401": {"print_status": 401}, "403": {"print_status": 403},
+            "redirect": {"redirected": True}, "password": {"password": True}}
+
+
+class SignsOutAtTheBill(Page):
+    """A session that ends as the bill is asked for. The bill is refused,
+    and Activity opened again after it goes to the sign-in page."""
+
+    def evaluate(self, js, arg=None):
+        got = super().evaluate(js, arg)
+        if arg is not None:
+            self.settled = site.BASE + "/LoginRedirect.aspx"
+        return got
 
 
 def drawn(page, html, out_path, base=None):
@@ -199,10 +222,10 @@ class Download(unittest.TestCase):
     def setUp(self):
         self.out = Path(tempfile.mkdtemp()) / "Statements" / "bill.pdf"
 
-    def save(self, page, number="10000002", date="2026-08-31", href=None):
+    def save(self, page, number="10000002", date="2026-08-31", href=None, trace=None):
         with mock.patch("paperpull_core.receipt_pdf.print_html_inert_to_pdf", side_effect=drawn) as draw:
             ok = site.download_bill(page, None, date, self.out, href=href or f"/secure/MyBill/{number}",
-                                    document_id=number)
+                                    document_id=number, trace=trace)
         return ok, draw
 
     def test_the_print_page_of_that_bill_is_drawn_inert(self):
@@ -241,10 +264,48 @@ class Download(unittest.TestCase):
             draw.assert_not_called()
             self.assertFalse(self.out.exists())
 
-    def test_refused_and_sign_in_answers_raise(self):
-        for page in (Page(print_status=401), Page(print_status=403), Page(password=True)):
-            with self.assertRaises(site.SessionExpired):
+    def test_a_bill_refused_while_the_list_still_reads_fails_alone(self):
+        """A 401, a 403, a redirect or a page asking for a password where one
+        bill's print page should be was read as a sign-out, so every run
+        stopped at that bill and Continue stopped there again (#124).
+        Activity is read again with the read that proves a session, and a
+        list that still reads leaves the refusal that bill's own."""
+        for how, kw in REFUSALS.items():
+            page = Page(**kw)
+            trace = []
+            ok, draw = self.save(page, trace=trace)
+            self.assertFalse(ok, how)
+            draw.assert_not_called()
+            self.assertFalse(self.out.exists(), how)
+            # The bill is asked for once, and Activity is opened for it and
+            # once more after the refusal.
+            self.assertEqual(page.asked, [site.print_url("10000002")], how)
+            self.assertEqual(page.opened, 2, how)
+            self.assertIn({"note": "refused, the list still reads"}, trace, how)
+
+    def test_a_bill_refused_and_a_list_refused_after_it_is_a_sign_out(self):
+        """A session that ended sends Activity to the sign-in page too, and
+        only that stops the run as signed out."""
+        for how, kw in REFUSALS.items():
+            page = SignsOutAtTheBill(**kw)
+            with self.assertRaises(site.SessionExpired, msg=how):
                 self.save(page)
+            self.assertEqual(page.asked, [site.print_url("10000002")], how)
+            self.assertEqual(page.opened, 2, how)
+            self.assertFalse(self.out.exists(), how)
+
+    def test_a_list_that_stops_after_a_refusal_reaches_the_run(self):
+        class PagerAfter(Page):
+            def evaluate(self, js, arg=None):
+                got = super().evaluate(js, arg)
+                if arg is not None:
+                    self.extra = {"pager": True}
+                return got
+        page = PagerAfter(print_status=403)
+        with self.assertRaises(site.ListStopped):
+            self.save(page)
+        self.assertEqual(page.asked, [site.print_url("10000002")])
+        self.assertFalse(self.out.exists())
 
     def test_a_password_rule_in_a_stylesheet_is_not_a_sign_in_page(self):
         css = "<style>input[type=\"password\"] { border: 1px }</style>"

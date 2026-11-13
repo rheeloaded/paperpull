@@ -60,8 +60,12 @@ site is never used.
   After it, nothing more is asked for. The page as written out is measured
   again before it is drawn. Each fetch gives up after 30 seconds.
 - **Signing out.** A redirect, a 401 or 403, or a print page asking for a
-  password stops the run and keeps what it saved. Sign in again and run
-  Resume. Any other answer that is not a printed bill fails that one bill.
+  password has Activity read again. When Activity goes to the sign-in page
+  too, the run stops and keeps what it saved. Sign in again and run Resume.
+  When Activity still reads, that bill is counted as failed with nothing
+  saved, the run goes on to the other bills, and the next run tries it
+  again. Any other answer that is not a printed bill fails that one bill
+  too.
 - **Reading Activity again.** Each bill reads Activity again. When that
   read stops the list, the run stops there once, saying why, and nothing
   goes to Manual Review. The panel then offers a run that reads the list
