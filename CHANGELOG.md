@@ -159,14 +159,22 @@ addresses and words out of their logs.
   one document is refused, as Ziply Fiber's is. A list refused too means
   you are signed out, and the run stops as before. A list that still reads
   leaves that document counted as failed with nothing saved, the run goes
-  on to the others, and the next run tries it again. A document is not
-  asked for twice, apart from the one more ask with a fresh sign-in token
-  that Anthem and Portland General Electric already made. In Affirm, FedEx,
-  myPay, Stripe and UPS a list read again that holds nothing also stops the
-  run as signed out. In First Horizon a page answered for a statement no
-  longer waits a minute for a download that never comes. M&T stays as it
-  was, since its list is the one you opened in your own tab, and nothing
-  can read that again without wiping it.
+  on to the others, and the next run tries it again. A list that does not
+  answer, times out, answers with something else or holds nothing says
+  neither, so the run stops there without calling you signed out, nothing
+  is recorded against the document, and the panel offers Get new documents,
+  which reads the list first and asks for it again. Ziply Fiber, Cetera,
+  Verizon Mobile and NW Natural now read a list that times out or stops
+  answering after a refusal that way too, where it counted the bill as
+  failed and went on. Anthem's member documents and ID cards read their own
+  lists again the same way, and a list there that does not answer ends that
+  kind of document for the run, counted as failed, as it does when it will
+  not open. A document is not asked for twice, apart from the one more ask
+  with a fresh sign-in token that Anthem and Portland General Electric
+  already made. In First Horizon a page answered for a statement no longer
+  waits a minute for a download that never comes. M&T stays as it was,
+  since its list is the one you opened in your own tab, and nothing can
+  read that again without wiping it.
 - **Wealthfront says why a new account's runs stop until its first
   statement.** A new account shows no statement until Wealthfront posts its
   first one, and each run stopped saying to run it again later, or that
