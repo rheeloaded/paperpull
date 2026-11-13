@@ -57,7 +57,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlsplit
 
-from paperpull_core import intake
+from paperpull_core import intake, refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -730,9 +730,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     two bills of one date are not read for again. `dl_dir` is unused:
     nothing goes through the browser's downloads. Nothing is pressed.
     Challenged, and SessionExpired and ListStopped from reading the list,
-    propagate to the run, so a list that stops stops the run once. A
-    refusal of the bill itself right after the list was read and answered
-    fails this bill alone, since the session plainly works."""
+    propagate to the run, so a list that stops stops the run once. A list
+    that does not answer, shows no bill, or reaches a page that stops
+    answering raises ListStopped too, since it says neither that the
+    session ended nor that it holds (refused.list_again). A refusal of the
+    bill itself right after the list was read and answered fails this bill
+    alone, since the session plainly works."""
     out_path = Path(out_path)
     if href != DOWNLOAD_PATH or not BILL_ID_RE.fullmatch(document_id or "") \
             or document_id != f"bill-{iso_date}":
@@ -743,7 +746,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     why = ""
     for fresh in ((False, True) if _RUN.get("bills") is not None else (True,)):
         if fresh:
-            _read(page)
+            # Read for this bill, or again after a View address the run read
+            # earlier was refused. A history that does not answer, or shows
+            # no bill, stops the run with the list unread, since every bill
+            # after this one would read the same list (refused.list_again).
+            refused.list_again(lambda: _read(page), SessionExpired, ListStopped,
+                               stops=(Challenged,))
         found = [d for d in _RUN["bills"] if d.document_id == document_id]
         if len(found) > 1:
             # Reading the list again would show the same two.
