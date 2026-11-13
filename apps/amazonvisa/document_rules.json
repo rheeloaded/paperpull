@@ -1,0 +1,10 @@
+{
+  "_comment": "Filename summary rules for Amazon Visa. Case-insensitive patterns are checked in order: tax, then statement. Other titles can still be downloaded and named by category. Tested on one contributor's account.",
+  "tax_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "^Kreditkartenabrechnung$",
+      "summary": "Kreditkartenabrechnung"
+    }
+  ]
+}

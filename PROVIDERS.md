@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (83, plus five built and waiting for a tester, and four first shells)
+## Supported (84, plus five built and waiting for a tester, and four first shells)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -23,6 +23,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`alpaca`](apps/alpaca) | Alpaca (Live brokerage account) | Brokerage and crypto statements and trade confirmations for the Live account, each row's own Download pressed once and the presigned file taken through the browser. The JSON twins of trade confirmations and the account application are skipped, and a Paper account is never read. Built and run on a contributor's own Live account, 22 documents | Brokerage / crypto |
 | [`att`](apps/att) | AT&T (Mobility, Fiber, Internet) | Monthly bills. Confirmed by @watling777 on two accounts, wireless and internet, with a full run on each (#26) | Telecom |
 | [`amazon`](apps/amazon) | Amazon | Order invoices (full history) | Retail |
+| [`amazonvisa`](apps/amazonvisa) | Amazon Visa (Openbank Pay) | Card statement history, contracts and other PDFs the portal lists. Tested on one account (#171) | Card |
 | [`amfam`](apps/amfam) | American Family Insurance | Billing statements and any tax form listed with them. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #45. Being tested by @jpfieber | Insurance |
 | [`amex`](apps/amex) | American Express | Statements, year-end summary | Card |
 | [`amexbanking`](apps/amexbanking) | American Express Banking (deposits) | Business Checking statements and 1099-INT tax forms, every document the list the Documents and Statements page asks for itself names, heard as it answers, each PDF asked for by its own id from inside the page with nothing clicked. One account a run, the one the page shows. Contributed by @appchamp. Built and run on a contributor's own Business Checking account, 61 documents saved (#168). Personal Checking and Savings are untested. American Express cards are the `amex` app | Bank |
