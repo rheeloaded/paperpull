@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-three providers are supported today, all built on the same pattern.
+Eighty-four providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -85,6 +85,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, plan docs (all years), ID cards, letters | Health insurance (PHI); tRPC API, nothing clicked. Contributed by [@riordan](https://github.com/riordan) |
 | [`apple`](apps/apple) | Apple (App Store and Apple Store) | App Store receipts for subscriptions, in-app purchases and paid apps, and Apple Store order invoices | **Built and run on the maintainer's own account.** Report a Problem's own purchase search from inside the page for the whole family, paid purchases only, each saved from Apple's own receipt, and the Apple Store's order list and invoices, nothing clicked, real Edge/Chrome |
 | [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms | **Confirmed by [@watling777](https://github.com/watling777)**, whose Pilot and full run saved every statement and the 1099-INT forms. Requested in [#52](https://github.com/rheeloaded/paperpull/issues/52) |
+| [`bbva`](apps/bbva) | BBVA Germany | Account statements and other Postfach PDFs | Reads the available web Postfach history. Tested on one account ([#209](https://github.com/rheeloaded/paperpull/issues/209)) |
 | [`bestbuy`](apps/bestbuy) | Best Buy | Online, store-order and in-store receipts, and returns | **Built on the maintainer's own account, 35 purchases back to 2015.** The history through the page's own query a year at a time, each details page saved as the receipt, nothing clicked but the year menu, real Edge/Chrome, paced for Best Buy's bot protection |
 | [`bilt`](apps/bilt) | Bilt Card (serviced by Cardless) | Card statements | **Contributed by [@JasperDale420](https://github.com/JasperDale420), 8 statements saved on a full run.** Only the card's balance summary, View statements and a statement's own button are pressed, and the PDF is taken from the tab it opens |
 | [`bofa`](apps/bofa) | Bank of America | Checking, savings and credit card statements | **Confirmed by [@appchamp](https://github.com/appchamp)** on a real account's checking and credit card statements ([#121](https://github.com/rheeloaded/paperpull/issues/121)). Savings statements are untested. Statements & Documents' own list and PDF links, read from inside the page, with its Statements heading opened, and when the links have no address, one pressed to learn the page's own call for a PDF. |
@@ -924,10 +925,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-two** apps pass their tests, the eighty-three that are
-  supported, the five still waiting for a tester and the Scalable Capital,
-  Consorsbank, CIBC and MBNA shells, 40,590 of them
-  across the repo. Most are in regular use by the author. The rest were built or
+- ✅ **Ninety-three** apps have automated tests, including eighty-four supported
+  providers, five waiting for a tester and four first shells. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with

@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (83, plus five built and waiting for a tester, and four first shells)
+## Supported (84, plus five built and waiting for a tester, and four first shells)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -29,6 +29,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`anthem`](apps/anthem) | Anthem BCBS (Elevance, 14 Blue states) | EOBs, a claims summary for each year with Anthem's CSV beside it, member/plan documents (all coverage years), digital ID cards, secure-message letters; tRPC API, nothing clicked. Contributed by @riordan | Health insurance (PHI) |
 | [`apple`](apps/apple) | Apple (App Store and Apple Store) | Receipts for everything paid for, App Store subscriptions such as Apple One and iCloud+, in-app purchases anywhere in Family Sharing and paid apps, each saved from Apple's own emailed receipt with free downloads skipped, and Apple Store orders, each order's invoice saved and a canceled one recorded without a receipt. Built and run on the maintainer's own account | Retail |
 | [`applecard`](apps/applecard) | Apple Card and Apple Savings | Apple Card statements, Savings statements, tax forms. Confirmed by @watling777, whose Pilot and full run saved every statement and the 1099-INT forms (#52) | Card / savings |
+| [`bbva`](apps/bbva) | BBVA Germany | Account statements and other PDFs from the web Postfach (#209) | Bank |
 | [`bestbuy`](apps/bestbuy) | Best Buy | Receipts for online orders, orders placed in a store and store purchases, and returns, each purchase's details page saved as the receipt, back to 2015. Built on the maintainer's own account, 35 purchases found and all 35 saved. Best Buy's bot protection stops answering if asked too quickly, so it is paced, and a blocked run says to wait an hour | Retail |
 | [`bilt`](apps/bilt) | Bilt Card (Bilt Card 2.0, serviced by Cardless) | Monthly card statements from the Bilt wallet. Run live on one account on 2026-10-15, where Discover, Pilot and Run All saved all eight statements. Only the card's "View balance summary", "View statements" and a statement's own button are pressed, and the PDF is taken from the tab that button opens. Statements of the Wells Fargo issued Bilt card are not here | Card |
 | [`bofa`](apps/bofa) | Bank of America | Checking, savings and credit card statements. Checking and credit card statements confirmed on a real account by @appchamp (#121). Savings statements are untested. Statements & Documents' own list and PDF links, read from inside the page, with its Statements heading opened, and when the links have no address, one pressed to learn the page's own call for a PDF | Bank |

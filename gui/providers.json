@@ -22,6 +22,7 @@
     "apple": {"gets": "Receipts for App Store purchases, subscriptions and Apple Store orders", "group": "shopping"},
     "applecard": {"gets": "Apple Card and Savings statements and tax forms", "group": "banks"},
     "att": {"gets": "Monthly bills for wireless, fiber and internet", "group": "bills"},
+    "bbva": {"gets": "Account statements and other Postfach PDFs", "group": "banks", "note": "Tested on one account so far"},
     "bestbuy": {"gets": "Receipts for online and store purchases and returns, back to 2015", "group": "shopping"},
     "bilt": {"gets": "Bilt Card statements from the wallet", "group": "banks"},
     "bofa": {"gets": "Checking, savings and credit card statements", "group": "banks", "note": "Tested on checking and credit card statements, not yet on savings"},
