@@ -238,7 +238,8 @@ class Wallet:
     PDF), "none", "two" (two tabs), "child" (the tab opens one of its own),
     "elsewhere" (a tab on another host), "wrongdate", "download" (a browser
     download as well), "stuck" (a tab that will not close), "late" (a second
-    tab after the first is read), "notpdf", "signin"."""
+    tab after the first is read), "notpdf", "signin", "signin-for" (a tab on
+    the sign-in page for the date in `signin_for` only)."""
 
     def __init__(self, statements=STATEMENTS, popup="pdf"):
         self.statements = list(statements)
@@ -259,10 +260,12 @@ class Wallet:
         self.tab_url = None              # callable(iso) -> the tab's address
         self.download_url = None         # callable(iso) -> the details answer's downloadUrl
         self.pdf_for = statement_pdf
+        self.tab_status = None           # callable(iso) -> the status of the tab's answer
         self.tab_readable = True
         self.asked_body = None
         self.list_delay = 0
         self.on_goto = None
+        self.signin_for = None           # the date whose tab "signin-for" sends to the sign-in
         self.pager = False               # the sheet shows a control for more statements
         self.sign_in_drawn = False       # the page draws Bilt's sign-in in place
 
@@ -334,12 +337,16 @@ class Wallet:
         if how == "signin":
             pop.go("https://www.bilt.com/login")
             return
+        if how == "signin-for" and iso == self.signin_for:
+            pop.go("https://www.bilt.com/login")
+            return
         if how == "wrongdate":
             pop.go(pdf_url("2026-09-06"), self.pdf_for("2026-09-06"))
             return
         body = sample_pdf() if how == "nottext" else (b"<html>no</html>" if how == "notpdf"
                                                        else self.pdf_for(iso))
-        pop.go(url, body, readable=self.tab_readable)
+        pop.go(url, body, status=self.tab_status(iso) if self.tab_status else 200,
+               readable=self.tab_readable)
         if how == "two":
             self.open_tab(self)
         elif how == "child":
@@ -907,11 +914,80 @@ def test_a_wallet_tab_sent_off_bilt_by_the_press_stops_and_keeps_nothing(tmp_pat
     assert no_tab_open(w) and not (tmp_path / "statements").exists()
 
 
-def test_a_tab_on_the_sign_in_page_is_signed_out(tmp_path):
-    w = Wallet(popup="signin")
+# What a statement's tab can be answered with that reads as signed out, by
+# the popup it opens and the status of its answer. A 401, a 403 and a
+# redirect at the PDF's own address, and the tab sent to Bilt's sign-in.
+TAB_REFUSALS = {
+    "401": ("pdf", 401),
+    "403": ("pdf", 403),
+    "redirect": ("pdf", 302),
+    "sign-in page": ("signin", 200),
+}
+THE_LIST = [site.SUMMARY_LABEL, site.STATEMENTS_LABEL]
+
+
+def refused_wallet(how):
+    popup, status = TAB_REFUSALS[how]
+    w = Wallet(popup=popup)
+    w.tab_status = lambda iso: status
+    return w
+
+
+@pytest.mark.parametrize("how", sorted(TAB_REFUSALS))
+def test_a_statement_refused_while_the_list_still_reads_fails_alone(tmp_path, how):
+    """A statement's tab answered as signed out was read as a sign-out, so
+    every run stopped at that statement and Continue stopped there again
+    (#124). The list is read again with the call that proves a session, and
+    a list that still reads leaves the refusal that statement's own."""
+    w = refused_wallet(how)
+    trace = []
+    got, out = take(w, tmp_path, trace=trace)
+    assert got is False and not out.exists()
+    # The list is read once more after the refusal, and the statement's
+    # button is pressed once, never a second time.
+    assert w.presses == THE_LIST + ["Download statement for October 06, 2026"] + THE_LIST
+    assert len(w.gotos) == 2
+    assert w.context.request.asked == []
+    assert len(w.popups) == 1 and no_tab_open(w)
+    assert {"note": "refused, the list still reads"} in trace
+    for word in PRIVATE:
+        assert word not in json.dumps(trace), word
+
+
+@pytest.mark.parametrize("ends", ["sign-in page", "list refused"])
+@pytest.mark.parametrize("how", sorted(TAB_REFUSALS))
+def test_a_statement_refused_and_a_list_refused_after_it_is_a_sign_out(tmp_path, how, ends):
+    """A session that ended refuses the list too, and only that stops the
+    run as signed out."""
+    w = refused_wallet(how)
+
+    def on_goto(wallet):
+        if len(wallet.gotos) < 2:
+            return
+        if ends == "sign-in page":
+            wallet.password = True
+        else:
+            wallet.list_answers = lambda: [list_resp(wallet.statements, status=401)]
+    w.on_goto = on_goto
     with pytest.raises(site.SessionExpired):
         take(w, tmp_path)
-    assert no_tab_open(w)
+    assert [p for p in w.presses if p.startswith("Download")] == [
+        "Download statement for October 06, 2026"]
+    assert len(w.gotos) == 2 and no_tab_open(w)
+    assert not (tmp_path / "statements").exists()
+
+
+def test_a_list_that_stops_when_read_after_a_refusal_stops_the_run_unread(tmp_path):
+    w = refused_wallet("403")
+
+    def on_goto(wallet):
+        if len(wallet.gotos) == 2:
+            wallet.sheet = ["2026-10-06"]
+    w.on_goto = on_goto
+    with pytest.raises(pressing.Stop) as stop:
+        take(w, tmp_path)
+    assert stop.value.list_unread
+    assert len([p for p in w.presses if p.startswith("Download")]) == 1
 
 
 def test_a_tab_opened_by_another_tab_is_left_alone(tmp_path):
@@ -1191,6 +1267,80 @@ def test_a_download_again_saves_a_second_copy_beside_the_one_still_there(tmp_pat
     assert len(names) == 6 and set(first) < set(names)
     assert len([p for p in w.presses if p.startswith("Download statement")]) == 3
     assert {r.get("state") for r in app.progress.data.values()} == {docs.State.COMPLETED.value}
+
+
+def run_all(app, caplog):
+    """A Run All, with what it printed and logged and how it ended."""
+    caplog.set_level(logging.INFO)
+    buf = io.StringIO()
+    ended = None
+    try:
+        with redirect_stdout(buf):
+            app.cmd_run("all")
+    except SystemExit as e:
+        ended = e
+    return ended, buf.getvalue() + caplog.text
+
+
+@pytest.mark.parametrize("how", ["403", "sign-in page"])
+def test_one_statement_refused_while_the_list_reads_fails_alone_and_the_rest_are_saved(
+        tmp_path, monkeypatch, caplog, how):
+    """The refused statement stopped the run before, so the statements after
+    it were never pressed, and every later run stopped at it again."""
+    refused = "2026-09-06"
+    if how == "403":
+        w = Wallet()
+        w.tab_status = lambda iso: 403 if iso == refused else 200
+    else:
+        w = Wallet(popup="signin-for")
+        w.signin_for = refused
+    app = wallet_app(tmp_path, monkeypatch, w)
+    ended, said = run_all(app, caplog)
+    assert ended is None, said
+    states = {r["date"]: r["state"] for r in app.progress.data.values()}
+    assert states == {"2026-10-06": docs.State.COMPLETED.value, refused: docs.State.FAILED.value,
+                      "2026-08-06": docs.State.COMPLETED.value}
+    assert (app.stats["failed"], len(app.stats["new_files"])) == (1, 2)
+    assert said.count("Nothing was saved, and the next run tries it again") == 1
+    assert "signed out" not in said
+    assert w.presses.count("Download statement for September 06, 2026") == 1
+    # The attempt file says why, and like every file but the run's own
+    # records it names no private word.
+    attempt = (app.paths.diagnostics / "download-attempt.json").read_text(encoding="utf-8")
+    assert "refused, the list still reads" in attempt
+    written = attempt + "".join(p.read_text(encoding="utf-8", errors="ignore")
+                                for p in (tmp_path / "out").rglob("*")
+                                if p.is_file() and p.suffix in (".csv", ".txt", ".log"))
+    seen = (said + written).replace(str(tmp_path), "<folder>").replace(
+        json.dumps(str(tmp_path))[1:-1], "<folder>")
+    for word in PRIVATE:
+        assert word not in seen, word
+    # The next run asks for it again, and only for it.
+    w.tab_status, w.popup = None, "pdf"
+    w.presses.clear()
+    ended, said = run_all(app, caplog)
+    assert ended is None, said
+    assert [p for p in w.presses if p.startswith("Download")] == [
+        "Download statement for September 06, 2026"]
+    assert {r["state"] for r in app.progress.data.values()} == {docs.State.COMPLETED.value}
+
+
+def test_one_statement_refused_and_the_list_after_it_stop_the_run_as_signed_out(
+        tmp_path, monkeypatch, caplog):
+    w = refused_wallet("401")
+    app = wallet_app(tmp_path, monkeypatch, w)
+
+    def on_goto(wallet):
+        # The load that reads the list again after the refusal.
+        if any(p.startswith("Download") for p in wallet.presses):
+            wallet.password = True
+    w.on_goto = on_goto
+    ended, said = run_all(app, caplog)
+    assert isinstance(ended, SystemExit)
+    assert "answered as signed out" in " ".join(said.split())
+    assert "Nothing was saved" not in said
+    assert app.progress.data == {}
+    assert len([p for p in w.presses if p.startswith("Download")]) == 1
 
 
 def test_one_id_under_two_dates_stops_the_list_and_keeps_the_record(tmp_path, monkeypatch):

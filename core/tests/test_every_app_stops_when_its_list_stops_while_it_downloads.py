@@ -185,6 +185,13 @@ ITS_OWN = {
         "as Discover reads it. A refused list reaches the run, a list that does not "
         "answer or shows another account stops it, and a list that still answers leaves "
         "the refusal that document's alone",
+    ("bilt", "download_statement", ("_catch_statement",)):
+        "a statement answered as signed out once its button was pressed, its tab on the "
+        "sign-in page or a refusal at its PDF address, after which the wallet's list is "
+        "read again. A sign-out shows there and reaches the run, a list that stops stops "
+        "it with the list unread, and a list that still reads leaves the refusal that "
+        "statement's alone, so one statement Bilt will not give never stops every later "
+        "run at it. The button is not pressed again",
     ("anthem", "download_document", ("_fetch_eob",)):
         "a refusal of one EOB's PDF, after which its claim type's list is read again. A "
         "sign-out shows there and reaches the run, and a list that still reads, or one "
