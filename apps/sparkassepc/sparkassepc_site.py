@@ -12,11 +12,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 from paperpull_core import failure
-from paperpull_core import intake, redirects
+from paperpull_core import intake, redirects, tabs
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
-from paperpull_core.recorder import DRAWN_PASSWORD_FIELD as PASSWORD_FIELD
 from paperpull_core.urls import is_safe_url as _host_allows, join
 
 log = logging.getLogger("sparkassepc_docs.site")
@@ -163,7 +162,11 @@ SECURITY_CHALLENGE_MARKERS = [
     "your session has expired", "session timed out",
 ]
 
-# Authentication and OAuth callback pages are never a document list.
+# The signed-in Postfach contains a hidden password field in the portal's
+# sign-in UI. The recorder and the session check count the same visible fields.
+PASSWORD_FIELD = "input[type='password']:visible"
+
+# Authentication and sign-out pages are never a document list.
 LOGIN_URL_MARKERS = ["/login", "/logout", "?logout"]
 
 RATE_LIMIT_MARKERS = ["zu viele anfragen", "später erneut", "too many requests",
@@ -183,7 +186,7 @@ def looks_signed_out(page) -> bool:
     if not is_safe_url(url) or any(m in url for m in LOGIN_URL_MARKERS):
         return True
     try:
-        if page.locator("input[type='password']:visible").count() > 0:
+        if page.locator(PASSWORD_FIELD).count() > 0:
             return True
     except Exception:
         return True
@@ -258,7 +261,7 @@ def _page_summary(page) -> dict:
             pass
     out["controls"] = controls
     try:
-        out["password_fields"] = page.locator("input[type='password']:visible").count()
+        out["password_fields"] = page.locator(PASSWORD_FIELD).count()
     except Exception:
         pass
     return out
@@ -302,11 +305,12 @@ def _folder(page, folder):
 
 def goto_documents(page):
     try:
-        if looks_signed_out(page):
+        url = page.url or "about:blank"
+        if not (url == "about:blank" and tabs.is_own(page)) and looks_signed_out(page):
             return False
-        if urlsplit(page.url).path not in FOLDERS.values():
+        if urlsplit(url).path not in FOLDERS.values():
             page.goto(URLS["documents"], wait_until="domcontentloaded", timeout=15000)
-        return is_safe_url(page.url) and page.locator("form.postfach").count() == 1
+        return not looks_signed_out(page) and page.locator("form.postfach").count() == 1
     except Exception:
         return False
 
@@ -384,11 +388,13 @@ def _turn(page, target):
         raise ListStopped("The Postfach paging address changed.")
     endpoint = urlunsplit(parts._replace(path=path.removesuffix(".html") + ".ajstep.html"))
     destination = BASE + path.removesuffix(".html") + ".ajstep.html"
-    answer = redirects.post_to_listing(
-        page.request, endpoint, destination, is_safe_url, data=form["body"], timeout=12000,
-        headers={"Content-Type": "application/x-www-form-urlencoded",
-                 "X-Requested-With": "XMLHttpRequest"})
+    headers = {"Content-Type": "application/x-www-form-urlencoded",
+               "X-Requested-With": "XMLHttpRequest"}
+    answer = page.request.post(endpoint, data=form["body"], max_redirects=0,
+                               timeout=12000, headers=headers)
     try:
+        answer = redirects.follow_listing(page.request, answer, destination, is_safe_url,
+                                          timeout=12000, headers=headers)
         if not answer.ok or answer.url != destination:
             raise ListStopped("The Postfach did not return the requested page.")
     finally:

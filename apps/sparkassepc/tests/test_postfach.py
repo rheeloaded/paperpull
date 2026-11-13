@@ -52,20 +52,15 @@ def test_paging_follows_only_its_exact_redirect(location, followed):
     first = SimpleNamespace(status=302, url=site.BASE + "/pager",
                             headers={"location": location}, dispose=lambda: None)
 
-    def post(url, **kwargs):
-        requests.append(("POST", url, kwargs["max_redirects"]))
-        return first
-
     def get(url, **kwargs):
-        requests.append(("GET", url, kwargs["max_redirects"]))
+        requests.append((url, kwargs["max_redirects"]))
         return object()
 
-    client = SimpleNamespace(post=post, get=get)
+    client = SimpleNamespace(get=get)
     destination = site.BASE + "/listing"
-    response = site.redirects.post_to_listing(client, first.url, destination,
-                                              site.is_safe_url, data="page=2")
+    response = site.redirects.follow_listing(client, first, destination, site.is_safe_url)
     assert (response is not first) == followed
-    assert requests == [("POST", first.url, 0)] + ([("GET", destination, 0)] if followed else [])
+    assert requests == ([(destination, 0)] if followed else [])
 
 
 def test_document_identity_does_not_depend_on_its_page_position():
