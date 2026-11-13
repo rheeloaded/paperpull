@@ -688,6 +688,59 @@ def test_a_document_answered_as_signed_out_and_a_list_that_stops_after_it_leaves
     assert "The ING list could not be read again whole" in said
 
 
+def empties_on_the_next_open(bank):
+    """The Postbox shows ING's notice that nothing matches once it is next
+    opened by its own address."""
+    real = bank.goto
+
+    def goto(url, **kw):
+        bank.lists["postbox"] = []
+        return real(url, **kw)
+    bank.goto = goto
+
+
+def rows_time_out(bank):
+    real = bank.evaluate
+
+    def evaluate(js, arg=None):
+        if isinstance(arg, dict) and "rowSelectors" in arg:
+            raise TimeoutError("Timeout 30000ms exceeded")
+        return real(js, arg)
+    bank.evaluate = evaluate
+
+
+def does_not_open(bank):
+    def goto(url, **kw):
+        bank.gotos.append(url)
+        raise TimeoutError("Timeout 30000ms exceeded")
+    bank.goto = goto
+
+
+# What the list read again after a refusal can show that says neither that
+# the session ended nor that it still holds.
+NOT_ANSWERED = {"empty": empties_on_the_next_open, "rows time out": rows_time_out,
+                "does not open": does_not_open}
+
+
+@pytest.mark.parametrize("after", sorted(NOT_ANSWERED))
+def test_a_document_refused_and_a_list_that_does_not_answer_after_it_leaves_the_list_unread(home, after):
+    """A Postbox that comes back empty was taken as a list that still reads,
+    so the document failed alone and every document after it went on to an
+    empty list. Neither an empty list nor one that does not come says the
+    session ended, so the run stops with the list unread and the refused
+    document left as it was for the next run that lists."""
+    home.bank.lists["postbox"] = [statement("P1", 1), statement("P2", 2), statement("P3", 3)]
+    home.bank.answer_with["P2"] = 403
+    home.bank.at_fetch["P2"] = NOT_ANSWERED[after]
+    _code, said = home.run_all()
+    assert isinstance(home.stopped, ListNotRead), said
+    assert home.bank.fetched == ["P3", "P2"]
+    assert home.on_disk() == ["P3"]
+    assert home.failed() == []
+    assert "signed out" not in said
+    assert "The ING list could not be read again whole" in said
+
+
 def test_a_document_gone_from_the_list_fails_and_nothing_is_fetched_for_it(home):
     home.bank.lists["postbox"] = [statement("P1", 1), statement("P2", 2)]
     assert home.run("--discover")[0] == 0

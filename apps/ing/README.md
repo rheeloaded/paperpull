@@ -125,9 +125,12 @@ the bank's back.
 
 When ING answers one document with a 401, a 403 or its sign-in page, the
 Postbox is opened and read again. A sign-in page there means you are signed
-out, and the run stops. A list that still reads leaves that one document
-failed with nothing saved, the run goes on to the others, and the next run
-tries it again.
+out, and the run stops. A Postbox that does not open, cannot be read whole
+or shows no document says neither, so the run stops without calling you
+signed out, nothing is recorded against that document, and the run it
+names, which reads the list first, asks for it again. A list that still
+reads leaves that one document failed with nothing saved, the run goes on
+to the others, and the next run tries it again.
 
 ## Safety
 

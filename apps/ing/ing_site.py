@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import unquote, urlsplit
 
-from paperpull_core import intake
+from paperpull_core import intake, refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
@@ -1040,11 +1040,14 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
 
     A document answered with a 401, a 403 or a sign-in page has its list
     opened afresh and read again, with the same call that reads it for a
-    listing. A session that has ended shows ING's sign-in page there, and
-    its SessionExpired stops the run, as a list that stops does. A list that
-    still reads leaves the refusal this document's own, so it fails alone,
-    since a stop here would stop every run at this document for good. The
-    document is not asked for after the list is read again."""
+    listing (paperpull_core.refused). A session that has ended shows ING's
+    sign-in page there, and its SessionExpired stops the run. A list that
+    does not open, cannot be read whole, or holds no document, though it
+    listed this one, says neither, and raises ListStopped, which stops the
+    run with the list unread. A list that still reads leaves the refusal
+    this document's own, so it fails alone, since a stop here would stop
+    every run at this document for good. The document is not asked for
+    after the list is read again."""
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins,
                        config=config)
@@ -1063,10 +1066,13 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
         except SessionExpired:
             # A refusal may be the session ending or this one document. The
             # list is opened and read again, and a session that ended shows
-            # there and stops the run. One that still reads leaves this
-            # document failed, so it never stops every later run at the
-            # same document.
-            _read_area(page, row["source"], config, again=True)
+            # there and stops the run. A list that does not answer, or holds
+            # nothing, stops it with the list unread. One that still reads
+            # leaves this document failed, so it never stops every later run
+            # at the same document.
+            refused.list_again(
+                lambda: _read_area(page, row["source"], config, again=True)["rows"],
+                SessionExpired, ListStopped)
             log.info("the document dated %s was refused while the list still reads", date)
             return ""
         if data:
