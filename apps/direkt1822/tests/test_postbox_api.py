@@ -30,14 +30,11 @@ global.fetch=async(path,options)=>{
  if(path.endsWith('benutzerInfo?complete=false')) {
   if(mode==='expired')return {ok:false,status:401};
   sessions++;data.benutzerInfo={token:'PRIVATE_AUTH_'+sessions,csrfToken:'PRIVATE_CSRF_'+sessions,
-    hatMehrereKundenverbindungen:mode==='multiple',stammNrsDisplay:[]};
+    hatMehrereKundenverbindungen:mode==='multiple',stammNrsDisplay:['9999999999']};
   if(mode==='missing-csrf')delete data.benutzerInfo.csrfToken;
- } else if(path.endsWith('/leseUndVermerkeMitId')){
-  if(mode!=='conversation-allowed')throw new Error('read-marking without consent');
-  data.konversation={betreff:'Invented correspondence',konversationen:[
-   {dokumentId:body.id.replace('row-',''),fileName:'root.pdf',filePDF:true,versandtAm:'2026-03-31'},
-   {dokumentId:'child-'+body.id,fileName:'attachment.pdf',filePDF:true,versandtAm:'2026-02-28'}]};
-  data.gesendeteDateien=[];
+  if(mode==='missing-multiple-flag')delete data.benutzerInfo.hatMehrereKundenverbindungen;
+  if(mode==='missing-customer-numbers')delete data.benutzerInfo.stammNrsDisplay;
+  if(mode==='two-customer-numbers')data.benutzerInfo.stammNrsDisplay=['9999999999','8888888888'];
  } else if(options.method==='POST'){
   if(!path.match(/\/postboxnachricht\/(eingang|ausgang|papierkorb)$/))throw new Error('write endpoint');
   if(options.headers['X-JOBA-AUTH']!=='PRIVATE_AUTH_'+sessions||options.headers['X-CSRF-TOKEN']!=='PRIVATE_CSRF_'+sessions)throw new Error('bad session');
@@ -49,8 +46,16 @@ global.fetch=async(path,options)=>{
    if(mode==='changed-total'&&body.seite===1)data.gesamtzahlNachrichten=4;
    if(mode==='short-page'&&body.seite===1)data.postboxNachrichtListe=[];
    if(mode==='wrong-page')data.seite=100;
-   if(['conversation','conversation-allowed'].includes(mode))data.postboxNachrichtListe[0].anzahlKorrespondenz=2;
-   if(mode==='missing-metadata')delete data.postboxNachrichtListe[0].dokumentId;
+   if(mode==='missing-total')delete data.gesamtzahlNachrichten;
+   if(mode==='missing-page-count')delete data.gesamtzahlSeiten;
+   const first=data.postboxNachrichtListe[0];
+   if(mode==='conversation'&&body.seite===0)first.anzahlKorrespondenz=3;
+   if(mode==='conversation-without-pdf'&&body.seite===0)Object.assign(first,{anzahlKorrespondenz:2,pdfFile:false});
+   if(mode==='missing-metadata')delete first.dokumentId;
+   if(mode==='missing-pdf-flag')delete first.pdfFile;
+   if(mode==='pdf-flag-as-text')first.pdfFile='true';
+   if(mode==='missing-parts')delete first.anzahlKorrespondenz;
+   if(mode==='parts-as-text')first.anzahlKorrespondenz='2';
    if(mode==='bank-error')data.jobaMeldungen=[{text:'PRIVATE BANK CONTENT'}];
   }else{
    data={...data,gesamtzahlNachrichten:1,gesamtzahlSeiten:1,seite:body.seite,
@@ -67,7 +72,7 @@ global.fetch=async(path,options)=>{
  return {ok:true,status:200,headers:{get:()=> 'application/json'},arrayBuffer:async()=>new TextEncoder().encode(JSON.stringify(data)).buffer};
 };
 (async()=>{
- const collected=await bridge({op:'collect',include_trash:mode!=='no-trash',open_conversations:mode==='conversation-allowed'});
+ const collected=await bridge({op:'collect',include_trash:mode!=='no-trash'});
  let downloaded;
  if(collected.ok&&['download','not-pdf'].includes(mode))downloaded=await bridge({op:'download',id:collected.rows[0].item_id});
  console.log(JSON.stringify({collected,downloaded,requests,sessions}));
@@ -85,23 +90,64 @@ def run(mode="collect"):
     return json.loads(result.stdout)
 
 
+def only_folder_lists_and_downloads(requests):
+    """No call but the three folder lists, benutzerInfo and a download.
+    Opening a conversation (leseUndVermerkeMitId) marks it read."""
+    return all(r["path"].endswith(("/eingang", "/ausgang", "/papierkorb", "benutzerInfo?complete=false"))
+               or "/postboxnachricht/download/" in r["path"] for r in requests)
+
+
 def test_all_zero_based_pages_and_folders_are_read_without_opening_messages():
     data = run()
     assert data["collected"]["ok"], data
     assert len(data["collected"]["rows"]) == 4
-    assert data["collected"]["summary"]["non_pdf_messages"] == 1
+    assert data["collected"]["summary"]["messages_not_opened"] == 1
+    assert data["collected"]["summary"]["threads_not_opened"] == 0
     assert [r["page"] for r in data["requests"] if r["path"].endswith('/eingang')] == [0, 1]
-    assert all("leseUndVermerke" not in r["path"] and "markiere" not in r["path"] and
-               "update" not in r["path"] for r in data["requests"])
+    assert only_folder_lists_and_downloads(data["requests"])
     assert "PRIVATE" not in json.dumps(data)
 
 
 @pytest.mark.parametrize("mode", ["repeated-page", "changed-total", "short-page", "wrong-page",
-                                  "conversation", "missing-metadata", "bank-error", "multiple"])
+                                  "missing-metadata", "bank-error", "multiple", "two-customer-numbers"])
 def test_incomplete_or_unmapped_histories_never_commit_a_partial_list(mode):
     data = run(mode)
     assert not data["collected"]["ok"] and "rows" not in data["collected"]
     assert "PRIVATE" not in json.dumps(data)
+
+
+@pytest.mark.parametrize("mode", ["missing-pdf-flag", "pdf-flag-as-text", "missing-parts", "parts-as-text",
+                                  "missing-multiple-flag", "missing-customer-numbers",
+                                  "missing-total", "missing-page-count"])
+def test_a_missing_field_stops_the_list_rather_than_read_as_nothing_there(mode):
+    """A row with no pdfFile was read as a message without a PDF, so a
+    statement went missing from a list still called whole, and a row with
+    no anzahlKorrespondenz as one message. benutzerInfo with no
+    hatMehrereKundenverbindungen or stammNrsDisplay read as one customer."""
+    data = run(mode)
+    assert not data["collected"]["ok"] and "rows" not in data["collected"], data
+    assert not data["collected"]["expired"]
+    assert "PRIVATE" not in json.dumps(data)
+
+
+@pytest.mark.parametrize("mode", ["conversation", "conversation-without-pdf"])
+def test_a_thread_is_counted_and_never_opened_and_the_list_goes_on(mode):
+    """A row of more than one message stopped the whole list unless the
+    conversation was opened, which marks it read at the bank. Its own PDF is
+    taken, the thread is counted, and the rest of the list is read."""
+    data = run(mode)
+    assert data["collected"]["ok"], data
+    summary = data["collected"]["summary"]
+    assert summary["threads_not_opened"] == 1
+    assert summary["messages_not_opened"] == 1
+    ids = {r["item_id"] for r in data["collected"]["rows"]}
+    assert ids == ({"d1", "d2", "d3", "d4"} if mode == "conversation" else {"d2", "d3", "d4"})
+    assert only_folder_lists_and_downloads(data["requests"])
+
+
+def test_the_page_script_has_no_way_to_open_a_conversation():
+    assert "leseUndVermerke" not in site._API_JS
+    assert "open_conversations" not in site._API_JS
 
 
 @pytest.mark.parametrize("mode", ["expired", "missing-csrf"])
@@ -127,14 +173,7 @@ def test_trash_can_be_excluded_explicitly():
     assert not any(r["path"].endswith('/papierkorb') for r in data["requests"])
 
 
-def test_explicit_conversation_consent_collects_older_pdf_attachments():
-    data = run("conversation-allowed")
-    assert data["collected"]["ok"], data
-    assert any(r["item_id"].startswith('child-') for r in data["collected"]["rows"])
-    assert data["collected"]["summary"]["opened_conversations"] >= 1
-
-
-def test_one_pdf_referenced_under_different_conversation_subjects_is_listed_once():
+def test_one_pdf_listed_in_two_folders_is_listed_once():
     data = run("same-pdf-other-context")
     assert data["collected"]["ok"], data
     rows = data["collected"]["rows"]
@@ -157,7 +196,26 @@ def test_declared_postbox_category_takes_priority_over_subject_guesses(code, cat
 
 def test_invalid_dates_stop_instead_of_disappearing():
     with pytest.raises(site.ListStopped):
-        site._normalise({"item_id":"invented","title":"Kontoauszug","date":"2026-02-30"})
+        site._normalize({"item_id": "invented", "title": "Kontoauszug", "date": "2026-02-30"})
+
+
+@pytest.mark.parametrize("value,day", [
+    # A zone or a Z is a moment, read as its day in Berlin.
+    ("2031-02-28T23:30:00Z", "2031-03-01"),
+    ("2031-07-31T22:15:00.000Z", "2031-08-01"),
+    ("2031-07-31T21:59:59Z", "2031-07-31"),
+    ("2031-12-31T23:00:00+00:00", "2032-01-01"),
+    ("2031-03-01T00:30:00+01:00", "2031-03-01"),
+    ("2031-02-28T18:30:00-0500", "2031-03-01"),
+    # A plain day, or a time with no zone, is the day written.
+    ("2031-02-28", "2031-02-28"),
+    ("2031-02-28T23:30:00", "2031-02-28"),
+    ("28.02.2031", "2031-02-28"),
+    ("20310228", "2031-02-28"),
+    ("", ""),
+])
+def test_a_zoned_timestamp_is_its_day_in_berlin(value, day):
+    assert site.parse_date(value) == day
 
 
 def test_attaching_during_the_account_holders_login_waits_without_clicking_or_reloading():
@@ -181,12 +239,16 @@ def test_attaching_during_the_account_holders_login_waits_without_clicking_or_re
     assert page.waits == 2
 
 
+@pytest.mark.parametrize("refusal", [site.intake.TooLarge, site.NoFile, site.SessionExpired])
 @pytest.mark.parametrize("list_error", [None, site.SessionExpired, site.ListStopped])
-def test_a_refused_pdf_is_weighed_against_a_fresh_list(monkeypatch, tmp_path, list_error):
+def test_a_refused_pdf_is_weighed_against_a_fresh_list(monkeypatch, tmp_path, refusal, list_error):
+    """A 401 or a 403 for one PDF reads as signed out in the page. It is
+    weighed against the list like any other refusal, so one document the
+    bank refuses fails alone while a list that answers signed out stops."""
     monkeypatch.setattr(site, "resolve_item", lambda *args, **kwargs: {"item_id": "invented"})
 
     def refused(*args, **kwargs):
-        raise site.intake.TooLarge("invented oversized PDF")
+        raise refusal("invented refusal")
 
     reads = []
 

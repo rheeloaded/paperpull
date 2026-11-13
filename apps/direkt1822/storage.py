@@ -71,7 +71,6 @@ SPEC = AppSpec(
     config_defaults={
         "pilot_count": 5,
         "include_trash": True,
-        "open_conversations": False,
         # Which kinds a run downloads, once it can download anything. A
         # person who only wants Kontoauszuege and Wertpapierdokumente drops
         # the rest.

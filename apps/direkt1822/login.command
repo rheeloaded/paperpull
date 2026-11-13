@@ -30,6 +30,6 @@ echo 'A browser window with a profile of its own will open. Then:'
 echo '1. Sign in to 1822direkt (answer any code it sends yourself)'
 echo '2. Open the page with your documents on it'
 echo '3. LEAVE THAT BROWSER WINDOW OPEN - do not close it'
-echo '4. Run Discover and Pilot. See README.md for the mark-read option'
+echo '4. Then run Discover, followed by Pilot, in PaperPull'
 
 "$PY" direkt1822_docs.py --open-browser $CFG

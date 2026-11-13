@@ -1,25 +1,27 @@
-"""1822direkt Postbox lists and direct PDFs through its own browser API.
+"""1822direkt's Postbox, its lists and direct PDFs, through the bank's own
+browser API.
 
-Mapped from the user's structural capture and the public Angular client.
-Only benutzerInfo, Postbox list endpoints and direct PDF downloads are used.
-No controls, transactions or account settings are activated. Conversation
-reads require open_conversations=true because the bank marks them read.
-Tokens are prepared inside the signed-in page and never returned to Python.
+Mapped from the account holder's structural capture and the public Angular
+client. Only benutzerInfo, the Postbox list calls and the direct PDF
+download are used. No control is pressed, and no transaction or setting is
+touched. A conversation is never opened, since the one call that opens it
+also marks it read at the bank. A row's own PDF is taken, and the
+conversations left unopened are counted and said. Tokens are prepared
+inside the signed-in page and never returned to Python.
 """
 from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
-from typing import List, Optional
+from typing import Optional
 
 from paperpull_core import failure, intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
-from paperpull_core.run_reporting import after_sign_in
 from paperpull_core.urls import is_safe_url as _host_allows
 
 log = logging.getLogger("direkt1822_docs.site")
@@ -36,19 +38,26 @@ URLS = {
 }
 
 class SessionExpired(RuntimeError):
-    """The API requires the account holder to sign in again."""
+    """The Postbox answers as signed out, so the account holder signs in
+    again."""
 
 
 class ListStopped(RuntimeError):
-    """The Postbox list could not be read whole."""
+    """The Postbox list could not be read whole. A run that reads the list
+    again while it downloads stops once with the list unread
+    (listing.read_again_stopped), since every document after it reads the
+    same list."""
 
 
 class NoFile(RuntimeError):
-    """The bank did not return the requested PDF."""
+    """The bank lists a document and gives no PDF for it, an HTTP error for
+    that one file or an answer that is not a PDF. Only that document fails,
+    once the list read again still answers, and the run goes on to the
+    next, as Renault Bank direkt's does."""
 
 
 class NotToldApart(RuntimeError):
-    """Documents alike cannot be uniquely matched."""
+    """A fresh list cannot uniquely identify a document."""
 
 
 def is_safe_url(url: str) -> bool:
@@ -280,9 +289,10 @@ async (args) => {
   const allowed = (path, method) => {
     const u = new URL(path, origin);
     if (u.origin !== origin || u.username || u.password || u.hash) return false;
+    // The three folder lists only. The call that opens a conversation marks
+    // it read at the bank, so it is never made.
     if (method === "POST") return !u.search &&
-      ([box + "eingang", box + "ausgang", box + "papierkorb"].includes(u.pathname) ||
-       (args.open_conversations === true && u.pathname === box + "leseUndVermerkeMitId"));
+      [box + "eingang", box + "ausgang", box + "papierkorb"].includes(u.pathname);
     if (method !== "GET") return false;
     if (u.pathname === root + "benutzerInfo") return [...u.searchParams.keys()].every(k => k === "complete");
     return u.pathname.startsWith(box + "download/") && !u.search &&
@@ -339,11 +349,19 @@ async (args) => {
       return {ok: true, data};
     }
     if (args.op !== "collect") fail("unknown operation");
-    if (auth.hatMehrereKundenverbindungen || (auth.stammNrsDisplay?.length || 0) > 1)
+    // Read as false and as none when missing, a second customer
+    // relationship would be left out of a list still called whole.
+    if (typeof auth.hatMehrereKundenverbindungen !== "boolean" || !Array.isArray(auth.stammNrsDisplay))
+      fail("incomplete customer metadata");
+    if (auth.hatMehrereKundenverbindungen || auth.stammNrsDisplay.length > 1)
       fail("multiple customer relationships require a mapped read-only context switch");
-    const items = new Map(), rows = [], unique = new Map(), conversations = [];
-    const summary = {pages: 0, listed: 0, pdfs: 0, non_pdf_messages: 0, folders: 0,
-      opened_conversations: 0, sent_files_without_download: 0};
+    const items = new Map(), rows = [], unique = new Map();
+    // A conversation is opened only by the call that marks it read at the
+    // bank, so none is opened. threads_not_opened counts the rows of more
+    // than one message, whose further attachments are not read, and
+    // messages_not_opened the single messages with no PDF of their own.
+    const summary = {pages: 0, listed: 0, pdfs: 0, folders: 0,
+      threads_not_opened: 0, messages_not_opened: 0};
     const addPdf = (row, folder) => {
       if (!row.dokumentId || !row.fileName || !row.erhaltenAm) fail("incomplete PDF metadata");
       const id = String(row.dokumentId);
@@ -351,8 +369,8 @@ async (args) => {
       const metadata = {title, date: row.erhaltenAm, kind: row.kategorie || "",
         account: "", source: folder, item_id: id};
       const signature = JSON.stringify([title, row.erhaltenAm, row.kategorie]);
-      // The same bank download id can be referenced under different
-      // conversation subjects/dates. Keep its first direct list entry.
+      // One bank download id can be listed in more than one folder, under
+      // another subject or date. Its first row is kept.
       if (unique.has(id)) return;
       unique.set(id, signature); rows.push(metadata); items.set(id, {id, filename: String(row.fileName)}); summary.pdfs++;
     };
@@ -375,18 +393,19 @@ async (args) => {
         const listed = result.postboxNachrichtListe;
         if (total > 0 && listed.length === 0) fail("Postbox history stopped before its total");
         for (const row of listed) {
-          const rowId = String(row.id || row.selectionId || "");
-          if (!rowId || ids.has(rowId)) fail("Postbox page repeated an entry");
+          const rowId = String(row?.id || row?.selectionId || "");
+          if (!rowId) fail("incomplete message metadata");
+          if (ids.has(rowId)) fail("Postbox page repeated an entry");
+          // Read as nothing there when missing, a statement whose row had no
+          // pdfFile became a message without a PDF, and a thread with no
+          // count one message, in a list still called whole.
+          const parts = row.anzahlKorrespondenz;
+          if (typeof row.pdfFile !== "boolean" || !Number.isSafeInteger(parts) || parts < 0)
+            fail("incomplete message metadata");
           ids.add(rowId); summary.listed++;
           if (row.pdfFile) addPdf(row, folder);
-          else summary.non_pdf_messages++;
-          if (row.anzahlKorrespondenz > 1 || !row.pdfFile) {
-            if (args.open_conversations !== true) {
-              if (row.anzahlKorrespondenz > 1) fail("PDF conversation attachments require --allow-mark-read (the bank marks conversations read)");
-              continue;
-            }
-            conversations.push({row, rowId, folder});
-          }
+          if (parts > 1) summary.threads_not_opened++;
+          else if (!row.pdfFile) summary.messages_not_opened++;
         }
         if (ids.size > total) fail("Postbox count is smaller than its list");
         if (page >= Math.max(0, pages - 1)) {
@@ -396,31 +415,13 @@ async (args) => {
       }
       if (!finished) fail("Postbox history reached the page limit");
     }
-    // Prefer direct document metadata even when an earlier conversation
-    // also references that PDF. Open conversations only after all root
-    // lists have been checked, and only with the explicit opt-in above.
-    for (const {row, rowId, folder} of conversations) {
-      const detail = await ask(box + "leseUndVermerkeMitId", {id: rowId});
-      summary.opened_conversations++;
-      if (!Array.isArray(detail.konversation?.konversationen)) fail("Postbox conversation is incomplete");
-      if (detail.konversation.konversationen.length < (row.anzahlKorrespondenz || 1)) fail("Postbox conversation is incomplete");
-      // The public client renders these as names only, without links.
-      if (detail.gesendeteDateien !== undefined && !Array.isArray(detail.gesendeteDateien)) fail("Postbox sent attachment format is not mapped");
-      summary.sent_files_without_download += detail.gesendeteDateien?.length || 0;
-      for (const part of detail.konversation.konversationen) {
-        if (!part.filePDF || unique.has(String(part.dokumentId))) continue;
-        addPdf({dokumentId: part.dokumentId, fileName: part.fileName,
-          erhaltenAm: part.versandtAm || row.erhaltenAm,
-          inhalt: (detail.konversation.betreff || row.inhalt || "Mitteilung") + " - " + part.fileName,
-          kategorie: ""}, folder);
-      }
-    }
     window[stateKey] = {items};
     return {ok: true, rows, summary};
   } catch (error) {
     if (ppRefused(error)) throw error;
+    // Return only our fixed messages, never a URL, a payload or a token.
     const message = String(error?.message || "");
-    const safe = /^(SESSION_EXPIRED|refused request|Postbox |invalid Postbox|download did not|document must|unknown operation|multiple customer|PDF conversation|incomplete PDF|one PDF)/;
+    const safe = /^(SESSION_EXPIRED|refused request|Postbox |invalid Postbox|download did not|document must|unknown operation|multiple customer|incomplete )/;
     return {ok: false, expired: message === "SESSION_EXPIRED",
       error: safe.test(message) ? message : "Postbox request failed"};
   }
@@ -431,6 +432,9 @@ _summary = {}
 
 
 def _execute(page, operation, *, stop=ListStopped, **values):
+    """The in-page bridge's answer to one operation. A signed-out answer
+    raises SessionExpired, and any other failure raises `stop`, ListStopped
+    for the list and NoFile for one document's download."""
     if not is_safe_url(page.url or ""):
         raise SessionExpired("Open the signed-in 1822direkt tab.")
     try:
@@ -511,8 +515,46 @@ def filed_category(row):
     return row.get("category") or classify(row.get("kind"), row.get("title"))
 
 
+def _last_sunday(year: int, month: int) -> int:
+    day = 31
+    while datetime(year, month, day).weekday() != 6:
+        day -= 1
+    return day
+
+
+def _berlin(when):
+    """A moment in Berlin time, by the EU rule, summer time from 01:00 UTC
+    on the last Sunday of March to 01:00 UTC on the last Sunday of October.
+    Worked out here because Windows' Python has no time zone data without
+    an extra package (Renault Bank direkt's own)."""
+    u = when.astimezone(timezone.utc)
+    start = datetime(u.year, 3, _last_sunday(u.year, 3), 1, tzinfo=timezone.utc)
+    end = datetime(u.year, 10, _last_sunday(u.year, 10), 1, tzinfo=timezone.utc)
+    return u + timedelta(hours=2 if start <= u < end else 1)
+
+
+_STAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[Tt ](\d{2}:\d{2}(?::\d{2})?)(\.\d+)?([Zz]|[+-]\d{2}:?\d{2})$")
+
+
 def parse_date(value):
+    """A day as the bank means it, YYYY-MM-DD, or "" when it names none.
+
+    A timestamp with a zone is a moment, and one after midnight in Berlin
+    is the day before in UTC, so it is read in Berlin time. A plain day,
+    or a time with no zone, is taken as it is written."""
     value = str(value or "").strip()
+    stamp = _STAMP_RE.match(value)
+    if stamp:
+        zone = stamp.group(4)
+        if zone in ("Z", "z"):
+            zone = "+00:00"
+        elif ":" not in zone:
+            zone = zone[:3] + ":" + zone[3:]
+        try:
+            when = datetime.fromisoformat(stamp.group(1) + "T" + stamp.group(2) + zone)
+            return _berlin(when).strftime("%Y-%m-%d")
+        except (ValueError, OverflowError):
+            return ""
     for fmt, pattern in (("%Y-%m-%d", r"^\d{4}-\d{2}-\d{2}(?!\d)"),
                          ("%d.%m.%Y", r"^\d{2}\.\d{2}\.\d{4}(?!\d)"),
                          ("%Y%m%d", r"^\d{8}(?!\d)")):
@@ -526,7 +568,7 @@ def parse_date(value):
     return ""
 
 
-def _normalise(row):
+def _normalize(row):
     date = parse_date(row.get("date"))
     if not date or not row.get("title") or not row.get("item_id"):
         raise ListStopped("a listed document has no readable date, title or identity")
@@ -537,6 +579,10 @@ def _normalise(row):
             "client_id": "", "href": URLS["documents"]}
 
 
+def _with_trash(config) -> bool:
+    return bool((config or {}).get("include_trash", True))
+
+
 def listed_rows(page, config=None, fresh=False):
     global _cache, _summary
     try:
@@ -544,20 +590,27 @@ def listed_rows(page, config=None, fresh=False):
     except Exception:
         present = False
     if (fresh or not _cache or _cache[0] is not page or not present
-            or time.monotonic() - _cache[1] > 120
-            or _cache[3] != (bool((config or {}).get("include_trash", True)), bool((config or {}).get("open_conversations", False)))):
-        result = _execute(page, "collect", include_trash=(config or {}).get("include_trash", True),
-                          open_conversations=(config or {}).get("open_conversations", False))
+            or time.monotonic() - _cache[1] > 120 or _cache[3] != _with_trash(config)):
+        result = _execute(page, "collect", include_trash=_with_trash(config))
         raw = result.get("rows")
         if not isinstance(raw, list):
             raise ListStopped("the document list could not be read")
-        rows = [_normalise(row) for row in raw]
+        rows = [_normalize(row) for row in raw]
         if len({r["item_id"] for r in rows}) != len(rows):
             raise ListStopped("the document list repeats an identity")
         _summary = result.get("summary") or {}
-        _cache = (page, time.monotonic(), rows, (bool((config or {}).get("include_trash", True)), bool((config or {}).get("open_conversations", False))))
+        _cache = (page, time.monotonic(), rows, _with_trash(config))
     wanted = set((config or {}).get("document_types") or storage_categories())
     return [dict(row) for row in _cache[2] if row["category"] in wanted]
+
+
+def not_opened() -> tuple:
+    """The last listing's conversations this app did not open, as (threads,
+    messages). A thread is a row of more than one message, whose own PDF is
+    taken and whose further attachments are not read. A message is a single
+    one with no PDF of its own. Opening either marks it read at the bank."""
+    return (int(_summary.get("threads_not_opened") or 0),
+            int(_summary.get("messages_not_opened") or 0))
 
 
 def storage_categories():
@@ -578,13 +631,19 @@ def undated():
 
 def resolve_item(page, title, date, account, occurrence=0, item_id="", *,
                  category, number_rows, twins=1, config=None):
-    """DKB's identity matching, without falling back to an unlisted id."""
+    """DKB's identity matching, without falling back to an unlisted id,
+    since the page holds a download's file name only for the rows it
+    listed."""
     rows = listed_rows(page, config)
     numbers = number_rows(rows)
     alike = [i for i, row in enumerate(rows) if
              (row["title"], row["date"], row["account"], filed_category(row)) ==
              (title, date, account, category)]
     mine = [i for i in alike if numbers[i][0] == occurrence]
+    if not mine:
+        if item_id and any(row["item_id"] == item_id for row in rows):
+            raise NotToldApart("Its stored id is now another document's.")
+        raise NotToldApart("The list no longer shows this document.")
     if len(mine) != 1:
         raise NotToldApart("The list does not uniquely identify this document.")
     index = mine[0]
@@ -597,17 +656,32 @@ def resolve_item(page, title, date, account, occurrence=0, item_id="", *,
 def download_document(page, title, date, out_path, occurrence=0, item_hint="",
                       client_hint="", account="", *, category, number_rows,
                       twins=1, config=None):
+    """Save one document, and answer the id its bytes came from, or "" when
+    the bank gave no PDF for it, which fails that document alone. Which row
+    is its own is resolve_item's to say. A list that answers as signed out
+    raises SessionExpired and a list that cannot be read again ListStopped,
+    since both hold for every document after it."""
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins, config=config)
     try:
         result = _execute(page, "download", stop=NoFile, id=row["item_id"])
         data = intake.decode(result["data"], validate=True)
         why = "" if data.startswith(b"%PDF-") else "not a PDF (%d bytes)" % len(data)
-    except (NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
+    except (SessionExpired, NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
+        # By its type and kind, since what an answer or an error says can
+        # carry the bank's words. A 401 or a 403 for this one file reads as
+        # signed out in the page, and a bank that refuses one document
+        # answers every run the same way, so it is weighed against the list
+        # here like any other failure, never taken as the run's end.
         why = "%s, %s" % (type(e).__name__, failure.error_kind(e))
     if why:
         log.warning("no PDF for one %s of %s: %s", category, date, why)
-        # Verify that the list still answers before failing only this file.
+        # A sign-in page served in place of the PDF, or a refusal of it,
+        # says nothing this app can tell from a file the bank will not give.
+        # The list is the proof, so it is read again here, and an answer as
+        # signed out (SessionExpired) or a list that stops (ListStopped) ends
+        # the run with nothing recorded against this document. Only a list
+        # that still answers makes this one document's failure.
         listed_rows(page, config, fresh=True)
         return ""
     out_path = Path(out_path)

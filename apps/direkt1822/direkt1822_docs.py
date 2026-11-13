@@ -1,8 +1,27 @@
-"""1822direkt Postfach downloader.
+"""1822direkt Postbox downloader (local, supervised).
 
-Uses DKB's shared orchestration for identity, progress, indexing and recovery.
-The provider-specific API is in direkt1822_site.py.
-Mapped from the account holder's technical capture and the public portal client.
+Usage:
+    python direkt1822_docs.py --login       verify connection to your browser
+    python direkt1822_docs.py --discover    list available documents
+    python direkt1822_docs.py --pilot       download the 5 newest, then stop
+    python direkt1822_docs.py --all         download everything in scope
+    python direkt1822_docs.py --resume      continue an interrupted run
+    python direkt1822_docs.py --verify      re-validate every saved PDF
+    python direkt1822_docs.py --diagnose    dump page structure (no downloads)
+    python direkt1822_docs.py --dry-run     plan filenames, save nothing
+
+Filters: --year YYYY  --start-date YYYY-MM-DD  --end-date YYYY-MM-DD
+         --max-docs N  --type Statement|"Tax Document"|Message|...
+
+Read-only. This tool only reads the 1822direkt Postbox, its sent items and
+its trash, and downloads PDFs the bank already holds. It never moves money,
+never changes an account or a setting, and never opens a conversation,
+since opening one marks it read at the bank. Everything stays on this
+machine. Nothing is sent to any external service.
+
+Uses DKB's orchestration for identity, progress, indexing and recovery
+(apps/dkb/dkb_docs.py). The 1822direkt API is in direkt1822_site.py, mapped
+on the contributor's own account (#174, #213).
 """
 from __future__ import annotations
 
@@ -122,6 +141,23 @@ def tidy(text) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
+def not_opened_lines() -> list:
+    """What Discover and the run summary say of the conversations the last
+    listing left unopened, or nothing when there were none. A conversation
+    is opened only by the call that marks it read at the bank, so this app
+    never opens one (site.not_opened)."""
+    threads, messages = site.not_opened()
+    if not threads and not messages:
+        return []
+    return [
+        "%d conversation(s) of more than one message and %d message(s) with no PDF "
+        "of their own were not opened, since opening one marks it read at the bank."
+        % (threads, messages),
+        "The PDF a conversation's row in the list offers is saved. Any further "
+        "attachments in it are not read, so open those in the Postbox yourself.",
+    ]
+
+
 def row_category(d: dict, title: str) -> str:
     """The category a listed row is recorded under, as _record_statement_doc
     reads it before the rules choose its words (site.filed_category)."""
@@ -151,8 +187,6 @@ class App:
         cfg_path = Path(args.config) if getattr(args, "config", None) \
             else (PROJECT_DIR / "config.json")
         self.config = load_config(cfg_path)
-        if getattr(args, "allow_mark_read", False):
-            self.config["open_conversations"] = True
         ensure_owner(self.config, cfg_path)
         set_filename_owner(self.config.get("owner", "") if self.config.get("owner_in_filename") else "")
         self.paths = Paths(Path(self.config["output_dir"]))
@@ -482,13 +516,8 @@ class App:
         # from it call the run finished (paperpull_core.listing).
         listing.read_whole(self)
         self.stats["discovered"] = len(self.discovery.data)
-        counts = getattr(site, "_summary", {})
-        if counts.get("non_pdf_messages"):
-            print(f"{counts['non_pdf_messages']} non-PDF message(s) have no directly listed PDF; "
-                  "their text is not exported.")
-        if counts.get("sent_files_without_download"):
-            print(f"{counts['sent_files_without_download']} sent-file reference(s) have no download link "
-                  "in the bank's Postbox; those files are not exported.")
+        for line in not_opened_lines():
+            print(line)
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -1042,6 +1071,12 @@ class App:
         s["ended"] = now_iso()
         dates = sorted(d for d in s["dates"] if d)
         new_files = s.get("new_files", [])
+        # Said only when this run read the list, since a run that did not
+        # cannot know.
+        unopened = []
+        if getattr(site, "_summary", None):
+            unopened = ["Conversations not opened:  %d" % sum(site.not_opened()),
+                        *not_opened_lines()]
         atomic_write_text(self.paths.run_summary, "\n".join([
             "1822direkt Documents - run summary",
             "=" * 40,
@@ -1061,6 +1096,7 @@ class App:
             f"PDF validation failures:   {s['validation_failures']}",
             f"Earliest date processed:   {dates[0] if dates else '-'}",
             f"Latest date processed:     {dates[-1] if dates else '-'}",
+            *unopened,
             "",
         ]))
         # A plain list of exactly the files downloaded THIS run (all new,
@@ -1103,8 +1139,6 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--start-date")
     ap.add_argument("--end-date")
     ap.add_argument("--max-docs", type=int)
-    ap.add_argument("--allow-mark-read", action="store_true",
-                    help="open conversations to find all PDF attachments; the bank marks them read")
     ap.add_argument("--type", help="Statement or 'Tax Document'")
     ap.add_argument("--yes", action="store_true", help="skip the --all confirmation")
     ap.add_argument("--redownload", action="store_true",
