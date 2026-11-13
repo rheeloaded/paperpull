@@ -258,6 +258,50 @@ def test_a_sign_out_partway_stops_the_run_once(run):
     assert r.saved() == {} and r.progress() == {}
 
 
+class HistoryFailsAfterARefusal(Page):
+    """The newest bill is refused, and the history read again after it
+    answers 500, lists no bill, or the page stops answering while it
+    loads."""
+
+    def __init__(self, how):
+        super().__init__(refuses=(ENDS[0],))
+        self.how, self.gone = how, False
+
+    def evaluate(self, js, arg=None):
+        got = super().evaluate(js, arg)
+        if isinstance(got, dict) and got.get("status") == 403:
+            self.gone = True
+            if self.how == "500":
+                self.status = 500
+            elif self.how == "empty":
+                self.data = answer([])
+        return got
+
+    def goto(self, url, **k):
+        if self.gone and self.how == "timeout":
+            self.gotos += 1
+            raise TimeoutError("Timeout 60000ms exceeded")
+        super().goto(url, **k)
+
+    def wait_for_timeout(self, ms):
+        if self.gone and self.how == "timeout":
+            raise TimeoutError("Timeout 30000ms exceeded")
+
+
+@pytest.mark.parametrize("how", ["500", "timeout", "empty"])
+def test_a_refused_bill_and_a_history_that_does_not_answer_stop_the_run_unread(run, how):
+    """Nothing is recorded against the bill, so the next run that lists
+    takes it again, and the run is not called signed out."""
+    page = HistoryFailsAfterARefusal(how)
+    r = run(page)
+    said, result, ended = r.main("--all", "--yes")
+    assert len(page.asked) == 1, said
+    assert result["stopped"] == 1 and result.get("list_not_read") == 1, said
+    assert result["failed"] == 0 and result["manual_review"] == 0, said
+    assert r.progress() == {} and r.saved() == {}, said
+    assert "signed out" not in said and "ms exceeded" not in said, said
+
+
 def test_another_account_shown_asks_for_none_of_its_bills(run):
     """Discover on account A, then the browser shows account B. Resume used
     to save B's PDFs under A's records as Completed."""

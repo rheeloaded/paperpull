@@ -435,7 +435,7 @@ LEFT = {
     "apps/verizon/verizon_docs.py": 1,
     "apps/verizon/verizon_site.py": 4,
     "apps/verizonmobile/verizonmobile_docs.py": 1,
-    "apps/verizonmobile/verizonmobile_site.py": 3,
+    "apps/verizonmobile/verizonmobile_site.py": 2,
     "apps/walmart/walmart_receipts.py": 7,
     "apps/wealthfront/wealthfront_docs.py": 7,
     "apps/wealthfront/wealthfront_site.py": 4,

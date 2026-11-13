@@ -53,7 +53,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from paperpull_core import intake
+from paperpull_core import intake, refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 # Everything on its way into a diagnostic file goes through here. It
@@ -661,7 +661,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     every bill after this one would read the same history. A PDF that is
     refused is asked about once more by reading the history again, so a
     sign-out stops the run, and a refusal of this one bill with the
-    history still reading is that bill's alone."""
+    history still reading is that bill's alone. A history read again that
+    does not answer, lists no bill, or reaches a page that stops answering
+    raises ListStopped, since it says neither (refused.list_again)."""
     out_path = Path(out_path)
     m = BILL_ID_RE.fullmatch(document_id or "")
     if not m or m.group(2) != (iso_date or ""):
@@ -682,14 +684,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         return False
     try:
         return _fetch(page, pdf_url(found[0].end_date, history.channel_id), out_path, trace)
-    except SessionExpired as refused:
+    except SessionExpired:
         # A refusal may be the session ending or this one bill. The history
-        # just read is read again, and a session that ended shows there and
-        # stops the run. One that still reads leaves this bill failed, so
-        # it never stops every later run at the same bill.
-        _open(page)
-        log.info("the bill dated %s was refused while the history still reads: %s",
-                 iso_date, refused)
+        # just read is read again, the way Discover reads it, and a session
+        # that ended shows there and stops the run. A history that does not
+        # answer, or lists no bill, stops it with the history unread, since
+        # that says neither (refused.list_again). One that still reads
+        # leaves this bill failed, so it never stops every later run at the
+        # same bill.
+        refused.list_again(lambda: collect_download_docs(page), SessionExpired, ListStopped)
+        log.info("the bill dated %s was refused while the history still reads", iso_date)
         if trace is not None:
             trace.append({"note": "refused, the history still reads"})
         return False
