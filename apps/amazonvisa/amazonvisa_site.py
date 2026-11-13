@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import Optional
 
+from paperpull_core import doc_types
 from paperpull_core import failure
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -369,13 +370,15 @@ async (args) => {
       if (!Array.isArray(list.elements) || list.metadata?.hasPendingRecords !== false)
         fail("The portal did not return the whole statement list");
       summary.contracts++;
+      // A statement whose PDF is not out yet may carry both fields empty,
+      // or leave both out, and is counted and left for a later run. Every
+      // row of a contract leaving both out is the answer's shape changing,
+      // not statements still pending, so that stops the list.
+      let keyless = 0;
       for (const row of list.elements) {
-        // A statement with no PDF yet may carry both fields empty. A field
-        // that is not there at all is an answer this app does not know,
-        // and reading it as no PDF would leave a statement out of a list
-        // still called whole.
-        if (!has(row, "documentId") || !has(row, "version"))
+        if (row === null || typeof row !== "object")
           fail("A listed statement is missing its document fields");
+        if (!has(row, "documentId") && !has(row, "version")) keyless++;
         if (!row.documentId && !row.version) {
           summary.without_pdf++;
           continue;
@@ -390,11 +393,15 @@ async (args) => {
                    title: "Kreditkartenabrechnung", category: "Credit Card Statement"});
         summary.statements++;
       }
+      if (list.elements.length && keyless === list.elements.length)
+        fail("A listed statement is missing its document fields");
     }
     const available = await get(root + "categories");
-    // An answer without its categories is not an empty list of them.
-    if (!Array.isArray(available.categories)) fail("The portal did not list its document categories");
-    for (const category of new Set(available.categories)) {
+    // An empty answer is no categories, as the contributor's own run read
+    // it. Any other answer without its list of them stops the list.
+    const categories = available.categories ?? (Object.keys(available).length === 0 ? [] : null);
+    if (!Array.isArray(categories)) fail("The portal did not list its document categories");
+    for (const category of new Set(categories)) {
       const list = await get(root + "documents", {queryParams: {categories: [token(category)], limit}});
       // Both the documents and their size must be there and agree.
       if (!Array.isArray(list.documents) || !Number.isSafeInteger(list.size) ||
@@ -512,7 +519,17 @@ def classify(kind, title=""):
 
 
 def filed_category(row):
-    return row.get("category") or classify(row.get("kind"), row.get("title"))
+    """The category a listed row's document is recorded under. The row's
+    own, or the one its kind and title say, except that one of no known
+    kind whose title says it is a statement is recorded as one
+    (amazonvisa_docs._record_statement_doc). Discover numbers the rows by
+    it and a download finds its row by it, so the two read a row as the
+    record holds it."""
+    category = row.get("category") or classify(row.get("kind"), row.get("title"))
+    title = re.sub(r"\s+", " ", str(row.get("title") or "")).strip() or "Statement"
+    if category == doc_types.OTHER and re.search(r"statement|kontoauszug", title, re.I):
+        return doc_types.STATEMENT
+    return category
 
 
 def _last_sunday(year: int, month: int) -> int:

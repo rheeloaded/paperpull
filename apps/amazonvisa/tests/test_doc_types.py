@@ -48,6 +48,31 @@ def test_a_category_document_is_filed_by_its_category(kind, title, category):
     assert site.filed_category({"kind": kind, "title": title}) == category
 
 
+def test_a_row_of_no_known_kind_titled_as_a_statement_is_found_as_it_was_recorded(
+        tmp_path, monkeypatch):
+    """Discover records such a row as a Statement (_record_statement_doc).
+    filed_category read it as Other Document, so a download looking for
+    the record never found its row. No title the portal gives says so
+    today, but the two must agree."""
+    config = json.loads((APP / "config.example.json").read_text(encoding="utf-8"))
+    config.update({"owner": "Dana Example", "output_dir": str(tmp_path / "out"),
+                   "document_types": storage.ALL_CATEGORIES + [doc_types.STATEMENT]})
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps(config), encoding="utf-8")
+    app = app_mod.App(app_mod.build_parser().parse_args(["--config", str(cfg)]))
+    row = site._normalize({"title": "Kontoauszug 3/2026", "kind": "cat_sonstige",
+                           "date": "2026-03-31", "item_id": "document:K1"})
+    assert app._record_statement_doc(row) == 1
+    (rec,) = app.discovery.data.values()
+    assert rec["category"] == site.filed_category(row) == doc_types.STATEMENT
+    monkeypatch.setattr(site, "listed_rows", lambda page, config=None, fresh=False: [dict(row)])
+    found = site.resolve_item(None, rec["title"], rec["date"], rec["account"],
+                              rec["occurrence"], item_id=rec["item_id"],
+                              category=rec["category"], number_rows=app._numbered,
+                              config=config)
+    assert found["item_id"] == "document:K1"
+
+
 def test_a_statement_keeps_the_kind_its_row_names():
     row = {"title": "Kreditkartenabrechnung", "category": "Credit Card Statement"}
     assert site.filed_category(row) == "Credit Card Statement"

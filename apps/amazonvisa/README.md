@@ -57,15 +57,18 @@ comes from the portal's document store, asked for without cookies. No
 control is pressed and the app never signs in or answers a prompt.
 
 - The card list names every card contract, and each contract's statement
-  history is read whole. A statement with no PDF yet is counted and said.
+  history is read whole. A statement with no PDF yet, its fields empty
+  or left out, is counted and said.
 - Each document category the portal lists is read, and a document that is
   not a PDF is counted and said. A document that is also a statement is
   listed once.
-- A statement without the fields that name its PDF, an answer with no card
-  in it, a category answer without its list, its documents or its size, a
-  category whose documents fill the whole answer of 100, or a statement
-  list with records still pending stops Discover before any of the list is
-  recorded.
+- An answer with no card in it, a card whose statement rows all leave out
+  the fields that name their PDFs, a statement row with one of them and
+  not the other, a categories answer that holds something but not their
+  list, a category without its documents or its size, a category whose
+  documents fill the whole answer of 100, or a statement list with
+  records still pending stops Discover before any of the list is
+  recorded. An empty categories answer is no categories.
 - A date that comes with a time and a zone is its day in Berlin. A plain
   day is taken as it is.
 - A call the portal never answers is given up on after 30 seconds.

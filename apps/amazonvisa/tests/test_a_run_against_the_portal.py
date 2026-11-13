@@ -533,7 +533,8 @@ def _without(*keys):
 
 
 MISSING = {
-    # A statement row without the fields that say which PDF it is.
+    # The only statement row of a contract without the fields that say
+    # which PDF it is, and one without one of them.
     "statement_without_its_fields": ("statements", _without("documentId", "version")),
     "statement_without_its_id": ("statements", _without("documentId")),
     "statement_without_its_version": ("statements", _without("version")),
@@ -544,7 +545,9 @@ MISSING = {
     # Whoever is signed in holds at least one card.
     "no_card": ("position", lambda d: {"resource": {"cardsInfo": {"cards": []}}}),
     "no_card_list": ("position", lambda d: {"resource": {}}),
-    "categories_without_their_list": ("categories", lambda d: {}),
+    # An answer that holds something, but not the list of categories.
+    "categories_without_their_list": ("categories", lambda d: {"total": 0}),
+    "categories_that_are_no_list": ("categories", lambda d: {"categories": None}),
     "category_without_its_documents": ("documents", lambda d: {"size": d["size"]}),
     "category_without_its_size": ("documents", lambda d: {"documents": d["documents"]}),
     "category_whose_size_disagrees": ("documents", lambda d: dict(d, size=d["size"] + 1)),
@@ -559,6 +562,39 @@ def test_a_missing_field_stops_the_listing_rather_than_read_as_nothing_there(hom
     home.bank.categories = {"cat_contratos": [document("V1")]}
     endpoint, bend = MISSING[missing]
     home.bank.bend = {endpoint: bend}
+    discover_stops(home)
+
+
+def test_an_empty_categories_answer_is_no_categories(home):
+    """The contributor's own run read an empty answer as no categories, so
+    stopping on it could keep Discover from ever finishing there."""
+    home.bank.statements = {CARD: [statement("S1")]}
+    home.bank.bend = {"categories": lambda d: {}}
+    code, _said = home.run_all()
+    assert code == 0
+    assert home.listed_whole()
+    assert home.on_disk() == ["S1"]
+    assert "documents" not in home.bank.asked
+
+
+def test_a_statement_without_either_field_beside_others_is_counted_as_no_pdf_yet(home):
+    """A statement whose PDF is not out yet may come without both fields,
+    from a serializer that leaves out what is empty."""
+    home.bank.statements = {CARD: [{"statementDate": "2031-03-02"}, statement("S1")]}
+    code, said = home.run_all()
+    assert code == 0
+    assert home.listed_whole()
+    assert "1 statement(s) have no PDF available yet" in said
+    assert home.on_disk() == ["S1"]
+
+
+def test_every_statement_of_a_card_without_either_field_stops_the_listing(home):
+    """Every row of a contract without them is the answer's shape changing,
+    not statements still pending."""
+    home.bank.cards = [CARD, OTHER_CARD]
+    home.bank.statements = {CARD: [statement("S1")],
+                            OTHER_CARD: [{"statementDate": "2031-03-02"},
+                                         {"statementDate": "2031-02-02"}]}
     discover_stops(home)
 
 
