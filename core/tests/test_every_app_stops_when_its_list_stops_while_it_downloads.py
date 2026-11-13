@@ -194,6 +194,11 @@ ITS_OWN = {
         "SessionExpired there and reaches the run, the connect form stops it as "
         "NotConnected, and a list that still shows invoices leaves the refusal that "
         "invoice's alone",
+    ("sdge", "download_bill", ("_fetch",)):
+        "a refusal of one bill's PDF, after which Billing History is opened and read "
+        "again. A sign-out or a list that stops shows there and reaches the run, and a "
+        "list that still reads leaves the refusal that bill's alone, so one bill SDG&E "
+        "will not give never stops every later run at it",
     ("ing", "download_document", ("_fetch",)):
         "a refusal of one document's link, a 401, a 403 or a sign-in page, after which "
         "its list is opened by its own address and read again. A sign-out or a list that "

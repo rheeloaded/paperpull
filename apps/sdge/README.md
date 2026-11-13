@@ -29,7 +29,10 @@ redirect followed, and kept only when it is a PDF. Before each bill the
 list is opened again and the bill is fetched only when exactly one row
 still carries its invoice id and date. A list the app cannot read stops
 rather than being called whole. If the portal answers as signed out, the
-run stops and keeps what it saved. Sign in again and run Resume.
+run stops and keeps what it saved. Sign in again and run Resume. A bill
+the portal refuses has Billing History read again first. A list that still
+reads leaves that bill counted as failed with nothing saved, the run goes
+on to the other bills, and the next run tries it again.
 
 ## Validation status
 

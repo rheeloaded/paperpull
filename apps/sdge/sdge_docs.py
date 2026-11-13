@@ -592,9 +592,10 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except site.SessionExpired:
-                # The portal answered a bill as a signed-out session. Every
-                # bill after it would get the same answer, so the run stops
-                # here, with nothing recorded against this one.
+                # Billing History, opened for this bill or read again after
+                # the bill was refused, answered as a signed-out session.
+                # Every bill after it would get the same answer, so the run
+                # stops here, with nothing recorded against this one.
                 self.session_ended()
             except site.ListStopped as stop:
                 # Billing History could not be read again for this bill.

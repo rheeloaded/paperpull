@@ -58,7 +58,6 @@ REFUSED_STATUSES = (401, 403, "401", "403")
 # on 2026-11-12. Ziply Fiber was mended that day.
 LEFT = {
     "mtb": "download_statement",
-    "sdge": "_fetch",
     "simmons": "_fetch_asked",
     "stripe": "_fetch_file",
     "tualatin": "_fetch",

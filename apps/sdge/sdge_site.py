@@ -23,8 +23,11 @@ CLICKED HERE:
   * A signed-out request for that address answers 302 to
     /portal/PreLogin/Validate, and the portal's scripts treat a JSON body
     with StatusCode 401 as signed out. Either, or an HTML page where a PDF
-    was expected, raises SessionExpired, and the run stops for the account
-    holder rather than filing the bill for manual review.
+    was expected, has Billing History read again. A list that shows the
+    sign-in page raises SessionExpired, and the run stops for the account
+    holder rather than filing the bill for manual review. A list that still
+    reads fails that one bill, and the run goes on. What the portal answers
+    a bill it will not give has not been seen.
 
 Sign-in (password, SMS code, reCAPTCHA) is the account holder's own, in the
 browser. No other host is ever allowed: not www.sdge.com, not the
@@ -281,7 +284,9 @@ def statement_date(text) -> Optional[str]:
 class SessionExpired(Exception):
     """My Energy Center answered as a signed-out session: its sign-in page,
     a redirect where a bill was asked for, a 401, or an HTML or JSON body
-    where a PDF was expected. The run stops for the account holder."""
+    where a PDF was expected. The run stops for the account holder. A bill
+    refused that way raises it only when Billing History, read again, shows
+    the sign-in page too (download_bill)."""
 
 
 def looks_signed_out(page) -> bool:
@@ -987,8 +992,8 @@ def _fetch(page, invoice_id: str, out_path: Path, trace: Optional[list]) -> bool
     """GET the bill's own address with the session's cookies, no redirect
     followed, and keep it only when it is a PDF (application/pdf, whatever
     its case or content-disposition, and a body starting %PDF). A redirect,
-    a 401 or 403, or an HTML or JSON body is the portal saying the session
-    has ended."""
+    a 401 or 403, or an HTML or JSON body raises SessionExpired, which
+    download_bill weighs against Billing History read again."""
     url = download_url(invoice_id)
     if not url:
         if trace is not None:
@@ -1043,9 +1048,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     `iso_date`. Billing History is opened again and the bill is fetched only
     when exactly one row there carries that same invoice id and statement
     date. `dl_dir` is unused: nothing here goes through the browser's
-    downloads. Nothing is pressed. SessionExpired propagates to the run, and
-    so does ListStopped when Billing History cannot be read again, since
-    every bill after this one would read the same list."""
+    downloads. Nothing is pressed. SessionExpired from reading the list
+    propagates to the run, and so does ListStopped when Billing History
+    cannot be read again, since every bill after this one would read the
+    same list.
+
+    A bill answered with a redirect, a 401 or 403, or a page or JSON where
+    its PDF should be has Billing History opened and read again, the same
+    read that proves a session. A session that has ended shows its sign-in
+    page there, and its SessionExpired stops the run. A list that still
+    reads leaves the refusal this bill's own, so it fails alone, since a
+    stop here would stop every run at this bill for good. The bill is not
+    asked for a second time."""
     out_path = Path(out_path)
     inv = (document_id or "").strip()
     if href != DOWNLOAD_PATH or not INVOICE_ID_RE.fullmatch(inv):
@@ -1064,7 +1078,20 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         if trace is not None:
             trace.append({"note": "no single row matches the record", "matches": len(found)})
         return False
-    return _fetch(page, inv, out_path, trace)
+    try:
+        return _fetch(page, inv, out_path, trace)
+    except SessionExpired:
+        # A refusal may be the session ending or this one bill. Billing
+        # History is opened again, and a session that ended shows its
+        # sign-in page there and stops the run. One that still reads leaves
+        # this bill failed, so it never stops every later run at the same
+        # bill.
+        _open(page)
+        _bills(page)
+        log.info("the bill dated %s was refused while the list still reads", iso_date)
+        if trace is not None:
+            trace.append({"note": "refused, the list still reads"})
+        return False
 
 
 # ---------------------------------------------------------------------------
