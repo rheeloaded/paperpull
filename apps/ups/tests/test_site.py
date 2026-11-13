@@ -105,6 +105,7 @@ class _Page:
     def __init__(self, rows, pdf=None):
         self.url = site.BASE + "/home"
         self.rows, self.pdf = rows, pdf
+        self.list_status = 200
         self.listeners, self.posted = [], []
 
     def on(self, _event, fn):
@@ -117,7 +118,7 @@ class _Page:
         self.url = url
         if url == site.INVOICES_PAGE:
             for resp in [_Resp(site.LIST_API, '{"invoiceStatus":["OPEN"]}', []),
-                         _Resp(site.LIST_API, "{}", self.rows)]:
+                         _Resp(site.LIST_API, "{}", self.rows, self.list_status)]:
                 for fn in list(self.listeners):
                     fn(resp)
 
@@ -189,13 +190,17 @@ def test_a_sign_in_answer_stops_the_run(tmp_path):
     page = _Page([_row(1, "2031-02-14")])
     site.capture_list(page)
 
-    def refused_then_signed_out(_js, args):
-        page.url = "https://www.ups.com/lasso/login"
+    def refused_then_list_refused(_js, args):
+        # The list call is answered 401 from now on. The rows ride along,
+        # so only the status says the list was refused.
+        page.list_status = 401
+        page.posted.append(args)
         return {"status": 401, "url": site.DOWNLOAD_API}
-    page.evaluate = refused_then_signed_out
-    page.goto = lambda url, **_: None
+    page.evaluate = refused_then_list_refused
     with pytest.raises(site.SessionExpired):
         site.download_bill(page, None, "2031-02-14", tmp_path / "i.pdf", document_id="row1")
+    assert len(page.posted) == 1 and page.url == site.INVOICES_PAGE
+    assert not (tmp_path / "i.pdf").exists()
     page = _Page([])
     page.url = "https://www.ups.com/lasso/login"
     page.goto = lambda url, **_: None

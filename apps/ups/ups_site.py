@@ -481,6 +481,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     if row_date(row) != iso_date:
         log.info("the listed invoice's date does not match the record's %s", iso_date)
         return False
+    # Where the tab is says nothing about this invoice, so a tab off the
+    # Billing Center stops the run here, before anything is asked and
+    # unweighed. Only what UPS answers for the invoice itself is weighed.
+    if not on_billing(page):
+        raise SessionExpired("the UPS tab is not on a signed-in Billing Center page")
     try:
         r = _post(page, DOWNLOAD_API, headers, download_body(row))
     except SessionExpired:

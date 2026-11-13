@@ -609,6 +609,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     link = link or (href if is_safe_url(href) else "")
     if not link:
         raise NeedsPerson("Stripe lists %s with no download link" % (title or "a document"))
+    # Where the tab is says nothing about this document, so a tab off the
+    # account's Dashboard pages stops the run here, before anything is
+    # asked and unweighed. Only what Stripe answers for the document itself
+    # is weighed.
+    if not on_dashboard(page):
+        raise SessionExpired("the Stripe tab is not on a signed-in Dashboard page")
     try:
         r = _fetch_file(page, link)
         if r.get("json") is not None:

@@ -76,6 +76,10 @@ class Page:
         self.refused, self.refusal, self.signs_out = set(refused), REFUSALS[refusal], signs_out
         self.list_status, self.rows = 200, ROWS
         self.listeners, self.asked, self.lists_read = [], [], 0
+        # Where the next read of My Invoices leaves the tab instead, with
+        # the list still received, as when UPS moves it off the Billing
+        # Center while the list loads.
+        self.lands_off = None
 
     def on(self, _event, fn):
         self.listeners.append(fn)
@@ -88,6 +92,8 @@ class Page:
         if url != site.INVOICES_PAGE:
             return
         self.lists_read += 1
+        if self.lands_off:
+            self.url, self.lands_off = self.lands_off, None
         if self.rows is None:
             return
         for resp in [Resp('{"invoiceStatus":["OPEN"]}', []), Resp("{}", self.rows, self.list_status)]:
@@ -172,6 +178,24 @@ def test_the_list_read_after_a_refusal_serves_the_next_invoice(tmp_path):
     assert page.lists_read == 2
 
 
+OFF_THE_BILLING_CENTER = "https://www.ups.com/us/en/Home.page"
+
+
+def test_a_tab_off_the_billing_center_stops_unweighed_with_nothing_asked(tmp_path):
+    """Where the tab is says nothing about one invoice. A tab off the
+    Billing Center when the invoice is about to be asked for stops the
+    run as it did, with the invoice never asked and the list not read
+    again for it. Weighed against the list, which opens the Billing
+    Center again on its way, it failed an invoice never asked for."""
+    page = Page()
+    page.lands_off = OFF_THE_BILLING_CENTER
+    with pytest.raises(site.SessionExpired):
+        take(page, tmp_path / "i.pdf")
+    assert not (tmp_path / "i.pdf").exists()
+    assert page.asked == []
+    assert page.lists_read == 1
+
+
 def make_app(tmp):
     config = json.loads((HERE / "config.example.json").read_text())
     config.update({"owner": "Tester Example", "output_dir": str(Path(tmp) / "out"),
@@ -181,13 +205,15 @@ def make_app(tmp):
     return docs.App(docs.build_parser().parse_args(["--resume", "--config", str(cfg)]))
 
 
-def run_with(tmp_path, page):
+def run_with(tmp_path, page, then=None):
     """A Run All's downloads over the three listed invoices, with what it
-    printed."""
+    printed. `then` changes the page once the list is recorded."""
     app = make_app(tmp_path)
     for r in site.collect_download_docs(page):
         app._record_rawdoc(r, site.BILLING_URL)
     app.discovery.save()
+    if then:
+        then()
     app.check_session = lambda p: None
     app._on_its_site = lambda: page
     app._dl_dir = None   # set where the app opens its page, which this skips
@@ -214,6 +240,22 @@ def test_one_invoice_refused_while_the_list_reads_fails_alone_and_the_rest_are_s
     assert said.count("Nothing was saved, and the next run tries it again") == 1
     assert "session has expired" not in said
     assert page.asked.count(row(2)["invoiceNumber"]) == 1
+
+
+def test_a_tab_moved_off_the_billing_center_stops_the_run_and_fails_nothing(tmp_path):
+    page = Page()
+
+    def moved_off():
+        # The list kept is old, so the first invoice reads it again, and
+        # that read leaves the tab off the Billing Center.
+        site._captured["at"] = 0.0
+        page.lands_off = OFF_THE_BILLING_CENTER
+    app, ended, said = run_with(tmp_path, page, then=moved_off)
+    assert isinstance(ended, SystemExit), said
+    assert "Nothing was saved" not in said
+    assert "Failed" not in {v["state"] for v in app.progress.data.values()}
+    assert app.stats["failed"] == 0
+    assert page.asked == []
 
 
 def test_one_invoice_refused_and_the_list_after_it_stop_the_run(tmp_path):

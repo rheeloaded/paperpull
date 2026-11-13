@@ -100,6 +100,10 @@ class Page:
         self.rows = ROWS
         self.listeners, self.asked, self.lists_read = [], [], 0
         self.context = Context(self)
+        # Where the next read of the tax list leaves the tab instead, with
+        # the list still received, as when the Dashboard moves it off the
+        # account's pages while the list loads.
+        self.lands_off = None
 
     def refuse_now(self):
         if self.signs_out:
@@ -125,6 +129,8 @@ class Page:
             return
         for fn in list(self.listeners):
             fn(resp)
+        if path == site.TAX_PATH and self.lands_off:
+            self.url, self.lands_off = self.lands_off, None
 
     def wait_for_timeout(self, _ms):
         pass
@@ -205,6 +211,27 @@ def test_a_document_given_reads_no_list_again(tmp_path):
     assert page.lists_read == 1
 
 
+OFF_THE_DASHBOARD = "https://dashboard.stripe.com/settings"
+
+
+def test_a_tab_off_the_dashboard_stops_unweighed_with_nothing_asked(tmp_path, monkeypatch):
+    """Where the tab is says nothing about one document. A tab off the
+    account's Dashboard pages when the document is about to be asked for
+    stops the run as it did, with the document never asked and the lists
+    not read again for it."""
+    page = Page()
+    page.lands_off = OFF_THE_DASHBOARD
+    reads = []
+    listed = site.list_documents
+    monkeypatch.setattr(site, "list_documents", lambda p: reads.append(p) or listed(p))
+    with pytest.raises(site.SessionExpired):
+        take(page, tmp_path / "i.pdf")
+    assert not (tmp_path / "i.pdf").exists()
+    assert page.asked == []
+    # The one read is the fresh link's own, before anything is asked.
+    assert len(reads) == 1
+
+
 def make_app(tmp):
     config = json.loads((HERE / "config.example.json").read_text())
     config.update({"owner": "Tester Example", "output_dir": str(Path(tmp) / "out"),
@@ -214,13 +241,15 @@ def make_app(tmp):
     return docs.App(docs.build_parser().parse_args(["--resume", "--config", str(cfg)]))
 
 
-def run_with(tmp_path, page):
+def run_with(tmp_path, page, then=None):
     """A Run All's downloads over the three listed invoices, with what it
-    printed."""
+    printed. `then` changes the page once the lists are recorded."""
     app = make_app(tmp_path)
     for r in site.collect_download_docs(page):
         app._record_rawdoc(r, site.BILLING_URL)
     app.discovery.save()
+    if then:
+        then()
     app.check_session = lambda p: None
     app._on_its_site = lambda: page
     app._dl_dir = None   # set where the app opens its page, which this skips
@@ -247,6 +276,22 @@ def test_one_document_refused_while_the_lists_read_fails_alone_and_the_rest_are_
     assert said.count("Nothing was saved, and the next run tries it again") == 1
     assert "session has expired" not in said
     assert page.asked.count("https://files.stripe.com/f2") == 1
+
+
+def test_a_tab_moved_off_the_dashboard_stops_the_run_and_fails_nothing(tmp_path):
+    page = Page()
+
+    def moved_off():
+        # The lists kept are old, so the first document reads them again,
+        # and that read leaves the tab off the account's pages.
+        site._cache.update(at=0.0, docs=[])
+        page.lands_off = OFF_THE_DASHBOARD
+    app, ended, said = run_with(tmp_path, page, then=moved_off)
+    assert isinstance(ended, SystemExit), said
+    assert "Nothing was saved" not in said
+    assert "Failed" not in {v["state"] for v in app.progress.data.values()}
+    assert app.stats["failed"] == 0
+    assert page.asked == []
 
 
 def test_one_document_refused_and_the_lists_after_it_stop_the_run(tmp_path):
