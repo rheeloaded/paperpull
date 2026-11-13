@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from paperpull_core import intake
+from paperpull_core import refused
 from paperpull_core.urls import host_matches, host_of
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
@@ -506,6 +507,19 @@ class ListingIncomplete(Exception):
     error (not an auth failure). Raised rather than returning an empty list, so
     a transient 429/5xx/timeout stops the surface loudly instead of recording an
     empty success and leaving a document silently missing from the archive."""
+
+
+class ListStopped(Exception):
+    """A list read again after one of its documents was refused did not
+    answer, answered with something that is not its list, or held nothing
+    (paperpull_core.refused). None of those says the session ended or that
+    it still holds, so the run stops with the list unread, nothing recorded
+    against the document. `docs` holds what was read before it stopped. Its
+    words are this module's own, never the page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 def _has_headers(page) -> bool:
@@ -1071,9 +1085,12 @@ def download_document(page, doc_id: str, out_path) -> bool:
 
     An EOB's PDF answered with a 401, a 403, no session headers or a sign-in
     page has its claim type's list read again, with the same call that
-    proves a session. A session that has ended is refused the list too, and
-    its SessionExpired stops the run there. A list that still reads, or one
-    that did not come, leaves the refusal this EOB's own, so it fails alone,
+    proves a session (paperpull_core.refused). A session that has ended is
+    refused the list too, and its SessionExpired stops the run there. A list
+    that did not come (ListingIncomplete, a timeout, any other failure) or
+    that holds nothing says neither, and raises ListStopped, which stops the
+    run with the list unread and nothing recorded against the EOB. A list
+    that still reads leaves the refusal this EOB's own, so it fails alone,
     since a stop here would stop every run at this EOB for good. The EOB is
     not asked for after the list is read again.
     """
@@ -1098,17 +1115,13 @@ def download_document(page, doc_id: str, out_path) -> bool:
     except SessionExpired:
         # A refusal may be the session ending or this one EOB. The list is
         # read again, and a session that ended shows there and stops the
-        # run. One that still reads leaves this EOB failed, so it never
-        # stops every later run at the same EOB. A list that did not come
-        # fails this EOB alone, as it does in resolve_eob_id, and a session
-        # that ended shows at the next EOB's own list.
+        # run. A list that did not come, or holds nothing, proves neither,
+        # so it stops the run with the list unread (ListStopped). One that
+        # still reads leaves this EOB failed, so it never stops every later
+        # run at the same EOB.
         start, end = _date_window()
-        try:
-            _summary_rows(page, claim_type, start, end)
-        except ListingIncomplete:
-            log.warning("Anthem's %s EOB list did not come after its %s was refused",
-                        claim_type, doc_kind)
-            return False
+        refused.list_again(lambda: _summary_rows(page, claim_type, start, end),
+                           SessionExpired, ListStopped)
         log.info("the %s %s was refused while the list still reads", claim_type, doc_kind)
         return False
 

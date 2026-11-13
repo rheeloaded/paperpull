@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import refused
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core import tabs
@@ -678,11 +679,31 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.ListStopped:
+                # The EOB list, read again after this EOB was refused, did
+                # not come or held nothing. Every EOB after it reads the
+                # same list, so the run stops here with nothing recorded
+                # against this one.
+                self.list_changed()
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
+
+    def list_changed(self) -> None:
+        """Stop the run because the EOB list, read again after one EOB was
+        refused, did not come or held nothing, which says neither that the
+        session ended nor that it still holds. Nothing is recorded against
+        the EOB, and the run leaves as one whose list did not end whole,
+        which only a run that lists carries on from, so the panel offers
+        that run rather than Continue, which would stop at the same EOB
+        again (listing.read_again_stopped, #124)."""
+        log.info("the EOB list could not be read again after an EOB was refused")
+        self.write_failure("read the eob list again", "the eob list did not answer")
+        listing.read_again_stopped(self, (
+            "Anthem's EOB list could not be read again after an EOB was refused, "
+            "so this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Download one document PDF straight to its final path.
@@ -713,7 +734,9 @@ class App:
             saved = site.download_document(page, doc.document_id, out_path)
         except site.SessionExpired:
             # The EOB list, read for this EOB or read again after the EOB was
-            # refused, answered as a signed-out session. Stop the whole run.
+            # refused, answered as a signed-out session. A list read again
+            # that did not come raises ListStopped instead, which the loop
+            # stops on with the list unread. Stop the whole run.
             # Continuing would file every remaining document as "manual
             # review" and finish looking successful while having saved
             # nothing.
@@ -906,7 +929,7 @@ class App:
         print("  !! Anthem session expired. Sign in again, then run Resume.")
         self.stats["session_expired"] = 1
 
-    def _listing_incomplete(self, err: Exception) -> None:
+    def _listing_incomplete(self, err: object) -> None:
         """A listing failed with a server/rate-limit error (not auth). Report it
         and count it as failed so the run exits nonzero instead of looking clean
         while a document is silently missing from the archive."""
@@ -914,13 +937,26 @@ class App:
               f"then run Resume.")
         self.stats["failed"] += 1
 
-    def _save_collected(self, kind: str, rows: List[dict], fetch_fn, beside=None) -> None:
+    def _save_collected(self, kind: str, rows: List[dict], fetch_fn, beside=None,
+                        list_fn=None) -> None:
         """Shared save loop for the API-fetched surfaces (member documents, ID
         cards, letters). Each row is filing metadata; `fetch_fn(page, row)`
         returns the PDF bytes on demand. Dedupe by the row's delete-safe key,
         validate the PDF, file it in its folder and index it. A document already
         downloaded once is never re-fetched (the sticky downloaded_ok marker),
         so this hooks straight into fetch-only-new.
+
+        `list_fn(page)` is the surface's own list, for a surface whose
+        documents Anthem can refuse (member documents, ID cards). A document
+        refused as a signed-out session has that list read again
+        (paperpull_core.refused). A list refused too ends the surface as
+        signed out, as before. A list that did not come or holds nothing
+        ends the surface as its own list does when it will not open, with
+        nothing recorded against the document. A list that still reads
+        leaves the refusal that document's own, so it fails alone, and the
+        surface goes on. It is not asked for a second time. Letters and
+        claims summaries are made here from what their lists carry, never
+        refused, and pass none.
 
         `beside(row)` gives the files kept beside a document's PDF, as
         (ending, bytes), the CSV of a claims summary. Each is written with the
@@ -957,11 +993,32 @@ class App:
             if getattr(self.args, "dry_run", False):
                 print(f"  DRY RUN - would save: {filename}")
                 continue
+            refused_alone = False
             try:
                 pdf = fetch_fn(self._on_its_site(), r)
             except site.SessionExpired:
-                self._session_expired()
-                return
+                if list_fn is None:
+                    self._session_expired()
+                    return
+                # A refusal may be the session ending or this one document.
+                # The surface's list is read again, and a session that ended
+                # is refused there too. A list that did not come proves
+                # neither and ends this surface, as it does when it will not
+                # open. One that still reads leaves this document failed, so
+                # it never ends every later pass at the same document.
+                try:
+                    refused.list_again(lambda: list_fn(self._on_its_site()),
+                                       site.SessionExpired, site.ListStopped)
+                except site.SessionExpired:
+                    self._session_expired()
+                    return
+                except site.ListStopped:
+                    log.info("the %s list could not be read again after one was refused", kind)
+                    self._listing_incomplete(
+                        "The %s list could not be read again after one was refused" % kind)
+                    return
+                log.info("a document of the %s was refused while its list still reads", kind)
+                pdf, refused_alone = None, True
             except Exception as e:
                 log.warning("could not fetch %s: %s", label, e)
                 self.stats["failed"] += 1
@@ -969,8 +1026,10 @@ class App:
             if not pdf:
                 # Nothing was saved, so nothing is in Manual Review. It is a
                 # failure, and the next run fetches it again (#152).
+                why = ("Refused while its list still reads" if refused_alone
+                       else "Could not fetch the document")
                 rec = {"state": State.FAILED.value, "title": label,
-                       "notes": "Could not fetch the document", "downloaded_ok": False}
+                       "notes": why, "downloaded_ok": False}
                 # A document saved before keeps its record while a Download
                 # again saves no copy of its own (paperpull_core.saved_copy).
                 if not saved_copy.holds(self, key, rec):
@@ -1084,7 +1143,8 @@ class App:
         self._save_collected(
             "member documents", rows,
             lambda pg, r: site.download_member_document(
-                pg, r["coverage_key"], r["document_type"]))
+                pg, r["coverage_key"], r["document_type"]),
+            list_fn=site.list_member_documents)
 
     def cmd_id_cards(self):
         """Download each member's digital insurance / ID card as a PDF (front and
@@ -1104,7 +1164,8 @@ class App:
         self._save_collected(
             "ID cards", rows,
             lambda pg, r: site.download_id_card(
-                pg, r["patient"], r["card_type"], r.get("ordinal", 0)))
+                pg, r["patient"], r["card_type"], r.get("ordinal", 0)),
+            list_fn=site.list_id_cards)
 
     def cmd_letters(self):
         """Download secure Message Center letters, one PDF per message. READ-SAFE:

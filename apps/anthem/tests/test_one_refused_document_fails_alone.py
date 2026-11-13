@@ -8,8 +8,13 @@ stopped there, and Continue stopped at it again, the loop of #124. Now the
 claim type's list is read again with the call that proves a session. A list
 refused too stops the run as signed out, as before. A list that still reads
 leaves that EOB failed with nothing saved, the run goes on, and the next run
-tries it again. The EOB is never asked for after the list is read again.
-Every name, claim number, token and page word here is invented.
+tries it again. A list that did not come, a 500, a timeout or one that holds
+nothing, says neither. It was read as that EOB's own failure, so the run
+went on with no session shown, and now it stops the run with the list
+unread and nothing recorded against the EOB, so a run that lists takes it
+again (paperpull_core.refused). The EOB is never asked for after the list
+is read again. Every name, claim number, token and page word here is
+invented.
 """
 import base64
 import json
@@ -25,7 +30,8 @@ sys.path.insert(0, str(APP / "tests"))
 
 import storage  # noqa: E402,F401  binds this provider's AppSpec
 import anthem_docs as app_mod  # noqa: E402
-from paperpull_core import testkit  # noqa: E402
+from paperpull_core import listing, testkit  # noqa: E402
+from paperpull_core.run_reporting import ListNotRead  # noqa: E402
 from test_a_claim_number_shown_beside_its_token import (  # noqa: E402
     FakePage, claim_row, signed_in)
 
@@ -61,9 +67,10 @@ def doc_id(claim=REFUSED):
 class Refuses(FakePage):
     """Answers the summary with the rows given and every EOB's PDF, except
     the refused claim's, which is answered as `refusal` says. With
-    `signs_out`, the session ends at that refusal, so the summary after it
-    is refused as well, by `signs_out`'s answer. Notes every call in
-    order."""
+    `signs_out`, the summary after that refusal is answered by
+    `signs_out`, a refusal for a session that ended there, or a list that
+    does not come, or raised when it is an exception, a timeout. Notes
+    every call in order."""
 
     def __init__(self, rows_by_type, refusal, signs_out=None, pdf=b"%PDF-1.4 invented"):
         super().__init__(rows_by_type)
@@ -74,6 +81,8 @@ class Refuses(FakePage):
         if "eob.v1.summary" in js:
             self.calls.append("list")
             if self.ended:
+                if isinstance(self.signs_out, BaseException):
+                    raise self.signs_out
                 return dict(self.signs_out)
             return super().evaluate(js, arg)
         if "eob.v1.download" in js:
@@ -127,16 +136,34 @@ def test_an_eob_refused_and_a_list_refused_after_it_is_a_sign_out(monkeypatch, t
     assert page.calls == asked(REFUSALS[how]) + again
 
 
-def test_an_eob_refused_and_a_list_that_does_not_come_after_it_fails_alone(monkeypatch, tmp_path):
-    """A list that answers neither the rows nor a refusal is a list that did
-    not come, which fails one EOB in resolve_eob_id too, and a session that
-    ended shows at the next EOB's own list."""
+# What the list can answer after a refused EOB that says neither that the
+# session ended nor that it still holds.
+UNREAD = {
+    "500": {"status": 500},
+    "429": {"status": 429},
+    "timeout": TimeoutError("Timeout 30000ms exceeded on made-up-host 4417"),
+    "empty": {"status": 200, "body": {"result": {"data": []}}},
+    "not a list": {"status": 200, "body": {"result": "made-up page words 4417"}},
+}
+
+
+@pytest.mark.parametrize("list_answer", sorted(UNREAD))
+def test_an_eob_refused_and_a_list_that_does_not_come_after_it_leaves_the_list_unread(
+        monkeypatch, tmp_path, caplog, list_answer):
+    """It was this EOB's own failure, or a timeout let out to the loop, so
+    the run went on with no session shown. A list that holds nothing is not
+    a sign-out either."""
     signed_in(monkeypatch)
-    page = Refuses(rows(), REFUSALS["403"], signs_out={"status": 500})
+    page = Refuses(rows(), REFUSALS["403"], signs_out=UNREAD[list_answer])
     out = tmp_path / "eob.pdf"
-    assert site.download_document(page, doc_id(), out) is False
+    with caplog.at_level(logging.INFO), pytest.raises(site.ListStopped) as got:
+        site.download_document(page, doc_id(), out)
+    assert not isinstance(got.value, site.SessionExpired)
     assert not out.exists()
+    # The EOB is not asked for after the list.
     assert page.calls == asked(REFUSALS["403"])
+    assert "still reads" not in caplog.text
+    assert "4417" not in caplog.text and "4417" not in str(got.value)
 
 
 def test_the_next_eob_is_taken_after_one_was_refused(monkeypatch, tmp_path):
@@ -209,3 +236,24 @@ def test_one_eob_refused_and_the_list_after_it_stop_the_run_as_signed_out(run, c
     # Nothing is asked for once the list was refused.
     assert page.calls[page.calls.index("eob " + REFUSED[1]):] == [
         "eob " + REFUSED[1], "eob " + REFUSED[1], "list", "list"]
+
+
+@pytest.mark.parametrize("list_answer", sorted(UNREAD))
+def test_one_eob_refused_and_a_list_that_does_not_come_stop_the_run_with_the_list_unread(
+        run, capsys, list_answer):
+    """Every EOB after it reads the same list, so the run stops at it, and
+    nothing is recorded against it. A run that lists takes it again, and
+    the panel offers that run, not Continue (#124)."""
+    page = Refuses(rows(), REFUSALS["403"], signs_out=UNREAD[list_answer],
+                   pdf=testkit.text_pdf(["Anthem made-up EOB"]))
+    app, ended, said = run(page, capsys)
+    assert isinstance(ended, ListNotRead), said
+    assert "id:" + doc_id() not in app.progress.data
+    assert app.stats["failed"] == 0
+    assert "could not be read again" in said
+    assert "session has expired" not in said and "Nothing was saved" not in said
+    assert listing.last(app) == listing.STOPPED
+    # Nothing is asked for once the list did not come.
+    assert page.calls[page.calls.index("eob " + REFUSED[1]):] == [
+        "eob " + REFUSED[1], "eob " + REFUSED[1], "list"]
+    assert not app.stats.get("session_expired")
