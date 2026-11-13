@@ -202,6 +202,13 @@ SECURITY_CHALLENGE_MARKERS = [
     "your session has expired", "session timed out",
 ]
 
+# The signed-in Postfach keeps a password field in hidden sign-in UI, which
+# the contributor's own signed-in session showed (#216). So only a password
+# field the page draws makes a sign-in page here, the reason named in
+# core/tests/test_every_app_counts_every_password_field.py. The core's
+# recorder takes this value and no other (recorder.DRAWN_PASSWORD_FIELD).
+PASSWORD_FIELD = "input[type='password']:visible"
+
 # Authentication and OAuth callback pages are never a document list.
 LOGIN_URL_MARKERS = ["/login", "/logout", "?logout"]
 
@@ -211,8 +218,8 @@ RATE_LIMIT_MARKERS = ["zu viele anfragen", "später erneut", "too many requests"
 
 
 def looks_signed_out(page) -> bool:
-    """True where the page is a sign-in page by its address, shows a
-    password field, or cannot say where it is."""
+    """True where the page is a sign-in page by its address, draws a
+    password field (PASSWORD_FIELD), or cannot say where it is."""
     try:
         url = (page.url or "").lower()
     except Exception:
@@ -222,7 +229,7 @@ def looks_signed_out(page) -> bool:
     if not is_safe_url(url) or any(m in url for m in LOGIN_URL_MARKERS):
         return True
     try:
-        if page.locator("input[type='password']").count() > 0:
+        if page.locator(PASSWORD_FIELD).count() > 0:
             return True
     except Exception:
         return True
@@ -297,7 +304,7 @@ def _page_summary(page) -> dict:
             pass
     out["controls"] = controls
     try:
-        out["password_fields"] = page.locator("input[type='password']").count()
+        out["password_fields"] = page.locator(PASSWORD_FIELD).count()
     except Exception:
         pass
     return out

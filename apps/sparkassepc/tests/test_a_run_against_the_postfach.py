@@ -724,13 +724,19 @@ def test_login_says_success_only_when_the_list_answers(home, signed_in):
     assert ("Success" in said) is signed_in
 
 
-def test_a_password_field_kept_out_of_sight_still_reads_as_a_sign_in_page(home):
-    """Every password field counts, as in every app but the one named in
-    core/tests/test_every_app_counts_every_password_field.py, since a field
-    kept out of sight may be the next step of a sign-in."""
+def test_only_a_drawn_password_field_reads_as_a_sign_in_page(home):
+    """The signed-in Postfach keeps a password field in hidden sign-in UI,
+    which the contributor's own session showed (#216), so a field kept out
+    of sight leaves the Postfach signed in, while one the page draws is a
+    sign-in page. The reason is named in
+    core/tests/test_every_app_counts_every_password_field.py."""
     home.page.goto(BASE + site.FOLDERS["Posteingang"])
     assert not site.looks_signed_out(home.page)
     home.page.evaluate("""() => document.body.insertAdjacentHTML('beforeend',
         '<form style="display:none"><input type="password" name="pin"></form>')""")
+    assert not site.looks_signed_out(home.page)
+    assert site.survey(home.page, dwell_ms=0)["pages"][0]["password_fields"] == 0
+    home.page.evaluate("""() => document.body.insertAdjacentHTML('beforeend',
+        '<form><input type="password" name="pin2"></form>')""")
     assert site.looks_signed_out(home.page)
     assert site.survey(home.page, dwell_ms=0)["pages"][0]["password_fields"] == 1

@@ -27,6 +27,9 @@ NAMED = {
                    "components that draw it only when it is asked for. A tester's survey of a "
                    "signed-in page counted the one password field the public home page holds, "
                    "which headless Chromium finds with no box (#178).",
+    "sparkassepc": "The signed-in Postfach keeps a password field in hidden sign-in UI. "
+                   "The contributor's live session had the Postfach form and document rows "
+                   "but no visible password field (#216).",
 }
 
 MODULES = sorted(p for p in REPO.glob("apps/*/*.py") if not p.name.startswith("test_"))
