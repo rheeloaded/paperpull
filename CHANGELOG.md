@@ -10,8 +10,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Added
-- **Sparkasse Pforzheim Calw (#175).** Reads the Postfach history and saves
-  direct PDF downloads while preserving their read status.
+- **Sparkasse Pforzheim Calw, the Postfach's direct PDF downloads (#175).**
+  Contributed by @MelleD. It was run on the contributor's own account,
+  where Discover read the Postfach's history and counted the messages
+  with no direct PDF, a Pilot saved two statements, and a second Pilot
+  saved nothing new. It reads Posteingang, Gesendet and Papierkorb page by
+  page in the signed-in tab, pressing only the Postfach's own numbered
+  page buttons and each document's own direct download link, found by
+  its row's identity and never by its subject. Before merging, a page is
+  turned by the page's own pager rather than a form the app sent itself,
+  a subject such as Zinsanpassung no longer stops its download, a pager
+  or page number that cannot be read and rows with no download link
+  anywhere stop the listing rather than read as its end, and a run with
+  no tab of yours on the bank's site opens the Postfach in a tab of its
+  own. The reworked page turns and download press have not been run
+  against the bank yet, and whether the bank marks a document read when
+  its PDF is taken has not been checked.
 
 ## [0.66.0] - 2026-11-13
 
