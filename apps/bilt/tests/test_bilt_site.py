@@ -266,6 +266,7 @@ class Wallet:
         self.list_delay = 0
         self.on_goto = None
         self.signin_for = None           # the date whose tab "signin-for" sends to the sign-in
+        self.tabs_stick = False          # every tab a press opens will not close
         self.pager = False               # the sheet shows a control for more statements
         self.sign_in_drawn = False       # the page draws Bilt's sign-in in place
 
@@ -364,6 +365,7 @@ class Wallet:
 
     def open_tab(self, opener):
         pop = Popup(opener, self.context)
+        pop.stuck = self.tabs_stick
         self.popups.append(pop)
         self.context.emit("page", pop)
         return pop
@@ -1030,12 +1032,105 @@ def test_a_download_address_on_another_host_is_only_noted(tmp_path):
     assert {"note": "details answer", "same_host": False, "same_address": False} in trace
 
 
-def test_a_signed_out_details_answer_stops_for_the_holder(tmp_path):
+def details_refused(status, iso_refused=None):
+    """The details call the statement's button makes the page ask, answered
+    `status`, for every statement or for the one dated `iso_refused`."""
+    def details(sid, iso):
+        code = status if iso_refused in (None, iso) else 200
+        return [details_resp(sid, iso, pdf_url(iso), status=code)]
+    return details
+
+
+@pytest.mark.parametrize("status", [401, 403, 302])
+def test_a_statement_whose_details_call_is_refused_while_the_list_reads_fails_alone(
+        tmp_path, status):
+    """The watch kept the details call's refusal for the page all run, so the
+    list read again after it raised on that same refusal before any list
+    answer was read, and one statement whose details Bilt refused stopped
+    every run (#124). The list is now judged by its own answer."""
     w = Wallet()
-    w.details_for = lambda sid, iso: [details_resp(sid, iso, pdf_url(iso), status=401)]
+    w.details_for = details_refused(status)
+    trace = []
+    got, out = take(w, tmp_path, trace=trace)
+    assert got is False and not out.exists()
+    assert w.presses == THE_LIST + ["Download statement for October 06, 2026"] + THE_LIST
+    assert len(w.gotos) == 2 and no_tab_open(w)
+    assert w.context.request.asked == []
+    assert {"note": "refused, the list still reads"} in trace
+
+
+@pytest.mark.parametrize("ends", ["sign-in page", "list refused"])
+@pytest.mark.parametrize("status", [401, 403, 302])
+def test_a_statement_whose_details_call_is_refused_and_the_list_after_it_is_a_sign_out(
+        tmp_path, status, ends):
+    w = Wallet()
+    w.details_for = details_refused(status)
+
+    def on_goto(wallet):
+        if len(wallet.gotos) < 2:
+            return
+        if ends == "sign-in page":
+            wallet.password = True
+        else:
+            wallet.list_answers = lambda: [list_resp(wallet.statements, status=401)]
+    w.on_goto = on_goto
+    with pytest.raises(site.SessionExpired):
+        take(w, tmp_path)
+    assert [p for p in w.presses if p.startswith("Download")] == [
+        "Download statement for October 06, 2026"]
+    assert len(w.gotos) == 2 and no_tab_open(w)
+
+
+def test_a_refused_list_answer_heard_at_the_press_is_never_forgotten(tmp_path):
+    """Only a statement's own details refusals are forgotten before the list
+    is read again. A refused list answer is the sign-out itself, so the run
+    stops though the wallet loaded afresh reads."""
+    w = Wallet()
+    real = w.press_statement
+
+    def press(sid, iso):
+        w.emit(list_resp(w.statements, status=401))
+        real(sid, iso)
+    w.press_statement = press
+    w.details_for = details_refused(403)
     with pytest.raises(site.SessionExpired):
         take(w, tmp_path)
     assert no_tab_open(w)
+
+
+def test_the_watch_forgets_only_this_pages_details_refusals():
+    w, other = Wallet(), Wallet()
+    watch = site.Run().watch
+    for page, url in ((w, details_url(SID1)), (w, list_url()), (other, details_url(SID2))):
+        r = Resp(url, status=403, page=page)
+        watch.on_response(r)
+    watch.forget_refused_details(w)
+    with pytest.raises(site.SessionExpired):
+        watch.raise_if_signed_out(w)            # its list refusal stays
+    with pytest.raises(site.SessionExpired):
+        watch.raise_if_signed_out(other)        # another page's refusal stays
+    watch = site.Run().watch
+    watch.on_response(Resp(details_url(SID1), status=401, page=w))
+    watch.forget_refused_details(w)
+    watch.raise_if_signed_out(w)
+
+
+@pytest.mark.parametrize("how", ["details refused"] + sorted(TAB_REFUSALS))
+def test_a_refused_statement_whose_tab_will_not_close_stops_the_run(tmp_path, how):
+    """Failing it alone would press the next statement's button with this
+    statement's tab still open, so the run stops there instead, and the
+    list is not read again."""
+    if how == "details refused":
+        w = Wallet()
+        w.details_for = details_refused(403)
+    else:
+        w = refused_wallet(how)
+    w.tabs_stick = True
+    with pytest.raises(pressing.NoAnswer) as stop:
+        take(w, tmp_path)
+    assert stop.value.reason == "the tab stayed open"
+    assert len(w.gotos) == 1
+    assert not (tmp_path / "statements").exists()
 
 
 @pytest.mark.parametrize("pdf,why", [
@@ -1282,7 +1377,7 @@ def run_all(app, caplog):
     return ended, buf.getvalue() + caplog.text
 
 
-@pytest.mark.parametrize("how", ["403", "sign-in page"])
+@pytest.mark.parametrize("how", ["403", "sign-in page", "details refused"])
 def test_one_statement_refused_while_the_list_reads_fails_alone_and_the_rest_are_saved(
         tmp_path, monkeypatch, caplog, how):
     """The refused statement stopped the run before, so the statements after
@@ -1291,6 +1386,9 @@ def test_one_statement_refused_while_the_list_reads_fails_alone_and_the_rest_are
     if how == "403":
         w = Wallet()
         w.tab_status = lambda iso: 403 if iso == refused else 200
+    elif how == "details refused":
+        w = Wallet()
+        w.details_for = details_refused(403, refused)
     else:
         w = Wallet(popup="signin-for")
         w.signin_for = refused
@@ -1316,7 +1414,7 @@ def test_one_statement_refused_while_the_list_reads_fails_alone_and_the_rest_are
     for word in PRIVATE:
         assert word not in seen, word
     # The next run asks for it again, and only for it.
-    w.tab_status, w.popup = None, "pdf"
+    w.tab_status, w.popup, w.details_for = None, "pdf", None
     w.presses.clear()
     ended, said = run_all(app, caplog)
     assert ended is None, said

@@ -247,9 +247,10 @@ ITS_OWN = {
         "the refusal that invoice's alone, so one invoice UPS will not give never stops "
         "every later run at it",
     ("bilt", "download_statement", ("_catch_statement",)):
-        "a statement answered as signed out once its button was pressed, its tab on the "
-        "sign-in page or a refusal at its PDF address, after which the wallet's list is "
-        "read again. A sign-out shows there and reaches the run, a list that stops stops "
+        "a statement answered as signed out once its button was pressed, a refusal of its "
+        "details call, its tab on the sign-in page or a refusal at its PDF address, after "
+        "which the details refusal is forgotten and the wallet's list is read again. A "
+        "sign-out shows there and reaches the run, a list that stops stops "
         "it with the list unread, and a list that still reads leaves the refusal that "
         "statement's alone, so one statement Bilt will not give never stops every later "
         "run at it. The button is not pressed again",

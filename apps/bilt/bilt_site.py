@@ -124,12 +124,13 @@ SIGNED OUT: a sign-in address, a password field, the sign-in drawn on the
 wallet itself, or a 401, 403, redirect or HTML answer to the page's own
 statements requests raises SessionExpired. The run saves, says so and
 stops, and asks for a sign-in again. A wallet that shows neither the
-sign-in nor one Bilt Card still stops the list. A statement whose tab lands
-on the sign-in page, or whose PDF address answers a 401, 403 or redirect,
-has the list read again. A list refused too stops the run as signed out,
-and a list that still reads fails that statement alone, and the next run
-tries it again. What Bilt shows for a statement it will not give has not
-been seen.
+sign-in nor one Bilt Card still stops the list. A statement whose details
+call answers a 401, 403 or redirect, whose tab lands on the sign-in page,
+or whose PDF address answers a 401, 403 or redirect, has the list read
+again. A list refused too stops the run as signed out, and a list that
+still reads fails that statement alone, and the next run tries it again. A
+tab such a statement opened that will not close stops the run. What Bilt
+shows for a statement it will not give has not been seen.
 
 KNOWN CEILINGS
   * One Bilt Card. A wallet that shows none, or more than one, stops the
@@ -390,8 +391,9 @@ class SessionExpired(Exception):
     """Bilt answered as a signed-out session: its sign-in page, a password
     field, its sign-in drawn on the wallet, or a 401, 403, redirect or HTML
     answer to the page's own statements requests. The run stops for the
-    account holder. A statement's tab answered that way raises it only when
-    the list, read again, refuses too (download_statement)."""
+    account holder. A statement's details call or tab answered that way
+    raises it only when the list, read again, refuses too
+    (download_statement)."""
 
 
 class ListStopped(Exception):
@@ -762,7 +764,9 @@ class _Watch:
     def __init__(self):
         self.lists: list = []          # (page, response)
         self.details: list = []        # (page, response)
-        self.signed_out: list = []     # pages a signed-out answer came to
+        # (page, kind) for each signed-out answer, of the list call ("list")
+        # or of a statement's details call ("details").
+        self.signed_out: list = []
 
     def on_response(self, response) -> None:
         try:
@@ -773,7 +777,7 @@ class _Watch:
                 return
             origin = _origin(response)
             if _signed_out_status(response):
-                self.signed_out.append(origin)
+                self.signed_out.append((origin, "list" if list_card_id(url) else "details"))
             elif list_card_id(url):
                 self.lists.append((origin, response))
             else:
@@ -791,8 +795,17 @@ class _Watch:
         return [r for origin, r in self.details[mark[1]:] if origin is page]
 
     def raise_if_signed_out(self, page) -> None:
-        if any(origin is page for origin in self.signed_out):
+        if any(origin is page for origin, _kind in self.signed_out):
             raise SessionExpired("Bilt answered the page's own request as signed out")
+
+    def forget_refused_details(self, page) -> None:
+        """Forget the refusals of a statement's details call heard for
+        `page`, so the list read again after that statement was refused is
+        judged by its own answer, which a session that ended has refused
+        too. A refused list answer is never forgotten, since it is the
+        sign-out itself."""
+        self.signed_out = [(origin, kind) for origin, kind in self.signed_out
+                           if not (origin is page and kind == "details")]
 
 
 class Run:
@@ -1581,6 +1594,16 @@ def _catch_statement(page, run: Run, target: Target, out_path: Path,
             # A page or a download that came while the PDF was read.
             raise _stop("Something more came while the statement was taken, so it was not kept.",
                         "more came while the statement was taken")
+    except SessionExpired:
+        # download_statement weighs a refusal against the list read again,
+        # and a list that reads goes on to the next statement's press. A
+        # tab this press opened that will not close would still be open
+        # then, so the run stops here instead.
+        if not _close_all(popups):
+            _note(trace, note="the tab stayed open", tabs=len(popups))
+            raise _stop("The statement's tab could not be closed, so nothing was taken.",
+                        "the tab stayed open")
+        raise
     finally:
         armed[0] = False
         for source, name, fn in ((page, "download", on_download), (page.context, "page", on_page),
@@ -1784,14 +1807,17 @@ def download_statement(page, run: Run, out_path, *, card_id: str, statement_id: 
     are the statement's own copies saved before, the file its record names,
     which a Download again may get the very bytes of (bind).
 
-    A statement answered as signed out once its button was pressed, its tab
-    on the sign-in page or a 401, 403 or redirect at its PDF address, has
-    the list read again, with the same call that proves a session. A
-    session that has ended is refused the list too, and its SessionExpired
-    stops the run there. A list that still reads leaves the refusal this
-    statement's own, so it fails alone (False), since a stop here would
-    stop every run at this statement for good. Its button is not pressed a
-    second time."""
+    A statement answered as signed out once its button was pressed, a 401,
+    403 or redirect to its details call, its tab on the sign-in page or a
+    401, 403 or redirect at its PDF address, has the list read again, with
+    the same call that proves a session. Its details call's refusal is
+    forgotten first (_Watch.forget_refused_details), so the list is judged
+    by its own answer. A session that has ended is refused the list too,
+    and its SessionExpired stops the run there. A list that still reads
+    leaves the refusal this statement's own, so it fails alone (False),
+    since a stop here would stop every run at this statement for good. Its
+    button is not pressed a second time, and a tab it opened that will not
+    close stops the run before the list is read (_catch_statement)."""
     out_path = Path(out_path)
     if not (card_id and CARD_ID_RE.fullmatch(card_id) and isinstance(statement_id, str)
             and STATEMENT_ID_RE.fullmatch(statement_id) and statement_date(iso_date) == iso_date):
@@ -1823,12 +1849,15 @@ def download_statement(page, run: Run, out_path, *, card_id: str, statement_id: 
         # list is read again, and a session that ended shows there and
         # stops the run. One that still reads leaves this statement failed,
         # so it never stops every later run at the same statement. Its
-        # button is not pressed a second time.
+        # button is not pressed a second time. A refusal of this statement's
+        # details call would raise again on the list's first look, so it is
+        # forgotten first. A refused list answer is kept.
+        run.watch.forget_refused_details(page)
         try:
             read_listing(page, run)
         except ListStopped as stop:
             log.info("the list stopped when read again after the statement dated %s was "
-                     "refused: %s", iso_date, stop)
+                     "refused", iso_date)
             _note(trace, note="the list stopped")
             raise _page_stopped(stop)
         log.info("the statement dated %s was refused while the list still reads", iso_date)
