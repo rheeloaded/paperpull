@@ -688,9 +688,11 @@ class App:
                                            number_rows=self._numbered, twins=alike,
                                            config=self.config)
         except site.SessionExpired:
-            # Stop the whole run. Continuing would file every remaining
-            # document as "manual review" and finish looking successful while
-            # having saved nothing.
+            # The tab, or the list opened again after the document was
+            # refused, shows ING's sign-in page. Stop the whole run.
+            # Continuing would file every remaining document as "manual
+            # review" and finish looking successful while having saved
+            # nothing.
             print("\n  !! ING answered as signed out instead of with the document.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, re-list your statements, then run Resume.")

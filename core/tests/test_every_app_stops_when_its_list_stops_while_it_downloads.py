@@ -186,6 +186,12 @@ ITS_OWN = {
         "SessionExpired there and reaches the run, the connect form stops it as "
         "NotConnected, and a list that still shows invoices leaves the refusal that "
         "invoice's alone",
+    ("ing", "download_document", ("_fetch",)):
+        "a refusal of one document's link, a 401, a 403 or a sign-in page, after which "
+        "its list is opened by its own address and read again. A sign-out or a list that "
+        "stops shows there and reaches the run, and a list that still reads leaves the "
+        "refusal that document's alone, so one document ING will not give never stops "
+        "every later run at it",
     ("firsthorizon", "download_statement", ("_catch_statement",)):
         "a statement whose own address was refused once its Download PDF was pressed, a "
         "401, a 403, a redirect, a page or the sign-in page, with every page the press "

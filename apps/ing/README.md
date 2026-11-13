@@ -118,10 +118,16 @@ window open.
 ## Staying signed in
 
 How long ING keeps a session that only a run uses has not been checked. When
-ING shows its sign-in page, or answers a download as signed out, the run
-stops and says so, and everything saved so far is kept. Sign in again in the
-open window and run Resume, which carries on where it stopped. The app does
-not keep the session alive behind the bank's back.
+ING shows its sign-in page, the run stops and says so, and everything saved
+so far is kept. Sign in again in the open window and run Resume, which
+carries on where it stopped. The app does not keep the session alive behind
+the bank's back.
+
+When ING answers one document with a 401, a 403 or its sign-in page, the
+Postbox is opened and read again. A sign-in page there means you are signed
+out, and the run stops. A list that still reads leaves that one document
+failed with nothing saved, the run goes on to the others, and the next run
+tries it again.
 
 ## Safety
 
