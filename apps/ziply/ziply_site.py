@@ -44,9 +44,11 @@ KNOWN CEILINGS (left as they are until a run shows otherwise)
     list, and a 401 or 403 there, or words that say the session ended,
     stop the run as signed out.
   * A bill's PDF answered with a 401, a 403, a redirect or a page has the
-    list read again. A list refused too stops the run as signed out, and a
-    list that still reads fails that bill alone. What Ziply answers a bill
-    it will not give has not been seen.
+    list read again. A list refused too stops the run as signed out, a list
+    that does not answer, holds no bill or reaches a page that stops
+    answering stops it with the list unread, and a list that still reads
+    fails that bill alone. What Ziply answers a bill it will not give has
+    not been seen.
 
 Sign-in, with any verification code, is the account holder's own, in the
 browser.
@@ -73,7 +75,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
-from paperpull_core import intake
+from paperpull_core import intake, refused
 from paperpull_core.characters import whole_json
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
@@ -734,9 +736,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     A bill's PDF answered with a 401, a 403, a redirect or a page has the
     list read again, with the same call that proves a session. A session
     that has ended is refused the list too, and its SessionExpired stops the
-    run there. A list that still reads leaves the refusal this bill's own,
-    so it fails alone, since a stop here would stop every run at this bill
-    for good. The bill is not asked for a second time."""
+    run there. A list that does not answer, holds no bill, or reaches a
+    page that stops answering raises ListStopped, which stops the run with
+    the list unread, since it says neither (refused.list_again). A list that
+    still reads leaves the refusal this bill's own, so it fails alone,
+    since a stop here would stop every run at this bill for good. The bill
+    is not asked for a second time."""
     out_path = Path(out_path)
     m = BILL_ID_RE.fullmatch((document_id or "").strip())
     if href != DOWNLOAD_PATH or not m:
@@ -759,9 +764,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             except SessionExpired:
                 # A refusal may be the session ending or this one bill. The
                 # list is read again, and a session that ended shows there
-                # and stops the run. One that still reads leaves this bill
-                # failed, so it never stops every later run at the same bill.
-                _read(page)
+                # and stops the run. A list that does not answer, or holds
+                # no bill, stops it with the list unread, since that says
+                # neither (refused.list_again). One that still reads leaves
+                # this bill failed, so it never stops every later run at the
+                # same bill.
+                refused.list_again(lambda: _read(page), SessionExpired, ListStopped)
                 shown = _RUN["session"].account[-4:]
                 if shown != last4:
                     raise OtherAccountShown(last4, shown)
