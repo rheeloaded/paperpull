@@ -641,8 +641,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
         # with the lists unread. Lists that still read leave the refusal
         # this document's own, so it fails alone and never stops every
         # later run at the same document. It is not asked for a second time.
-        refused.list_again(lambda: list_documents(page), SessionExpired, ListStopped,
-                           stops=(NeedsPerson,))
+        refused.list_again(lambda: list_documents(page), SessionExpired, ListStopped)
         log.info("the document dated %s was refused while the lists still read", iso_date)
         return False
     if not r.get("b64"):

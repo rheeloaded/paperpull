@@ -505,8 +505,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
         # alone and never stops every later run at the same invoice. It is
         # not asked for a second time, and the next invoice goes with the
         # headers the page sent just now.
-        refused.list_again(lambda: capture_list(page)[0], SessionExpired, ListStopped,
-                           stops=(NeedsPerson,))
+        refused.list_again(lambda: capture_list(page)[0], SessionExpired, ListStopped)
         log.info("the invoice dated %s was refused while the list still reads", iso_date)
         return False
     if not r.get("b64"):
