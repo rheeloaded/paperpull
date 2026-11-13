@@ -1092,6 +1092,60 @@ def test_a_list_that_stops_when_read_after_a_refusal_stops_the_run_unread(tmp_pa
     assert page.context.request.asked == [(pdf_url(D1), 0)]
 
 
+def _times_out_on_the_next_load(page):
+    """The page's waits time out from the next load on, as a page that
+    stops answering does."""
+    goto = page.goto
+
+    def load(url, **kw):
+        goto(url, **kw)
+
+        def timed_out(ms):
+            raise TimeoutError("Timeout 30000ms exceeded")
+        page.wait_for_timeout = timed_out
+    page.goto = load
+
+
+def _holds_nothing(page):
+    """The list holds no document from the next load on."""
+    goto = page.goto
+
+    def load(url, **kw):
+        page.docs, page.rows = [], []
+        goto(url, **kw)
+    page.goto = load
+
+
+# What the list read again after a refusal can do that says nothing of the
+# session. Each stops the run with the list unread, never as signed out and
+# never as one document's failure.
+LIST_UNREAD = {
+    "500": lambda page: setattr(page, "list_status", 500),
+    "timeout": _times_out_on_the_next_load,
+    "empty": _holds_nothing,
+}
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_a_list_that_does_not_answer_after_a_refusal_stops_the_run_unread(tmp_path, how):
+    """A timeout reached the loop as the document's own failure, so the run
+    went on with no session shown, and a list that held nothing was read as
+    one that still reads. Neither says the session holds."""
+    page = refused_page("403")
+
+    def unread(page, d):
+        asks_only(page, d)
+        LIST_UNREAD[how](page)
+    page.on_press = unread
+    with pytest.raises(pressing.Stop) as stop:
+        take(page, tmp_path)
+    assert stop.value.list_unread
+    assert page.presses == [row_text(DOCS[0])]
+    assert page.context.request.asked == [(pdf_url(D1), 0)]
+    assert len(page.gotos) == 2
+    assert not (tmp_path / "out" / "doc.pdf").exists()
+
+
 def test_a_list_that_stops_while_a_document_is_sought_stops_the_run(tmp_path):
     page = Page(rows=[row_text(d) for d in DOCS[1:]])
     with pytest.raises(pressing.Stop) as stop:
@@ -1278,6 +1332,32 @@ def test_one_document_refused_and_the_list_after_it_stop_the_run_as_signed_out(
     assert "Nothing was saved" not in said
     assert app.progress.data == {}
     assert len(page.presses) == 1 and len(page.context.request.asked) == 1
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_one_document_refused_and_a_list_that_does_not_answer_after_it_stop_the_run_unread(
+        tmp_path, monkeypatch, caplog, how):
+    """The run stops at the refused document with the list unread, so the
+    panel offers a run that lists first. Nothing is recorded against the
+    document, and nothing after it is pressed."""
+    page = Page()
+    page.pdf_refused[D2] = PDF_REFUSALS["403"]
+
+    def press(page, d):
+        if d["documentId"] != D2:
+            return Page.brings_pdf(page, d)
+        asks_only(page, d)
+        LIST_UNREAD[how](page)
+    page.on_press = press
+    app = make_app(tmp_path, monkeypatch, page)
+    ended, said = run_all(app, caplog)
+    assert isinstance(ended, pressing.Stop) and ended.list_unread, said
+    states = {r["date"]: r["state"] for r in app.progress.data.values()}
+    assert set(states.values()) == {docs.State.COMPLETED.value}
+    assert DOCS[1]["date"] not in states
+    assert "signed out" not in said and "Nothing was saved" not in said
+    assert page.presses[-1] == row_text(DOCS[1]) and page.presses.count(row_text(DOCS[1])) == 1
+    assert page.context.request.asked == [(pdf_url(D2), 0)]
 
 
 def test_discover_keeps_no_id_and_says_the_date_the_documents_go(tmp_path, monkeypatch):

@@ -134,9 +134,12 @@ Sign in again and run Resume.
 
 A document whose PDF address answers a 401, a 403 or a redirect has the
 list read again. A list refused too means you are signed out, and the run
-stops as above. A list that still reads leaves that document counted as
-failed with nothing saved, the run goes on to the other documents, and the
-next run tries it again. Its row is never pressed twice.
+stops as above. A list that does not answer, times out or shows no document
+says nothing about your sign-in, so the run stops there with nothing
+recorded against that document, and the panel offers a run that reads the
+list first, which takes it. A list that still reads leaves that document
+counted as failed with nothing saved, the run goes on to the other
+documents, and the next run tries it again. Its row is never pressed twice.
 
 Files are named after the document's date and its kind.
 
