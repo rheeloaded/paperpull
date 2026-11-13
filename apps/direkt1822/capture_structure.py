@@ -14,6 +14,9 @@ from urllib.parse import parse_qsl, urlsplit
 
 from playwright.sync_api import sync_playwright
 
+from paperpull_core import intake
+from paperpull_core.characters import whole_json
+
 APP = Path(__file__).resolve().parent
 HOST = "www.1822direkt-banking.de"
 AUTH = re.compile(r"services_auth|portal-oauth|oauth|(?:^|/)(?:login|logout|token|authenticate)(?:/|$)", re.I)
@@ -57,7 +60,7 @@ def schema(value, depth=0):
 
 
 def main():
-    cfg = json.loads((APP / "config.json").read_text())
+    cfg = whole_json(json.loads((APP / "config.json").read_text(encoding="utf-8")))
     out = APP / "Diagnostics" / "technical-structure.json"
     entries = []
     seen = set()
@@ -85,16 +88,14 @@ def main():
         try:
             payload = request.post_data
             if payload:
-                entry["request_structure"] = schema(json.loads(payload))
+                entry["request_structure"] = schema(whole_json(json.loads(payload)))
         except (ValueError, TypeError):
             entry["request_structure"] = "non-json (not captured)"
         if entry["type"] == "json":
             try:
-                size = int(response.header_value("content-length") or 0)
-                if size > 2_000_000:
-                    entry["response_structure"] = "too large (not captured)"
-                else:
-                    entry["response_structure"] = schema(response.json())
+                entry["response_structure"] = schema(intake.json_of(response, limit=2_000_000))
+            except intake.TooLarge:
+                entry["response_structure"] = "too large (not captured)"
             except Exception:
                 entry["response_structure"] = "unavailable"
         key = json.dumps(entry, sort_keys=True)
@@ -112,7 +113,7 @@ def main():
 
     with sync_playwright() as p:
         # Observe the existing session without applying Playwright's context
-        # defaults (including Browser.setDownloadBehavior). Some CDP browsers
+        # download defaults. Some CDP browsers
         # cannot change context settings; this report needs none of them.
         browser = p.chromium.connect_over_cdp(cfg["cdp_url"], no_defaults=True)
         pages = [page for context in browser.contexts for page in context.pages

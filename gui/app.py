@@ -325,6 +325,11 @@ def _looks_like_installs(root: Path) -> int:
 _STATUS_MOD = None
 _EXPORT_MOD = None
 _LAST_EXPORT = None     # path of the spreadsheet this panel wrote last, for Reveal
+# The transactions spreadsheets being built now, by the mark each build's
+# program is given. That program is the panel's own child, which Restart and
+# update would cut off, so the restart waits while any is built
+# (_what_an_exit_would_cut).
+_BUILDING: set = set()
 # Apps with a downloader process alive right now. Removing one of these
 # would pull the folder out from under a run.
 _RUNNING: set = set()
@@ -1220,6 +1225,13 @@ def api_export_transactions(provider: str = "", csv: str = ""):
     async def stream():
         global _LAST_EXPORT
         yield _event("$ export_transactions.py " + " ".join(cmd[3:]))
+        # Checked and claimed with nothing awaited between, as a run is, so
+        # Restart and update either waits for this spreadsheet or comes first
+        # and it never starts (api_update_restart).
+        if _UPDATE_RESTARTING:
+            yield _event(_RESTARTING_SAYS)
+            yield _event(1, "done")
+            return
         # The version goes to the app so that a file it writes says which
         # build wrote it. Every failure file so far has carried an empty
         # version, which is the one field that says what a tester ran.
@@ -1227,43 +1239,47 @@ def api_export_transactions(provider: str = "", csv: str = ""):
         # that only that line, never a provider's folder name it printed,
         # says which file Show and the server's download hand over.
         mark = run_result.new_mark()
-        env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
-                   PAPERPULL_VERSION=VERSION, **{run_result.MARK_ENV: mark})
+        _BUILDING.add(mark)
         try:
-            proc = subprocess.Popen(cmd, cwd=str(tool.parent), stdin=subprocess.DEVNULL,
-                                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                    encoding="utf-8", errors="replace", bufsize=1, env=env)
-        except Exception as e:
-            yield _event("[failed to start] %s" % e)
-            yield _event(1, "done")
-            return
-        wrote = None
-        try:
-            while True:
-                line = await to_thread.run_sync(proc.stdout.readline)
-                if not line:
-                    break
-                said = run_result.exported(line.rstrip("\r\n"), mark)
-                if said is not None:
-                    wrote = said
-                    continue
-                yield _event(line.rstrip())
-            code = await to_thread.run_sync(proc.wait)
-            # It writes only into the folder it was given, so a path
-            # anywhere else is not its spreadsheet.
-            if code == 0 and wrote and Path(wrote).resolve().parent == apps_root().resolve():
-                _LAST_EXPORT = Path(wrote)
-                yield _event(json.dumps({"path": wrote}), "result")
-            yield _event(code, "done")
+            env = dict(os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8",
+                       PAPERPULL_VERSION=VERSION, **{run_result.MARK_ENV: mark})
+            try:
+                proc = subprocess.Popen(cmd, cwd=str(tool.parent), stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                        encoding="utf-8", errors="replace", bufsize=1, env=env)
+            except Exception as e:
+                yield _event("[failed to start] %s" % e)
+                yield _event(1, "done")
+                return
+            wrote = None
+            try:
+                while True:
+                    line = await to_thread.run_sync(proc.stdout.readline)
+                    if not line:
+                        break
+                    said = run_result.exported(line.rstrip("\r\n"), mark)
+                    if said is not None:
+                        wrote = said
+                        continue
+                    yield _event(line.rstrip())
+                code = await to_thread.run_sync(proc.wait)
+                # It writes only into the folder it was given, so a path
+                # anywhere else is not its spreadsheet.
+                if code == 0 and wrote and Path(wrote).resolve().parent == apps_root().resolve():
+                    _LAST_EXPORT = Path(wrote)
+                    yield _event(json.dumps({"path": wrote}), "result")
+                yield _event(code, "done")
+            finally:
+                if proc.poll() is None:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                if proc.stdout:
+                    proc.stdout.close()
         finally:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-            if proc.stdout:
-                proc.stdout.close()
+            _BUILDING.discard(mark)
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -2217,7 +2233,7 @@ def _documents_in_use(meta: dict, account: str, root: Path) -> str:
     docs = Path(os.path.normpath(raw))
     profile = _config_of(meta, account).get("profile_dir")
     if isinstance(profile, str) and profile.strip():
-        held = Path(profile.strip())
+        held = Path(server_mode.with_home(profile.strip()))
         held = held if held.is_absolute() else Path(meta["dir"]) / held
         if _within(docs, held) or _within(held, docs):
             return ""
@@ -2243,7 +2259,7 @@ def _not_for_documents(meta: dict, account: str) -> list:
     for other in meta.get("accounts", ()):
         profile = _config_of(meta, other).get("profile_dir")
         if isinstance(profile, str) and profile.strip():
-            path = Path(profile.strip())
+            path = Path(server_mode.with_home(profile.strip()))
             out.append(path if path.is_absolute() else install / path)
         if other != account:
             try:
@@ -3615,7 +3631,8 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
                                      "person was added." % app_dir.name)
         try:
             first = json.loads(base.read_text(encoding="utf-8-sig"))
-            server_mode.hold_in_data(app_dir / mod.output_dir_for(app_dir, first, label))
+            server_mode.hold_in_data(
+                app_dir / server_mode.with_home(mod.output_dir_for(app_dir, first, label)))
         except (OSError, ValueError, TypeError, AttributeError):
             raise HTTPException(409, "%s's folder for a second person would be outside the data "
                                      "folder, so no person was added." % app_dir.name)
@@ -4824,7 +4841,7 @@ def _close_own_window(meta: dict, account: str) -> list:
     port = _sign_in_port(meta, account)
     try:
         # As the browser was opened on it (browser._launch), "~" and all.
-        profile = Path(str(cfg.get("profile_dir") or "")).expanduser()
+        profile = Path(server_mode.with_home(str(cfg.get("profile_dir") or "")))
     except (ValueError, RuntimeError):
         return []
     if not port or not str(profile) or str(profile) == ".":
@@ -5254,8 +5271,10 @@ def _naming_output(d: Path) -> Optional[Path]:
         except ValueError:
             return None
     cfg = _read_json(d / "config.json") or {}
-    # The same default load_config gives an absent output_dir.
-    out = Path(cfg.get("output_dir") or (Path.home() / "Downloads" / _provider_name(d)))
+    # The same default load_config gives an absent output_dir, and "~" read
+    # as the home folder, as a run reads it.
+    out = Path(server_mode.with_home(cfg.get("output_dir"))
+               or (Path.home() / "Downloads" / _provider_name(d)))
     return out if out.is_absolute() else d / out
 
 
@@ -5428,7 +5447,7 @@ async def api_naming_preview(request: Request):
     for r in _newest_saved(_naming_records(d)):
         # With the folders a pattern filed it in, as the new name shows the
         # folders it would be filed in.
-        current = _named_where(r, out, cfg.get(DOCUMENTS_KEY) if isinstance(
+        current = _named_where(r, out, server_mode.with_home(cfg.get(DOCUMENTS_KEY)) if isinstance(
             cfg.get(DOCUMENTS_KEY), str) else "")
         # The default names no folder, so a file a pattern put in folders
         # goes back to the folder of its kind, under the name it has.
@@ -5543,9 +5562,10 @@ def _config_of(meta: dict, account: str) -> dict:
 
 
 def _documents_of(meta: dict, account: str) -> str:
-    """The documents folder an account's config names, or ""."""
+    """The documents folder an account's config names, or "", with "~" read
+    as the home folder, as a run reads it."""
     value = _config_of(meta, account).get(DOCUMENTS_KEY)
-    return value if isinstance(value, str) else ""
+    return server_mode.with_home(value) if isinstance(value, str) else ""
 
 
 def _within(path, folder) -> bool:
@@ -5609,7 +5629,7 @@ def _profiles_known(apps: dict) -> list:
         for account in meta["accounts"]:
             profile = _config_of(meta, account).get("profile_dir")
             if isinstance(profile, str) and profile.strip():
-                path = Path(profile.strip())
+                path = Path(server_mode.with_home(profile.strip()))
                 out.append(path if path.is_absolute() else install / path)
     return out
 
@@ -5699,7 +5719,7 @@ def _follows(cfg: dict, meta: dict, account: str, root: str) -> bool:
     """_follows_root of a config already read."""
     if DOCUMENTS_KEY not in cfg:
         return True
-    value = cfg[DOCUMENTS_KEY]
+    value = server_mode.with_home(cfg[DOCUMENTS_KEY])
     return bool(root) and isinstance(value, str) and value != "" and \
         os.path.normpath(value) == _documents_for(meta, account, root)
 
@@ -6397,12 +6417,18 @@ def _exit_soon() -> None:
 def _what_an_exit_would_cut() -> str:
     """Why the panel must not exit now, or "". Every run the panel started
     stays in _RUNS until it has been noted, a Rename, a Move and Review Names
-    included, and a history import holds _IMPORTING (api_finishing)."""
+    included, a history import holds _IMPORTING (api_finishing), and a
+    transactions spreadsheet being built is in _BUILDING. On a Mac nothing
+    else would see that last one, since the swap waits only for the panel
+    and the host around it (updater.start_swap)."""
     if _RUNS or _RUNNING:
         return ("A download, a Rename or a Move is going on. Wait for it to finish, "
                 "or stop the download, then restart to update.")
     if _IMPORTING.locked():
         return "A history file is being imported. Restart to update once it has finished."
+    if _BUILDING:
+        return ("A transactions spreadsheet is being built. Restart to update once it "
+                "has finished.")
     return ""
 
 

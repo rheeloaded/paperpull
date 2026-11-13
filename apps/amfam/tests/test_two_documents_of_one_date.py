@@ -1612,3 +1612,23 @@ def test_a_bill_link_naming_its_kind_under_a_masked_policy_is_still_filed(page, 
     assert _found(docs) == [(DAY, "statement", STATEMENT)] and docs.unsure == 0
     saved, trace = _download(page, tmp_path, STATEMENT)
     assert saved and presses == ["g-statement"], (presses, trace)
+
+
+def test_a_statement_already_in_manual_review_named_in_full_stays_where_it_is(tmp_path, monkeypatch):
+    """A record a run started in another folder saved from 0.62.0 to 0.65.0
+    names its file by its full path, and a run now names its folders from
+    the install (#166). A statement set aside again for the same PDF as
+    another bill's, already in Manual Review, keeps its name there, as one
+    named from the install does."""
+    install = tmp_path / "Example Install"
+    install.mkdir()
+    monkeypatch.chdir(install)
+    app = receipt_app(app_mod, install, output_dir=".")
+    app.paths.ensure()
+    held = install / "Manual Review" / ("%s Account Statement.pdf" % DAY)
+    held.write_bytes(text_pdf(["a statement set aside before"]))
+    app.progress.update("k", {"pdf_path": str(held), "pdf_filename": held.name, "date": DAY,
+                              "state": "Needs Manual Review", "downloaded_ok": False})
+    app._distrust("k")
+    assert sorted(p.name for p in held.parent.iterdir()) == [held.name]
+    assert app.progress.get("k")["pdf_path"] == str(held)

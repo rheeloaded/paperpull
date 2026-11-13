@@ -43,7 +43,16 @@ ON_SCREEN = {
 # What the docs may not name in bold, the way they name a control.
 IN_DOCS = ["Only check what's there", "**Rename preview**", "**Apply renames**",
            "**Preview move**", "**Use the folder for every provider**", "**Use it for",
-           "**Preview renames**", "**Rename them**", "**Use each provider's own folder**"]
+           "**Preview renames**", "**Rename them**", "**Use each provider's own folder**",
+           # The tester steps of about twenty-five app READMEs still said to
+           # click add a provider, pick it in the App list, Login, more under
+           # the buttons, then Record, Diagnose and Pilot, none of which the
+           # panel shows. They are Add a provider, Open sign-in window, More,
+           # Get help with Record steps and Make the report in it, and Try
+           # the newest few first. The terminal's own command names, such as
+           # paperpull <app> record and --pilot, are not buttons and stay.
+           "**add a provider**", "the App list", "**Login**", "**more**", "under the buttons",
+           "**Record**", "**Diagnose**", "Diagnose button", "**Pilot**"]
 
 
 def _page_lines(path: Path):
@@ -91,7 +100,8 @@ def test_no_message_from_the_panel_names_what_it_stopped_using():
 
 
 def _docs():
-    yield from (REPO / name for name in ("README.md", "SERVER.md", "PRIVACY.md", "PRIVACY-SERVER.md"))
+    yield from (REPO / name for name in ("README.md", "SERVER.md", "PRIVACY.md", "PRIVACY-SERVER.md",
+                                         "CONTRIBUTING.md", "PROVIDERS.md"))
     yield REPO / "gui" / "README.md"
     yield from sorted((REPO / "docs").glob("*.md"))
     yield from sorted((REPO / "apps").glob("*/README.md"))
@@ -149,6 +159,57 @@ def test_the_tester_guide_names_each_control_as_the_panel_shows_it():
     assert "**Back to** and the provider's name" in text
     assert "**More**, then **Get help**" in text
     assert text.index("**Get help**") < text.index("2. In Get help, click **Record steps**")
+
+
+# Each control the app READMEs' tester steps name, with the place on the page
+# that shows it, so a control renamed or moved fails here and the READMEs are
+# rewritten with it. Their sign-in is Get help's own Open sign-in window,
+# which starts no run after it (test_start_after_sign_in.py), where the one on
+# the provider's page can go on to Get new documents by itself.
+README_SAYS = [
+    ("Add a provider", "index.html", "Add a provider</button>"),
+    ("Continue", "index.html", 'id="w-next2">Continue</button>'),
+    ("Set up", "index.html", 'id="w-create">Set up</button>'),
+    ("More", "app.js", "DOTS + 'More</button>"),
+    ("Get help", "app.js", "menuItem('support', k, P.report, 'Get help'"),
+    ("Open sign-in window", "index.html", 'data-do="sp-signin">Open sign-in window</button>'),
+    ("Make the report", "index.html", 'data-do="sp-go">Make the report</button>'),
+    ("Record steps", "index.html", 'data-do="rc-go">Record steps</button>'),
+    ("Stop recording", "app.js", "STOP + 'Stop recording</button>"),
+    ("Try the newest few first", "app.js", ">Try the newest few first</button>"),
+    ("Get new documents", "app.js", "sv(P.download, 18, 2.2) + 'Get new documents</button>"),
+]
+
+
+def _app_readmes():
+    for path in sorted((REPO / "apps").glob("*/README.md")):
+        yield path.parent.name, " ".join(path.read_text(encoding="utf-8").split())
+
+
+def test_the_app_readmes_name_each_control_as_the_panel_shows_it():
+    page = {name: (STATIC / name).read_text(encoding="utf-8") for name in ("app.js", "index.html")}
+    said = " ".join(text for _, text in _app_readmes())
+    for name, where, shown in README_SAYS:
+        assert "**%s**" % name in said, name
+        assert page[where].count(shown) == 1, (name, where, shown)
+    # Close is Get help's own, the way back to the provider's page.
+    help_dialog = page["index.html"].split('id="dlg-support"', 1)[1].split("</dialog>", 1)[0]
+    assert "**Close** to leave Get help" in said
+    assert help_dialog.count('formnovalidate>Close</button>') == 1
+    # The provider is named as the panel names it, on its tile and on the
+    # run page's way back, which is how E*TRADE reads ETRADE there.
+    assert "'\">Back to ' + esc(RUN.provider) + '</a>'" in page["app.js"]
+    # A bold name is anything up to the next two stars, since E*TRADE has one.
+    bold = r"((?:[^*]|\*(?!\*))+)"
+    named = 0
+    for slug, text in _app_readmes():
+        source = (REPO / "apps" / slug / "storage.py").read_text(encoding="utf-8")
+        found = app_module._PROVIDER_RE.search(source)
+        for said_name in re.findall(r"\*\*Back to %s\*\*" % bold, text) + \
+                re.findall(r"Click \*\*%s\*\*, then \*\*Continue\*\*" % bold, text):
+            named += 1
+            assert found and said_name == found.group(1), (slug, said_name)
+    assert named > 40
 
 
 def test_a_folder_with_no_config_is_told_what_mends_it(tmp_path):

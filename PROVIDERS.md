@@ -10,10 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (83, plus five built and waiting for a tester, and four first shells)
-
-1822direkt is the **84th supported provider** when counted after Renault Bank
-direkt (PR #212); the totals above exclude that pending PR.
+## Supported (84, plus five built and waiting for a tester, and four first shells)
 
 | App | Provider | Documents | Category |
 |-----|----------|-----------|----------|
@@ -80,6 +77,7 @@ direkt (PR #212); the totals above exclude that pending PR.
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements. Contributed by @appchamp. Repaired in 0.37.1 and confirmed on a real account by @watling777 (#33) | Utility |
 | [`portlandgeneral`](apps/portlandgeneral) | Portland General Electric (PGE, Oregon) | Monthly bills, the Detailed Bill PDF, read from Billing & Payment History's own API answers and asked for from inside the signed-in page, nothing clicked. One account at a time. Built and run on a contributor's own account, 36 bills | Utility |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Card |
+| [`renaultbank`](apps/renaultbank) | Renault Bank direkt | Statements, tax documents, confirmations and other documents from the Postfach and its archive, for every bank customer the sign-in can see, and the PDF attachments of incoming and sent messages, read through the Postfach's own API from inside the page with nothing clicked. Contributed by @MelleD. Run on the contributor's own account, an archive document and a message attachment included (#172) | Bank |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements for the individual, retirement and crypto accounts, tax docs. A statement Robinhood serves only as HTML (seen for three recent months) is left for manual review | Brokerage |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098. UNTESTED, built without an account. Have an SBA loan? Run Diagnose and attach the file to issue #28 | Government loan servicing |
 | [`scalable`](apps/scalable) | Scalable Capital | Statements, securities documents and tax certificates. UNTESTED, built without an account. A first shell that opens the site for you to sign in and nothing more, and downloads nothing yet. Have an account? Sign in, Record one trip to a document and attach the recording to issue #170. A child's sub-account under the same sign-in takes a second recording that switches to it | Brokerage |
@@ -127,7 +125,8 @@ New to this? Look for the **`good first provider`** label, those are easy sites
 Status legend: **requested** → **claimed** (someone's building it) →
 **in review** (PR open) → merged (moves to Supported). **Built, needs a
 tester** is an app written without an account, which anyone who holds one
-can finish by running its Diagnose button and attaching the result.
+can finish by making a support report, **Make the report** under **More**
+and then **Get help** on its page, and attaching the result.
 
 ## How the list grows
 

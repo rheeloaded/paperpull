@@ -7,7 +7,7 @@ saved their credit card statements. Checking, savings, mortgage and loan
 statements and tax documents have not been run on a real account yet, and
 every guess about wellsfargo.com is still marked in `wellsfargo_site.py`.
 For those, what it needs is a survey from a signed-in account, which the
-Diagnose button produces and which contains no personal data. The
+support report in Get help produces and which contains no personal data. The
 conversation is
 [issue #27](https://github.com/rheeloaded/paperpull/issues/27).
 
@@ -21,22 +21,29 @@ savings, mortgage or loan account, or for a tax document.
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Wells Fargo**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Wells Fargo**, then
+   **Continue**, then **Set up**. Back on Accounts, click **Wells Fargo** to
+   open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in yourself, answer any code it sends, and leave the window open.
-4. Click **more** under the buttons, then **Diagnose**. It reads the
-   documents page and writes `Diagnostics\diagnose-documents.json` in the
-   Wells Fargo folder. It downloads nothing, takes no screenshot, and writes
-   any word that is not on PaperPull's fixed list as its shape. It presses
-   only links and buttons that lead to the documents or show more of them,
-   a documents link or "Show more" for instance.
-5. Click **Record**, in the same **more** menu. Go back to the browser window
-   and click your way to one document the way you normally would, then come
-   back here and click **Stop recording**. It writes
+4. Back in Get help, click **Make the report**. This support report reads
+   the documents page and writes `Diagnostics\diagnose-documents.json` in
+   the Wells Fargo folder. It downloads nothing, takes no screenshot, and
+   writes any word that is not on PaperPull's fixed list as its shape. It
+   presses only links and buttons that lead to the documents or show more of
+   them, a documents link or "Show more" for instance.
+5. Once the report is done, click **Back to Wells Fargo**, then **More**,
+   then **Get help** again, and click **Record steps**. Go back to the
+   browser window and click your way to one document the way you normally
+   would, then come back here and click **Stop recording**. It writes
    `Diagnostics\recording.json`, which is the path you actually took rather
    than a guess at it. It records nothing you type and reads no cookies, and
-   it refuses to start before you are signed in. The whole walkthrough, written
-   for someone who has never done this, is
+   it refuses to start before you are signed in. The whole walkthrough,
+   written for someone who has never done this, is
    [Testing a provider](../../docs/testing-a-provider.md).
 6. Open each file in Notepad and look through it. It should hold page
    headings, the names of buttons and links, and the shape of the data the
@@ -47,14 +54,17 @@ savings, mortgage or loan account, or for a tax document.
    in it to edit.
 7. Attach both files to [issue #27](https://github.com/rheeloaded/paperpull/issues/27)
    with a sentence about what the documents page looks like to you.
-8. When a new build is posted, click **Pilot** and say whether PDFs landed
-   in `Statements\`, then attach a fresh Diagnose file.
+8. When a new build is posted, click **Try the newest few first** on the
+   provider's page and say whether PDFs landed in `Statements\`, then attach
+   a fresh support report. If it says to sign in first, sign in from Get
+   help as in step 3 and click it again.
    If the run printed any lines that begin with `Waited for`, copy
    those into your comment as well. They say which way of waiting
    each page needed, which is the thing the next build keeps.
 
-A Diagnose file and one recording together are usually enough to get a
-provider working in a single round. Diagnose on its own takes two or three.
+A support report and one recording together are usually enough to get a
+provider working in a single round. A support report on its own takes two
+or three.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It

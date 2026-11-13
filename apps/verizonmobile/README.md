@@ -16,13 +16,20 @@ delete-safe, part of [PaperPull](../../README.md).
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Verizon Mobile**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Verizon Mobile**, then
+   **Continue**, then **Set up**. Back on Accounts, click **Verizon Mobile**
+   to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in to verizon.com yourself, answer any code it sends, and leave the
-   window open. Login says Success only once Bill & payment history has
-   listed your bills.
-4. Click **Pilot**. It lists your bills and saves the newest five to
-   `Statements\`. Look at them before a full run.
+   window open. The sign-in says Success only once Bill & payment history
+   has listed your bills. Then click **Close** to leave Get help.
+4. Click **Try the newest few first**. It lists your bills and saves the
+   newest five to `Statements\`. Look at them before you click **Get new
+   documents**.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It
@@ -31,10 +38,11 @@ states, with no text from your account in it. Attach it to
 [issue #31](https://github.com/rheeloaded/paperpull/issues/31). It is
 described in full on the
 [Testing a provider](../../docs/testing-a-provider.md#if-a-run-fails-send-the-file-it-wrote)
-page. **Diagnose**, under **more**, writes `Diagnostics\diagnose-billing.json`,
-a survey of Bill & payment history that downloads nothing, presses nothing,
-follows no link, takes no screenshot, and writes any word that is not on
-PaperPull's fixed list as its shape.
+page. A support report, **Make the report** under **More** and then **Get
+help**, writes `Diagnostics\diagnose-billing.json`, a survey of Bill &
+payment history that downloads nothing, presses nothing, follows no link,
+takes no screenshot, and writes any word that is not on PaperPull's fixed
+list as its shape.
 
 ## Setup, for a checkout
 

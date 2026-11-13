@@ -13,8 +13,8 @@ import direkt1822_site as site
 
 HARNESS = r"""
 const fs=require('fs');
-const bridge=eval('('+fs.readFileSync(process.argv[1],'utf8')+')');
-const mode=process.argv[2];
+const bridge=eval('('+fs.readFileSync(0,'utf8')+')');
+const mode=process.argv[1];
 global.window={};global.location={origin:'https://www.1822direkt-banking.de'};
 const requests=[];
 let sessions=0;
@@ -64,7 +64,7 @@ global.fetch=async(path,options)=>{
   return {ok:true,status:200,headers:{get:()=> 'application/pdf'},
     arrayBuffer:async()=>bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength)};
  }else throw new Error('unexpected endpoint');
- return {ok:true,status:200,headers:{get:()=> 'application/json'},json:async()=>data};
+ return {ok:true,status:200,headers:{get:()=> 'application/json'},arrayBuffer:async()=>new TextEncoder().encode(JSON.stringify(data)).buffer};
 };
 (async()=>{
  const collected=await bridge({op:'collect',include_trash:mode!=='no-trash',open_conversations:mode==='conversation-allowed'});
@@ -79,8 +79,9 @@ def run(mode="collect"):
     node = shutil.which("node")
     if not node:
         pytest.skip("Node is required to exercise the in-page bridge")
-    result = subprocess.run([node, "-e", HARNESS, str(APP / "direkt1822_api.js"), mode],
-                            capture_output=True, text=True, check=True, timeout=15)
+    result = subprocess.run([node, "-e", HARNESS, mode],
+                            input=site.intake.reading(site._API_JS),
+                            capture_output=True, encoding="utf-8", check=True, timeout=15)
     return json.loads(result.stdout)
 
 
@@ -178,3 +179,35 @@ def test_attaching_during_the_account_holders_login_waits_without_clicking_or_re
     page = Page()
     assert site.goto_documents(page)
     assert page.waits == 2
+
+
+@pytest.mark.parametrize("list_error", [None, site.SessionExpired, site.ListStopped])
+def test_a_refused_pdf_is_weighed_against_a_fresh_list(monkeypatch, tmp_path, list_error):
+    monkeypatch.setattr(site, "resolve_item", lambda *args, **kwargs: {"item_id": "invented"})
+
+    def refused(*args, **kwargs):
+        raise site.intake.TooLarge("invented oversized PDF")
+
+    reads = []
+
+    def relist(page, config, *, fresh):
+        reads.append(fresh)
+        if list_error:
+            raise list_error("invented list error")
+        return []
+
+    monkeypatch.setattr(site, "_execute", refused)
+    monkeypatch.setattr(site, "listed_rows", relist)
+    output = tmp_path / "statement.pdf"
+
+    def download():
+        return site.download_document(None, "Statement", "2026-03-31", output,
+                                      category="Statement", number_rows=lambda rows: [])
+
+    if list_error:
+        with pytest.raises(list_error):
+            download()
+    else:
+        assert download() == ""
+    assert reads == [True]
+    assert not output.exists()

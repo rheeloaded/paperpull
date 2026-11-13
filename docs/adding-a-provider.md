@@ -145,8 +145,9 @@ any app's history) or use `paperpull <yourslug> diagnose`, and answer:
 - **How does a download actually happen?** This varies a lot (see Tips below).
 
 The quickest way to answer all three is a recording. Add your app in the
-panel, sign in with **Login**, then press **Record** under **more** and click
-your way to one document. `recording.json` in the app's `Diagnostics` folder
+panel with **Add a provider** and open its page. Click **More**, then **Get
+help**, sign in with **Open sign-in window** there, then press **Record
+steps** and click your way to one document. `recording.json` in the app's `Diagnostics` folder
 lists each press and every answer the page asked the site for, and typed
 values are never captured. [testing-a-provider.md](testing-a-provider.md)
 walks through it, and a recording is also how someone who has the account

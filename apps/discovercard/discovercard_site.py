@@ -103,6 +103,9 @@ from paperpull_core.controls import click_next_page as _click_next_page
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.characters import whole_json
+from paperpull_core.failure import error_kind
+from paperpull_core.urls import where_it_leads
+from paperpull_core.words import shape_label
 
 log = logging.getLogger("discovercard_docs.site")
 
@@ -478,7 +481,7 @@ def click_documents_nav(page) -> bool:
                 c.click()
                 page.wait_for_timeout(3500)
                 dismiss_timeout(page)
-                log.info("clicked %s %r -> %s", role, label, page.url)
+                log.info("clicked %s %r -> %s", role, shape_label(label), where_it_leads(page.url))
                 if on_documents_page(page):
                     return True
                 # the nav may open a submenu (Statements / Tax Forms)
@@ -489,13 +492,13 @@ def click_documents_nav(page) -> bool:
                             s.first.click()
                             page.wait_for_timeout(3000)
                             dismiss_timeout(page)
-                            log.info("clicked submenu %r -> %s", sub, page.url)
+                            log.info("clicked submenu %r -> %s", sub, where_it_leads(page.url))
                             if on_documents_page(page):
                                 return True
                     except Exception:
                         pass
         except Exception as e:
-            log.info("documents nav (%s) failed: %s", role, e)
+            log.info("documents nav (%s) failed: %s", role, error_kind(e))
     return False
 
 
@@ -521,16 +524,16 @@ def goto_documents(page) -> bool:
             if looks_public_or_error(page) or looks_signed_out(page):
                 break
             if on_documents_page(page):
-                log.info("statements page reached at %s", page.url)
+                log.info("statements page reached at %s", where_it_leads(page.url))
                 return True
         except Exception as e:
-            log.info("documents URL %s failed: %s", url, str(e).splitlines()[0][:70])
+            log.info("documents URL %s failed: %s", where_it_leads(url), error_kind(e))
     if click_documents_nav(page):
-        log.info("documents area reached at %s", page.url)
+        log.info("documents area reached at %s", where_it_leads(page.url))
         return True
     # Signed out already? Say so instead of navigating around a dead session.
     if looks_signed_out(page):
-        log.info("session is signed out (%s) - not navigating", page.url[:70])
+        log.info("session is signed out (%s) - not navigating", where_it_leads(page.url))
         return False
     started_at = page.url
     for url in DOCUMENT_URL_CANDIDATES:
@@ -542,7 +545,7 @@ def goto_documents(page) -> bool:
                 # A wrong guess. Go back to where the user left us rather than
                 # leaving them stranded on a 404 with the public site's login
                 # form on screen, and stop guessing.
-                log.info("URL %s landed on a public/error page - reverting", url)
+                log.info("URL %s landed on a public/error page - reverting", where_it_leads(url))
                 try:
                     page.goto(started_at, wait_until="domcontentloaded", timeout=45000)
                 except Exception:
@@ -555,10 +558,10 @@ def goto_documents(page) -> bool:
             except Exception:
                 pass
             if on_documents_page(page):
-                log.info("documents area reached at %s", page.url)
+                log.info("documents area reached at %s", where_it_leads(page.url))
                 return True
         except Exception as e:
-            log.info("documents URL %s failed: %s", url, e)
+            log.info("documents URL %s failed: %s", where_it_leads(url), error_kind(e))
     return on_documents_page(page)
 
 
@@ -678,7 +681,7 @@ def collect_documents(page) -> List[RawDoc]:
     try:
         rows = page.evaluate(_ROW_JS)
     except Exception as e:
-        log.info("row scrape failed: %s", e)
+        log.info("row scrape failed: %s", error_kind(e))
         rows = []
     for i, r in enumerate(rows):
         title = _html.unescape(r.get("title", "")).strip() or "Statement"
@@ -770,7 +773,7 @@ def _safe_selects(page, limit: int = 12):
         except Exception:
             options = []
         if is_forbidden_control_context(identity, options):
-            log.info("refusing dropdown by its options: %s", identity[:120])
+            log.info("refusing dropdown by its options: %s", shape_label(identity[:120]))
             continue
         yield s, identity
 
@@ -842,10 +845,10 @@ def _select_option(page, sel, label: str) -> bool:
     """
     identity = control_identity(sel)
     if is_money_control(identity):
-        log.warning("REFUSED to set a money-movement control: %s", identity[:160])
+        log.warning("REFUSED to set a money-movement control: %s", shape_label(identity[:160]))
         return False
     if FORBIDDEN_CONTROL_RE.search(label or ""):
-        log.warning("REFUSED option %r - matches the forbidden list", label)
+        log.warning("REFUSED option %r - matches the forbidden list", shape_label(label))
         return False
     try:
         sel.select_option(label=label, timeout=8000)
@@ -853,7 +856,7 @@ def _select_option(page, sel, label: str) -> bool:
         dismiss_timeout(page)
         return True
     except Exception as e:
-        log.info("could not select %r: %s", label, str(e).split("\n")[0])
+        log.info("could not select %r: %s", shape_label(label), error_kind(e))
         return False
 
 
@@ -911,7 +914,7 @@ def discovercard_collect(page) -> Listed:
             if FORBIDDEN_CONTROL_RE.search(a):
                 # Never chosen (_select_option), and no account whose
                 # statements are listed.
-                log.info("refusing account option %r", a[:60])
+                log.info("refusing account option %r", shape_label(a[:60]))
                 continue
             if not _select_option(page, acct_sel, a):
                 passed_over.add("account picker")
@@ -1024,17 +1027,17 @@ def discovercard_download(page, ctx, account: str, date: str, out_path,
     # Discover's own host, and must still name the date we want. A stored
     # href from an earlier run cannot send this anywhere else.
     if not STMT_PDF_RE.search(href):
-        log.warning("refusing a non-statement URL for %s: %s", date, href[:80])
+        log.warning("refusing a non-statement URL for %s: %s", date, where_it_leads(href))
         return False
     want = date.replace("-", "")
     if want and want not in href:
-        log.warning("MISMATCH: %s does not name %s - refusing", href[:80], want)
+        log.warning("MISMATCH: %s does not name %s - refusing", where_it_leads(href), want)
         return False
 
     url = resolve_statement_url(href)
     if not url:
         log.warning("refusing an off-host statement URL for %s: %s",
-                    date, href[:80])
+                    date, where_it_leads(href))
         return False
     # Every redirect on the way has to stay on Discover's hosts as well.
     # Playwright alone would follow one wherever it led, carrying the
@@ -1042,7 +1045,7 @@ def discovercard_download(page, ctx, account: str, date: str, out_path,
     try:
         resp = redirects.get(ctx.request, url, is_safe_url, timeout=90000)
     except Exception as e:
-        log.info("fetch failed for %s: %s", date, str(e).splitlines()[0][:80])
+        log.info("fetch failed for %s: %s", date, error_kind(e))
         return False
     if resp.status != 200:
         log.info("statement %s returned HTTP %s", date, resp.status)
@@ -1056,7 +1059,7 @@ def discovercard_download(page, ctx, account: str, date: str, out_path,
     try:
         data = intake.body(resp)
     except Exception as e:
-        log.info("could not read body for %s: %s", date, e)
+        log.info("could not read body for %s: %s", date, error_kind(e))
         return False
     if not _write_if_pdf(data, out_path):
         return False
@@ -1091,7 +1094,7 @@ def probe_statements_api(page) -> dict:
         ensure_statements(page)
         page.wait_for_timeout(1200)
     except Exception as e:
-        log.info("probe_statements_api: %s", e)
+        log.info("probe_statements_api: %s", error_kind(e))
     try:
         raw_links = page.locator(STMT_PDF_SEL).count()
     except Exception:
@@ -1149,7 +1152,7 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
                 _select_option(page, sel, y)
         page.wait_for_timeout(int(seconds * 100))
     except Exception as e:
-        log.info("probe_api: %s", e)
+        log.info("probe_api: %s", error_kind(e))
     finally:
         try:
             page.remove_listener("response", on_resp)
@@ -1219,7 +1222,7 @@ def statement_links(page) -> List[dict]:
         loc = page.locator(STMT_PDF_SEL)
         n = min(loc.count(), 400)
     except Exception as e:
-        log.info("could not read statement links: %s", e)
+        log.info("could not read statement links: %s", error_kind(e))
         return []
     for i in range(n):
         el = loc.nth(i)
@@ -1240,7 +1243,7 @@ def statement_links(page) -> List[dict]:
         except Exception:
             label = ""
         if label and not is_safe_control(label):
-            log.info("refusing statement control %r", label[:60])
+            log.info("refusing statement control %r", shape_label(label[:60]))
             continue
         # The human period label lives on an ANCESTOR of the link, but not a
         # predictable one: closest('div') matches a bare wrapper holding only

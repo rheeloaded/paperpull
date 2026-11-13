@@ -144,10 +144,6 @@ class App:
     # could not choose, so the run goes on with what it read and stops at
     # its end rather than finish (_stop_if_cut_short).
     _list_cut_short = False
-    # Set when all that kept the list from being whole is an account's list
-    # that answered empty or as long as one answer holds, which reading it
-    # again does not change.
-    _only_short_lists = False
 
     def __init__(self, args):
         self.args = args
@@ -489,25 +485,29 @@ class App:
             print("  is seen to hold, so it may have older statements this app cannot reach.")
             print("  Look for them on Discover's Statements page.")
         if passed_over:
-            # An account the menu holds whose list did not answer, a list
-            # that may be cut short, or a statement the list names that could
-            # not be told apart, is a part of the list missing, so the list
-            # is not noted whole, and the run goes on with what it read and
-            # stops at its end rather than finish.
+            # An account the menu holds whose list did not answer or answered
+            # empty, or a statement the list names that could not be told
+            # apart, is a part of the list missing, so the list is not noted
+            # whole, and the run goes on with what it read and stops at its
+            # end rather than finish. An empty answer is what a list that did
+            # not load looks like, and what Discover may give for one it
+            # refused, and nothing in it tells either from an account with no
+            # statement yet, so it stops the run like any other part missing.
             self._list_cut_short = True
-            self._only_short_lists = not set(passed_over) - {site.EMPTY_LIST}
             log.info("Discover Bank: the list was not read through the %s",
                      " and the ".join(passed_over))
             print("\n  Discover Bank's statement list was not read whole.")
             if site.EMPTY_LIST in passed_over:
-                print("  An account on the menu answered with no statements, which a new account")
-                print("  does and a list that did not load can too, so the list is not noted as")
-                print("  read whole. Everything else is downloaded.")
-            if not self._only_short_lists:
+                print("  An account on the menu answered with no statements. A new account does")
+                print("  that, and so does a list that did not load, and nothing in the answer")
+                print("  tells them apart, so that account's list could not be read.")
+            if set(passed_over) - {site.EMPTY_LIST}:
                 print("  An account or a statement on it could not be read.")
-                print("  What was read is kept, and this run stops at its end rather than finish.")
-                print("  Pilot or Run All reads the list again.")
-                self.write_failure("read the statement list", "some of the list could not be read")
+            print("  What was read is kept, and this run stops at its end rather than finish.")
+            self.write_failure("read the statement list",
+                               "an account answered with no statements"
+                               if set(passed_over) == {site.EMPTY_LIST}
+                               else "some of the list could not be read")
         n_new = 0
         for d in raw:
             n_new += self._record_discover_doc(d)
@@ -552,16 +552,14 @@ class App:
     def _stop_if_cut_short(self) -> None:
         """A run that did not read the whole statement list did not finish,
         and must not read as a clean one. Once it has used what came, it
-        leaves on SystemExit the way a run leaves on a sign-out, which the
-        panel reports as a run that stopped."""
-        if self._list_cut_short and not self._only_short_lists:
-            # An empty list alone stops nothing. A run stopped for it would
-            # stop on every run of a new account, and the panel would offer a
-            # sign-in and a Continue that cannot change what the list says.
-            print("\nNot all of Discover Bank's statement list was read, so this run stops here")
-            print("rather than finish. Everything it saved is kept.")
-            print("Run it again later to read the rest.")
-            raise SystemExit(0)
+        leaves on ListNotRead, which the panel reports as a run that stopped
+        before its list was read. Resume reads no list and would stop here
+        again, so the panel offers a run that reads the list rather than
+        Continue (paperpull_core.listing)."""
+        if self._list_cut_short:
+            print("\nNot all of Discover Bank's statement list could be read, so this run stops")
+            print("here rather than finish.")
+            raise listing.say_unread(self)
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -640,7 +638,11 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except Exception as e:
-                log.exception("Failed on %s", doc.key)
+                # Named by its date and kind, never by its key, which is its
+                # PDF's address with the account's id, and the error by its
+                # kind, since what it says can carry that address too.
+                log.error("Failed on the %s of %s (%s, %s)", doc.category or "document",
+                          doc.date or "no date", type(e).__name__, failure.error_kind(e))
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()

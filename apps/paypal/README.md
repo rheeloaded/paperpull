@@ -81,12 +81,16 @@ rather than go past it.
 
 ### Help test it on a business account
 
-1. Click **Login**, sign in, and leave the window open. Login says Success
-   only once the business statements list has come.
-2. Click **Pilot**. It saves the five newest statements, or stops and says
-   why.
-3. Click **more**, then **Diagnose**. It opens the business statements page
-   and presses nothing. It writes `Diagnostics\diagnose-documents.json`,
+1. On PayPal's page in the panel, click **More**, then **Get help**, and
+   click **Open sign-in window** there. Unlike the one on the provider's
+   page, it starts no download once you are signed in. Sign in and leave
+   the window open. The sign-in says Success only once the business
+   statements list has come. Then click **Close** to leave Get help.
+2. Click **Try the newest few first**. It saves the five newest statements,
+   or stops and says why.
+3. Click **Back to PayPal**, then **More**, then **Get help**, and click
+   **Make the report**. This support report opens the business statements
+   page and presses nothing. It writes `Diagnostics\diagnose-documents.json`,
    which keeps the list's shape, each statement's status, kind of file and
    dates as written, and what one statement's Download button reads. Any
    word in it that is not on PaperPull's fixed list, and every digit, is

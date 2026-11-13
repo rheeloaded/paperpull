@@ -46,9 +46,9 @@ Walmart, Verizon and Chase apps, never the bundled Playwright Chromium.
   its address. No menu or link of the site is pressed to get there. When the
   address lands anywhere else, the run says it could not open Statements and
   stops, and you open it in the window yourself.
-- **Login** says you are signed in only once the account menu reads and an
-  account's statement list answers. A tab that only sits at the Statements
-  address says nothing of the session.
+- **The sign-in** says you are signed in only once the account menu reads
+  and an account's statement list answers. A tab that only sits at the
+  Statements address says nothing of the session.
 - **The accounts** are read from the page's own account menu, from the
   state the page keeps for it, never by opening the menu or choosing an
   account on it. Every option that is a deposit account is read, with the
@@ -77,11 +77,14 @@ Walmart, Verizon and Chase apps, never the bundled Playwright Chromium.
   call this app knows reaches, so the run says so, downloads what is
   listed and finishes. Look for older statements on Discover's Statements
   page yourself.
-- **An account on the menu whose list answers with no statements** is not
-  called whole, since a list that did not load can look like that. The
-  run says so, downloads every other account's statements and finishes,
-  with the list not noted as read whole, so a brand new account is never
-  marked checked until its first statement.
+- **An account on the menu whose list answers with no statements** is a
+  part of the list missing too. A list that did not load, or one Discover
+  answered empty in place of refusing it, looks the same as a brand new
+  account's, and nothing in the answer tells them apart. The run says so,
+  downloads every other account's statements, writes a failure file and
+  stops at its end rather than finish, and the panel offers a run that
+  reads the list again. A brand new account stops each run this way until
+  its first statement comes.
 - **With no account menu to read**, the one statement list the page asked
   for itself is read, and the run still stops at its end, since how many
   accounts there are is then not known. With no list either, the run stops

@@ -59,21 +59,28 @@ lasts.
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Simmons Bank**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Simmons Bank**, then
+   **Continue**, then **Set up**. Back on Accounts, click **Simmons Bank**
+   to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in to Simmons Bank online banking yourself and leave the window open.
-4. Click **more** under the buttons, then **Diagnose**. It opens the
-   Documents page by its address and writes
+4. Back in Get help, click **Make the report**. This support report opens
+   the Documents page by its address and writes
    `Diagnostics\diagnose-documents.json` in the Simmons Bank folder. It
    downloads nothing, clicks nothing, takes no screenshot, and writes any
    word that is not on PaperPull's fixed list as its shape.
-5. Click **Pilot**. It saves the newest document and stops. Open the PDF
+5. Once the report is done, click **Back to Simmons Bank**, then **Try the
+   newest few first**. It saves the newest document and stops. Open the PDF
    and check it is the document of the date in its name.
 6. Open the Diagnostics file in Notepad and look through it. It should hold
    counts, no values. If anything in it looks personal, delete that line.
 7. Attach it to a new
    [provider issue](https://github.com/rheeloaded/paperpull/issues/new/choose)
-   titled "Simmons Bank", with a sentence saying whether the pilot saved the
+   titled "Simmons Bank", with a sentence saying whether step 5 saved the
    right document.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a

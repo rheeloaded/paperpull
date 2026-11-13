@@ -91,6 +91,8 @@ from paperpull_core.capture import is_document as _is_document
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.identity import on_its_own_pattern as _on_its_own_pattern
 from paperpull_core.characters import whole_characters, whole_json
+from paperpull_core.failure import error_kind
+from paperpull_core.words import shape_label, shape_url
 
 log = logging.getLogger("ally_docs.site")
 
@@ -422,7 +424,7 @@ def click_documents_nav(page) -> bool:
                 c.click()
                 page.wait_for_timeout(3500)
                 dismiss_timeout(page)
-                log.info("clicked %s %r -> %s", role, label, page.url)
+                log.info("clicked %s %r -> %s", role, shape_label(label), where_it_leads(page.url))
                 if on_documents_page(page):
                     return True
                 # the nav may open a submenu (Statements / Tax Forms)
@@ -433,13 +435,13 @@ def click_documents_nav(page) -> bool:
                             s.first.click()
                             page.wait_for_timeout(3000)
                             dismiss_timeout(page)
-                            log.info("clicked submenu %r -> %s", sub, page.url)
+                            log.info("clicked submenu %r -> %s", sub, where_it_leads(page.url))
                             if on_documents_page(page):
                                 return True
                     except Exception:
                         pass
         except Exception as e:
-            log.info("documents nav (%s) failed: %s", role, e)
+            log.info("documents nav (%s) failed: %s", role, error_kind(e))
     return False
 
 
@@ -456,7 +458,7 @@ def goto_documents(page) -> bool:
     if on_documents_page(page):
         return True
     if click_documents_nav(page):
-        log.info("documents area reached at %s", page.url)
+        log.info("documents area reached at %s", where_it_leads(page.url))
         return True
     for url in DOCUMENT_URL_CANDIDATES:
         try:
@@ -470,10 +472,10 @@ def goto_documents(page) -> bool:
             except Exception:
                 pass
             if on_documents_page(page):
-                log.info("documents area reached at %s", page.url)
+                log.info("documents area reached at %s", where_it_leads(page.url))
                 return True
         except Exception as e:
-            log.info("documents URL %s failed: %s", url, e)
+            log.info("documents URL %s failed: %s", where_it_leads(url), error_kind(e))
     return on_documents_page(page)
 
 
@@ -581,7 +583,7 @@ def collect_documents(page) -> List[RawDoc]:
     try:
         rows = page.evaluate(_ROW_JS)
     except Exception as e:
-        log.info("row scrape failed: %s", e)
+        log.info("row scrape failed: %s", error_kind(e))
         rows = []
     for i, r in enumerate(rows):
         title = _html.unescape(r.get("title", "")).strip() or "Statement"
@@ -727,10 +729,10 @@ def _select_option(page, sel, label: str) -> bool:
     """
     identity = control_identity(sel)
     if is_money_control(identity):
-        log.warning("REFUSED to set a money-movement control: %s", identity[:160])
+        log.warning("REFUSED to set a money-movement control: %s", shape_label(identity[:160]))
         return False
     if FORBIDDEN_CONTROL_RE.search(label or ""):
-        log.warning("REFUSED option %r - matches the forbidden list", label)
+        log.warning("REFUSED option %r - matches the forbidden list", shape_label(label))
         return False
     try:
         sel.select_option(label=label, timeout=8000)
@@ -738,7 +740,7 @@ def _select_option(page, sel, label: str) -> bool:
         dismiss_timeout(page)
         return True
     except Exception as e:
-        log.info("could not select %r: %s", label, str(e).split("\n")[0])
+        log.info("could not select %r: %s", shape_label(label), error_kind(e))
         return False
 
 
@@ -940,7 +942,7 @@ def _draw_list_again(page, heard: list, asking: set) -> None:
     try:
         page.goto(URLS["documents"], wait_until="domcontentloaded", timeout=60000)
     except Exception as e:
-        log.info("the statements address did not load: %s", str(e).splitlines()[0][:90])
+        log.info("the statements address did not load: %s", error_kind(e))
     dismiss_timeout(page)
     if not _drawn_or_heard(page, heard) and not looks_signed_out(page):
         ensure_statements(page)
@@ -988,9 +990,9 @@ def ally_collect_via_api(page, labels: Optional[dict] = None) -> Optional[List[d
             if isinstance(items, list):
                 heard.append(r.url)
                 captured.extend(items)
-                log.info("captured %d statements from %s", len(items), r.url)
+                log.info("captured %d statements from %s", len(items), where_it_leads(r.url))
         except Exception as e:
-            log.info("could not read statements response: %s", e)
+            log.info("could not read statements response: %s", error_kind(e))
         finally:
             asking.discard(r.request)
 
@@ -1223,7 +1225,7 @@ def _find_row_control(page, date: str, account: str = "", occurrence: int = 0):
         for row, text in rows:
             if needle and needle in text.lower():
                 return _row_download_control(row)
-        log.info("no row for registration %r on %s", account[:40], date)
+        log.info("no row for registration %r on %s", shape_label(account[:40]), date)
         return None
 
     # Ambiguous set: drop the registration-labeled rows, then take the Nth.
@@ -1269,14 +1271,14 @@ def ally_download(page, ctx, account: str, date: str, out_path,
     out_path.parent.mkdir(parents=True, exist_ok=True)
     dismiss_timeout(page)
     if not ensure_statements(page):
-        log.info("statements page not available for %r %s", account, date)
+        log.info("statements page not available for %r %s", shape_label(account), date)
         return False
 
     # Tax forms live in their own tab and are identified by their form name
     # ("1099-INT"), not by a statement date.
     if kind == "tax":
         if not click_tax_tab(page):
-            log.info("could not open the tax area for %r", title or date)
+            log.info("could not open the tax area for %r", shape_label(title or date))
             return False
 
     # Put the list in the state that shows this row: the statement's own year.
@@ -1369,7 +1371,7 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
             if kind == "tax"
             else _find_row_control(page, date, account, occurrence))
     if ctrl is None:
-        log.info("statement row not found for %r %s", account, date)
+        log.info("statement row not found for %r %s", shape_label(account), date)
         return False
     if kind == "tax":
         # The picker showed this year when it was set, and the page has gone
@@ -1402,7 +1404,7 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
                 log.info("captured via direct href")
                 return True
         except Exception as e:
-            log.info("direct fetch failed for %s: %s", url, e)
+            log.info("direct fetch failed for %s: %s", where_it_leads(url), error_kind(e))
 
     # 2. A real download event (the most common mechanism).
     before = {id(p) for p in ctx.pages}
@@ -1418,7 +1420,7 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
                 return True
         except Exception as e:
             log.info("no download event for %r %s (%s); trying tab capture",
-                     account, date, str(e).split("\n")[0])
+                     shape_label(account), date, error_kind(e))
 
         # 3. The PDF opened in a new tab (blob: or a URL) - fetch its bytes.
         new_page = None
@@ -1432,7 +1434,7 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
             if new_page:
                 break
         if new_page is None:
-            log.info("nothing opened for %r %s", account, date)
+            log.info("nothing opened for %r %s", shape_label(account), date)
             return False
 
         ok = False
@@ -1452,9 +1454,9 @@ def _download_via_row(page, ctx, account: str, date: str, out_path: Path,
             if b64:
                 ok = _write_if_pdf(intake.decode(b64), out_path)
                 if ok:
-                    log.info("captured via new tab (%s)", url[:80])
+                    log.info("captured via new tab (%s)", where_it_leads(url))
         except Exception as e:
-            log.info("tab capture failed for %r %s: %s", account, date, e)
+            log.info("tab capture failed for %r %s: %s", shape_label(account), date, error_kind(e))
         return ok
     finally:
         # However the press ended. Only the one tab looked at was ever
@@ -1536,7 +1538,7 @@ def probe_statements_api(page) -> dict:
             if _select_option(page, sel, y):
                 page.wait_for_timeout(900)
     except Exception as e:
-        log.info("probe_statements_api: %s", e)
+        log.info("probe_statements_api: %s", error_kind(e))
     finally:
         try:
             page.remove_listener("response", on_resp)
@@ -1614,7 +1616,7 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
                 _select_option(page, sel, y)
         page.wait_for_timeout(int(seconds * 100))
     except Exception as e:
-        log.info("probe_api: %s", e)
+        log.info("probe_api: %s", error_kind(e))
     finally:
         try:
             page.remove_listener("response", on_resp)
@@ -1687,7 +1689,7 @@ def read_statement_facts(pdf_path) -> StatementFacts:
         # not read that way is read the plain way.
         text = whole_characters(pdf_reader.page_texts(pdf_path, 1, layout=True)[0])
     except Exception as e:
-        log.info("could not read %s: %s", pdf_path, e)
+        log.info("could not read %s: %s", pdf_path, error_kind(e))
         return StatementFacts([])
 
     return parse_statement_text(text)
@@ -1794,10 +1796,10 @@ def click_tax_tab(page) -> bool:
                 c.click()
                 page.wait_for_timeout(3000)
                 dismiss_timeout(page)
-                log.info("opened tax area via %s %r -> %s", role, label, page.url)
+                log.info("opened tax area via %s %r -> %s", role, shape_label(label), where_it_leads(page.url))
                 return True
             except Exception as e:
-                log.info("tax tab click failed: %s", e)
+                log.info("tax tab click failed: %s", error_kind(e))
     log.info("no tax tab found on the documents page")
     return False
 
@@ -1877,7 +1879,10 @@ def ally_collect_tax_via_api(page) -> List[dict]:
                 shape = f"{r.url.split('?')[0]} key={key} fields={','.join(sorted(items[0].keys()))}"
                 if shape not in seen_shapes:
                     seen_shapes.append(shape)
-                    log.info("tax payload: %s", shape[:220])
+                    # The address as its shape, since a path can carry an id.
+                    log.info("tax payload at %s key=%s fields=%s",
+                             shape_url(r.url, query=False)[:120], key,
+                             ",".join(sorted(items[0].keys()))[:120])
         except Exception:
             pass
 
@@ -1980,10 +1985,10 @@ def _find_tax_row_control(page, title: str, account: str = "",
         if matches or unread:
             break
     if unread:
-        log.info("a tax row for %r could not be read, so none is taken by its place", title)
+        log.info("a tax row for %r could not be read, so none is taken by its place", shape_label(title))
         return None
     if not matches:
-        log.info("no tax row found for %r", title)
+        log.info("no tax row found for %r", shape_label(title))
         return None
 
     if account:
@@ -1991,7 +1996,7 @@ def _find_tax_row_control(page, title: str, account: str = "",
         for row, text in matches:
             if name and name in text.lower():
                 return _row_download_control(row)
-        log.info("no tax row for registration %r (%s)", account[:40], title)
+        log.info("no tax row for registration %r (%s)", shape_label(account[:40]), shape_label(title))
         return None
 
     # No registration on this record: take the Nth row that names none either,
@@ -2001,7 +2006,7 @@ def _find_tax_row_control(page, title: str, account: str = "",
     if occurrence < len(plain):
         return _row_download_control(plain[occurrence][0])
     log.info("wanted tax form #%d of %d for %s - not present",
-             occurrence + 1, len(plain), title)
+             occurrence + 1, len(plain), shape_label(title))
     return None
 
 

@@ -1381,6 +1381,15 @@ def _names_profile(command: str, real: str) -> bool:
     return False
 
 
+def profile_folder(profile_dir) -> Path:
+    """A browser profile folder in full, read as a run reads its config, a
+    "~" at its start the home folder and "~name" a folder of that name
+    (storage.with_home), so a browser opens the very profile the config
+    names (#166)."""
+    from .storage import with_home
+    return Path(with_home(str(profile_dir))).resolve()
+
+
 def signin_browser_pid(profile_dir, port) -> Optional[int]:
     """The process of this account's own sign-in browser, or None. Named by
     both its debugging port and its profile folder on its command line, so
@@ -1389,7 +1398,7 @@ def signin_browser_pid(profile_dir, port) -> Optional[int]:
     if sys.platform == "win32":
         return None
     try:
-        real = str(Path(profile_dir).expanduser().resolve())
+        real = str(profile_folder(profile_dir))
         out = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True, timeout=5).stdout
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
@@ -1634,7 +1643,7 @@ def _last_version(profile_dir):
     leaves this as it was never reached the profile. One that cannot be read
     equals nothing, not even itself, so it reads as reached, which keeps an
     older build off the profile. Mac and Linux were not measured."""
-    last = Path(profile_dir).expanduser().resolve() / "Last Version"
+    last = profile_folder(profile_dir) / "Last Version"
     try:
         return last.read_bytes(), last.stat().st_mtime_ns
     except FileNotFoundError:
@@ -1732,7 +1741,7 @@ def _launch(exe: str, name: str, profile_dir, port: str,
     # two profiles from one setting, and left four of them holding live signed-in
     # session cookies inside the shared Playwright browser cache, where an app
     # update would have deleted them without warning.
-    profile_path = Path(profile_dir).expanduser().resolve()
+    profile_path = profile_folder(profile_dir)
     profile_path.mkdir(parents=True, exist_ok=True)
     # The browser must not inherit our stdio. It outlives this process by
     # design (the user keeps it open), so if it holds our stdout, whoever is

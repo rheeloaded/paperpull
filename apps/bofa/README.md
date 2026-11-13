@@ -16,8 +16,8 @@ read, so the app now presses one such link to learn how the page asks for
 a PDF. The same tester then taught it the credit card page and the links
 drawn behind the front of a card, and that run saved all 388 statements
 across five checking and credit card accounts, with none in Manual Review. Savings statements have not been run on a real account
-yet, so if you hold one with Bank of America, a Pilot run tells whether
-they work, see below. Tax forms are not covered yet.
+yet, so if you hold one with Bank of America, **Try the newest few first**
+tells whether they work, see below. Tax forms are not covered yet.
 
 ## How it reads the site
 
@@ -50,15 +50,21 @@ guess.
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest),
    or update your checkout, and open the control panel.
-2. Click **add a provider** and tick **Bank of America**. Pick it in the
-   App list.
-3. Click **Login**. Your own Edge or Chrome opens on bankofamerica.com,
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Bank of America**, then
+   **Continue**, then **Set up**. Back on Accounts, click **Bank of
+   America** to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens on bankofamerica.com,
    with a separate profile. Sign in yourself and answer any code it sends.
 4. In that window, open **Statements & Documents**, the way you normally
    would, and leave the window there.
-5. Click **Pilot**. It lists every account's statements and downloads the
-   newest five into the `Statements` folder. To try a single statement
-   first, run it from a terminal with `--max-docs 1`, for example
+5. Back in PaperPull, click **Close** to leave Get help, then click **Try
+   the newest few first**. It lists every account's statements and
+   downloads the newest five into the `Statements` folder. To try a single
+   statement first, run it from a terminal with `--max-docs 1`, for example
    `python paperpull.py bofa pilot --max-docs 1` in a checkout.
 6. Look at what landed. A statement in `Statements` was checked against
    its day and account. One in `Manual Review` was not filed, and the run
@@ -71,15 +77,16 @@ guess.
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It
 says which step broke and what the page looked like at the time, as counts
 and states, with no text from your account in it. Attach it to the issue
-the same way. **Diagnose**, under **more**, writes one too while the window
-is on Statements & Documents, saying what the list answered as counts and
-names only.
+the same way. A support report writes one too while the window is on
+Statements & Documents, saying what the list answered as counts and names
+only. It is **Make the report**, under **More** and then **Get help** on
+Bank of America's page.
 
 ## Sign-in
 
 Sign-in uses your own installed Edge or Chrome, in a separate profile. You
 sign in yourself, answer your own code, and leave the window open. The app
-never sees your password. Login says you are signed in only when the
+never sees your password. The sign-in says you are signed in only when the
 statements list answered, so it asks you to open Statements & Documents
 first. With other Bank of America tabs open, it works in the one on
 Statements & Documents, and with more than one there it stops and asks you

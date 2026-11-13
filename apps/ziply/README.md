@@ -45,15 +45,20 @@ none open, in a tab of its own. A tab of another site is never used.
   session's cookies, no redirect followed, and kept only when it is a PDF.
   A JSON answer fails that bill alone, and the next run tries it again.
 - **Once a run.** The list is read once and kept in memory. It is read
-  again only when a bill is not in it.
+  again only when a bill is not in it or a bill is refused.
 - **One account at a time.** A page that asks about more than one account
   stops the list, and nothing is listed. A bill is fetched only when the
   page asks about the account it was listed under. When it asks about
   another, the run stops and names the last four digits of the account it
   wants. Choose that account on the site and run Resume.
-- **Signing out.** A 401, a 403, a redirect, a sign-in page where a bill
-  was asked for, or an API answer that says the session has ended stops
-  the run and keeps what it saved. Sign in again and run Resume.
+- **Signing out.** The sign-in page in place of Billing, or a 401, a 403,
+  a redirect or an API answer that says the session has ended where the
+  list was asked for, stops the run and keeps what it saved. Sign in again
+  and run Resume. A bill answered with a 401, a 403, a redirect or a
+  sign-in page is followed by one more read of the list. A sign-out shows
+  there and stops the run the same way. A list that still reads leaves the
+  refusal that one bill's, so the run goes on and the next run tries it
+  again.
 
 ## Validation status
 

@@ -7,6 +7,155 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **1822direkt, the 84th supported provider (#174).** Downloads PDFs from
+  the Postbox, including conversation attachments when you allow the app
+  to mark conversations as read. A trial download on one account saved
+  five PDFs, and a repeat saved no duplicates. Uses CDP port 9314.
+- **Renault Bank direkt, the Postfach, its archive and message attachments
+  (#172).** Contributed by @MelleD and run on the contributor's own
+  account, where a Pilot saved recent documents, an older archive document
+  and a message attachment, and a second Pilot saved nothing new. It reads
+  the bank's own Postfach API from inside the signed-in page, every bank
+  customer the sign-in can see, Posteingang and Archiv page by page to the
+  total the bank declares, and incoming and sent messages with the older
+  messages of each thread. Each document's tokens and download tickets stay
+  in the page, and nothing is pressed. Before merging, a document whose PDF
+  does not come (an HTTP error for that one file, no ticket, or an answer
+  that is not a PDF) fails alone and the run goes on, once the list read
+  again still answers, where it had ended every run at that document so
+  nothing older was ever saved. A list that answers as signed out still
+  stops the run there. Attachments that name another type than PDF are
+  left out and counted, a customer or message missing the field that says
+  whether it has messages or a thread stops the listing rather than read
+  as having none, and a message is dated by its day in Berlin, not in UTC.
+  Whether the bank marks a document read when its PDF is fetched has not
+  been checked yet.
+
+### Changed
+- **The update check also accepts installers signed by TNE Enterprises
+  LLC.** On Windows, an installer signed by TNE Enterprises LLC, the company
+  behind PaperPull, now passes the update check as one signed by its
+  current publisher does, so signing can move to the company later
+  without the copies already installed refusing the update. The signature
+  must still be valid, come from Microsoft's ID Verified code signing and
+  say it is the new version. PRIVACY.md says so.
+
+### Fixed
+- **The tester steps in the app READMEs name the panel's buttons as it
+  shows them.** Twenty-seven app READMEs, the README, CONTRIBUTING.md,
+  PROVIDERS.md and docs/adding-a-provider.md still said to click add a
+  provider, pick it in the App list, then Login, more, Record, Diagnose
+  and Pilot, none of which the panel shows. They now go through Add a
+  provider, Continue and Set up, the provider's own page, then More and
+  Get help with its Open sign-in window, Make the report, Record steps and
+  Stop recording, and Try the newest few first. The sign-in in Get help is
+  the one they use, since it starts no download once you are signed in,
+  where the one on the provider's page can start Get new documents by
+  itself. A census in the panel's tests fails on any of the old names, and
+  pins each control the READMEs name, and the provider's name as the panel
+  writes it, to where the page shows it.
+- **A Windows update that cannot finish opens PaperPull again.** When the
+  installer failed and the copy it kept to finish with was gone or would not
+  open, or the installer could not be started at all, the update went on to
+  check PaperPull's own Python and could end with nothing open. It now says
+  so in `update.log` and opens the PaperPull you had, with nothing else run
+  first.
+- **A kept installer is checked again before it opens.** After a failed
+  install, the installer kept in your temp folder, which other programs can
+  change, opens again only once its SHA-256 and its signature are checked
+  again, while it is held so nothing can change it. One that changed is not
+  opened, `update.log` says why, and PaperPull opens instead.
+- **Installers the update kept are removed.** An installer kept after a
+  failed install is removed once it has finished the update or PaperPull
+  opened in its place, and a new update removes the ones earlier updates
+  left in your temp folder, about 55 MB each. Only folders the update made,
+  holding nothing but its own files, are removed.
+- **Restart and update waits for a transactions spreadsheet.** Since
+  0.64.0, restarting to update on a Mac while the transactions spreadsheet
+  was being built cut it off, since the restart did not see it. The restart
+  now says a spreadsheet is being built and waits for it, as it waits for a
+  download, and no spreadsheet starts while PaperPull restarts.
+- **Discover Bank no longer ends a run as Nothing new when an account's list
+  answers empty.** An account on the menu whose statement list answered with
+  no statements left the list not read whole but let the run finish, so a
+  run that read nothing of that account looked clean and only the details
+  said so. A list that did not load, or one Discover answered empty in place
+  of refusing it, looks exactly like a new account's. So the run now
+  downloads every other account's statements, writes a failure file and
+  stops at its end, and the panel offers Get new documents, which reads the
+  list again. A brand new account stops each run this way until its first
+  statement comes. Any other part of the list it could not read stops the
+  run the same way, where the panel used to offer Continue, which reads no
+  list.
+- **The log no longer carries a page's address, an account's id or a page's
+  words in Discover Bank, Chase, Ally, Robinhood and Discover.** These apps
+  wrote into their log the address the tab was on, a statement's whole PDF
+  address with the account's id in it, an error's own text, which names the
+  address it was at, document titles and account names. Discover Bank also
+  wrote up to 300 characters of what Discover answered for a PDF it refused,
+  and no longer reads that answer at all. A place
+  is now named by its site alone, an error by its kind, and a name from the
+  page by its shape. A new check reads the log lines of every app and fails
+  on any new one that does this, and lists the ones other apps still have so
+  they can be fixed next.
+- **A run started from a terminal in another folder works as the panel's
+  runs do (#166).** Since 0.62.0 such a run read `"."` and the other
+  relative folders in config.json from the folder config.json is in, but by
+  writing each one out in full. So every file it saved was recorded in
+  progress.json and the index by its full path, unlike the paths every
+  other run records, and a file recorded before was looked for in the
+  folder the terminal was in. A copy put aside for review was then taken
+  for missing, and a run could download it again as a second copy. Such a
+  run now works in the folder config.json is in, where the panel starts
+  every run, so it records and finds each file exactly as the panel's runs
+  do. A file a run recorded by its full path from 0.62.0 to 0.65.0 still
+  counts as downloaded, deleted or not, and a Download again still knows
+  the copy each record names. A test of every app holds both. American
+  Family no longer renames such a statement already in Manual Review when
+  it sets it aside again.
+- **A folder written with `~` is in your home folder (#166).**
+  `output_dir`, `profile_dir` and `documents_dir` in a config.json written
+  by hand can start with `~` for your home folder, such as
+  `~/Documents/Amex`. That is USERPROFILE on Windows and HOME on macOS and
+  Linux. A run read it as a folder named `~`, inside the provider's folder
+  or the folder config.json is in, and made Logs, Backups and a folder of
+  each kind there. The control panel now reads each one the same way as a run, and
+  so do Add a person, which makes the new person's folder beside the first
+  one's, moving history to another computer, `tools/upgrade.py` and the
+  sign-in browser. A name that only starts with `~`, such as `~archive`, is
+  still a folder of that name. On PaperPull Server the home folder is
+  outside the data folder, so a run stops before saving anything there and
+  the panel reads nothing from it, as for any folder outside it. If a run
+  before this one kept its record of what was downloaded in such a folder
+  named `~`, the run stops before downloading anything, says where that
+  folder is, and asks you to move it to your home folder or write the full
+  path, so nothing is downloaded a second time.
+- **One bill Ziply Fiber refuses no longer stops every run.** A bill whose
+  PDF Ziply answered with a 401, a 403, a redirect or a page was read as a
+  sign-out, so the run stopped at that bill, and every run after it,
+  Continue included, stopped at the same bill. Now the bill list is read
+  again when one bill is refused. A list refused too means you are signed
+  out, and the run stops as before. A list that still reads leaves that
+  bill counted as failed with nothing saved, the run goes on to the other
+  bills, and the next run tries it again. The bill is never asked for
+  twice. A new census holds every document app to this, and names the apps
+  that still stop a run at one refused document, to be looked at one by
+  one.
+- **Wealthfront says why a new account's runs stop until its first
+  statement.** A new account shows no statement until Wealthfront posts its
+  first one, and each run stopped saying to run it again later, or that
+  there was nothing to download yet, and the next run stopped the same way.
+  Nothing seen of the Documents page so far tells an account with no
+  statement apart from a page still drawing, so the run still stops there.
+  Now, on an account that has never listed or saved a statement, the stop
+  says that a new account stops there on every run until its first
+  statement, that nothing needs fixing, and to run it again and then make a
+  support report if the page in the browser does show one. An account that
+  has listed a statement before is still told what it was told before.
+
 ## [0.65.0] - 2026-11-12
 
 The update check now installs on Windows too, and PaperPull Server gives
@@ -17,7 +166,6 @@ empty Postbox as empty again, and a recording keeps more of what a
 document holds.
 
 ### Added
-- **1822direkt, the 84th supported provider after Renault Bank direkt.** Downloads paginated Postbox PDFs and, with explicit consent to mark conversations read, conversation attachments. Pilot tested on one account; the repeat saved no duplicates. Uses CDP port 9314, one above Renault Bank direkt’s 9313; the numbering assumes Renault’s PR #212 is merged first.
 - **Anthem claims summaries (#211).** Anthem now files its claims list, which
   is not the EOB Center, as one claims summary for each of the five years
   before this one and one for the current year to date each month a run

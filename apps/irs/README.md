@@ -44,11 +44,11 @@ It does not read these yet.
   Run All, then Resume, which saves the transcripts Run All listed. To keep
   the notices page out of every run, take `"Other Document"` out of
   `document_types` in `config.json`, and it is never opened. If yours lists
-  a notice, please send a Diagnose file.
+  a notice, please send a support report.
 - A transcript of a kind other than the four above. The list is read
   again before each transcript is saved, so one of another kind stops Run
   All and Resume alike before either saves a transcript, until the app has
-  been taught it. If yours lists one, please send a Diagnose file.
+  been taught it. If yours lists one, please send a support report.
 - W-2 or 1099 copies under information returns.
 - A fresher copy of a transcript already saved. The IRS updates an account
   transcript as the account changes, and the app takes each one once. Use
@@ -64,16 +64,22 @@ diagnostic file and file name.
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **IRS**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **IRS**, then **Continue**,
+   then **Set up**. Back on Accounts, click **IRS** to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in to your IRS Online Account yourself, through ID.me, answer the
    code it sends, and leave the window open.
-4. Click **more** under the buttons, then **Diagnose**. It opens the
-   transcript and notices pages by their addresses and writes
+4. Back in Get help, click **Make the report**. This support report opens
+   the transcript and notices pages by their addresses and writes
    `Diagnostics\diagnose-documents.json` in the IRS folder. It downloads
-   nothing, clicks nothing, takes no screenshot, and writes any word that
-   is not on PaperPull's fixed list as its shape.
-5. Click **Record**, in the same **more** menu. Go back to the browser window
+   nothing, clicks nothing, takes no screenshot, and writes any word that is
+   not on PaperPull's fixed list as its shape.
+5. Once the report is done, click **Back to IRS**, then **More**, then **Get
+   help** again, and click **Record steps**. Go back to the browser window
    and click your way to one transcript the way you normally would, then
    come back here and click **Stop recording**. It writes
    `Diagnostics\recording.json`. It records nothing you type and reads no

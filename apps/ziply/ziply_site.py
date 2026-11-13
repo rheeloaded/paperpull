@@ -43,6 +43,10 @@ KNOWN CEILINGS (left as they are until a run shows otherwise)
     status, an error, or a message that does not say success stops the
     list, and a 401 or 403 there, or words that say the session ended,
     stop the run as signed out.
+  * A bill's PDF answered with a 401, a 403, a redirect or a page has the
+    list read again. A list refused too stops the run as signed out, and a
+    list that still reads fails that bill alone. What Ziply answers a bill
+    it will not give has not been seen.
 
 Sign-in, with any verification code, is the account holder's own, in the
 browser.
@@ -232,8 +236,9 @@ class SessionExpired(Exception):
     """ziplyfiber.com answered as a signed-out session, with its sign-in
     page, a redirect where a bill or the list was asked for, a 401 or 403,
     an answer from the account API that says the session ended, or a page
-    where a bill's PDF was expected. The run stops for the account
-    holder."""
+    where a bill's PDF was expected. The run stops for the account holder.
+    A bill refused that way raises it only when the list, read again,
+    refuses too (download_bill)."""
 
 
 def looks_signed_out(page) -> bool:
@@ -670,7 +675,10 @@ _PDF_JS = r"""async ([url, limit]) => {
 
 def _fetch(page, invoice_id: str, out_path: Path, trace: Optional[list]) -> bool:
     """GET the bill's PDF address from inside the signed-in page, the way
-    its View PDF link opens it, and keep the body only when it is a PDF."""
+    its View PDF link opens it, and keep the body only when it is a PDF. A
+    401, a 403, a redirect or a page where the PDF should be raises
+    SessionExpired, which download_bill weighs against the list read again.
+    Any other answer that is not a PDF fails this bill alone."""
     url = invoice_url(invoice_id)
     if not url:
         return False
@@ -696,8 +704,9 @@ def _fetch(page, invoice_id: str, out_path: Path, trace: Optional[list]) -> bool
         return False
     if data[:5] != b"%PDF-":
         # The PDF is asked with the session's cookies alone, so a page in
-        # its place is the sign-in page. A JSON answer is about this one
-        # bill, which fails alone and is tried again on the next run.
+        # its place reads as the sign-in page, until download_bill has read
+        # the list again. A JSON answer is about this one bill, which fails
+        # alone and is tried again on the next run.
         if data.lstrip()[:1] == b"<":
             raise SessionExpired("ziplyfiber.com answered a bill with a sign-in page")
         if trace is not None:
@@ -718,9 +727,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     statement there carries that id and date. A list for another account
     than the one the bill was recorded under raises OtherAccountShown, with
     no reread, since the account shown is the person's choice on the site.
-    `dl_dir` is unused. Nothing is pressed. SessionExpired propagates to the
-    run, and so does ListStopped when the list cannot be read again, since
-    every bill after this one would read the same list."""
+    `dl_dir` is unused. Nothing is pressed. SessionExpired from reading the
+    list propagates to the run, and so does ListStopped when the list cannot
+    be read again, since every bill after this one would read the same list.
+
+    A bill's PDF answered with a 401, a 403, a redirect or a page has the
+    list read again, with the same call that proves a session. A session
+    that has ended is refused the list too, and its SessionExpired stops the
+    run there. A list that still reads leaves the refusal this bill's own,
+    so it fails alone, since a stop here would stop every run at this bill
+    for good. The bill is not asked for a second time."""
     out_path = Path(out_path)
     m = BILL_ID_RE.fullmatch((document_id or "").strip())
     if href != DOWNLOAD_PATH or not m:
@@ -738,7 +754,21 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             raise OtherAccountShown(last4, session.account[-4:])
         found = [d for d in bills if d.document_id == m.group(0) and d.date_text == (iso_date or "")]
         if len(found) == 1:
-            return _fetch(page, inv, out_path, trace)
+            try:
+                return _fetch(page, inv, out_path, trace)
+            except SessionExpired:
+                # A refusal may be the session ending or this one bill. The
+                # list is read again, and a session that ended shows there
+                # and stops the run. One that still reads leaves this bill
+                # failed, so it never stops every later run at the same bill.
+                _read(page)
+                shown = _RUN["session"].account[-4:]
+                if shown != last4:
+                    raise OtherAccountShown(last4, shown)
+                log.info("the bill dated %s was refused while the list still reads", iso_date)
+                if trace is not None:
+                    trace.append({"note": "refused, the list still reads"})
+                return False
     log.info("%d statements match the recorded id and date %s, none taken", len(found), iso_date)
     if trace is not None:
         trace.append({"note": "no single statement matches the record", "matches": len(found)})

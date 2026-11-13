@@ -43,6 +43,8 @@ attempt held in this run.
 """
 from __future__ import annotations
 
+import os
+
 # The first words of what an attempt that saved nothing adds to the saved
 # copy's notes. A later attempt's entry takes the place of the one found by
 # them, so the notes say only how the latest one ended.
@@ -125,7 +127,26 @@ def _names_its_copy(old: dict, rec: dict) -> bool:
     named it, or a run ended just after "PDF Saved", is not told apart from
     the saved one here."""
     path = str(old.get("pdf_path") or "")
-    return bool(path) and str(rec.get("pdf_path") or "") == path
+    return bool(path) and _one_file(str(rec.get("pdf_path") or ""), path)
+
+
+def _one_file(a: str, b: str) -> bool:
+    """Whether two recorded paths name one file. A run records a path
+    relative to the folder it works in, the install, but a run that 0.62.0
+    to 0.65.0 started in another folder recorded the full path (#166). So
+    two paths are one file when they read alike, or when each read from
+    the folder this run works in is the same path, or when the two are one
+    file on disk."""
+    if not a:
+        return False
+    if a == b:
+        return True
+    try:
+        if os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b)):
+            return True
+        return os.path.samefile(a, b)
+    except (OSError, ValueError):
+        return False
 
 
 def tried(app, key: str) -> str:

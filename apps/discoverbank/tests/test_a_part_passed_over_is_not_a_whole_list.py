@@ -43,7 +43,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import storage  # noqa: F401  binds this provider's AppSpec
 import discoverbank_docs as app_mod
 import discoverbank_site as site
-from paperpull_core import listing, testkit
+from paperpull_core import listing, run_reporting, testkit
+from paperpull_core.run_reporting import ListNotRead
 
 BASE = "https://bank.discover.com"
 PAGE_URL = BASE + "/web/deposits/documents/statements"
@@ -461,18 +462,79 @@ def test_a_list_shorter_or_longer_than_one_answer_holds_is_whole(make_app, bank,
     assert len(app.discovery.data) == count + 2
 
 
-def test_an_account_whose_list_answers_empty_is_not_a_whole_list(make_app, bank, page, tmp_path,
-                                                               capsys):
+EMPTY = "an account answered with no statements"
+
+
+@pytest.mark.parametrize("command", ["discover", "pilot", "all"])
+def test_an_account_whose_list_answers_empty_stops_the_run_as_a_list_not_read(
+        make_app, bank, page, tmp_path, capsys, command):
     """An empty list for an account the menu holds is what a list that did
-    not load can look like, so it is not called whole either."""
+    not load can look like, and so is an empty answer Discover gave in place
+    of one it refused. Nothing in the answer tells either from an account
+    with no statement yet. Such a list was left not noted whole and the run
+    finished, so a run that read nothing of that account ended clean and
+    only the details said so. Now everything else is downloaded and the run
+    stops at its end as one whose list was not read, which the panel answers
+    with a run that reads the list again rather than Continue."""
     bank.lists[SAVINGS["id"]] = []
-    app = make_app("--all")
-    app.cmd_run("all")
-    assert listing.last(app) != listing.COMPLETE
-    assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"]}
+    app = make_app("--" + command)
+    run = {"discover": app.cmd_discover, "pilot": app.cmd_pilot,
+           "all": lambda: app.cmd_run("all")}[command]
+    with pytest.raises(ListNotRead) as stopped:
+        run()
+    assert stopped.value.code == 0
+    assert listing.last(app) == listing.STOPPED
     out = said(capsys)
-    assert "answered with no statements" in out and "this run stops" not in out
+    assert "answered with no statements" in out
+    assert "could not be read" in out and "so this run stops here" in out
+    assert (failure(tmp_path)["step"], failure(tmp_path)["reason"]) == (
+        "read the statement list", EMPTY)
+    if command != "discover":
+        assert {owner_of(r["href"]) for r in saved(app)} == {CHECKING["id"]}
+        assert_each_file_is_its_own(app, bank)
     assert_nothing_pressed(page)
+
+
+def panel_reads(out):
+    for line in out.splitlines():
+        if line.startswith(run_reporting.PREFIX):
+            return json.loads(line[len(run_reporting.PREFIX):])
+    raise AssertionError("no result line for the panel in\n" + out)
+
+
+def test_a_run_whose_only_account_answers_empty_never_ends_as_nothing_new(
+        bank, page, tmp_path, monkeypatch, capsys):
+    """The run the panel shows. With the one account on the menu answering
+    an empty list, Run All saved nothing and its result said it finished,
+    which the panel shows as Nothing new."""
+    bank.menu = [SAVINGS]
+    bank.lists[SAVINGS["id"]] = []
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({
+        "owner": "Test Person", "output_dir": str(tmp_path / "out"),
+        "profile_dir": str(tmp_path / "profile"), "cdp_url": "",
+        "document_types": ["Statement"], "default_start_date": "",
+        "min_pdf_bytes": 2000, "max_path_length": 240,
+        "delay_min_seconds": 0, "delay_max_seconds": 0, "pilot_count": 5}), encoding="utf-8")
+    monkeypatch.setattr(app_mod.App, "page", lambda self: page)
+    monkeypatch.setattr(app_mod.App, "_on_its_site", lambda self: page)
+    monkeypatch.setattr(app_mod.App, "check_session", lambda self, *_a, **_kw: None)
+    page.load()
+    with pytest.raises(SystemExit):
+        app_mod.main(["--config", str(cfg), "--yes", "--all"])
+    result = panel_reads(capsys.readouterr().out)
+    assert (result["stopped"], result.get("list_not_read")) == (1, 1), result
+    assert result["new_files"] == 0
+    assert_nothing_pressed(page)
+
+
+def test_a_resume_after_an_empty_list_reads_no_list_and_stops(make_app, bank, tmp_path):
+    bank.lists[SAVINGS["id"]] = []
+    with pytest.raises(ListNotRead):
+        make_app("--all").cmd_run("all")
+    with pytest.raises(ListNotRead):
+        make_app("--resume").cmd_resume()
+    assert listing.last(make_app("--resume")) == listing.STOPPED
 
 
 # -- Login --------------------------------------------------------------------------

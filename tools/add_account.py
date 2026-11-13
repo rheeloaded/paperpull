@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -88,6 +89,22 @@ def free_cdp_url(app_dir: Path, cdp_url) -> str | None:
     return re.sub(r":%d\b" % base, ":%d" % port, cdp_url, count=1)
 
 
+# What may follow a "~" that stands for the home folder.
+_AFTER_HOME = ("", "/", "\\") if os.name == "nt" else ("", "/")
+
+
+def with_home(value):
+    """A folder setting as a run reads it, with a "~" at its start read as
+    the home folder, "~" alone or followed by a separator, and anything else
+    as it is. A run reads a setting the same way, in
+    paperpull_core.storage.with_home, which a test holds this to. Kept here
+    too, since this tool runs where no core is beside it."""
+    if not isinstance(value, str) or value[:1] != "~" or value[1:2] not in _AFTER_HOME:
+        return value
+    home = os.path.expanduser(value)
+    return value if home == value else os.path.normpath(home)
+
+
 def output_dir_for(app_dir: Path, cfg: dict, name: str) -> str:
     """The output_dir a second person's config gets, from the first
     person's config. Their folder sits beside the first one's, named for the
@@ -95,11 +112,17 @@ def output_dir_for(app_dir: Path, cfg: dict, name: str) -> str:
     Receipts". A packaged install keeps its downloads in the install folder
     itself (output_dir "."), so there the new folder is a sibling of the
     install, written as a relative path so the install can still be moved.
-    The control panel's import asks this too, to read what may already be
-    in that folder before it makes the account."""
-    out = Path(cfg.get("output_dir") or ".")
-    if (app_dir / out).resolve() == app_dir.resolve():
+    A first folder under the home folder, "~/Documents/Amazon Receipts" say,
+    gives "~/Documents/Amazon Receipts - spouse" (#166). The control panel's
+    import asks this too, to read what may already be in that folder before
+    it makes the account."""
+    raw = cfg.get("output_dir") or "."
+    out = Path(raw)
+    if (app_dir / with_home(raw)).resolve() == app_dir.resolve():
         return str(Path("..") / f"{app_dir.name} - {name}")
+    if out.name == "~":
+        # The home folder itself, whose own folder has no name to add to.
+        out = Path(with_home(raw))
     return str(out.parent / f"{out.name} - {name}")
 
 
@@ -139,7 +162,7 @@ def make_config(app_dir: Path, name: str, port_offset: int | None = None,
 
     dest = app_dir / f"config.{slug(name)}.json"
     dest.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
-    (app_dir / cfg["output_dir"]).mkdir(parents=True, exist_ok=True)
+    (app_dir / with_home(cfg["output_dir"])).mkdir(parents=True, exist_ok=True)
     return dest
 
 

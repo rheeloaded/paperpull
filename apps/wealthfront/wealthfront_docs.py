@@ -28,7 +28,8 @@ from paperpull_core import saved_copy
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result,
+                                          under_panel)
 
 import argparse
 import logging
@@ -93,6 +94,27 @@ def _set_aside_note(count: int) -> str:
     what, which = ("1 file", "it") if count == 1 else ("%d files" % count, "each")
     return ("%s of the form set kept in Manual Review, since %s was neither a PDF nor a "
             "spreadsheet, CSV, text or ZIP file" % (what, which))
+
+
+def _no_statement_yet(seen: str, shows: str) -> None:
+    """What a run that read no statement says as it stops, on an account
+    that has never listed one.
+
+    Wealthfront shows a new account no statement until it posts the first
+    one. No page from such an account has been seen, so nothing this app
+    reads tells it apart from a page still drawing, and the run stops as a
+    page still drawing must. Such an account stops on every run until its
+    first statement, so it is told that, and what to do when the page does
+    show one. A page from an account with none, its own words where the
+    list would be, is what it would take to tell the two apart."""
+    report = ("press Make the report (More, then Get help)" if under_panel()
+              else "run paperpull wealthfront diagnose")
+    print(f"{seen}, as on a new account before Wealthfront posts its first statement.")
+    print("A new account stops here on every run until then, since a page still drawing")
+    print("looks the same, and nothing needs fixing. The first run after the statement is")
+    print("posted reads it. If Wealthfront's Documents page in the browser window does")
+    print(f"show {shows}, run it again. If it stops here again, {report}")
+    print("and attach the survey file it saves to the Wealthfront issue on GitHub.")
 
 
 def ask(prompt: str) -> str:
@@ -390,14 +412,19 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             if not site.goto_documents(page):
-                print("Could not open the Documents page. Run --diagnose.")
-                print("If it shows no documents yet, there is nothing to download")
-                print("until the first one is posted.")
+                print("Could not open the Documents page.")
                 # Nothing was listed, so this run stops here rather than finish
                 # clean, as a Resume after it does (paperpull_core.listing).
                 # The page counts as open only once it shows a document, so an
                 # account with none yet stops here until one is posted, and is
-                # told why.
+                # told why. One that has listed a statement before, or wants
+                # none, is told what it was told before.
+                if self._no_statement_listed():
+                    _no_statement_yet("It showed no document", "a document")
+                else:
+                    print("Run --diagnose.")
+                    print("If it shows no documents yet, there is nothing to download")
+                    print("until the first one is posted.")
                 raise SystemExit(0)
         self.check_session(page)
         site.scroll_full_page(page)
@@ -533,9 +560,30 @@ class App:
         panel reports as a run that stopped."""
         if self._list_cut_short:
             print("\nNot all of Wealthfront's document list was read, so this run stops here")
-            print("rather than finish. Everything it saved is kept. Run it again later to")
-            print("read the rest.")
+            print("rather than finish. Everything it saved is kept.")
+            # An account that has never listed a statement listed none this
+            # time either, as a new account's runs do until its first. It
+            # still stops, since a page still drawing looks the same.
+            if self._no_statement_listed():
+                _no_statement_yet("No statement showed", "a statement")
+            else:
+                print("Run it again later to read the rest.")
             raise SystemExit(0)
+
+    def _no_statement_listed(self) -> bool:
+        """Whether this account wants statements and no run has listed or
+        saved one, as on a new account. Its records keep every document any
+        run listed or saved, and a history moved from another computer
+        brings the saved ones, so one that has a statement among them is no
+        new account, and its page showing none now is a page that did not
+        draw. A history moved with --minimal carries no category, so until a
+        run lists a statement again such an account is told what a new one
+        is. This chooses only what the stop says, never whether it stops."""
+        if not doc_types.wanted(doc_types.STATEMENT, self.config):
+            return False
+        return not any(isinstance(rec, dict) and rec.get("category") == doc_types.STATEMENT
+                       for store in (self.discovery, self.progress)
+                       for rec in store.data.values())
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]

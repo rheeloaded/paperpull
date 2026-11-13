@@ -190,6 +190,13 @@ WALKS_DECIDE_NOTHING = {
             "a moved record still names every invoice in its list of invoices, which "
             "--minimal carries",
     },
+    "wealthfront": {
+        "wealthfront_docs.App._no_statement_listed":
+            "chooses only what a stop says, never whether a run stops or what it downloads. "
+            "After a --minimal move the saved records carry no category, so a run that lists "
+            "no statement is told what a new account is told until a run lists one, and stops "
+            "as it did before",
+    },
 }
 
 # Walks in the core, met by every app that hands its records there.

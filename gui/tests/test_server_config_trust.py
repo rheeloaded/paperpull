@@ -13,6 +13,7 @@ inside the data folder.
 Every folder is a throwaway one under tmp_path, and the one program run is
 the stand-in below.
 """
+import functools
 import json
 import os
 import sys
@@ -219,3 +220,130 @@ def test_on_the_desktop_the_panel_follows_the_config_as_before(layout, tmp_path,
     configure(install, output_dir=str(outside))
     assert server_mode.output_root(install, "primary") == outside.resolve()
     assert [r["pdf_filename"] for r in app._naming_records(install)] == ["x.pdf"]
+
+
+# -- a folder under the home folder (#166) ---------------------------------------------------
+#
+# A config written by hand can start a folder with "~", the home folder of
+# whoever runs it. The panel reads each folder setting as a run does, so it
+# finds the records, the profile and the documents where the run puts them.
+# USERPROFILE is the home folder on Windows and HOME elsewhere, and every
+# panel test has both pointed at a folder of its own (conftest _own_home).
+
+@pytest.fixture()
+def home_folder(tmp_path):
+    home = tmp_path / "home"
+    assert Path(os.environ["USERPROFILE"]) == Path(os.environ["HOME"]) == home
+    return home
+
+
+def no_tilde_folder(tmp_path) -> bool:
+    return [p for p in tmp_path.rglob("*") if p.name.startswith("~")] == []
+
+
+def test_on_the_desktop_the_panel_reads_a_home_folder_as_a_run_does(layout, home_folder,
+                                                                     tmp_path, monkeypatch):
+    data, install = layout
+    monkeypatch.delenv("PAPERPULL_SERVER")
+    configure(install, output_dir="~/Example Statements", profile_dir="~/Example Profile",
+              documents_dir="~/Watched")
+    # What binding and loading a config set in the core, put back after.
+    for name in ("_SPEC", "_CONFIG_READ", "_CONFIG_GIVEN", "_FILENAME_PATTERN",
+                 "_PATTERN_OWNER"):
+        monkeypatch.setattr(core_storage, name, getattr(core_storage, name))
+    monkeypatch.setattr(core_storage, "_DOCUMENTS", dict(core_storage._DOCUMENTS))
+    from paperpull_core.spec import AppSpec, DOCUMENT
+    core_storage.bind(AppSpec(provider="Testco", project_dir=install, kind=DOCUMENT))
+    monkeypatch.chdir(install)
+    ran = core_storage.load_config(install / "config.json")
+    out = home_folder / "Example Statements"
+    assert Path(ran["output_dir"]) == out
+    assert Path(ran["profile_dir"]) == home_folder / "Example Profile"
+    assert Path(ran["documents_dir"]) == home_folder / "Watched"
+
+    assert server_mode.output_root(install, "primary") == out.resolve()
+    assert app._naming_output(install) == out
+    meta = {"name": "Testco Statements", "dir": str(install), "accounts": ["primary"]}
+    assert home_folder / "Example Profile" in app._profiles_known({"Testco Statements": meta})
+    assert home_folder / "Example Profile" in app._not_for_documents(meta, "primary")
+    assert app._documents_in_use(meta, "primary", out) == str(home_folder / "Watched")
+    assert no_tilde_folder(tmp_path)
+
+
+def test_on_the_server_a_home_folder_is_outside_the_data_folder_for_a_run_and_the_panel(
+        layout, home_folder, tmp_path):
+    data, install = layout
+    configure(install, output_dir="~/Statements")
+    said = run()
+    assert "outside" in said and "this run stopped" in said, said
+    assert not (install / "loaded.json").exists()
+    with pytest.raises(ValueError):
+        server_mode.output_root(install, "primary")
+    assert no_tilde_folder(tmp_path)
+
+
+@pytest.mark.parametrize("written", ["~", "~/Example", "~\\Example", "~archive", "x/~",
+                                     "", ".", "./~", "../Example - biz", 7, None])
+def test_the_panel_and_a_run_read_a_home_folder_alike(home_folder, written, monkeypatch):
+    """Read in four places, the core's storage.with_home, the panel's
+    server_mode.with_home, and add_account's and upgrade's, which run where
+    no core is beside them, so held to one answer here. Windows takes
+    "~name" for the folder beside the home folder named name when the home
+    folder is named for USERNAME, so that is set to match, and only "~name"
+    read as a folder of that name gives one answer for each."""
+    monkeypatch.setenv("USERNAME", home_folder.name)
+    expected = core_storage.with_home(written)
+    if written == "~archive":
+        assert expected == "~archive"
+    assert server_mode.with_home(written) == expected
+    assert tool("add_account").with_home(written) == expected
+    assert tool("upgrade").with_home(written) == expected
+
+
+@functools.lru_cache(maxsize=None)
+def tool(name: str):
+    """tools/<name>.py, loaded once as the panel loads it."""
+    import importlib.util
+    path = Path(__file__).resolve().parents[2] / "tools" / ("%s.py" % name)
+    spec = importlib.util.spec_from_file_location("paperpull_%s_home_folder" % name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_a_second_person_beside_a_folder_under_the_home_folder_gets_theirs_there(
+        tmp_path, home_folder, monkeypatch):
+    """Add a person makes the new person's folder beside the first one's,
+    which is under the home folder, and never a folder named "~" in the
+    install."""
+    monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
+    install = tmp_path / "installs" / "Example Statements"
+    install.mkdir(parents=True)
+    (install / "config.json").write_text(json.dumps({
+        "output_dir": "~/Example Statements",
+        "profile_dir": "~/Example Statements/browser-profile"}), encoding="utf-8")
+    made = tool("add_account").make_config(install, "spouse")
+    written = json.loads(made.read_text(encoding="utf-8"))
+    theirs = home_folder / "Example Statements - spouse"
+    assert theirs.is_dir()
+    assert Path(core_storage.with_home(written["output_dir"])) == theirs
+    assert server_mode.output_root(install, "spouse") == theirs.resolve()
+    assert no_tilde_folder(tmp_path)
+
+
+@pytest.mark.parametrize("written", ["~/Example Statements", "~archive", ".",
+                                     "../Example Statements - biz"])
+def test_a_history_move_reads_an_output_folder_as_a_run_does(tmp_path, home_folder, written):
+    install = tmp_path / "Example Statements"
+    as_a_run = Path(os.path.normpath(install / core_storage.with_home(written)))
+    assert tool("migrate").output_dir_of(install, {"output_dir": written}, "Testco") == as_a_run
+
+
+def test_an_upgrade_finds_a_browser_profile_under_the_home_folder(tmp_path, home_folder):
+    install = tmp_path / "Example Statements"
+    install.mkdir()
+    (home_folder / "Example Profile").mkdir()
+    (install / "config.json").write_text(json.dumps({"profile_dir": "~/Example Profile"}),
+                                         encoding="utf-8")
+    said = tool("upgrade").inspect(install)["warnings"]
+    assert not [w for w in said if "browser profile" in w], said

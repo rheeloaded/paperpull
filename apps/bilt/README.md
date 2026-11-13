@@ -45,22 +45,29 @@ Statements of the earlier Bilt card issued by Wells Fargo, before February
 
 1. Install PaperPull from the [latest release](https://github.com/rheeloaded/paperpull/releases/latest)
    and open the control panel.
-2. Click **add a provider** and tick **Bilt**. Pick it in the App list.
-3. Click **Login**. Your own Edge or Chrome opens with a separate profile.
+2. Click **Add a provider** on the Accounts page. The first time you open
+   PaperPull it shows its terms and asks which folder your documents go in,
+   then shows the same list by itself. Click **Bilt**, then **Continue**,
+   then **Set up**. Back on Accounts, click **Bilt** to open its page.
+3. Click **More**, then **Get help**, and click **Open sign-in window**
+   there. Unlike the one on the provider's page, it starts no download once
+   you are signed in. Your own Edge or Chrome opens with a separate profile.
    Sign in to your Bilt account yourself, open **Wallet**, make sure the
    wallet shows your Bilt Card, and leave the window open.
-4. Click **more** under the buttons, then **Diagnose**. It opens the wallet
-   by its address and writes `Diagnostics\diagnose-documents.json` in the
-   Bilt folder. It downloads nothing, clicks nothing, takes no screenshot,
-   and writes any word that is not on PaperPull's fixed list as its shape.
-5. Click **Pilot**. It saves the newest statement and stops. Open the PDF
-   and check it is the statement of the date in its name.
+4. Back in Get help, click **Make the report**. This support report opens
+   the wallet by its address and writes
+   `Diagnostics\diagnose-documents.json` in the Bilt folder. It downloads
+   nothing, clicks nothing, takes no screenshot, and writes any word that is
+   not on PaperPull's fixed list as its shape.
+5. Once the report is done, click **Back to Bilt**, then **Try the newest
+   few first**. It saves the newest statement and stops. Open the PDF and
+   check it is the statement of the date in its name.
 6. Open the Diagnostics file in Notepad and look through it. It should hold
    counts and the shape of each address, no values. If anything in it looks
    personal, delete that line.
 7. Attach it to a new
    [provider issue](https://github.com/rheeloaded/paperpull/issues/new/choose)
-   titled "Bilt Card", with a sentence saying whether the pilot saved the
+   titled "Bilt Card", with a sentence saying whether step 5 saved the
    right statement.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a

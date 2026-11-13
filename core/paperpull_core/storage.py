@@ -52,6 +52,9 @@ DOCUMENTS_FOLDERS = "documents-folders.json"
 # The config file load_config last read, which Login asks about, since a
 # sign-in is opened on that config's port (ports.say_at_sign_in).
 _CONFIG_READ = None
+# The path load_config was last given for that file, as it was given
+# (_file_given).
+_CONFIG_GIVEN = None
 
 
 def _folder_key(path) -> str:
@@ -66,12 +69,12 @@ def documents_dir_for(output_dir) -> str:
 
 def bind(spec) -> None:
     """Attach this process's AppSpec. Called once by the app's storage shim."""
-    global _SPEC, _CONFIG_READ
+    global _SPEC, _CONFIG_READ, _CONFIG_GIVEN
     _SPEC = spec
     # A documents folder belongs to the config load_config reads next, and
     # so does the file a sign-in asks about.
     _DOCUMENTS.clear()
-    _CONFIG_READ = None
+    _CONFIG_READ = _CONFIG_GIVEN = None
     from . import receipt_pdf
     receipt_pdf.bind(spec)
 
@@ -108,6 +111,24 @@ def config_file(path=None) -> Path:
 # The settings that name a folder and may be written relative to the folder
 # a run starts in. documents_dir has to be a full path (set_documents_dir).
 _RELATIVE_FOLDERS = ("output_dir", "profile_dir")
+# What may follow a "~" that stands for the home folder.
+_AFTER_HOME = ("", "/", "\\") if os.name == "nt" else ("", "/")
+
+
+def with_home(value):
+    """A folder setting as a run reads it, with a "~" at its start read as
+    the home folder of whoever runs it (#166), USERPROFILE on Windows and
+    HOME on macOS and Linux. That is "~" alone or followed by a separator,
+    "~/Documents/Statements" say. A name that only starts with "~" is a
+    folder of that name, since to some programs "~name" is another
+    person's home folder, which Windows can only guess at, and a folder
+    meant to be in the install must never be put there. Anything else, a
+    value that is not text included, comes back as it is. The control
+    panel reads a setting the same way (server_mode.with_home)."""
+    if not isinstance(value, str) or value[:1] != "~" or value[1:2] not in _AFTER_HOME:
+        return value
+    home = os.path.expanduser(value)
+    return value if home == value else os.path.normpath(home)
 
 
 def _started_in(folder) -> bool:
@@ -124,10 +145,10 @@ def _started_in(folder) -> bool:
             os.path.normcase(os.path.realpath(str(folder)))
 
 
-def read_relative_folders(cfg: dict, path) -> None:
-    """Read a relative output_dir or profile_dir from the config's own
-    folder when the run started neither there nor in the app's folder
-    (#165).
+def start_in_config_folder(cfg: dict, path) -> None:
+    """Move a run started neither in the app's folder nor in its config's
+    folder into the config's folder, when the config names a folder
+    relative to where the run starts (#165, #166).
 
     Every launcher starts a run in the app's own folder. The control panel
     does, paperpull and paperpull.bat do, login.bat and login.command do,
@@ -140,20 +161,73 @@ def read_relative_folders(cfg: dict, path) -> None:
     always has. A run started in any other folder, a shell in the folder
     that holds the installs say, read "." as that folder, and made Logs,
     Backups and a folder of each kind there, with a browser profile nobody
-    had signed in to. Such a run now reads them from the folder the config
-    is in. The config in memory is given each folder as it is used."""
+    had signed in to. From 0.62.0 such a run read the folders from the
+    config's folder by writing each out in full, so every path it recorded
+    was a full path, and a path recorded before was looked for in the
+    folder it started in, where no file is. A copy put aside for review
+    that was there was then taken for one that was not, and downloaded
+    again. Such a run now works in the folder its config is in, as a
+    launcher would have started it, keeps each setting as written, and
+    reads and records every path exactly as a launcher's run does."""
     base = Path(os.path.abspath(str(path))).parent
     if not isinstance(cfg, dict) or _started_in(spec().project_dir) or _started_in(base):
         return
-    for key in _RELATIVE_FOLDERS:
-        value = cfg.get(key)
-        if isinstance(value, str) and value.strip() and not Path(value).is_absolute():
-            cfg[key] = os.path.normpath(os.path.join(str(base), value))
+    if not any(isinstance(value, str) and value.strip() and not Path(value).is_absolute()
+               for value in (cfg.get(key) for key in _RELATIVE_FOLDERS)):
+        return
+    try:
+        os.chdir(str(base))
+    except OSError as e:
+        raise SystemExit(
+            "%s names its folders from the folder it is in, %s, and this run cannot work "
+            "there (%s), so it stopped before doing anything. Start it in that folder, as "
+            "the control panel does." % (Path(path).name, base, e))
+
+
+def _stop_for_history_in_a_tilde_folder(written, cfg: dict, path) -> None:
+    """Stop a run whose output_dir starts with "~" while the record of what
+    it downloaded is still in the folder named "~" that 0.65.0 and before
+    made of it (#166). They read "~/Documents/Statements" as a folder named
+    "~" in the install, or in the config's folder for a run started
+    elsewhere, and kept progress.json there. Read now as the home folder,
+    the run would find no record there and download the whole history a
+    second time. Nothing is moved for the person, since which copy to keep
+    is theirs to say, and once the home folder holds a record of its own the
+    run goes on."""
+    if not written or (Path(cfg["output_dir"]) / "progress.json").exists():
+        return
+    for base in (Path(path).parent, Path(spec().project_dir)):
+        old = Path(os.path.normpath(os.path.join(str(base), written)))
+        if (old / "progress.json").is_file():
+            raise SystemExit(
+                "output_dir in %s is written as %s, which PaperPull now reads as a "
+                "folder in your home folder, %s. Until now it was read as a folder named "
+                "~ in %s, and the record of what was downloaded is there, so this run "
+                "stopped before downloading anything again. Move the folder %s to %s, or "
+                "write output_dir as the full path of the folder it is in now, and run "
+                "again." % (Path(path).name, one_line(written), one_line(cfg["output_dir"]),
+                            one_line(base), one_line(old), one_line(cfg["output_dir"])))
+
+
+def _given(path) -> str:
+    return os.path.normpath(str(path)) if path else ""
+
+
+def _file_given(path) -> Path:
+    """The config file a run was given as `path`. The one load_config read,
+    when it was given that very path, since a run started elsewhere works
+    in its config's folder once it is read (start_in_config_folder), and a
+    path given from where it started names another file from there. Any
+    other is looked for as load_config looks for one (config_file)."""
+    if _CONFIG_READ is not None and _given(path) == _CONFIG_GIVEN:
+        return _CONFIG_READ
+    return config_file(path)
 
 
 def load_config(path: Optional[Path] = None) -> dict:
     """Read config.json and fill in this provider's defaults."""
     sp = spec()
+    given = _given(path)
     path = config_file(path)
     if not path.exists():
         copy_cmd = ("copy config.example.json config.json"
@@ -174,6 +248,16 @@ def load_config(path: Optional[Path] = None) -> dict:
         raise SystemExit(
             one_line(path) + " is not valid JSON: " + str(e) + "\n"
             "Open it and fix the syntax - a trailing comma is the usual cause.")
+    # A folder written from the home folder, "~/Documents/Statements" say, is
+    # read as that folder before anything judges or prints it (#166).
+    home_written = None
+    if isinstance(cfg, dict):
+        for key in _NAMED_SETTINGS:
+            if key in cfg:
+                read = with_home(cfg[key])
+                if key == "output_dir" and read != cfg[key]:
+                    home_written = cfg[key]
+                cfg[key] = read
     held = _not_on_one_line(cfg, path)
     if held:
         raise SystemExit(
@@ -181,8 +265,11 @@ def load_config(path: Optional[Path] = None) -> dict:
             "and names, and the control panel reads what it prints line by line, so a "
             "name has to be one line of plain text. Rename it, or change the setting, "
             "and run again." % held)
-    # Before the server's checks, so they judge the folders the run uses.
-    read_relative_folders(cfg, path)
+    # Named in full first, since the run may move to another folder, and
+    # before the server's checks, so they judge the folders the run uses.
+    path = Path(path).absolute()
+    _stop_for_history_in_a_tilde_folder(home_written, cfg, path)
+    start_in_config_folder(cfg, path)
     if os.environ.get("PAPERPULL_SERVER") == "1":
         hold_to_the_server(cfg, path)
         refuse_links_out(cfg["output_dir"], path)
@@ -211,8 +298,8 @@ def load_config(path: Optional[Path] = None) -> dict:
     set_filename_patterns(cfg)
     # Where documents go (#102), read here for the same reason.
     set_documents_dir(cfg, path)
-    global _CONFIG_READ
-    _CONFIG_READ = Path(path).absolute()
+    global _CONFIG_READ, _CONFIG_GIVEN
+    _CONFIG_READ, _CONFIG_GIVEN = path, given
     return cfg
 
 
@@ -307,7 +394,8 @@ def set_documents_dir(cfg: dict, path) -> str:
     if not isinstance(raw, str) or not raw.strip():
         why = "it is not a folder's path"
     elif not Path(raw.strip()).is_absolute():
-        why = "it is not a full path, starting with a drive or a /"
+        why = ("it is not a full path, starting with a drive or a /, or a folder in your "
+               "home folder, starting with ~/")
     else:
         docs = os.path.normpath(raw.strip())
         profile = str(cfg.get("profile_dir") or "")
@@ -568,7 +656,7 @@ def ensure_owner(config: dict, config_path) -> dict:
     if _SPEC is not None:
         # The file load_config read for this name, which for a bare name
         # given to a run started in another folder is the app's own.
-        config_path = config_file(config_path)
+        config_path = _file_given(config_path)
     try:
         existing = json.loads(Path(config_path).read_text(encoding="utf-8-sig"))
         existing["owner"] = name

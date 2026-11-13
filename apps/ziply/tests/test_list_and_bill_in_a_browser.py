@@ -88,8 +88,11 @@ class FakeZiply:
         self.api_status = 200
         self.lists_until_signed_out = -1
         # What a bill's PDF is answered with instead, by invoice id,
-        # "json", "html" or "redirect".
+        # "json", "html", "redirect" or "403".
         self.instead = {}
+        # The session ends as such a bill is asked for, so every list asked
+        # after it is refused.
+        self.signs_out_at_the_bill = False
 
 
 SITE = FakeZiply()
@@ -131,12 +134,16 @@ class _Handler(BaseHTTPRequestHandler):
             if SESSION not in (self.headers.get("Cookie") or ""):
                 return self._to_sign_in()
             instead = SITE.instead.get(inv)
+            if instead and SITE.signs_out_at_the_bill:
+                SITE.lists_until_signed_out = 0
             if instead == "json":
                 return self._json(200, {"error": True, "message": "Invoice not available"})
             if instead == "html":
                 return self._send(200, b"<!doctype html><title>Sign in</title>", "text/html")
             if instead == "redirect":
                 return self._to_sign_in()
+            if instead == "403":
+                return self._json(403, {"message": "Forbidden"})
             if inv not in PDFS:
                 return self._json(404, {"message": "no such invoice"})
             return self._send(200, PDFS[inv], "application/pdf")
@@ -357,19 +364,53 @@ def test_a_json_answer_fails_that_bill_and_the_rest_are_saved(attached, server, 
     assert out.count("Nothing was saved, and the next run tries it again") == 1, folded(out)
 
 
-@pytest.mark.parametrize("instead", ["html", "redirect"])
-def test_a_sign_in_page_for_a_bill_stops_the_run_once(attached, server, tmp_path, capsys, instead):
-    """The newest bill is answered with a sign-in page, or a redirect to
-    one. The run stops as signed out, saving nothing and recording nothing
-    against the bill."""
+def bill_asks(inv):
+    return sum(1 for s in SITE.seen if s[:2] == ("GET", site.DOWNLOAD_PATH) and s[2] == "invoiceId=" + inv)
+
+
+@pytest.mark.parametrize("instead", ["html", "redirect", "403"])
+def test_a_bill_refused_while_the_list_reads_fails_alone(attached, server, tmp_path, capsys, instead):
+    """The newest bill is answered with a sign-in page, a redirect to one,
+    or a 403, while the session still works. That stopped every run at the
+    newest bill as signed out (#124). The list is read again, it still
+    reads, so that bill fails alone, asked for once, and the other two are
+    saved."""
     SITE.instead = {BILLS[0][1]: instead}
     their_tab(attached, server)
+    SITE.seen.clear()
+
+    ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert "signed out" not in out, folded(out)
+    assert saved(tmp_path) == sorted(PDFS[inv] for _, inv in BILLS[1:]), folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == 1, folded(out)
+    assert bill_asks(BILLS[0][1]) == 1, SITE.seen
+    assert lists_asked() == 2 and page_loads() == 2, SITE.seen
+    assert not any(s[:2] == ("GET", "/login") for s in SITE.seen), SITE.seen
+    assert panel_reads(out)["stopped"] == 0, folded(out)
+    attempt = (tmp_path / "out" / "Diagnostics" / "download-attempt.json").read_text(encoding="utf-8")
+    assert "refused, the list still reads" in attempt
+    assert "Sign in" not in attempt and "Forbidden" not in attempt and ACCOUNT not in attempt
+
+
+@pytest.mark.parametrize("instead", ["html", "redirect"])
+def test_a_bill_refused_with_the_list_refused_too_stops_the_run_once(attached, server, tmp_path, capsys,
+                                                                     instead):
+    """The session ends as the newest bill is asked for, so the list read
+    again for it is refused too. The run stops as signed out, saving
+    nothing and recording nothing against the bill."""
+    SITE.instead = {BILLS[0][1]: instead}
+    SITE.signs_out_at_the_bill = True
+    their_tab(attached, server)
+    SITE.seen.clear()
 
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
     assert "answered as signed out" in folded(out), folded(out)
     assert "manual review" not in out.lower() and "Nothing was saved" not in out, folded(out)
     assert saved(tmp_path) == []
+    # Discover's list, then the one read again after the refusal, refused.
+    assert bill_asks(BILLS[0][1]) == 1 and lists_asked() == 2, SITE.seen
     assert not any(s[:2] == ("GET", "/login") for s in SITE.seen), SITE.seen
 
 

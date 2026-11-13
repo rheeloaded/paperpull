@@ -56,9 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-three providers are supported today, all built on the same pattern.
-With Renault Bank direkt (PR #212) merged first, 1822direkt is the **84th
-supported provider**; the current totals here exclude that pending PR.
+Eighty-four providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -137,6 +135,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |
 | [`portlandgeneral`](apps/portlandgeneral) | Portland General Electric (Oregon) | Monthly bills, the Detailed Bill PDF | **Built and run on a contributor's own account, 36 bills listed and the newest saved by a Pilot.** The list and each PDF are asked of PGE's own account API from inside the signed-in page, nothing clicked. One account at a time |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | Billing statements | Statements table; per-year switcher |
+| [`renaultbank`](apps/renaultbank) | Renault Bank direkt | Statements, tax documents, confirmations and other Postfach and archive documents, and the PDF attachments of messages | **Contributed by [@MelleD](https://github.com/MelleD), run on the contributor's own account** ([#212](https://github.com/rheeloaded/paperpull/pull/212)). The Postfach's own API from inside the page, nothing clicked. An archive document and a message attachment were saved, and a whole run has not been reported yet. Requested in [#172](https://github.com/rheeloaded/paperpull/issues/172) |
 | [`robinhood`](apps/robinhood) | Robinhood | Account statements, tax docs | "View More" pagination |
 | [`sba`](apps/sba) | SBA (MySBA Loan Portal) | Loan statements, 1098 | **Untested, built without an account. Have an SBA loan? [Help test it](apps/sba/README.md#help-test-it-no-programming-needed)** |
 | [`scalable`](apps/scalable) | Scalable Capital | Statements, securities documents, tax certificates | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/scalable/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document, and a second recording that switches to a child's sub-account. Requested in [#170](https://github.com/rheeloaded/paperpull/issues/170) |
@@ -379,6 +378,12 @@ paperpull amex all              REM download everything available
 paperpull amex resume           REM continue after an interruption
 paperpull list                  REM every app it can see
 ```
+
+A folder in config.json, `output_dir` or `profile_dir`, is read from the
+app's own folder unless it is a full path, and one that starts with `~`,
+such as `~/Documents/Amex`, is in your home folder. That holds wherever
+the run is started from, so a run started in another folder works in the
+app's folder, as the panel's runs do.
 
 `paperpull` is `paperpull.bat` on Windows and `./paperpull` on macOS and
 Linux, or `python paperpull.py` anywhere. In the installed Mac app it is
@@ -910,8 +915,9 @@ you use isn't here yet, you're the ideal person to add it:
 - 📥 Can't build it yourself? [Request a provider](https://github.com/rheeloaded/paperpull/issues/new/choose)
   and someone with that account may pick it up.
 - 🎬 **[Testing a provider](docs/testing-a-provider.md)**, for people who have
-  the account but do not write code. Sign in, press **Record**, click your way
-  to one document, and send back what the app wrote down. That is usually all
+  the account but do not write code. Sign in, press **Record steps** in Get
+  help, click your way to one document, and send back what the app wrote
+  down. That is usually all
   it takes to turn a scaffold into a working app.
 
 Every contribution keeps the **read-only, local, no-credentials** design, see
@@ -919,12 +925,12 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-two** apps pass their tests, the eighty-three that are
+- ✅ All **ninety-three** apps pass their tests, the eighty-four that are
   supported, the five still waiting for a tester and the Scalable Capital,
   Consorsbank, CIBC and MBNA shells. The new 1822direkt provider adds its
-  own automated suite and has been Pilot-tested on one account. Most are in regular use by the author. The rest were built or
-  confirmed by people who hold those accounts, named in the table above
-  and in [Thanks](#thanks).
+  own automated suite and was tested on one account. Most are in regular use
+  by the author. The rest were built or confirmed by people who hold those
+  accounts, named in the table above and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with
   every release since 0.43.0 as `ghcr.io/rheeloaded/paperpull-server`.
   See [PaperPull Server](#paperpull-server).

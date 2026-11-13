@@ -80,6 +80,8 @@ from paperpull_core.capture import fetch_as_b64 as _fetch_as_b64
 from paperpull_core.capture import is_document as _is_document
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.characters import whole_json
+from paperpull_core.failure import error_kind
+from paperpull_core.words import shape_label
 
 log = logging.getLogger("chase_docs.site")
 
@@ -427,7 +429,7 @@ def click_documents_nav(page) -> bool:
                 c.click()
                 page.wait_for_timeout(3500)
                 dismiss_timeout(page)
-                log.info("clicked %s %r -> %s", role, label, page.url)
+                log.info("clicked %s %r -> %s", role, shape_label(label), where_it_leads(page.url))
                 if on_documents_page(page):
                     return True
                 # the nav may open a submenu (Statements / Tax Forms)
@@ -438,13 +440,13 @@ def click_documents_nav(page) -> bool:
                             s.first.click()
                             page.wait_for_timeout(3000)
                             dismiss_timeout(page)
-                            log.info("clicked submenu %r -> %s", sub, page.url)
+                            log.info("clicked submenu %r -> %s", sub, where_it_leads(page.url))
                             if on_documents_page(page):
                                 return True
                     except Exception:
                         pass
         except Exception as e:
-            log.info("documents nav (%s) failed: %s", role, e)
+            log.info("documents nav (%s) failed: %s", role, error_kind(e))
     return False
 
 
@@ -461,7 +463,7 @@ def goto_documents(page) -> bool:
     if on_documents_page(page):
         return True
     if click_documents_nav(page):
-        log.info("documents area reached at %s", page.url)
+        log.info("documents area reached at %s", where_it_leads(page.url))
         return True
     for url in DOCUMENT_URL_CANDIDATES:
         try:
@@ -475,10 +477,10 @@ def goto_documents(page) -> bool:
             except Exception:
                 pass
             if on_documents_page(page):
-                log.info("documents area reached at %s", page.url)
+                log.info("documents area reached at %s", where_it_leads(page.url))
                 return True
         except Exception as e:
-            log.info("documents URL %s failed: %s", url, e)
+            log.info("documents URL %s failed: %s", where_it_leads(url), error_kind(e))
     return on_documents_page(page)
 
 
@@ -615,7 +617,7 @@ def collect_documents(page) -> List[RawDoc]:
     try:
         rows = page.evaluate(_ROW_JS)
     except Exception as e:
-        log.info("row scrape failed: %s", e)
+        log.info("row scrape failed: %s", error_kind(e))
         rows = []
     for i, r in enumerate(rows):
         title = _html.unescape(r.get("title", "")).strip() or "Statement"
@@ -743,10 +745,10 @@ def _select_option(page, sel, label: str) -> bool:
     """
     identity = control_identity(sel)
     if is_money_control(identity):
-        log.warning("REFUSED to set a money-movement control: %s", identity[:160])
+        log.warning("REFUSED to set a money-movement control: %s", shape_label(identity[:160]))
         return False
     if FORBIDDEN_CONTROL_RE.search(label or ""):
-        log.warning("REFUSED option %r - matches the forbidden list", label)
+        log.warning("REFUSED option %r - matches the forbidden list", shape_label(label))
         return False
     try:
         sel.select_option(label=label, timeout=8000)
@@ -754,7 +756,7 @@ def _select_option(page, sel, label: str) -> bool:
         dismiss_timeout(page)
         return True
     except Exception as e:
-        log.info("could not select %r: %s", label, str(e).split("\n")[0])
+        log.info("could not select %r: %s", shape_label(label), error_kind(e))
         return False
 
 
@@ -820,7 +822,7 @@ def chase_collect(page) -> Listed:
             if FORBIDDEN_CONTROL_RE.search(a):
                 # Never chosen (_select_option), and no account whose
                 # statements are listed.
-                log.info("refusing account option %r", a[:60])
+                log.info("refusing account option %r", shape_label(a[:60]))
                 continue
             if not _select_option(page, acct_sel, a):
                 passed_over.add("account picker")
@@ -885,15 +887,15 @@ def chase_download(page, ctx, account: str, date: str, out_path,
     out_path.parent.mkdir(parents=True, exist_ok=True)
     dismiss_timeout(page)
     if not ensure_statements(page):
-        log.info("documents page not available for %r %s", account, date)
+        log.info("documents page not available for %r %s", shape_label(account), date)
         return False
 
     if not select_year(page, date[:4]):
         log.info("year %s not offered by the picker - cannot reach %s %s",
-                 date[:4], account, date)
+                 date[:4], shape_label(account), date)
         return False
     if account and not expand_only_card(page, account):
-        log.info("could not open the card %r", account[:40])
+        log.info("could not open the card %r", shape_label(account[:40]))
         return False
 
     # Which document Chase actually serves, so the file can be checked against
@@ -943,14 +945,14 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
             if loc.count():
                 label = " ".join((loc.first.inner_text(timeout=1500) or "").split())
                 if not is_safe_row_control(label or action):
-                    log.info("row control %r did not clear the guard", label[:60])
+                    log.info("row control %r did not clear the guard", shape_label(label[:60]))
                     continue
                 link = loc.first
                 break
         except Exception as e:
-            log.info("row lookup failed (%s): %s", action, str(e).splitlines()[0][:70])
+            log.info("row lookup failed (%s): %s", action, error_kind(e))
     if link is None:
-        log.info("no row for %s on %s", account[:40], date)
+        log.info("no row for %s on %s", shape_label(account[:40]), date)
         return False
 
     before = {id(p) for p in ctx.pages}
@@ -966,7 +968,7 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
                 return True
         except Exception as e:
             log.info("no download event for %s %s (%s); trying tab capture",
-                     account[:30], date, str(e).splitlines()[0][:60])
+                     shape_label(account[:30]), date, error_kind(e))
 
         new_page = None
         for _ in range(30):
@@ -979,7 +981,7 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
             if new_page:
                 break
         if new_page is None:
-            log.info("nothing opened for %s %s", account[:30], date)
+            log.info("nothing opened for %s %s", shape_label(account[:30]), date)
             return False
 
         ok = False
@@ -997,9 +999,9 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
             if b64:
                 ok = _write_if_pdf(intake.decode(b64), out_path)
                 if ok:
-                    log.info("captured via new tab (%s)", url[:70])
+                    log.info("captured via new tab (%s)", where_it_leads(url))
         except Exception as e:
-            log.info("tab capture failed for %s %s: %s", account[:30], date, e)
+            log.info("tab capture failed for %s %s: %s", shape_label(account[:30]), date, error_kind(e))
         return ok
     finally:
         # However the press ended. The refusal above returned before the tab
@@ -1084,7 +1086,7 @@ def probe_statements_api(page) -> dict:
             rows.extend(read_card_rows(page, label))
             collapse_all_cards(page)
     except Exception as e:
-        log.info("probe_statements_api: %s", e)
+        log.info("probe_statements_api: %s", error_kind(e))
     finally:
         try:
             page.remove_listener("response", on_resp)
@@ -1156,7 +1158,7 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
                 _select_option(page, sel, y)
         page.wait_for_timeout(int(seconds * 100))
     except Exception as e:
-        log.info("probe_api: %s", e)
+        log.info("probe_api: %s", error_kind(e))
     finally:
         try:
             page.remove_listener("response", on_resp)
@@ -1261,7 +1263,7 @@ def card_accordions(page) -> List[Tuple[object, str]]:
         if is_card_control(label):
             out.append((el, label))
         elif label:
-            log.info("refusing accordion control %r", label[:60])
+            log.info("refusing accordion control %r", shape_label(label[:60]))
     return out
 
 
@@ -1273,7 +1275,7 @@ def collapse_all_cards(page) -> None:
                 el.click()
                 page.wait_for_timeout(400)
         except Exception as e:
-            log.info("could not collapse %r: %s", name[:40], e)
+            log.info("could not collapse %r: %s", shape_label(name[:40]), error_kind(e))
 
 
 def expand_only_card(page, label: str, why: Optional[dict] = None) -> bool:
@@ -1301,7 +1303,7 @@ def expand_only_card(page, label: str, why: Optional[dict] = None) -> bool:
             page.wait_for_timeout(2500)
             return True
         except Exception as e:
-            log.info("could not expand %r: %s", name[:40], e)
+            log.info("could not expand %r: %s", shape_label(name[:40]), error_kind(e))
             if why is not None:
                 why["why"] = "would not open"
             return False
@@ -1317,7 +1319,7 @@ def year_options(page) -> List[str]:
             return []
         label = inp.get_attribute("aria-label") or "View:"
         if not is_safe_control(label):
-            log.info("year picker %r did not clear the guard", label)
+            log.info("year picker %r did not clear the guard", shape_label(label))
             return []
         inp.click()
         page.wait_for_timeout(1200)
@@ -1333,7 +1335,7 @@ def year_options(page) -> List[str]:
         page.wait_for_timeout(400)
         return sorted(years, reverse=True)
     except Exception as e:
-        log.info("year options failed: %s", e)
+        log.info("year options failed: %s", error_kind(e))
         return []
 
 
@@ -1367,7 +1369,7 @@ def select_year(page, year: str, why: Optional[dict] = None) -> bool:
         dismiss_timeout(page)
         return True
     except Exception as e:
-        log.info("could not select year %s: %s", year, e)
+        log.info("could not select year %s: %s", year, error_kind(e))
         return False
 
 
@@ -1403,7 +1405,7 @@ def read_card_rows(page, label: str) -> List[dict]:
         links = page.get_by_role("link", name=re.compile(r"Saves document", re.I))
         n = min(links.count(), 400)
     except Exception as e:
-        log.info("could not read rows for %r: %s", label[:40], e)
+        log.info("could not read rows for %r: %s", shape_label(label[:40]), error_kind(e))
         return []
     for i in range(n):
         try:
@@ -1471,7 +1473,7 @@ def chase_collect_via_api(page, keep=None) -> Listed:
         for label in cards:
             rows = read_card_rows(page, label)
             passed_over.update(getattr(rows, "passed_over", ()))
-            log.info("  %s %s: %d document(s)", year or "(current)", label[:34], len(rows))
+            log.info("  %s %s: %d document(s)", year or "(current)", shape_label(label[:34]), len(rows))
             found.extend(rows)
             collapse_all_cards(page)
 

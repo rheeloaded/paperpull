@@ -33,12 +33,14 @@ from urllib.parse import urlsplit
 from paperpull_core.urls import join as join_url
 
 from paperpull_core import intake
-from paperpull_core.urls import host_matches, host_of
+from paperpull_core.urls import host_matches, host_of, where_it_leads
 from paperpull_core import controls as _controls
 from paperpull_core.controls import SETTINGS_CONTROL_RE
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.characters import whole_json
+from paperpull_core.failure import error_kind
+from paperpull_core.words import shape_label
 
 log = logging.getLogger("discoverbank_docs.site")
 
@@ -391,13 +393,15 @@ def goto_documents(page) -> bool:
             if looks_public_or_error(page) or looks_signed_out(page):
                 break
             if on_documents_page(page):
-                log.info("statements page reached at %s", page.url)
+                log.info("statements page reached at %s", where_it_leads(page.url))
                 return True
         except Exception as e:
-            log.info("documents URL %s failed: %s", url, str(e).splitlines()[0][:70])
+            log.info("the statements address at %s did not open (%s)",
+                     where_it_leads(url), error_kind(e))
     # Signed out already? Say so instead of navigating around a dead session.
     if looks_signed_out(page):
-        log.info("session is signed out (%s) - not navigating", page.url[:70])
+        log.info("session is signed out (at %s), so nothing is opened",
+                 where_it_leads(page.url))
         return False
     started_at = page.url
     for url in DOCUMENT_URL_CANDIDATES:
@@ -409,7 +413,8 @@ def goto_documents(page) -> bool:
                 # A wrong guess. Go back to where the user left us rather than
                 # leaving them stranded on a 404 with the public site's login
                 # form on screen, and stop guessing.
-                log.info("URL %s landed on a public/error page - reverting", url)
+                log.info("the statements address landed on a public or error page at %s, "
+                         "so the tab goes back", where_it_leads(page.url))
                 try:
                     page.goto(started_at, wait_until="domcontentloaded", timeout=45000)
                 except Exception:
@@ -422,10 +427,11 @@ def goto_documents(page) -> bool:
             except Exception:
                 pass
             if on_documents_page(page):
-                log.info("documents area reached at %s", page.url)
+                log.info("documents area reached at %s", where_it_leads(page.url))
                 return True
         except Exception as e:
-            log.info("documents URL %s failed: %s", url, e)
+            log.info("the statements address at %s did not open (%s)",
+                     where_it_leads(url), error_kind(e))
     return on_documents_page(page)
 
 
@@ -572,14 +578,14 @@ def parse_statements_api(json_data, account_label: str, account_id: str = "") ->
             binary_href = join_url(BASE, binary_href)
         owner = account_of_href(binary_href)
         if not owner or not stmt_date or (account_id and owner != account_id):
-            log.warning("refusing a statement on the list (%s), since its PDF is not "
-                        "this account's or it has no date", name[:40] or i)
+            log.warning("refusing statement %d on the list, since its PDF is not "
+                        "this account's or it has no date", i + 1)
             refused += 1
             continue
         by_label, by_id = kind_of_label(label), kind_of_id(owner)
         if by_label and by_id and by_label != by_id:
-            log.warning("refusing a statement on the list (%s), since the account is "
-                        "named %s and its id says %s", name[:40] or i, by_label, by_id)
+            log.warning("refusing statement %d on the list, since the account is "
+                        "named %s and its id says %s", i + 1, by_label, by_id)
             refused += 1
             continue
         kind = by_label or by_id
@@ -645,7 +651,7 @@ def collect_documents(page) -> List[RawDoc]:
     try:
         rows = page.evaluate(_ROW_JS)
     except Exception as e:
-        log.info("row scrape failed: %s", e)
+        log.info("row scrape failed (%s)", error_kind(e))
         rows = []
     for i, r in enumerate(rows):
         title = _html.unescape(r.get("title", "")).strip() or "Statement"
@@ -742,7 +748,7 @@ def _safe_selects(page, limit: int = 12):
         except Exception:
             options = []
         if is_forbidden_control_context(identity, options):
-            log.info("refusing dropdown by its options: %s", identity[:120])
+            log.info("refusing dropdown by its options: %s", shape_label(identity[:120]))
             continue
         yield s, identity
 
@@ -817,16 +823,13 @@ _DOWNLOAD_BYTES_JS = """async (url) => {
   const ppTarget = new URL(url, location.href);
   if (ppTarget.protocol !== "https:" || ppTarget.hostname !== "bank.discover.com" || ppTarget.username || ppTarget.password || (ppTarget.port && ppTarget.port !== "443")) throw new Error("Refusing an off-host document request");
   const r = await fetch(url, { credentials: 'include', headers: { 'Accept': 'application/pdf' } });
-  if (r.status !== 200) {
-    const text = await r.text();
-    return { ok: false, status: r.status, b64: '', text: text.slice(0, 300) };
-  }
+  if (r.status !== 200) return { ok: false, status: r.status, b64: '' };
   let s = '';
   const bytes = await ppRead(r);
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk)
     s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-  return { ok: true, status: r.status, b64: btoa(s), text: '' };
+  return { ok: true, status: r.status, b64: btoa(s) };
 }"""
 
 
@@ -900,7 +903,7 @@ def read_account_menu(page) -> Optional[List[dict]]:
     try:
         menus = page.evaluate(_ACCOUNT_MENUS_JS)
     except Exception as e:
-        log.warning("Could not read the account menu (%s)", e)
+        log.warning("Could not read the account menu (%s)", error_kind(e))
         return None
     found = []
     for menu in menus if isinstance(menus, list) else ():
@@ -933,7 +936,7 @@ def _read_list(page, url: str):
     try:
         got = intake.evaluate(page, _STATEMENTS_FETCH_JS, url)
     except Exception as e:
-        log.warning("The statement list call failed (%s)", str(e).splitlines()[0][:120])
+        log.warning("The statement list call failed (%s)", error_kind(e))
         return None
     if not isinstance(got, dict) or not got.get("ok"):
         log.warning("The statement list call answered %s",
@@ -1037,7 +1040,7 @@ def discoverbank_collect(page) -> Optional[Listed]:
     try:
         calls = page.evaluate(_LIST_CALLS_JS)
     except Exception as e:
-        log.warning("Could not read the page's own calls (%s)", e)
+        log.warning("Could not read the page's own calls (%s)", error_kind(e))
         calls = []
     lists = sorted({u.split("?")[0] for u in calls if isinstance(u, str)
                     and re.fullmatch(r"https://bank\.discover\.com" + STATEMENTS_PATH
@@ -1091,11 +1094,12 @@ def discoverbank_download(
     if href and href.startswith("/"):
         href = join_url(BASE, href)
     if not href:
-        log.warning("No download URL provided for %s %s", account, date)
+        log.warning("No download URL provided for %s %s", shape_label(account), date)
         return False
 
     if not is_safe_url(href) or not account_of_href(href):
-        log.warning("Refusing to download from a URL that is no statement PDF: %s", href)
+        log.warning("Refusing to download from a URL that is no statement PDF, at %s",
+                    where_it_leads(href))
         return False
 
     out_path = Path(out_path)
@@ -1104,8 +1108,11 @@ def discoverbank_download(
     result = intake.evaluate(page, _DOWNLOAD_BYTES_JS, href)
 
     if not isinstance(result, dict) or not result.get("ok") or not result.get("b64"):
-        err = result.get("text") if isinstance(result, dict) else "unknown error"
-        log.error("Failed to fetch statement bytes from %s: %s", href, err)
+        # What Discover answered is never said, since an error page can name
+        # the account, and the address is named by where it leads.
+        log.error("Failed to fetch statement bytes from %s (%s)", where_it_leads(href),
+                  "HTTP %d" % result["status"] if isinstance(result, dict)
+                  and isinstance(result.get("status"), int) else "no answer")
         return False
 
     pdf_bytes = intake.decode(result["b64"])
@@ -1137,7 +1144,7 @@ def probe_statements_api(page) -> dict:
         ensure_statements(page)
         page.wait_for_timeout(1200)
     except Exception as e:
-        log.info("probe_statements_api: %s", e)
+        log.info("probe_statements_api failed (%s)", error_kind(e))
     accounts = read_account_menu(page)
     listed = discoverbank_collect(page)
     dates = sorted(d.date_text for d in listed or () if d.date_text)
@@ -1192,7 +1199,7 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
         scroll_full_page(page, rounds=4)
         page.wait_for_timeout(int(seconds * 100))
     except Exception as e:
-        log.info("probe_api: %s", e)
+        log.info("probe_api failed (%s)", error_kind(e))
     finally:
         try:
             page.remove_listener("response", on_resp)
