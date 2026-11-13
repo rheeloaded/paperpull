@@ -56,8 +56,12 @@ another site is never used.
   and the bill is asked for once more with what that reading gave. A bill
   refused right after a list that answered, the first time or the second,
   is counted as failed with nothing saved, the run goes on to the other
-  bills, and the next run tries it again. Any other answer that is not a
-  PDF fails that one bill too.
+  bills, and the next run tries it again. A list read for a bill that does
+  not read, an answer of 500, a timeout, a tab that cannot be read or a
+  history with no bill, says nothing about the session, since that bill
+  was listed. The run stops there with nothing recorded against the bill,
+  and the panel offers a run that reads the list first. Any other answer
+  that is not a PDF fails that one bill too.
 
 ## Validation status
 

@@ -213,6 +213,55 @@ class SignsOutAtTheBill(Page):
         return got
 
 
+
+class ListFailsAfterTheBill(Page):
+    """A bill refused while the session still holds, after which the
+    billing history does not read. "500" is the API answering the page's
+    own list request with a 500, "timeout" a further page of the history
+    that times out, "dead" a tab whose address can no longer be read, and
+    "empty" a history with no bill. None of them says the session ended.
+    `failing` starts it failing before any bill is asked for."""
+
+    dead = False
+
+    def __init__(self, how, failing=False, **kw):
+        self.how, self.failing = how, False
+        super().__init__(**kw)
+        if failing:
+            self.fail()
+
+    @property
+    def url(self):
+        if self.dead:
+            raise RuntimeError("Target page, context or browser has been closed")
+        return self._url
+
+    @url.setter
+    def url(self, value):
+        self._url = value
+
+    def fail(self):
+        self.failing = True
+        if self.how == "500":
+            self.first = Resp(answer(self.rows[:self.limit], total=len(self.rows)), status=500,
+                              body=history_body(self.limit))
+        elif self.how == "dead":
+            self.dead = True
+        elif self.how == "empty":
+            self.rows = []
+
+    def evaluate(self, js, arg=None):
+        if self.failing and self.how == "timeout" and arg[0] == site.GRAPHQL_URL:
+            raise TimeoutError("Timeout 30000ms exceeded")
+        got = super().evaluate(js, arg)
+        if arg[0] == site.PDF_URL and got.get("status") == 403:
+            self.fail()
+        return got
+
+
+UNREAD = ("500", "timeout", "dead", "empty")
+
+
 class Hosts(unittest.TestCase):
     def test_only_the_site_and_its_api_over_https(self):
         ok = ["https://portlandgeneral.com/secure/payment/billing-payment-history",
@@ -565,6 +614,34 @@ class Download(unittest.TestCase):
             self.assertFalse(any(u == site.PDF_URL for u, _, _ in page.asked))
             self.assertFalse(self.out.exists())
 
+    def test_a_list_that_does_not_read_after_a_refusal_is_unread_not_a_sign_out(self):
+        """A 500, a timeout, a tab that cannot be read or a history with no
+        bill, read again after one bill's refusal on a kept list, says
+        nothing of the session. Each stops the run with the list unread,
+        never as signed out and never as that bill's own failure, and the
+        bill is asked for once."""
+        for how in UNREAD:
+            site._RUN.clear()
+            page = ListFailsAfterTheBill(how, limit=2, refused=("ref/B2",))
+            site.collect_download_docs(page)
+            with self.assertRaises(site.ListStopped, msg=how):
+                fetch(page, self.out)
+            self.assertEqual([b["encryptedBillId"] for b in page.pdfs_asked()], ["ref/B2"], how)
+            self.assertEqual(page.opened, 2, how)
+            self.assertFalse(self.out.exists(), how)
+
+    def test_a_list_read_for_a_bill_that_does_not_read_is_unread(self):
+        """With no list kept, the list is read for the bill first. The bill
+        was listed, so a list that times out, cannot be read or holds no
+        bill is a list unread, and nothing is asked for."""
+        for how in UNREAD:
+            site._RUN.clear()
+            page = ListFailsAfterTheBill(how, failing=True, limit=2)
+            with self.assertRaises(site.ListStopped, msg=how):
+                fetch(page, self.out)
+            self.assertEqual(page.pdfs_asked(), [], how)
+            self.assertFalse(self.out.exists(), how)
+
     def test_other_non_pdfs_fail_that_bill_alone(self):
         for page in (Page(limit=10, pdf=b"GIF89a"), Page(limit=10, pdf_status=500),
                      Page(limit=10, pdf=b'{"error":"no such bill"}'), Page(limit=10, pdf=b"<html>")):
@@ -697,6 +774,28 @@ class Orchestrator(unittest.TestCase):
         self.assertNotIn("Nothing was saved", said)
         self.assertEqual(app.progress.data, {})
         self.assertEqual(len(page.pdfs_asked()), 1)
+
+    def test_one_bill_refused_and_a_list_that_does_not_read_stop_the_run_unread(self):
+        """The list read again after a refusal answered 500, timed out,
+        could not be read or held no bill. That proves no session and no
+        sign-out, so the run stops with the list unread, nothing is
+        recorded against the refused bill, and a run that lists first takes
+        it again. A list that failed this way was recorded as that bill's
+        failure, and the run went on with no session shown."""
+        pdf = testkit.text_pdf(["Portland General Electric made-up bill"])
+        for how in UNREAD:
+            self.tmp = tempfile.mkdtemp()
+            page = ListFailsAfterTheBill(how, limit=2, pdf=pdf, refused=("ref/B2",))
+            app, ended, said = self._run_with(page)
+            self.assertIsInstance(ended, ListNotRead, (how, said))
+            states = {k: v["state"] for k, v in app.progress.data.items()}
+            self.assertEqual(states, {"id:bill-0012-2026-09-30": "Completed"}, how)
+            self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0, how)
+            text = " ".join(said.split())
+            self.assertIn("could not be read again", text, how)
+            self.assertNotIn("signed out", text, how)
+            self.assertNotIn("Nothing was saved, and the next run tries it again", text, how)
+            self.assertEqual([b["encryptedBillId"] for b in page.pdfs_asked()], ["ref+A1", "ref/B2"], how)
 
     def test_another_account_shown_stops_the_run_once_and_records_nothing(self):
         app = make_app(self.tmp, "--all")

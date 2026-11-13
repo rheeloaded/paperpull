@@ -69,6 +69,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
 from paperpull_core import intake
+from paperpull_core import refused
 from paperpull_core.characters import whole_json
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
@@ -934,10 +935,14 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     earlier has the list read again, with the same call that proves a
     session, and the bill asked for once more with the bill id and
     authorization of that reading. A session that has ended is refused the
-    list, and its SessionExpired stops the run there. A refusal right after
-    a list that answered fails this bill alone, since a stop here would
-    stop every run at this bill for good. The bill is not asked for again
-    after that."""
+    list, and its SessionExpired stops the run there. Every list read here
+    is for a bill that was listed, so one that does not read, a 500, a
+    timeout, a tab that cannot be read, or a history with no bill, raises
+    ListStopped (refused.list_again), which says nothing of the session,
+    and the run stops with the list unread and nothing recorded against
+    the bill. A refusal right after a list that answered fails this bill
+    alone, since a stop here would stop every run at this bill for good.
+    The bill is not asked for again after that."""
     out_path = Path(out_path)
     m = BILL_ID_RE.fullmatch(document_id or "")
     if href != DOWNLOAD_PATH or not m or m.group(2) != iso_date:
@@ -950,7 +955,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     for fresh in ((False, True) if _RUN else (True,)):
         if fresh:
             try:
-                _read(page)
+                refused.list_again(lambda: _read(page), SessionExpired, ListStopped,
+                                   stops=(OtherAccountShown,))
             except ListStopped as stop:
                 log.info("the bill list stopped while looking for the bill dated %s: %s", iso_date, stop)
                 raise
