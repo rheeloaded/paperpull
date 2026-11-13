@@ -192,6 +192,12 @@ ITS_OWN = {
         "it with the list unread, and a list that still reads leaves the refusal that "
         "statement's alone, so one statement Bilt will not give never stops every later "
         "run at it. The button is not pressed again",
+    ("bofa", "document_bytes", ("_ask_link", "_ask_pdf")):
+        "a refusal of one statement's PDF, after which its account's list for the year "
+        "is read again. A sign-out shows there and reaches the run, a list that cannot be "
+        "read stops it with the list unread, and a list that still reads leaves the "
+        "refusal that statement's alone, so one statement Bank of America will not give "
+        "never stops every later run at it",
     ("anthem", "download_document", ("_fetch_eob",)):
         "a refusal of one EOB's PDF, after which its claim type's list is read again. A "
         "sign-out shows there and reaches the run, and a list that still reads, or one "

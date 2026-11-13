@@ -702,6 +702,9 @@ class App:
                 page, account_ref=doc.account_ref, date=doc.date,
                 document_id=doc.document_id, year=doc.year)
         except site.SessionExpired:
+            # The list, read for this statement or read again after its PDF
+            # was refused, answered as a signed-out session. A refusal of the
+            # PDF alone, with the list still read, came back as nothing saved.
             print("\n  !! Bank of America answered with a sign-in page instead of a document.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, open Statements & Documents, then run Resume.")

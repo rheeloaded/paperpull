@@ -443,11 +443,69 @@ def test_a_statement_no_longer_listed_is_not_asked_for(tmp_path, bank, capsys):
 
 
 def test_a_sign_in_part_way_stops_the_run(tmp_path, bank, capsys):
+    """The statement is refused and so is the list read after it, which
+    is a session that ended."""
+    real = bank.evaluate
+
+    def signs_out(js, arg=None):
+        got = real(js, arg)
+        if "content-disposition" in js:
+            bank.list_status = 401
+        return got
+    bank.evaluate = signs_out
     bank.pdf_status = 401
     code = run(tmp_path, "--pilot")
     assert code == 2 or code == ("exit", 0)
     out = capsys.readouterr().out
     assert "session has expired" in out and result(out)["new_files"] == 0
+    assert result(out)["stopped"] == 1 and len(bank.pdfs) == 1
+    assert "Nothing was saved, and the next run tries it again" not in out
+    assert records(tmp_path) == {}
+
+
+REFUSED = "DOC000000000101"
+
+
+def refuses_one(bank, status=403):
+    """A bank that refuses one statement's PDF with `status` while every
+    list and every other statement reads."""
+    real = bank.evaluate
+
+    def refuse(js, arg=None):
+        if "content-disposition" in js and isinstance(arg, str) and arg.endswith(REFUSED):
+            bank.pdfs.append(arg)
+            return {"status": status, "url": arg, "ct": "text/html", "cd": "", "b64": ""}
+        return real(js, arg)
+    bank.evaluate = refuse
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_one_statement_refused_while_the_list_reads_fails_alone_and_the_rest_are_saved(
+        tmp_path, bank, capsys, status):
+    """The refused statement stopped the run before, so the statements
+    after it were never asked for, and every later run, Continue included,
+    stopped at it again (#124)."""
+    refuses_one(bank, status)
+    code = run(tmp_path, "--pilot")
+    out = capsys.readouterr().out
+    # 1 is a run that finished with a document failed, never a stop (2).
+    assert code == 1, out
+    got = result(out)
+    assert got["stopped"] == 0 and got["new_files"] == 3 and got["failed"] == 1
+    states = {r["document_id"]: r["state"] for r in records(tmp_path).values()}
+    assert states == {"DOC000000000091": "Completed", "DOC000000000101": "Failed",
+                      "DOC000000000102": "Completed", "DOC000000000201": "Completed"}
+    assert out.count("Nothing was saved, and the next run tries it again") == 1
+    assert "session has expired" not in out
+    assert bank.pdfs.count(sb.LINK_BASE + REFUSED) == 1
+    saved = sorted(p.name for p in (tmp_path / "out").rglob("*.pdf"))
+    assert JANUARY_CHECKING not in saved and len(saved) == 3
+    # The next run tries it again, and takes it once the bank gives it.
+    bank.evaluate = sb.Bank.evaluate.__get__(bank)
+    assert run(tmp_path, "--resume", "--yes") == 0
+    states = {r["document_id"]: r["state"] for r in records(tmp_path).values()}
+    assert set(states.values()) == {"Completed"}
+    assert bank.pdfs.count(sb.LINK_BASE + REFUSED) == 2
 
 
 def test_run_all_asks_for_yes_first(tmp_path, bank, monkeypatch, capsys):
