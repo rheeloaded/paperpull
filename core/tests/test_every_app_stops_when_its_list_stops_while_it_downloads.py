@@ -186,6 +186,14 @@ ITS_OWN = {
         "SessionExpired there and reaches the run, the connect form stops it as "
         "NotConnected, and a list that still shows invoices leaves the refusal that "
         "invoice's alone",
+    ("firsthorizon", "download_statement", ("_catch_statement",)):
+        "a statement whose own address was refused once its Download PDF was pressed, a "
+        "401, a 403, a redirect, a page or the sign-in page, with every page the press "
+        "made closed, after which the statements page is opened afresh and the session "
+        "probe asked. What the run's page shows and the page's own answers stop the run "
+        "first, a sign-out shows there and reaches the run, a page that stops stops it "
+        "with the list unread, and a session that still reads leaves the refusal that "
+        "statement's alone. Download PDF is not pressed again",
     ("amexbanking", "download_one", ("amexbanking_download",)):
         "a refusal of one document's PDF, after which the list is loaded again and read "
         "as Discover reads it. A refused list reaches the run, a list that does not "
