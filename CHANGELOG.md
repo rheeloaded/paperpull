@@ -7,6 +7,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+- **1822direkt, the Postbox, its sent items and its trash (#174).** It
+  reads the bank's own Postbox API from inside the signed-in page,
+  Posteingang, Gesendet and the Papierkorb page by page to the total the
+  bank declares, and fetches each PDF from the address the bank's own page
+  uses, with the tokens kept in the page and nothing pressed. A
+  conversation is never opened, since opening one marks it read at the
+  bank. A thread's own PDF is saved, and Discover and the run summary say
+  how many threads and messages with no PDF of their own were left
+  unopened, whose further attachments are not read. Before merging, a
+  thread stopped the whole list unless the app was allowed to open it, and
+  now it does not, so Login answers for an account that has one. A missing
+  field stops the listing rather than read as nothing there, where a row
+  with no PDF flag was taken for a message without one and its statement
+  left out of a list called whole. A timestamp with a zone is dated by its
+  day in Berlin, and a 401 or a 403 for one PDF fails that document alone
+  once the list read again still answers, where it had ended every run
+  there. The tool that wrote page addresses to a file for issues is gone,
+  since Record does that through the fixed list of words. Run on the
+  contributor's own account, where a Pilot saved five documents and a
+  second Pilot saved nothing new. Contributed by @MelleD.
+
 ## [0.66.0] - 2026-11-13
 
 Renault Bank direkt is new, contributed by @MelleD. One bill Ziply Fiber
@@ -18,10 +42,6 @@ cannot finish opens PaperPull again, and five more apps keep page
 addresses and words out of their logs.
 
 ### Added
-- **1822direkt, the 84th supported provider (#174).** Downloads PDFs from
-  the Postbox, including conversation attachments when you allow the app
-  to mark conversations as read. A trial download on one account saved
-  five PDFs, and a repeat saved no duplicates. Uses CDP port 9314.
 - **Renault Bank direkt, the Postfach, its archive and message attachments
   (#172).** Contributed by @MelleD and run on the contributor's own
   account, where a Pilot saved recent documents, an older archive document

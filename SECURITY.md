@@ -104,9 +104,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Verizon Mobile and Ziply Fiber) open the provider's
     pages by their address and read them, or ask for the same lists and
     files the provider's own page asks for, from inside the signed-in page or
-    with its cookies. 1822direkt opens conversations through the Postbox API
-    only with permission to mark them as read and download their attachments.
-    On a site that can also change direct deposit and tax
+    with its cookies. On a site that can also change direct deposit and tax
     withholding, not activating a control is the strongest guarantee
     available, and UKG additionally refuses any URL whose path says `EDIT`
     rather than `VIEW`. The Diagnose command of Affirm, DKB, Fidelity, Invest529,
