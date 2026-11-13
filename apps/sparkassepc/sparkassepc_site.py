@@ -764,8 +764,7 @@ def _take_pdf(page, row, config=None):
 
     page.route(PDF_ROUTE, hold)
     try:
-        pressing.click(page, link, css=LINK_CSS, words=_words(), step=TAKE_STEP,
-                       what="the direct download link of the document of %s" % row["date"])
+        _press_link(page, link, row["date"])
         deadline = time.monotonic() + 15
         while not held and time.monotonic() < deadline:
             page.wait_for_timeout(150)
@@ -784,6 +783,18 @@ def _take_pdf(page, row, config=None):
     if not isinstance(result, dict) or not result.get("ok"):
         raise NoFile("The Postfach PDF service did not give the file.")
     return intake.decode(result.get("data"), validate=True)
+
+
+def _press_link(page, link, date):
+    """Press one row's own direct download link. A link the bank shows
+    turned off was not pressed, so this one document is left (NoFile),
+    recorded as failed and tried again on the next run, and the run goes
+    on. A link something covers still stops the run."""
+    try:
+        pressing.click(page, link, css=LINK_CSS, words=_words(), step=TAKE_STEP,
+                       what="the direct download link of the document of %s" % date)
+    except pressing.TurnedOff:
+        raise NoFile("The row's direct download link is turned off.") from None
 
 
 # The PDF the held navigation was going to, asked for once from inside the

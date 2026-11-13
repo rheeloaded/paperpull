@@ -150,6 +150,10 @@ STOPS = {
     ("vanguard", "show_more", "click", "show more of the list"): (1,
         "a control of the whole list, read as turned on before it is pressed, and a "
         "list shown in full leaves only the statement not shown"),
+    ("sparkassepc", "_turn", "click", ""): (1,
+        "the Postfach's numbered page button, found only when it is turned on, a step "
+        "to the page a document is on, so a turned off one where the pager offers that "
+        "page would leave every document on it and after it unread"),
 }
 
 # The presses that leave their document and go on when something covers them
@@ -172,7 +176,8 @@ LEAVES = {
     ("coinbase", "_press_card_pdf"), ("firsthorizon", "_press"),
     ("etrade", "_catch_pdf"), ("golden1", "_catch_pdf"), ("nelnet", "_catch_pdf"),
     ("newrez", "_catch_pdf"), ("pge", "_press_once"), ("sba", "_catch_pdf"),
-    ("simmons", "_catch_document"), ("smud", "_catch_pdf"), ("statefarm", "_catch_pdf"),
+    ("simmons", "_catch_document"), ("smud", "_catch_pdf"), ("sparkassepc", "_press_link"),
+    ("statefarm", "_catch_pdf"),
     ("vanguard", "download_document"),
     ("venmo", "show_all"), ("wellsfargo", "_catch_pdf")}
 
@@ -785,6 +790,22 @@ def _venmo_list(off: bool) -> str:
             % (" disabled" if off else ""))
 
 
+def _sparkassepc(site, page, out, staging, trace):
+    """Sparkasse Pforzheim Calw's press of one row's own direct download
+    link, the only one on the page. A turned off link leaves the document
+    (NoFile), which its download records as failed and goes on from."""
+    try:
+        return site._press_link(page, page.locator("#get"), "2026-06-30")
+    except site.NoFile:
+        return False
+
+
+def _sparkassepc_link(off: bool) -> str:
+    return ('<a id="get" class="ctl postbox-message-direct-download" href="#"%s '
+            'onclick="window.presses++; return false;">Kontoauszug Juni 2026</a>'
+            % (' aria-disabled="true"' if off else ""))
+
+
 def _how(app: str, function: str, monkeypatch):
     """The app's own press path, the page that shows its control, and the
     row it sits in, for each press that leaves its document."""
@@ -826,6 +847,8 @@ def _how(app: str, function: str, monkeypatch):
         return "spectrum_site", _spectrum_mobile(monkeypatch), _spectrum_row, "June 30, 2026"
     if (app, function) == ("venmo", "show_all"):
         return "venmo_site", _venmo, _venmo_list, VENMO_MONTH
+    if (app, function) == ("sparkassepc", "_press_link"):
+        return "sparkassepc_site", _sparkassepc, _sparkassepc_link, "30.06.2026"
     return None
 
 
