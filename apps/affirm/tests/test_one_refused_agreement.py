@@ -7,6 +7,12 @@ the loop of #124. Now the loan list is read again when one agreement is
 refused. A session that ended is refused the list too, and that stops the
 run. A list that still reads leaves the agreement failed alone, nothing
 saved, and the next run tries it again. The agreement is asked for once.
+
+A list that does not answer when it is read again (a 500, a timeout) or
+answers with no loan says nothing either way, so the run stops with the
+list unread, nothing recorded against the agreement, and a run that lists
+first takes it again. It is neither a sign-out nor the agreement's own
+failure (the review of 2026-11-13).
 """
 import io
 import json
@@ -23,6 +29,7 @@ import storage  # noqa: E402,F401  binds this provider's AppSpec
 import affirm_site as site  # noqa: E402
 import affirm_docs as docs  # noqa: E402
 from paperpull_core import receipt_pdf, testkit  # noqa: E402
+from paperpull_core.run_reporting import ListNotRead  # noqa: E402
 
 LOANS = ("L-0001", "L-0002", "L-0003")
 DAYS = {"L-0001": "2025-11-26", "L-0002": "2024-06-02", "L-0003": "2023-01-15"}
@@ -48,12 +55,15 @@ class Page:
     """A signed-in affirm.com page. The loan list and each loan's details
     answer from the API, and each agreement from its own address, refused
     with `how` for the loans in `refused`. A session that ends at the
-    refusal (`signs_out`) refuses the list from then on."""
+    refusal (`signs_out`) refuses the list from then on, and one whose list
+    stops answering then (`list_then`, a status, "timeout" or "empty")
+    answers it that way."""
 
     url = "https://www.affirm.com/u/"
 
-    def __init__(self, refused=(), how=401, signs_out=False):
-        self.refused, self.how, self.signs_out = set(refused), how, signs_out
+    def __init__(self, refused=(), how=401, signs_out=False, list_then=None):
+        self.refused, self.how = set(refused), how
+        self.list_then = 401 if signs_out else list_then
         self.list_status = 200
         self.list_json = None
         self.asked = []
@@ -64,6 +74,8 @@ class Page:
     def evaluate(self, js, arg=None):
         self.asked.append(arg)
         if arg.startswith(site.API["loans"]):
+            if self.list_status == "timeout":
+                raise TimeoutError("Timeout 30000ms exceeded")
             if self.list_status != 200:
                 return {"status": self.list_status, "json": None, "url": arg}
             if self.list_json is not None:
@@ -74,8 +86,10 @@ class Page:
             return {"status": 200, "json": details_of(arg.rsplit("/", 1)[1]), "url": arg}
         loan = next(x for x in LOANS if terms_of(x) == arg)
         if loan in self.refused:
-            if self.signs_out:
-                self.list_status = 401
+            if self.list_then == "empty":
+                self.list_json = {"data": [], "next": None}
+            elif self.list_then is not None:
+                self.list_status = self.list_then
             return {"status": self.how, "ct": "text/html", "text": "", "url": arg}
         html = "<html><body>" + "Truth in Lending made-up words " * 100 + "</body></html>"
         return {"status": 200, "ct": "text/html; charset=utf-8", "text": html, "url": arg}
@@ -122,13 +136,24 @@ def test_an_agreement_refused_and_the_list_refused_after_it_is_a_sign_out(render
 
 
 @pytest.mark.parametrize("answer", [{}, {"data": [], "next": None}])
-def test_a_list_read_empty_after_a_refusal_is_no_list(rendered, tmp_path, answer):
-    """A sign-in page answered through a redirect reads as no loans at all,
-    which is not a list that still reads, since this loan was listed."""
+def test_a_list_read_empty_after_a_refusal_is_unread_not_a_sign_out(rendered, tmp_path, answer):
+    """No loans at all is not a list that still reads, since this loan was
+    listed, and nothing in it says the session ended."""
     page = Page(refused={"L-0002"})
     page.list_json = answer
-    with pytest.raises(site.SessionExpired):
+    with pytest.raises(site.ListStopped):
         take(page, tmp_path / "a.pdf")
+    assert page.agreements_asked() == [terms_of("L-0002")]
+
+
+@pytest.mark.parametrize("then", [500, 503, "timeout"])
+def test_a_list_that_does_not_answer_after_a_refusal_is_unread(rendered, tmp_path, then):
+    page = Page(refused={"L-0002"}, list_then=then)
+    out = tmp_path / "a.pdf"
+    with pytest.raises(site.ListStopped):
+        take(page, out)
+    assert not out.exists()
+    assert page.lists_asked() == 1
     assert page.agreements_asked() == [terms_of("L-0002")]
 
 
@@ -192,3 +217,23 @@ def test_one_agreement_refused_and_the_list_after_it_stop_the_run(rendered, tmp_
     assert "Nothing was saved" not in said
     assert app.progress.data == {}
     assert page.agreements_asked() == [terms_of("L-0001")]
+
+
+@pytest.mark.parametrize("then", [500, "timeout", "empty"])
+def test_one_agreement_refused_and_the_list_unread_after_it_stop_with_the_list_unread(
+        rendered, tmp_path, then):
+    """A 500 or a timeout there reached the loop as the agreement's own
+    failure, and the run went on with no session shown. A list with no loan
+    was read as a sign-out. Now the run stops with the list unread, nothing
+    recorded against the agreement, so Get new documents takes it again."""
+    page = Page(refused={"L-0002"}, how=403, list_then=then)
+    app, ended, said = run_with(tmp_path, page)
+    assert isinstance(ended, ListNotRead), said
+    states = {v["item_id"]: v["state"] for v in app.progress.data.values()}
+    assert states == {"L-0001": "Completed"}
+    assert app.stats["failed"] == 0
+    assert "session has expired" not in said
+    assert "Nothing was saved" not in said
+    assert "could not be read again" in said
+    assert page.agreements_asked() == [terms_of("L-0001"), terms_of("L-0002")]
+

@@ -58,7 +58,7 @@ from paperpull_core.redact import redact, set_private_words  # noqa: F401
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.api_census import shape_of as _shape
 from paperpull_core.dates import checked as _checked_date
-from paperpull_core import intake
+from paperpull_core import intake, refused
 from paperpull_core.characters import whole_json
 
 log = logging.getLogger("affirm_docs.site")
@@ -81,6 +81,18 @@ class SessionExpired(RuntimeError):
     """Affirm answered with a sign-in page instead of the thing asked for. A
     loan agreement refused that way raises it only when the loan list, read
     again, is refused too (download_document)."""
+
+
+class ListStopped(Exception):
+    """The loan list, read again after one agreement was refused, did not
+    answer (a 500, a timeout) or answered with no loan, though it listed
+    that loan. It says neither that the session ended nor that it holds, so
+    the run stops with the list unread. Its words are this module's own,
+    never the page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 def is_safe_url(url: str) -> bool:
@@ -353,25 +365,17 @@ def collect_documents(page, keep=None, config: Optional[dict] = None) -> List[di
     return rows
 
 
-def _still_listed(loans: list) -> list:
-    """The loan list read again after one agreement was refused. A list
-    with no loan at all, which is what a sign-in page answered through a
-    redirect reads as, is no list, since that loan was listed, and raises
-    SessionExpired."""
-    if not loans:
-        raise SessionExpired("the loan list read empty after a refused agreement")
-    return loans
-
-
 def download_document(page, title: str, date: str, out_path: Path, occurrence: int = 0,
                       item_hint: str = "", client_hint: str = "", account: str = "") -> bool:
     """Fetch the agreement page through the signed-in page and render it to PDF.
 
     An agreement answered with a 401 or 403 has the loan list read again,
-    with the same call that proves a session. A list refused too, or one
-    with no loan at all, raises SessionExpired, which stops the run. A list
-    that still reads leaves the agreement failed alone (False), and the
-    next run tries it again."""
+    with the same call that proves a session (refused.list_again). A list
+    refused too raises SessionExpired, which stops the run as signed out. A
+    list that does not answer (a 500, a timeout) or holds no loan raises
+    ListStopped, which stops the run with the list unread, since it says
+    neither. A list that still reads leaves the agreement failed alone
+    (False), and the next run tries it again."""
     from paperpull_core import receipt_pdf
     url = terms_url(page, item_hint) if item_hint else ""
     url = url or client_hint
@@ -388,10 +392,12 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
         # A refusal may be the session ending or this one agreement. The
         # loan list is read again, and a session that ended is refused
         # there too, which raises SessionExpired and stops the run. A list
-        # that still reads leaves the refusal this agreement's own, so it
-        # fails alone and never stops every later run at the same loan. It
-        # is not asked for a second time.
-        _still_listed(list_loans(page))
+        # that does not answer or holds no loan raises ListStopped, which
+        # stops it with the list unread. A list that still reads leaves the
+        # refusal this agreement's own, so it fails alone and never stops
+        # every later run at the same loan. It is not asked for a second
+        # time.
+        refused.list_again(lambda: list_loans(page), SessionExpired, ListStopped)
         log.warning("the loan agreement dated %s was refused while the loan list still reads", date)
         return False
     html = res.get("text") or ""

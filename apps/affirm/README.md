@@ -36,8 +36,11 @@ tab of the same browser. Nothing on the page is clicked.
 
 An agreement Affirm answers with a 401 or 403 has the loan list read
 again. A list refused too means you are signed out, and the run stops. A
-list that still reads leaves that agreement failed with nothing saved, the
-run goes on to the others, and the next run tries it again.
+list that does not answer, or holds no loan, says neither, so the run
+stops with nothing recorded against that agreement, and Get new documents
+reads the list first and tries it again. A list that still reads leaves
+that agreement failed with nothing saved, the run goes on to the others,
+and the next run tries it again.
 
 ## Safety
 
