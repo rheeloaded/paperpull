@@ -418,80 +418,97 @@ _NUMBER = re.compile(r"[1-9]\d{0,2}")
 SETTLE_SECONDS = 20
 
 
-def _row_shape(row):
-    """One row as the list read it, held to the shape this app reads. A row
-    with no direct download is kept and counted, never read as nothing
-    there. A row with more than one, or a downloadable row with no identity,
-    and any row whose unread mark is not read, stop the listing."""
+def _row_fault(row):
+    """Why a row as the list read it is not the shape this app reads, or
+    "". A row with no direct download is kept and counted, never read as
+    nothing there. A row with more than one, a downloadable row with no
+    identity, and any row whose unread mark is not read stop the listing."""
     if not isinstance(row, dict) or not isinstance(row.get("links"), int):
-        raise ListStopped("A Postfach row cannot be read.")
+        return "A Postfach row cannot be read."
     if row["links"] > 1:
-        raise ListStopped("A Postfach row offers more than one direct download.")
+        return "A Postfach row offers more than one direct download."
     if not isinstance(row.get("unread"), bool):
-        raise ListStopped("A Postfach row's unread mark cannot be read.")
-    downloadable = row["links"] == 1
+        return "A Postfach row's unread mark cannot be read."
     token = row.get("identity")
-    if downloadable and (not isinstance(token, str) or not token or len(token) > 2048):
-        raise ListStopped("A listed PDF has no document identity.")
-    return dict(row, downloadable=downloadable)
+    if row["links"] == 1 and (not isinstance(token, str) or not token or len(token) > 2048):
+        return "A listed PDF has no document identity."
+    return ""
 
 
-def _read_page(page):
-    """The Postfach page the tab shows, whole or not at all.
+# What _look answers besides a page.
+SIGNED_OUT, STOPPED = "signed out", "stopped"
 
-    Its rows, its page number and the page after it as the pager says them,
-    and the numbers the pager offers to press. A pager that shows no page
-    number this can read stops the listing. A page with no pager reads as
-    page 1 with no page after it, which only a short page may be
-    (_collect)."""
+
+def _look(page):
+    """The Postfach page the tab shows as ("page", what it lists), or why it
+    cannot be read, (SIGNED_OUT, words) or (STOPPED, words). It raises none
+    of this module's stops, so a look taken again and again while a page
+    changes (_settled) never has to catch one.
+
+    What it lists is its rows, its page number and the page after it as the
+    pager says them, and the numbers the pager offers to press. A pager that
+    shows no page number this can read stops the listing. A page with no
+    pager reads as page 1 with no page after it, which only a short page
+    may be (_collect)."""
     if not is_safe_url(page.url) or looks_signed_out(page):
-        raise SessionExpired("Sign in to Sparkasse Pforzheim Calw again.")
+        return SIGNED_OUT, "Sign in to Sparkasse Pforzheim Calw again."
     if urlsplit(page.url).path not in FOLDERS.values():
-        raise ListStopped("The browser left the Postfach.")
+        return STOPPED, "The browser left the Postfach."
     result = page.evaluate(_LIST_JS)
     if not isinstance(result, dict) or result.get("failed") or not isinstance(result.get("rows"), list):
-        raise ListStopped("The Postfach list is missing.")
+        return STOPPED, "The Postfach list is missing."
     if result.get("filtered"):
-        raise ListStopped("Clear the Postfach search and select Gesamtzeitraum before running.")
-    rows = [_row_shape(row) for row in result["rows"]]
+        return STOPPED, "Clear the Postfach search and select Gesamtzeitraum before running."
+    rows = []
+    for row in result["rows"]:
+        fault = _row_fault(row)
+        if fault:
+            return STOPPED, fault
+        rows.append(dict(row, downloadable=row["links"] == 1))
     if not result.get("pager"):
-        return {"rows": rows, "pager": False, "number": 1, "next": 0, "offered": set()}
+        return "page", {"rows": rows, "pager": False, "number": 1, "next": 0, "offered": set()}
     active = result.get("active")
     if result.get("actives") != 1 or not isinstance(active, str) or not _NUMBER.fullmatch(active):
-        raise ListStopped("The Postfach's active page number cannot be read.")
+        return STOPPED, "The Postfach's active page number cannot be read."
     following = result.get("next")
     if result.get("nexts") not in (0, 1) or (result.get("nexts") and not (
             isinstance(following, str) and _NUMBER.fullmatch(following))):
-        raise ListStopped("The Postfach's next page number cannot be read.")
+        return STOPPED, "The Postfach's next page number cannot be read."
     offered = {int(v) for v in result.get("offered") or ()
                if isinstance(v, str) and _NUMBER.fullmatch(v)}
-    return {"rows": rows, "pager": True, "number": int(active),
-            "next": int(following) if result.get("nexts") else 0, "offered": offered}
+    return "page", {"rows": rows, "pager": True, "number": int(active),
+                    "next": int(following) if result.get("nexts") else 0, "offered": offered}
 
 
 def _settled(page, target=None):
     """The page once it reads, and reads the same twice running, with the
     page number `target` when one is given. A page still changing, between
-    a press and the bank's answer, is read again until it holds still. When
-    it never does within SETTLE_SECONDS, the last reason it would not read
-    stops it."""
+    a press and the bank's answer, is looked at again until it holds still.
+    When it never does within SETTLE_SECONDS, the last reason it would not
+    read stops it, SessionExpired for a sign-in page and ListStopped for
+    anything else."""
     deadline = time.monotonic() + SETTLE_SECONDS
-    last, why = None, ListStopped("The Postfach did not reach the requested page.")
+    last, kind, why = None, STOPPED, "The Postfach did not reach the requested page."
     while True:
         try:
-            now = _read_page(page)
-            if target is not None and not (now["pager"] and now["number"] == target):
-                now = None
-                why = ListStopped("The Postfach did not reach the requested page.")
-        except (SessionExpired, ListStopped) as e:
-            now, why = None, e
+            seen, found = _look(page)
         except Exception:
-            now, why = None, ListStopped("The Postfach page did not finish loading.")
+            # A page between two documents cannot be read for a moment.
+            seen, found = STOPPED, "The Postfach page did not finish loading."
+        now = None
+        if seen != "page":
+            kind, why = seen, found
+        elif target is None or (found["pager"] and found["number"] == target):
+            now = found
+        else:
+            kind, why = STOPPED, "The Postfach did not reach the requested page."
         if now is not None and last is not None and _same(now, last):
             return now
         last = now
         if time.monotonic() >= deadline:
-            raise why
+            if kind == SIGNED_OUT:
+                raise SessionExpired(why)
+            raise ListStopped(why)
         try:
             page.wait_for_timeout(250)
         except Exception:
@@ -794,9 +811,12 @@ def _note_unread(page, before):
     alone. Nobody has measured whether the bank marks a document read when
     its PDF is taken, and a change never stops the run."""
     try:
-        after = [r for r in _read_page(page)["rows"] if r.get("identity") == before["identity"]]
+        seen, found = _look(page)
     except Exception:
         return
+    if seen != "page":
+        return
+    after = [r for r in found["rows"] if r.get("identity") == before["identity"]]
     if len(after) == 1 and after[0]["unread"] != before["unread"]:
         log.info("a Postfach row's unread mark changed with its download")
 
