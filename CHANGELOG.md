@@ -136,6 +136,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   twice. A new census holds every document app to this, and names the apps
   that still stop a run at one refused document, to be looked at one by
   one.
+- **Wealthfront says why a new account's runs stop until its first
+  statement.** A new account shows no statement until Wealthfront posts its
+  first one, and each run stopped saying to run it again later, or that
+  there was nothing to download yet, and the next run stopped the same way.
+  Nothing seen of the Documents page so far tells an account with no
+  statement apart from a page still drawing, so the run still stops there.
+  Now, on an account that has never listed or saved a statement, the stop
+  says that a new account stops there on every run until its first
+  statement, that nothing needs fixing, and to run it again and then make a
+  support report if the page in the browser does show one. An account that
+  has listed a statement before is still told what it was told before.
 
 ## [0.65.0] - 2026-11-12
 
