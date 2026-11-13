@@ -18,6 +18,10 @@ cannot finish opens PaperPull again, and five more apps keep page
 addresses and words out of their logs.
 
 ### Added
+- **Amazon Visa card statements and portal PDFs (#171).** Reads the
+  statement history for every visible card contract and the PDFs in the
+  portal's document categories. Tested on one account with 28 PDFs listed
+  and five saved and verified.
 - **Renault Bank direkt, the Postfach, its archive and message attachments
   (#172).** Contributed by @MelleD and run on the contributor's own
   account, where a Pilot saved recent documents, an older archive document
