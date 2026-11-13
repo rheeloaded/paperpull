@@ -33,7 +33,12 @@ every document after it, the major of the #128 review.
 
 LEFT names the apps that still have the shape, each by the function that
 reads the refusal, until each is looked at. A name that no longer has it
-fails, so the list only shrinks.
+fails, so the list only shrinks. Seventeen were named on 2026-11-12 and
+sixteen were mended the next day. M&T alone is left, since its list is the
+one the person opened in their own tab, which nothing can read again
+without wiping it, and none of its requests proves a session. Weighing a
+refused statement there needs a recording of a request M&T answers with a
+list first.
 
 What this cannot see. The receipt apps, whose purchase loops name no
 sign-out and meet one inside process_one (Apple's stopped sides), so what
@@ -41,7 +46,11 @@ stops a run there needs a reading of its own. A refusal told by what the tab
 shows rather than by the answer (looks_signed_out after a press), a helper
 more than two calls down, a stop raised by a name, and a handler kept in a
 name. A list read again that is called but whose answer is thrown away is
-not seen either, which each app's own tests hold.
+not seen either, which each app's own tests hold. Nor is a stop raised in a
+helper the handler calls on the list read again, such as a list that holds
+nothing read as a sign-out (Affirm, Stripe, UPS, FedEx, myPay). It is read
+as the list's stop, not the refusal passed on, and each app's own tests
+hold that it stops the run only for the list.
 """
 import ast
 from pathlib import Path
@@ -54,10 +63,37 @@ REPO = Path(__file__).resolve().parents[2]
 REFUSED_STATUSES = (401, 403, "401", "403")
 
 # The apps that read one document's refusal as a sign-out of the whole run,
-# by the site function where it is read, not yet looked at. Each was seen
-# on 2026-11-12. Ziply Fiber was mended that day.
+# by the site function where it is read, not yet mended. Each was seen on
+# 2026-11-12. Ziply Fiber was mended that day and sixteen more on
+# 2026-11-13. M&T's statement list is read from the person's own tab, and
+# no request it makes proves a session, so there is nothing to read again.
 LEFT = {
     "mtb": "download_statement",
+}
+
+# The mended apps, each by the function that keeps a refusal and the one
+# that reads it. Affirm reads its loan list right where it reads the
+# refusal, so no stop is left there to keep.
+MENDED = {
+    "amexbanking": ("download_one", "amexbanking_download"),
+    "anthem": ("download_document", "_fetch_eob"),
+    "bilt": ("download_statement", "_take"),
+    "bofa": ("document_bytes", "_ask_link"),
+    "cetera": ("download_bill", "_fetch"),
+    "fedex": ("download_bill", "_fetch_file"),
+    "firsthorizon": ("download_statement", "_catch_statement"),
+    "ing": ("download_document", "_fetch"),
+    "irs": ("download_bill", "_fetch"),
+    "mypay": ("download_document", "_fetch"),
+    "nwnatural": ("download_bill", "_fetch"),
+    "portlandgeneral": ("download_bill", "_fetch"),
+    "sdge": ("download_bill", "_fetch"),
+    "simmons": ("download_document", "_fetch_asked"),
+    "stripe": ("download_bill", "_fetch_file"),
+    "tualatin": ("download_bill", "_fetch"),
+    "ups": ("download_bill", "_post"),
+    "verizonmobile": ("download_bill", "_fetch"),
+    "ziply": ("download_bill", "_fetch"),
 }
 
 
@@ -394,16 +430,20 @@ def test_each_app_left_still_has_the_shape(read):
     assert not mended, mended
 
 
-def test_the_apps_that_weigh_a_refusal_are_read(read):
-    """Not vacuous. The apps mended so far are seen reading a refusal of
-    one document and keeping it in a function that reads the list again."""
-    assert ("download_bill", "_fetch") in read["cetera"].weighed()
-    assert ("download_bill", "_fetch") in read["verizonmobile"].weighed()
-    assert ("download_bill", "_fetch") in read["nwnatural"].weighed()
-    assert ("download_bill", "_fetch") in read["ziply"].weighed()
-    for app in ("cetera", "verizonmobile", "nwnatural", "ziply"):
-        assert read[app].refusals(), app
-        assert "SessionExpired" in read[app].stops, app
+@pytest.mark.parametrize("app", sorted(MENDED))
+def test_the_apps_that_weigh_a_refusal_are_read(read, app):
+    """Not vacuous. Each app mended is seen reading a refusal of one
+    document and keeping it in a function that reads the list again."""
+    assert MENDED[app] in read[app].weighed()
+    assert read[app].refusals(), app
+    assert "SessionExpired" in read[app].stops, app
+
+
+def test_affirm_reads_its_list_where_it_reads_a_refusal(read):
+    """Affirm's agreement refused reads the loan list in the same place, so
+    no stop is raised there for a handler to keep."""
+    assert read["affirm"].wrong() == [] and read["affirm"].refusals() == []
+    assert "download_document" in read["affirm"].path
 
 
 # -- the rule, on samples --------------------------------------------------------------

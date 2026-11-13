@@ -149,6 +149,24 @@ addresses and words out of their logs.
   twice. A new census holds every document app to this, and names the apps
   that still stop a run at one refused document, to be looked at one by
   one.
+- **One document a provider refuses no longer stops every run in sixteen
+  more apps.** Affirm, American Express Banking, Anthem, Bank of America,
+  Bilt, FedEx, First Horizon, ING, the IRS, myPay, Portland General
+  Electric, SDG&E, Simmons Bank, Stripe, Tualatin Water and UPS read a 401,
+  a 403, a redirect or a page answered for one document as a sign-out, so
+  the run stopped at that document, and every run after it, Continue
+  included, stopped at the same one (#124). Now the list is read again when
+  one document is refused, as Ziply Fiber's is. A list refused too means
+  you are signed out, and the run stops as before. A list that still reads
+  leaves that document counted as failed with nothing saved, the run goes
+  on to the others, and the next run tries it again. A document is not
+  asked for twice, apart from the one more ask with a fresh sign-in token
+  that Anthem and Portland General Electric already made. In Affirm, FedEx,
+  myPay, Stripe and UPS a list read again that holds nothing also stops the
+  run as signed out. In First Horizon a page answered for a statement no
+  longer waits a minute for a download that never comes. M&T stays as it
+  was, since its list is the one you opened in your own tab, and nothing
+  can read that again without wiping it.
 - **Wealthfront says why a new account's runs stop until its first
   statement.** A new account shows no statement until Wealthfront posts its
   first one, and each run stopped saying to run it again later, or that
