@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 from typing import Optional
 
+from paperpull_core import failure
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here.
@@ -723,7 +724,9 @@ def download_document(page, title, date, out_path, occurrence=0, item_hint="",
         data = intake.decode(result["data"], validate=True)
         why = "" if data.startswith(b"%PDF-") else "not a PDF (%d bytes)" % len(data)
     except (NoFile, intake.TooLarge, ValueError, KeyError, TypeError) as e:
-        why = str(e) or type(e).__name__
+        # By its type and kind, since what an answer or an error says can
+        # carry the bank's words.
+        why = "%s, %s" % (type(e).__name__, failure.error_kind(e))
     if why:
         log.warning("no PDF for one %s of %s: %s", category, date, why)
         # A sign-in page served in place of the PDF, or a redirect to one,

@@ -338,7 +338,8 @@ class App:
             try:
                 listed = site.answers_its_list(page)
             except (site.SessionExpired, site.ListStopped) as e:
-                log.info("the Postfach list did not answer: %s", e)
+                log.info("the Postfach list did not answer (%s, %s)", type(e).__name__,
+                         failure.error_kind(e))
         if challenge:
             print(f"!! {challenge}\nResolve it in the browser, then re-run --login.")
         elif site.looks_signed_out(page):
@@ -465,7 +466,7 @@ class App:
             raw = site.collect_documents(page, keep=scope.period_filter(self.args, self.config),
                                          config=self.config)
         except site.SessionExpired as e:
-            log.info("the list answered as signed out: %s", e)
+            log.info("the list answered as signed out (%s)", failure.error_kind(e))
             self.session_ended()
         except site.ListStopped as stop:
             # Nothing of this listing is recorded, and the listing stays
@@ -617,7 +618,10 @@ class App:
                 # run stops here, with nothing recorded against this one.
                 self.list_changed(stop)
             except Exception as e:
-                log.exception("Failed on %s", doc.key)
+                # Named by its kind and date, never by its key, which holds
+                # its title, and the error by its kind, never its words.
+                log.error("Failed on the %s of %s (%s, %s)", doc.category or "document",
+                          doc.date or "no date", type(e).__name__, failure.error_kind(e))
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
@@ -637,7 +641,8 @@ class App:
         document was sought. Nothing is recorded against the document, and
         the run leaves as one whose list did not end whole, which only a run
         that lists carries on from (listing.read_again_stopped)."""
-        log.info("the list could not be read again: %s", stop)
+        log.info("the list could not be read again (%s, %s)", type(stop).__name__,
+                 failure.error_kind(stop))
         self.write_failure("read the documents list again", "the list stopped partway")
         listing.read_again_stopped(self, (
             "The Renault Bank direkt list could not be read again whole (%s), so this run stops here." % stop))
@@ -714,7 +719,8 @@ class App:
                 print(f"  !! {opened.reason}. Marked for manual review.")
                 return
             out_path = opened.pdf
-            log.info("Opened the ZIP for %s", doc.title)
+            log.info("Opened the ZIP for the %s of %s", doc.category or "document",
+                         doc.date or "no date")
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         self._record(doc, State.PDF_SAVED)
