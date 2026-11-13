@@ -32,7 +32,11 @@ rather than being called whole. If the portal answers as signed out, the
 run stops and keeps what it saved. Sign in again and run Resume. A bill
 the portal refuses has Billing History read again first. A list that still
 reads leaves that bill counted as failed with nothing saved, the run goes
-on to the other bills, and the next run tries it again.
+on to the other bills, and the next run tries it again. A list that does
+not read then, one that does not open or finish drawing, a tab that
+cannot be read, or a table with no bill, says nothing about the session.
+The run stops there with nothing recorded against that bill, and the
+panel offers a run that reads the list first.
 
 ## Validation status
 
