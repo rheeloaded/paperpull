@@ -1139,6 +1139,46 @@ def test_a_statement_refused_and_a_page_that_stops_after_it_stops_the_run_with_t
     assert not (tmp_path / "o.pdf").exists()
 
 
+def _no_panel(bank):
+    bank.accounts = []
+
+
+def _times_out_with_no_panel(bank):
+    """The statements page loads with no account panel yet, and its wait
+    times out, as a page that stops answering does."""
+    _no_panel(bank)
+
+    def timed_out(ms):
+        raise TimeoutError("Timeout 30000ms exceeded")
+    bank.wait_for_timeout = timed_out
+
+
+# What the statements page opened afresh after a refusal can do that says
+# nothing of the session. Each stops the run with the list unread, never as
+# signed out and never as one statement's failure.
+LIST_UNREAD = {
+    "probe 500": lambda b: setattr(b, "probe", Resp(site.SESSION_URL, 500)),
+    "timeout": _times_out_with_no_panel,
+    "no account panel": _no_panel,
+}
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_a_page_that_does_not_answer_after_a_refusal_stops_the_run_with_the_list_unread(
+        tmp_path, how):
+    """A timeout reached the loop as the statement's own failure, so the
+    run went on with no session shown. None of these says the session
+    holds."""
+    bank = refusing("403")
+    bank.on_goto = lambda b: LIST_UNREAD[how](b) if len(b.gotos) == 2 else None
+    with pytest.raises(site.pressing.Stop) as stop:
+        take(bank, tmp_path)
+    assert stop.value.reason == "the statements page stopped" and stop.value.list_unread
+    assert presses_of(bank) == [("download", 0, "2026-09-16")]
+    assert len(bank.gotos) == 2
+    assert not (tmp_path / "o.pdf").exists()
+
+
 @pytest.mark.parametrize("shown", ["timeout dialog", "sign-in page", "page's own answer"])
 def test_the_page_itself_signed_out_while_a_statement_is_taken_stops_at_once(tmp_path, shown):
     """What the run's own page shows, or the page's own request answered as
@@ -1522,6 +1562,24 @@ def test_one_statement_refused_and_the_session_after_it_stop_the_run_as_signed_o
     assert app.progress.data == {}
     assert app.stats["manual_review"] + app.stats["failed"] == 0
     assert len(presses_of(bank)) == 1
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_one_statement_refused_and_a_page_that_does_not_answer_after_it_stop_the_run_unread(
+        tmp_path, how):
+    """The run stops at the refused statement with the list unread, so the
+    panel offers a run that lists first. Nothing is recorded against the
+    statement, and nothing after it is pressed."""
+    bank = refusing("403", [acct1()])
+    app = _listed(tmp_path, bank)
+    loads = len(bank.gotos)
+    bank.on_goto = lambda b: LIST_UNREAD[how](b) if len(b.gotos) == loads + 2 else None
+    ended, said = _run_all(app, bank)
+    assert isinstance(ended, site.pressing.Stop) and ended.list_unread, said
+    assert app.progress.data == {}
+    assert app.stats["manual_review"] + app.stats["failed"] == 0
+    assert "signed out" not in said and "Nothing was saved" not in said
+    assert presses_of(bank) == [("download", 0, "2026-09-16")]
 
 
 def test_an_expired_session_during_discovery_stops_the_run(tmp_path):

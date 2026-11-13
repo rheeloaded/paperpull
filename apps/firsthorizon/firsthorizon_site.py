@@ -67,7 +67,10 @@ review. A statement's own PDF address answered that way may be the bank
 refusing that one statement, so the statements page is opened afresh and
 the session probe asked again first (download_statement). A session that
 ended shows there and stops the run, and one that still reads leaves that
-statement failed alone, for the next run to try again.
+statement failed alone, for the next run to try again. A page that does
+not open, times out or shows no account says nothing of the session, so it
+stops the run with the list unread, nothing recorded against the
+statement, and a run that lists first takes it.
 
 KNOWN CEILINGS (left until a live run shows otherwise)
   * A panel's cards are read inside the element its aria-controls names.
@@ -111,6 +114,7 @@ from urllib.parse import quote, unquote, urlsplit
 from paperpull_core import intake
 from paperpull_core import pressing
 from paperpull_core import redirects
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -1659,10 +1663,11 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_id: str, pro
     stops the run as before. Otherwise the statements page is opened
     afresh, which asks the session probe, with nothing pressed. A session
     that ended shows there and its SessionExpired stops the run, a page
-    that stops the list stops it with the list unread, and a page that
-    still reads leaves the refusal this statement's own, so it answers
-    False and fails alone. A stop here would stop every run at this
-    statement for good (#124). Download PDF is not pressed a second time."""
+    that stops the list, times out or shows no account stops it with the
+    list unread (refused.list_again), and a page that still reads leaves
+    the refusal this statement's own, so it answers False and fails
+    alone. A stop here would stop every run at this statement for good
+    (#124). Download PDF is not pressed a second time."""
     out_path = Path(out_path)
     if not (account_id and product and _DOCUMENT_ID_RE.fullmatch(document_id or "")
             and _no_dots(document_id) and statement_date(iso_date) == iso_date):
@@ -1695,9 +1700,12 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_id: str, pro
         # asks the bank's session probe, and a session that ended shows
         # there and stops the run. One that still reads leaves this
         # statement failed, so it never stops every later run at the same
-        # statement. Nothing is pressed for it again.
+        # statement. Nothing is pressed for it again. A page that times out
+        # or shows no account says nothing of the session, so it stops the
+        # run with the list unread (refused.list_again).
         try:
-            _open(page, run)
+            refused.list_again(lambda: _open(page, run).state.get("panels"),
+                               SessionExpired, ListStopped, stops=(DeadlineReached,))
         except ListStopped as stop:
             log.info("the list stopped when read again after the statement dated %s was refused",
                      iso_date)

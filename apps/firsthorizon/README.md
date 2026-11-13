@@ -43,12 +43,15 @@ If the bank answers as signed out, or shows its session-timeout warning,
 the run stops and keeps what it saved. Sign in again and run Resume. When
 the bank refuses one statement, the Statements page is opened again and
 the app asks the bank once more whether the session is signed in. If it
-is not, the run stops the same way. If it is, that one statement is
-counted as failed with nothing saved, the run goes on to the others, and
-the next run tries it again. Its Download PDF is never pressed twice. A run
-also stops on its own eight minutes after it first checks the session,
-before the next statement, so the ten-minute session never ends
-mid-download. Sign in again for a fresh session and run Resume.
+is not, the run stops the same way. If the page does not open, times out
+or shows no account, that says nothing about your sign-in, so the run stops
+there with nothing recorded against that statement, and the panel offers a
+run that reads the list first, which takes it. If it is signed in, that
+one statement is counted as failed with nothing saved, the run goes on to
+the others, and the next run tries it again. Its Download PDF is never
+pressed twice. A run also stops on its own eight minutes after it first
+checks the session, before the next statement, so the ten-minute session
+never ends mid-download. Sign in again for a fresh session and run Resume.
 
 Files are named `YYYY-MM-DD First Horizon Bank Statement.pdf`. Only when
 that name is already taken, as by two accounts' statements of one date,
