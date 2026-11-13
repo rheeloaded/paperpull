@@ -582,7 +582,18 @@ def classify(kind, title=""):
 
 
 def filed_category(row):
-    return row.get("category") or classify(row.get("kind"), row.get("title"))
+    """The category a listed row's document is recorded under. The row's
+    own, or the one its kind and title name, except that an Other Document
+    whose title says it is a statement is recorded as one
+    (renaultbank_docs._record_statement_doc), as DKB's is. Discover numbers
+    the rows by it and a download finds its row by it, so the two read a
+    row as the record holds it. classify reads such a title as a Statement
+    already, so only a row that arrives as an Other Document needs this."""
+    category = row.get("category") or classify(row.get("kind"), row.get("title"))
+    title = re.sub(r"\s+", " ", str(row.get("title") or "")).strip() or "Statement"
+    if category == "Other Document" and re.search(r"statement|kontoauszug", title, re.I):
+        return "Statement"
+    return category
 
 
 def _last_sunday(year: int, month: int) -> int:
@@ -698,7 +709,9 @@ def resolve_item(page, title, date, account, occurrence=0, item_id="", *,
     mine = [i for i in alike if numbers[i][0] == occurrence]
     if not mine:
         if item_id and any(row["item_id"] == item_id for row in rows):
-            raise NotToldApart("Its stored id is now another document's.")
+            # Not surely another document. The bank may have changed the
+            # row's title or kind, so this says only what differs.
+            raise NotToldApart("Its stored id now names a row of another kind, title, date or account.")
         raise NotToldApart("The list no longer shows this document.")
     if len(mine) != 1:
         raise NotToldApart("The list does not uniquely identify this document.")

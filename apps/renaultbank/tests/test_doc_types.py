@@ -3,6 +3,7 @@ Invented values only, never a real account's."""
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -146,6 +147,30 @@ def test_only_the_banking_host_is_allowed():
 def test_the_sign_in_address_is_the_one_the_request_names():
     assert site.URLS["login"] == "https://banking.renault-bank-direkt.de/services_cloud/portal/"
     assert site.is_safe_url(site.URLS["login"]) and site.is_safe_url(site.URLS["home"])
+
+
+@pytest.mark.parametrize("category", ["Other Document", "Tax Document", "Message"])
+@pytest.mark.parametrize("title", ["Kontoauszug 3/2031", "Monthly statement", "Information"])
+def test_a_row_is_filed_as_its_record_is(category, title):
+    """_record_statement_doc records an Other Document whose title says
+    Kontoauszug or statement as a Statement. filed_category, which Discover
+    numbers rows by and resolve_item finds a row by, has to read the row the
+    same way, or a download never finds the row its record names and the
+    document fails on every run. classify reads such a title as a Statement
+    already, so only a row that arrives as an Other Document shows it."""
+    row = {"title": title, "date": "2031-04-02", "account": "", "category": category,
+           "item_id": "document:A1", "client_id": "", "href": ""}
+    recorded = {}
+    every = storage.ALL_CATEGORIES + [storage.OTHER]
+    app = SimpleNamespace(
+        rules=doc_types.load_rules(), stats={"skipped_out_of_scope": 0},
+        config={"document_types": every}, args=SimpleNamespace(start_date=None),
+        discovery=SimpleNamespace(get=lambda key: None,
+                                  update=lambda key, rec, save=False: recorded.update({key: rec})))
+    assert app_mod.App._record_statement_doc(app, row) == 1
+    (key, rec), = recorded.items()
+    assert rec["category"] == site.filed_category(row)
+    assert key == app_mod.listed_key(row)
 
 
 def test_the_document_key_tells_two_accounts_apart():

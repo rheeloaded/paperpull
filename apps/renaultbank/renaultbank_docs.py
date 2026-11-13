@@ -410,7 +410,8 @@ class App:
             if confidence != doc_types.HIGH or summary in ("", "Other Document", "Document"):
                 summary = storage.FALLBACK_SUMMARY.get(category, "Dokument")
             confidence = confidence or "high"
-        # The same as row_category, which listed_key reads a row by.
+        # The same rule as site.filed_category, which row_category and
+        # listed_key read a row by and resolve_item finds its row by.
         if category == doc_types.OTHER and re.search(r"statement|kontoauszug", title, re.I):
             category = doc_types.STATEMENT
         if not doc_types.wanted(category, self.config):
