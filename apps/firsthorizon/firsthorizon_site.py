@@ -749,10 +749,13 @@ def session_alive(page, run: Run) -> bool:
         body = intake.body(resp)
     except Exception:
         raise ListStopped("the session probe could not be read")
-    if _ctype(resp).startswith("text/html") or body.lstrip()[:1] == b"<":
-        raise SessionExpired("the session probe answered with a page")
+    # The status first, so a gateway's own error page, a 502 or a 503, is a
+    # probe that did not answer rather than the bank's sign-in. A page is
+    # read as the sign-in only when it came with a 200.
     if resp.status != 200:
         raise ListStopped("the session probe was answered %d" % resp.status)
+    if _ctype(resp).startswith("text/html") or body.lstrip()[:1] == b"<":
+        raise SessionExpired("the session probe answered with a page")
     try:
         got = whole_json(json.loads(body.decode("utf-8")))
     except (ValueError, UnicodeDecodeError):
@@ -1642,6 +1645,16 @@ def _catch_statement(page, run: Run, dl_dir, target: Target, iso_date: str, out_
 _DOCUMENT_ID_RE = re.compile(_DOC_ID_RE)
 
 
+def _shown_again(page, run: Run) -> list:
+    """The account panels of the statements page opened afresh after a
+    statement was refused, once the page the refusal left shows no sign-in
+    of the bank's. A page whose address cannot be read raises as it is, so
+    refused.list_again reads it as the list unread."""
+    check_signed_in(page)
+    run.watch.raise_if_signed_out(page)
+    return _open(page, run).state.get("panels")
+
+
 def download_statement(page, run: Run, dl_dir, out_path, *, account_id: str, product: str,
                        document_id: str, iso_date: str,
                        trace: Optional[list] = None) -> Optional[bool]:
@@ -1693,18 +1706,17 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_id: str, pro
     except SessionExpired:
         # What the run's own page shows, or the page's own request answered
         # as signed out, stops the run as it always did.
-        check_signed_in(page)
-        run.watch.raise_if_signed_out(page)
         # A refusal of the statement's own address may be the session ending
-        # or this one statement. The statements page is opened afresh, which
-        # asks the bank's session probe, and a session that ended shows
-        # there and stops the run. One that still reads leaves this
+        # or this one statement. The page the refusal left is looked at for
+        # the bank's sign-in, then the statements page is opened afresh,
+        # which asks the bank's session probe, and a session that ended
+        # shows there and stops the run. One that still reads leaves this
         # statement failed, so it never stops every later run at the same
-        # statement. Nothing is pressed for it again. A page that times out
-        # or shows no account says nothing of the session, so it stops the
-        # run with the list unread (refused.list_again).
+        # statement. Nothing is pressed for it again. A page that times out,
+        # cannot be read or shows no account says nothing of the session, so
+        # it stops the run with the list unread (refused.list_again).
         try:
-            refused.list_again(lambda: _open(page, run).state.get("panels"),
+            refused.list_again(lambda: _shown_again(page, run),
                                SessionExpired, ListStopped, stops=(DeadlineReached,))
         except ListStopped as stop:
             log.info("the list stopped when read again after the statement dated %s was refused",

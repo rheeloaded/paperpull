@@ -44,7 +44,8 @@ the run stops and keeps what it saved. Sign in again and run Resume. When
 the bank refuses one statement, the Statements page is opened again and
 the app asks the bank once more whether the session is signed in. If it
 is not, the run stops the same way. If the page does not open, times out
-or shows no account, that says nothing about your sign-in, so the run stops
+or shows no account, or the bank's check answers with a server's error,
+that says nothing about your sign-in, so the run stops
 there with nothing recorded against that statement, and the panel offers a
 run that reads the list first, which takes it. If it is signed in, that
 one statement is counted as failed with nothing saved, the run goes on to

@@ -1158,6 +1158,11 @@ def _times_out_with_no_panel(bank):
 # signed out and never as one statement's failure.
 LIST_UNREAD = {
     "probe 500": lambda b: setattr(b, "probe", Resp(site.SESSION_URL, 500)),
+    # A gateway's own error page, not the bank's sign-in.
+    "probe 502 page": lambda b: setattr(b, "probe", Resp(
+        site.SESSION_URL, 502, ctype="text/html", body=b"<html>made-up gateway</html>")),
+    "probe 503 page": lambda b: setattr(b, "probe", Resp(
+        site.SESSION_URL, 503, ctype="text/html", body=b"<html>made-up gateway</html>")),
     "timeout": _times_out_with_no_panel,
     "no account panel": _no_panel,
 }
