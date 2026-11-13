@@ -929,6 +929,12 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
   providers, five waiting for a tester and four first shells. Most are in regular
   use by the author. The rest were built or confirmed by people who hold those
   accounts, named in the table above and in [Thanks](#thanks).
+- ✅ All **ninety-two** apps pass their tests, the eighty-three that are
+  supported, the five still waiting for a tester and the Scalable Capital,
+  Consorsbank, CIBC and MBNA shells, 40,590 of them
+  across the repo. Most are in regular use by the author. The rest were built or
+  confirmed by people who hold those accounts, named in the table above
+  and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with
   every release since 0.43.0 as `ghcr.io/rheeloaded/paperpull-server`.
   See [PaperPull Server](#paperpull-server).

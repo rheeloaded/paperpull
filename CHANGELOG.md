@@ -7,7 +7,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.66.0] - 2026-11-13
+
+Renault Bank direkt is new, contributed by @MelleD. One bill Ziply Fiber
+refuses no longer stops every run, and Discover Bank no longer calls a run
+Nothing new when an account's list answers empty. A run started from a
+terminal in another folder finds its files as the panel's runs do, and a
+folder written with `~` is in your home folder. A Windows update that
+cannot finish opens PaperPull again, and five more apps keep page
+addresses and words out of their logs.
 
 ### Added
 - **Amazon Visa card statements and portal PDFs (#171).** Reads the
@@ -131,8 +139,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the panel reads nothing from it, as for any folder outside it. If a run
   before this one kept its record of what was downloaded in such a folder
   named `~`, the run stops before downloading anything, says where that
-  folder is, and asks you to move it to your home folder or write the full
-  path, so nothing is downloaded a second time.
+  folder is, and asks you to write its full path as `output_dir` and leave
+  it where it is, so nothing is downloaded a second time. It stops the same
+  way when your home folder holds a record too, and names both.
 - **One bill Ziply Fiber refuses no longer stops every run.** A bill whose
   PDF Ziply answered with a 401, a 403, a redirect or a page was read as a
   sign-out, so the run stopped at that bill, and every run after it,
