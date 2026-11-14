@@ -1490,39 +1490,24 @@ def _prime_and_fetch(page, target: str, bucket: str, js: str, what: str,
 
 
 def render_html_to_pdf(page, html: str) -> Optional[bytes]:
-    """Render a fragment of HTML to a PDF using the browser's own print-to-PDF,
-    on a throwaway blank page with all network blocked (so a letter body cannot
-    fetch a tracking pixel or any remote resource). Used to turn a letter's text
-    and an ID card's front/back images into filed PDFs."""
-    from paperpull_core.receipt_pdf import PRINT_TO_PDF_OPTIONS, PDF_MAGIC, printed_pdf
-    ctx = page.context
-    scratch = ctx.new_page()
+    """Render HTML this app put together to a PDF, a letter's text, an ID
+    card's front and back images or a claims summary's table, through the
+    core's inert drawing (receipt_pdf.inert_pdf_bytes): active content
+    stripped, JavaScript off, every request aborted, and never in a page of
+    the signed-in session where it can help it. A letter's body is a
+    secure message's, which this app does not write, and it was drawn with
+    JavaScript on in the signed-in context, its block covering http and
+    https alone. None when it cannot be drawn that way, so nothing is ever
+    drawn without the block, and the document is tried again next run."""
+    from paperpull_core.receipt_pdf import UnsafeHtml, inert_pdf_bytes
     try:
-        try:
-            scratch.route(re.compile(r"^https?://"), lambda r: r.abort())
-        except Exception as e:
-            # FAIL CLOSED. The content below is a secure-message body, which
-            # anyone able to send the member a message can influence, and this
-            # scratch page shares the signed-in browser context. If the block
-            # could not be installed, the promise in this docstring is not one
-            # this function can keep, so it renders nothing rather than
-            # rendering untrusted markup with the network wide open.
-            log.warning("could not block network for the PDF render (%s); "
-                        "skipping rather than rendering unguarded",
-                        str(e).splitlines()[0][:80])
-            return None
-        scratch.set_content(html, wait_until="load")
-        sess = ctx.new_cdp_session(scratch)
-        data = printed_pdf(sess, PRINT_TO_PDF_OPTIONS)
-        return data if data.startswith(PDF_MAGIC) else None
+        return inert_pdf_bytes(page, html)
+    except UnsafeHtml as e:
+        log.warning("refused to render a PDF of markup that stays active after stripping (%s)", e)
+        return None
     except Exception as e:
         log.warning("could not render a PDF: %s", str(e).splitlines()[0][:80])
         return None
-    finally:
-        try:
-            scratch.close()
-        except Exception:
-            pass
 
 
 def _b64_pdf(res: dict, what: str) -> Optional[bytes]:

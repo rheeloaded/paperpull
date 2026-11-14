@@ -626,6 +626,60 @@ def print_html_inert_to_pdf(page, html: str, out_path: Path, base: Optional[str]
             pass
 
 
+def inert_pdf_bytes(page, html: str, base: str = "") -> bytes:
+    """The PDF of HTML the app put together or fetched itself, drawn so that
+    nothing in it can run or reach anything, as bytes printed the way the
+    page is printed (PRINT_TO_PDF_OPTIONS). Active content is stripped
+    (inert_html), JavaScript is off, and every request the drawing would
+    make is aborted, a WebSocket and a popup included, since both need
+    script. Attached to a browser, it is drawn in a fresh context with none
+    of the signed-in session's cookies, as print_html_inert_to_pdf draws.
+    A persistent profile's context cannot open another, so there it is
+    drawn in a page of its own with JavaScript turned off for that page.
+
+    Anthem drew a secure message's body in a page of the signed-in context
+    with JavaScript on, its block covering http and https alone, so a
+    script in a body could open a WebSocket or a popup carrying the
+    session (a private report of 2026-11-10).
+
+    Raises UnsafeHtml when the HTML is refused before drawing, and anything
+    else when the drawing or its block cannot be made, never drawing
+    without the block."""
+    inert = inert_html(html, base)
+    browser = getattr(page.context, "browser", None)
+    if browser is not None:
+        ctx = browser.new_context(java_script_enabled=False, accept_downloads=False)
+        try:
+            ctx.route("**/*", lambda route: route.abort())
+            tab = ctx.new_page()
+            return _printed_inert(ctx.new_cdp_session(tab), tab, inert)
+        finally:
+            try:
+                ctx.close()
+            except Exception:
+                pass
+    ctx = page.context
+    tab = ctx.new_page()
+    try:
+        tab.route("**/*", lambda route: route.abort())
+        session = ctx.new_cdp_session(tab)
+        session.send("Emulation.setScriptExecutionDisabled", {"value": True})
+        return _printed_inert(session, tab, inert)
+    finally:
+        try:
+            tab.close()
+        except Exception:
+            pass
+
+
+def _printed_inert(session, tab, inert: str) -> bytes:
+    tab.set_content(inert, wait_until="load")
+    data = printed_pdf(session, PRINT_TO_PDF_OPTIONS)
+    if not data.startswith(PDF_MAGIC):
+        raise RuntimeError("printToPDF returned non-PDF data")
+    return data
+
+
 def get_print_snapshot(page) -> Optional[str]:
     """HTML stashed by the print hook at the moment print() was called
     (from the main window or any same-origin iframe), or None."""
