@@ -475,6 +475,16 @@ def _provider_address(domains) -> "re.Pattern":
         re.IGNORECASE | re.ASCII)
 
 
+def on_provider_site(address, domains) -> bool:
+    """Whether a url_setting's value is an https address under one of the
+    provider's own domains with nothing after the name (_provider_address).
+    PaperPull Server holds every config to it before a run, and a history
+    file imported on either edition is held to it before its settings are
+    written (tools/migrate.py settings_to_apply)."""
+    return (isinstance(address, str) and bool(domains)
+            and bool(_provider_address(domains).fullmatch(address)))
+
+
 def hold_to_the_server(cfg: dict, path: Path) -> None:
     """Hold a config read on PaperPull Server to the server's own places,
     from what the file itself says, before any default is filled in. The
@@ -508,7 +518,7 @@ def hold_to_the_server(cfg: dict, path: Path) -> None:
         address = cfg.get(key)
         if address is None or address == "":
             continue
-        if not (isinstance(address, str) and _provider_address(domains).fullmatch(address)):
+        if not on_provider_site(address, domains):
             raise SystemExit(
                 "%s holds a %s that is not an https address on %s with nothing after the name, "
                 "such as https://yourname.%s. On PaperPull Server a provider's address has to "

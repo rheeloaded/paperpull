@@ -3778,24 +3778,41 @@ def _history_root(raw: str):
     return root, True
 
 
-def _apply_settings(mod, cfg_path: Path, install: Path, settings: dict) -> None:
+def _apply_settings(mod, cfg_path: Path, install: Path, settings: dict, slug: str = "") -> list:
     """A file's settings, written into a config the import just made. Only
     what tools/migrate.py allows for this install, a file name pattern only
-    when it passes the same check the File names tab makes, and never the
-    folders, profile, browser or port, which belong to this computer."""
+    when it passes the same check the File names tab makes, an address only
+    on the provider's own site, and never the folders, profile, browser or
+    port, which belong to this computer. The app's url_settings are read
+    from PaperPull's own copy of the provider, slug, which nobody who can
+    write to the shared folder can change. Returns the addresses left out."""
+    left_out: list = []
     if not server_mode.own_file(cfg_path):
-        return
+        return left_out
     naming = _naming()
+    tmpl_root = _templates_root()
+    source = tmpl_root / slug if (slug and tmpl_root is not None) else install
     with _CONFIG_WRITES:
         cfg = _read_json(cfg_path)
         if not isinstance(cfg, dict):
-            return
+            return left_out
         take = mod.settings_to_apply(install, cfg, settings,
-                                     check_pattern=naming.check if naming else None)
+                                     check_pattern=naming.check if naming else None,
+                                     url_settings=mod.url_settings_of(source), left_out=left_out)
         if not take:
-            return
+            return left_out
         cfg.update(take)
         _replace_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+    return left_out
+
+
+def _left_out_note(left_out: list) -> str:
+    """What the import says of addresses it did not write. The address is
+    not repeated, since a provider's own address can name an employer."""
+    if not left_out:
+        return ""
+    return ("Its %s was left out, since it is not an address on the provider's own site. "
+            "Set it in the provider's settings." % " and ".join(sorted(set(left_out))))
 
 
 def _template_for(entry: dict, providers: list):
@@ -3812,6 +3829,8 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
     tmpl = _template_for(entry, providers)
     if tmpl is None:
         return None, "this version of PaperPull has no %s" % entry["provider"]
+    # The addresses _apply_settings left out, said in the import's row.
+    left_out: list = []
     account = entry["account"]
     if account != "primary" and (not _LABEL_RE.match(account) or account == "example"):
         return None, "its person's label cannot be used here"
@@ -3829,7 +3848,8 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
             if create_install(root, tmpl["slug"], owner=str(owner or "")[:80]) != "created":
                 return None, "a folder named %s is already there" % tmpl["folder"]
             if account == "primary":
-                _apply_settings(mod, install / "config.json", install, entry["settings"])
+                left_out = _apply_settings(mod, install / "config.json", install,
+                                           entry["settings"], tmpl["slug"])
             cfg = _read_json(install / "config.json") or {}
             where = mod.output_dir_of(install, cfg, tmpl["provider"])
         if _history_outside(where):
@@ -3843,6 +3863,7 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
                  "made": True}
         places.append(first)
         if account == "primary":
+            first["note"] = _left_out_note(left_out)
             return first, ""
     if first.get("config") is None:
         return None, "its first person's folder has no app to add a person to"
@@ -3869,7 +3890,7 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
     owner = str(entry["settings"].get("owner") or "")[:80]
     if apply:
         dest = _make_account(install, account, owner)
-        _apply_settings(mod, dest, install, entry["settings"])
+        left_out = _apply_settings(mod, dest, install, entry["settings"], tmpl["slug"])
         made = mod.output_dir_of(install, _read_json(dest) or {}, tmpl["provider"])
         if _history_outside(made):
             return None, "its folder is outside the data folder"
@@ -3879,6 +3900,7 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
              "provider": tmpl["provider"], "kind": tmpl["kind"], "path": where,
              "records": have, "settings": {}, "config": install / ("config.%s.json" % account),
              "made": True}
+    place["note"] = _left_out_note(left_out)
     places.append(place)
     return place, ""
 
@@ -3913,6 +3935,9 @@ def _history_walk(mod, manifest: dict, root: Path, apply: bool) -> list:
                 continue
             how = "set up" if entry["account"] == "primary" else "add person"
         row["action"] = how
+        note = place.pop("note", "")
+        if note:
+            row["note"] = note
         if place["account"] != "primary":
             row["account"] = place["account"]
         records, added, updated = mod.merged(place, entry, manifest)

@@ -386,6 +386,58 @@ def test_a_file_cannot_choose_this_computers_folders_profile_browser_or_port(pan
     assert [p.name for p in new.iterdir()] == ["Bank Statements"]
 
 
+def test_an_address_from_the_file_is_left_out_unless_it_is_on_the_providers_site(
+        panel, tmp_path):
+    """A provider whose sign-in address is a setting, as UKG's base_url is.
+    A file carried --no-sandbox into it, for the first person and for a
+    person added, and the browser took that as a switch (a private report
+    of 2026-11-10). It is left out of both and the import says so, the
+    rest of each person's settings come across, and the app's addresses
+    are read from PaperPull's own copy of it, never by running its code."""
+    from paperpull_core import storage as core_storage
+    root = app_module._templates_root()
+    d = root / "pay"
+    d.mkdir()
+    (d / "pay_docs.py").write_text("# the app\n", encoding="utf-8")
+    (d / "storage.py").write_text(
+        'SPEC = AppSpec(\n    provider="Pay",\n    kind=DOCUMENT,\n'
+        '    url_settings={"base_url": ("ultipro.com", "saashr.com")},\n)\n', encoding="utf-8")
+    (d / "config.example.json").write_text(
+        json.dumps(dict(EXAMPLE, base_url="https://REPLACE-ME.ultipro.com")), encoding="utf-8")
+    entry = {"provider": "Pay", "kind": "DOCUMENT", "folder": "Pay Statements"}
+    data = _hand_made(
+        [dict(entry, account="primary", file="apps/0/progress.json",
+              settings={"owner": "Pat Example", "base_url": "--no-sandbox"}),
+         dict(entry, account="spouse", file="apps/1/progress.json",
+              settings={"owner": "Jamie Example", "base_url": "https://attacker.example"})],
+        {"apps/0/progress.json": _done(1), "apps/1/progress.json": _done(2, "j")})
+    new = tmp_path / "new"
+    _use(new)
+    spec = core_storage._SPEC
+    got = bring(data)
+    assert core_storage._SPEC is spec
+    folder = [p.name for p in new.iterdir() if p.name.startswith("Pay")]
+    install = new / sorted(folder)[0]
+    first, second = _config(install), _config(install, "config.spouse.json")
+    assert first["base_url"] == "https://REPLACE-ME.ultipro.com" and first["owner"] == "Pat Example"
+    assert second["base_url"] == "https://REPLACE-ME.ultipro.com"
+    assert second["owner"] == "Jamie Example"
+    rows = {r["account"]: r for r in got["rows"]}
+    for who in ("primary", "spouse"):
+        assert rows[who]["action"] in ("set up", "add person"), rows[who]
+        assert "base_url was left out" in rows[who]["note"], rows[who]
+    # A file whose address is UKG's own comes across with no note.
+    good = _hand_made([dict(entry, account="primary", file="apps/0/progress.json",
+                            settings={"base_url": "https://example.ultipro.com"})],
+                      {"apps/0/progress.json": _done(1)})
+    other = tmp_path / "other"
+    _use(other)
+    got = bring(good)
+    install = other / [p.name for p in other.iterdir() if p.name.startswith("Pay")][0]
+    assert _config(install)["base_url"] == "https://example.ultipro.com"
+    assert "note" not in got["rows"][0]
+
+
 def test_something_that_is_not_a_history_file_is_refused_with_a_sentence(panel, tmp_path):
     _use(tmp_path / "new")
     with pytest.raises(fastapi.HTTPException) as e:

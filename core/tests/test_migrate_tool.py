@@ -568,6 +568,77 @@ def test_a_file_name_pattern_is_taken_only_once_it_is_checked(tmp_path):
                                      check_pattern=lambda p: None) == pattern
 
 
+UKG = Path(__file__).resolve().parents[2] / "apps" / "ukg"
+
+
+def _ukg(tmp_path):
+    """An install of the real UKG app, copied as the panel copies it."""
+    import shutil
+    inst = tmp_path / "UKG Pay Stubs"
+    shutil.copytree(UKG, inst, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    (inst / "config.json").write_text((inst / "config.example.json").read_text(encoding="utf-8"),
+                                      encoding="utf-8")
+    return inst
+
+
+def test_an_address_from_a_file_is_written_only_on_the_providers_own_site(tmp_path):
+    """UKG's base_url is where its sign-in window opens, the last thing on
+    the browser's command line. A history file from another computer
+    carried --no-sandbox into it, which the browser took as a switch (a
+    private report of 2026-11-10). It is held to UKG's own domains, as
+    PaperPull Server holds it before every run, and the rest of the file's
+    settings still come across."""
+    inst = _ukg(tmp_path)
+    cfg = json.loads((inst / "config.json").read_text(encoding="utf-8"))
+    for value in ("--no-sandbox", "https://attacker.example", "https://yourhost/wfc/",
+                  "http://example.ultipro.com", "https://example.ultipro.com@evil.example",
+                  "https://example.ultipro.com/c/hcm", "javascript:alert(1)"):
+        left = []
+        got = migrate.settings_to_apply(inst, dict(cfg), {"base_url": value, "owner": "Pat Example"},
+                                        left_out=left)
+        assert got == {"owner": "Pat Example"}, (value, got)
+        assert left == ["base_url"], value
+    for value in ("https://example.ultipro.com", "https://secure6.saashr.com/",
+                  "https://REPLACE-ME.ultipro.com", ""):
+        left = []
+        got = migrate.settings_to_apply(inst, dict(cfg), {"base_url": value}, left_out=left)
+        assert got == {"base_url": value} and left == [], value
+    # Not the kind the install's own setting is, as before.
+    assert migrate.settings_to_apply(inst, dict(cfg), {"base_url": 7}) == {}
+
+
+def test_an_apps_addresses_are_read_from_its_code_without_running_it(tmp_path):
+    """Running storage.py binds the core to that app for the whole process,
+    and the panel imports every provider's history in one."""
+    from paperpull_core import storage as core_storage
+    before = core_storage._SPEC
+    assert migrate.url_settings_of(_ukg(tmp_path)) == {"base_url": ("ultipro.com", "saashr.com")}
+    assert core_storage._SPEC is before
+    assert migrate.url_settings_of(_app(tmp_path)) == {}
+
+
+def test_an_app_whose_addresses_cannot_be_read_takes_no_address_from_a_file(tmp_path):
+    inst = _ukg(tmp_path)
+    (inst / "storage.py").write_text("SPEC = AppSpec(url_settings=WHERE)\n", encoding="utf-8")
+    assert migrate.url_settings_of(inst) is None
+    left = []
+    got = migrate.settings_to_apply(inst, json.loads((inst / "config.json").read_text(encoding="utf-8")),
+                                    {"base_url": "https://example.ultipro.com", "owner": "Pat"},
+                                    left_out=left)
+    assert got == {"owner": "Pat"} and left == ["base_url"]
+    (inst / "storage.py").unlink()
+    assert migrate.url_settings_of(inst) is None
+
+
+def test_every_other_providers_settings_come_across_as_before(tmp_path):
+    """No app but UKG holds an address, so nothing of theirs is left out."""
+    inst = _app(tmp_path)
+    left = []
+    got = migrate.settings_to_apply(inst, dict(EXAMPLE), {"default_start_date": "2020-01-01",
+                                                          "owner": "Pat"}, left_out=left)
+    assert got == {"default_start_date": "2020-01-01", "owner": "Pat"} and left == []
+
+
 def test_a_first_persons_folder_is_never_taken_for_the_start_of_a_seconds():
     """The first version compared the start of a path with the folder and no
     separator, so a path in "Bank Statements - spouse" was taken for one in

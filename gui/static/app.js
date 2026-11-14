@@ -2173,7 +2173,8 @@ async function hxPost(url) {
   return d;
 }
 function hxTable(d, done) {
-  const why = r => r.failed ? r.failed : r.action === 'skipped' ? 'skipped, ' + r.why : (done ? HX_DONE : HX_PLAN)[r.action];
+  const why = r => (r.failed ? r.failed : r.action === 'skipped' ? 'skipped, ' + r.why : (done ? HX_DONE : HX_PLAN)[r.action]) +
+    (r.note ? ' ' + r.note : '');
   const rows = d.rows.map(r =>
     '<tr><td>' + esc(r.provider) + '</td><td>' + esc(r.account === 'primary' ? '' : r.account) +
     '</td><td>' + esc(why(r)) + '</td><td class="num">' + r.records + '</td>' +

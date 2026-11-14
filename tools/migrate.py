@@ -123,12 +123,15 @@ that the new machine starts with no history to report on until it runs.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
+import errno
 import io
 import json
 import os
 import posixpath
 import re
+import stat
 import sys
 import zipfile
 from datetime import datetime
@@ -142,7 +145,8 @@ if (_CORE / "paperpull_core").is_dir():
 from paperpull_core.keys import account_component  # noqa: E402
 from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
 from paperpull_core.ports import is_example  # noqa: E402
-from paperpull_core.storage import json_text, sanitize_component, with_home  # noqa: E402
+from paperpull_core.storage import (  # noqa: E402
+    json_text, on_provider_site, sanitize_component, with_home)
 
 # The file this writes. Version 1 had one entry per folder and no people or
 # settings, and still imports.
@@ -336,11 +340,97 @@ def _version() -> str:
         return ""
 
 
+# The most a file read from an install may hold. A history of years of
+# documents is a few megabytes.
+MAX_READ_BYTES = 256 * 1024 * 1024
+
+
+def read_plain(path: Path, limit: int = MAX_READ_BYTES) -> bytes:
+    """The bytes of a plain file at path, never a named pipe or a device,
+    whose open or read waits for good and would hold the panel's thread.
+    On PaperPull Server it is never read through a link at its name either,
+    which someone who can write to the shared folder can leave there, so
+    what it leads to, the server's password file among them, would be
+    copied into a history, a backup or the download of an export, and a
+    file with a second name, a hard link, is refused too. Linux refuses the
+    link in the open itself (O_NOFOLLOW). The desktop's own folders are the
+    person's alone, and a link there, to a synced folder say, is read as
+    it always was. OSError for any of that, ValueError past limit."""
+    on_server = os.environ.get("PAPERPULL_SERVER") == "1"
+    before = os.lstat(path) if on_server else os.stat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
+    flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+             | (getattr(os, "O_NOFOLLOW", 0) if on_server else 0))
+    fd = os.open(path, flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (on_server and st.st_nlink > 1):
+            raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
+        parts, got = [], 0
+        while True:
+            piece = os.read(fd, 1 << 20)
+            if not piece:
+                break
+            got += len(piece)
+            if got > limit:
+                raise ValueError("%s is larger than %d bytes" % (path, limit))
+            parts.append(piece)
+        return b"".join(parts)
+    finally:
+        os.close(fd)
+
+
 def _read_json(path: Path):
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
+        return json.loads(read_plain(path).decode("utf-8-sig"))
     except (OSError, ValueError):
         return None
+
+
+def url_settings_of(source: Path):
+    """The url_settings of the app whose storage.py is in source, {} for an
+    app with none, None when the file cannot be read or says something this
+    cannot follow. Read from the file's text and never by running it, since
+    running it binds the core to that app for the whole process the panel
+    runs in."""
+    try:
+        tree = ast.parse(read_plain(Path(source) / "storage.py", 4 * 1024 * 1024)
+                         .decode("utf-8", "replace"))
+    except (OSError, ValueError, SyntaxError):
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "url_settings":
+                continue
+            try:
+                found = ast.literal_eval(kw.value)
+            except (ValueError, SyntaxError, TypeError):
+                return None
+            if isinstance(found, dict) and all(
+                    isinstance(k, str) and isinstance(v, tuple) and v
+                    and all(isinstance(d, str) for d in v) for k, v in found.items()):
+                return found
+            return None
+    return {}
+
+
+def _address_kept(key: str, value, url_settings) -> bool:
+    """Whether a setting from a file may be written, as far as addresses go.
+    An app's url_settings name the settings that hold an address the app
+    opens, UKG's base_url, and each has to be on the provider's own site,
+    as PaperPull Server holds it before every run. A value there reaches
+    the browser's command line and the page a person signs in at, so a
+    file from another computer cannot choose it (a private report of
+    2026-11-10). An app whose url_settings could not be read keeps no
+    setting whose name ends in url."""
+    if url_settings is None:
+        return not (key.lower().endswith("url") and value not in (None, ""))
+    if key not in url_settings or value in (None, ""):
+        return True
+    return on_provider_site(value, url_settings[key])
 
 
 def _entry_script(folder: Path):
@@ -442,20 +532,30 @@ def _same_kind(ref, value) -> bool:
     return value is None or isinstance(value, (str, int, float))
 
 
-def settings_to_apply(install: Path, cfg: dict, settings: dict, check_pattern=None) -> dict:
+def settings_to_apply(install: Path, cfg: dict, settings: dict, check_pattern=None,
+                      url_settings=False, left_out=None) -> dict:
     """What of a file's settings may be written into a config this import
     just made. Only the keys settings_allowed gives this install, each the
-    same kind as the install's own value, and a file name pattern only when
+    same kind as the install's own value, an address only when it is on the
+    provider's own site (_address_kept), and a file name pattern only when
     check_pattern finds nothing wrong with it. With no way to check a
-    pattern, none is taken."""
+    pattern, none is taken. url_settings are the app's own (url_settings_of),
+    read from the install's storage.py when not given. Each address left
+    out is added to left_out, when given, for the import to say."""
     if not isinstance(settings, dict):
         return {}
     allowed = settings_allowed(install)
     example = _read_json(install / "config.example.json")
     example = example if isinstance(example, dict) else {}
+    if url_settings is False:
+        url_settings = url_settings_of(install)
     out = {}
     for key, value in settings.items():
         if key not in allowed or not _fits(value):
+            continue
+        if not _address_kept(key, value, url_settings):
+            if left_out is not None:
+                left_out.append(key)
             continue
         ref = example.get(key, cfg.get(key))
         if ref is not None and not _same_kind(ref, value):
