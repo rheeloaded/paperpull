@@ -506,7 +506,10 @@ def same_origin(headers: dict) -> bool:
     connection, so none is refused too. Origin and Referer, when sent, have
     to name the very address the request was made to. An Origin of null,
     which a browser sends for a page that keeps its address to itself,
-    names no address, and neither does an empty one, so both are refused."""
+    names no address, and neither does an empty one, so both are refused.
+
+    On PaperPull Server a request that carries none of the three is refused
+    as well (names_nothing)."""
     site = (headers.get("sec-fetch-site") or "").lower()
     if site and site != "same-origin":
         return False
@@ -518,7 +521,34 @@ def same_origin(headers: dict) -> bool:
     referer = headers.get("referer")
     if referer and (urlsplit(referer.strip()).netloc or "").lower() != host:
         return False
-    return True
+    return not (enabled() and names_nothing(headers))
+
+
+def names_nothing(headers: dict) -> bool:
+    """Whether a request carries no Sec-Fetch-Site, no Origin and no
+    Referer at all, which on PaperPull Server reached over plain HTTP is a
+    link opened from an email or a chat, or another program's page on the
+    same NAS.
+
+    A browser sends Sec-Fetch-Site only to an address it counts as secure,
+    one over HTTPS or this computer's own. A server reached over plain HTTP
+    by a name on the home network, nas.local or its address, gets none, so
+    a link opened from outside the browser arrives there with the session's
+    cookie, SameSite=Strict and all, and nothing else. An image that
+    another program's page on the same NAS asks for under no-referrer
+    arrives the same way, its other port being the same site to the
+    browser. Both were measured in Chromium on 2026-11-14, after a private
+    report showed that such a link to /api/run started a run.
+
+    The panel's own page always names itself. Nothing in the panel sets a
+    Referrer-Policy, so its fetch, EventSource, frames and the addresses
+    its script sends the page to carry a Referer of its own address, and a
+    POST or a connection to the Browser Screen an Origin too. On the
+    desktop, at 127.0.0.1, every current browser sends Sec-Fetch-Site, and
+    a request with none of the three is curl or a script somebody wrote,
+    which stays allowed there."""
+    return (not (headers.get("sec-fetch-site") or "").strip() and headers.get("origin") is None
+            and not (headers.get("referer") or "").strip())
 
 
 # -- the names it answers to -----------------------------------------------------------
@@ -1034,12 +1064,21 @@ def install(app) -> None:
         if root not in target.parents or not target.is_file():
             raise HTTPException(404)
         if target.suffix == ".html":
-            token = session_token(_headers(request.scope))
+            headers = _headers(request.scope)
+            token = session_token(headers)
             if not screen_open(token):
                 return HTMLResponse(page(again_body("dock")), headers={"Cache-Control": "no-store"})
             # The page is opened by a person, from the panel or its own tab,
-            # where noVNC connecting again never opens it again.
-            note_screen_use(token)
+            # where noVNC connecting again never opens it again. Another
+            # program's page on the same NAS can ask for it too, as an image
+            # or in a frame of its own, and the browser sends the session's
+            # cookie with that, which kept the screen open for as long as
+            # that page stayed open. So only the panel's own page and an
+            # address the browser opened by itself count, and only for the
+            # page itself or a frame.
+            dest = (headers.get("sec-fetch-dest") or "").strip().lower()
+            if from_its_own_page(headers) and dest in ("", "document", "iframe"):
+                note_screen_use(token)
         return FileResponse(target, headers={"Cache-Control": "no-cache"})
 
     @app.post("/screen/again", include_in_schema=False)

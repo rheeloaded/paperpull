@@ -579,8 +579,11 @@ def _same_origin_only(request: Request) -> None:
     where it let such a link start a run, and only the pages a browser
     opens by their address take it. The header is absent from curl and
     from browsers old enough not to know it, Safari before 16.4 among
-    them, and those are allowed through, because the header being missing
-    is not the same as it saying cross-site.
+    them, and those are allowed through on the desktop, because the header
+    being missing is not the same as it saying cross-site. PaperPull Server
+    reached over plain HTTP gets no Sec-Fetch-Site from any browser, so
+    there a request has to carry an Origin or a Referer naming the panel
+    (server_mode.names_nothing).
 
     None of that tells the panel's page from a page that pointed a name of
     its own at this computer, since the browser takes the two for one
@@ -596,7 +599,8 @@ def _same_origin_only(request: Request) -> None:
     if not (_host_allowed(headers.get("host")) and server_mode.same_origin(headers)):
         # The one refusal a person meets by doing something ordinary,
         # opening an address of the API by hand, so it says why.
-        if (headers.get("sec-fetch-site") or "").strip().lower() == "none":
+        if ((headers.get("sec-fetch-site") or "").strip().lower() == "none"
+                or (server_mode.enabled() and server_mode.names_nothing(headers))):
             raise HTTPException(403, "only the panel's own page asks for this, never a link "
                                      "or an address typed in")
         raise HTTPException(403, "cross-origin request refused")

@@ -220,6 +220,62 @@ def test_the_panels_own_requests_never_keep_the_screen_open():
     assert server_mode._SESSIONS[token]["screen"] == before and server_mode.screen_open(token)
 
 
+def test_a_link_to_the_api_over_plain_http_starts_no_run(monkeypatch):
+    """Over plain HTTP the browser sends no Sec-Fetch-Site, so a link to
+    /api/run opened from an email or a chat arrives with the session's
+    cookie alone, and so does an image another program's page on the NAS
+    asks for under no-referrer. That started the run (a private report of
+    2026-11-10). The panel's own page names itself in its Referer."""
+    app_module._write_settings({"terms_accepted": app_module.TERMS_VERSION})
+    started = []
+    monkeypatch.setattr(app_module, "_start_run", lambda *a, **k: started.append(a) or {})
+    token = server_mode.new_session()
+    cookie = ("cookie", "%s=%s" % (server_mode.SESSION_COOKIE, token))
+    status, _, body = ask("GET", "/api/run?app=Shop&action=rename_apply",
+                          headers=[("host", HOST), cookie])
+    assert status == 403 and "link" in body and started == []
+    status, _, _ = ask("GET", "/api/run?app=Shop&action=rename_apply",
+                       headers=[("host", HOST), ("referer", "http://nas.local:5000/"), cookie])
+    assert status == 403 and started == []
+    # The panel's own page, over plain HTTP, with its Referer and nothing else.
+    status, _, _ = ask("GET", "/api/run?app=Shop&action=pilot",
+                       headers=[("host", HOST), ("referer", "http://%s/" % HOST), cookie])
+    assert status == 200 and len(started) == 1
+
+
+def test_another_programs_page_does_not_keep_the_screen_open(monkeypatch):
+    """noVNC's page, asked for as an image or in a frame of another
+    program's page on the NAS, came with the session's cookie and started
+    the screen's quarter hour again each time, so a page left open there
+    kept the screen open with nobody at it. Over plain HTTP such a request
+    carries no header at all."""
+    token = server_mode.new_session()
+    cookie = ("cookie", "%s=%s" % (server_mode.SESSION_COOKIE, token))
+    others = [
+        [("host", HOST), cookie],
+        [("host", HOST), ("referer", "http://nas.local:5000/"), cookie],
+        [("host", HOST), ("sec-fetch-site", "same-site"), ("sec-fetch-dest", "iframe"),
+         ("referer", "http://nas.local:5000/"), cookie],
+        [("host", HOST), ("sec-fetch-site", "same-site"), ("sec-fetch-dest", "image"), cookie],
+        # The panel's own page asking for it as an image is not someone there.
+        own_page(token) + [("sec-fetch-dest", "image")],
+    ]
+    for headers in others:
+        server_mode._SESSIONS[token]["screen"] = time.time() - 600
+        before = server_mode._SESSIONS[token]["screen"]
+        assert ask("GET", "/screen/novnc/vnc.html", headers=headers)[2] == "<title>noVNC</title>"
+        assert server_mode._SESSIONS[token]["screen"] == before, headers
+    # The panel's own frame, over HTTPS and over plain HTTP, and the page
+    # opened in its own tab by its address, are someone there.
+    for headers in (own_page(token) + [("sec-fetch-dest", "iframe")],
+                    [("host", HOST), ("referer", "http://%s/screen" % HOST), cookie],
+                    [("host", HOST), ("sec-fetch-site", "none"), ("sec-fetch-dest", "document"),
+                     cookie]):
+        server_mode._SESSIONS[token]["screen"] = time.time() - 600
+        assert ask("GET", "/screen/novnc/vnc.html", headers=headers)[2] == "<title>noVNC</title>"
+        assert time.time() - server_mode._SESSIONS[token]["screen"] < 30, headers
+
+
 def test_another_programs_page_on_the_same_machine_does_not_keep_the_session():
     """A page of another program on the NAS, at another port, is the same
     site to the browser, which sends the panel's cookie with an image that

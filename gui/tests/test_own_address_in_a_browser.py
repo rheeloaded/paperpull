@@ -483,3 +483,175 @@ def test_the_docked_window_asks_for_the_password_again_after_a_gap(browser, port
     finally:
         context.close()
     assert json.dumps(server_mode._FAILS) == "{}"
+
+
+# -- PaperPull Server over plain HTTP, by a name on the home network ---------------
+#
+# A browser sends Sec-Fetch-Site only to an address it counts as secure, one
+# over HTTPS or this computer's own, so the tests above at 127.0.0.1 and
+# localhost always carry it. A server reached as http://nas.local gets none,
+# and its session cookie, SameSite=Strict and all, still goes with a link
+# opened from an email and with an image another program's page on the same
+# NAS asks for. That let such a link start a run (a private report of
+# 2026-11-10). Chromium here is told that nas.local is 127.0.0.1, so the
+# panel is reached by that name, as a browser on the home network reaches it.
+
+LAN = "nas.local"
+
+
+@pytest.fixture(scope="module")
+def lan_browser(browser):
+    """Playwright's own Chromium again, finding nas.local at this computer."""
+    chromium = browser.browser_type.launch(args=[
+        "--disable-extensions", "--disable-sync", "--disable-background-networking",
+        "--disable-component-update", "--no-first-run",
+        "--host-resolver-rules=MAP %s 127.0.0.1" % LAN])
+    yield chromium
+    chromium.close()
+
+
+@pytest.fixture()
+def another_program():
+    """A page of another program on the same NAS, at a port of its own,
+    holding whatever the test gives it."""
+    import http.server
+    held = {"page": b""}
+
+    class Page(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(held["page"])
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Page)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield held, "http://%s:%d/" % (LAN, server.server_address[1])
+    server.shutdown()
+    server.server_close()
+
+
+def on_the_lan_server(tmp_path, monkeypatch):
+    (tmp_path / "novnc").mkdir()
+    (tmp_path / "novnc" / "vnc.html").write_text(
+        "<!doctype html><title>noVNC</title><p id=screen>the screen</p>", encoding="utf-8")
+    monkeypatch.setenv("PAPERPULL_NOVNC", str(tmp_path / "novnc"))
+    monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    server_mode.set_password(PASSWORD)
+
+
+def runs_asked_for(monkeypatch) -> list:
+    """The runs the panel goes on to start once a request passed its checks.
+    The server runs only PaperPull's own providers, so the invented one here
+    is refused right after, which is no matter to these tests."""
+    asked = []
+    start = app_module._start_run
+
+    def noted(app, *args, **kwargs):
+        asked.append(app)
+        return start(app, *args, **kwargs)
+
+    monkeypatch.setattr(app_module, "_start_run", noted)
+    return asked
+
+
+def test_over_plain_http_neither_a_link_nor_another_programs_page_starts_a_run(
+        lan_browser, port, shop, tmp_path, monkeypatch, another_program):
+    on_the_lan_server(tmp_path, monkeypatch)
+    asked = runs_asked_for(monkeypatch)
+    base = "http://%s:%d" % (LAN, port)
+    token = server_mode.new_session()
+    context = lan_browser.new_context()
+    context.add_cookies([{"name": server_mode.SESSION_COOKIE, "value": token, "url": base,
+                          "httpOnly": True, "sameSite": "Strict"}])
+    run = base + "/api/run?app=Shop%20Receipts&action=pilot"
+    try:
+        tab = context.new_page()
+        answer = tab.goto(run)
+        sent = answer.request.all_headers()
+        # What makes this case: the browser sent nothing that says where
+        # the request came from, and it did send the session.
+        assert not {"sec-fetch-site", "origin", "referer"} & set(sent), sent
+        assert answer.status == 403, answer.text()
+        assert "link" in answer.json()["detail"]
+
+        held, page = another_program
+        held["page"] = (
+            '<img referrerpolicy="no-referrer" src="%s">'
+            '<iframe referrerpolicy="no-referrer" src="%s/screen/novnc/vnc.html"></iframe>'
+            % (run, base)).encode()
+        server_mode._SESSIONS[token]["screen"] -= 600
+        before = server_mode._SESSIONS[token]["screen"]
+        # An image's answer that is not an image is held back from the page
+        # by the browser, which Playwright reports as a failed request, so
+        # either counts as the panel having answered.
+        ended = set()
+        tab.on("requestfinished", lambda r: ended.add(r.url.split("?")[0]))
+        tab.on("requestfailed", lambda r: ended.add(r.url.split("?")[0]))
+        tab.goto(page)
+        for _ in range(150):
+            if {base + "/api/run", base + "/screen/novnc/vnc.html"} <= ended:
+                break
+            tab.wait_for_timeout(100)
+        assert {base + "/api/run", base + "/screen/novnc/vnc.html"} <= ended, ended
+        assert server_mode._SESSIONS[token]["screen"] == before, "another program kept the screen open"
+    finally:
+        context.close()
+    assert asked == [], "a link or another program's page started a run"
+
+
+def test_over_plain_http_the_panel_signs_in_runs_and_hands_files_over(
+        lan_browser, port, shop, tmp_path, monkeypatch):
+    """Everything the page asks for over plain HTTP names the panel in its
+    Referer, its forms in an Origin too, so the sign-in, a run, a request
+    with a body, a file handed over and the Browser Screen all still work."""
+    on_the_lan_server(tmp_path, monkeypatch)
+    asked = runs_asked_for(monkeypatch)
+    sheet = shop.parent / "All Purchases.xlsx"
+    sheet.write_bytes(b"an invented spreadsheet")
+    monkeypatch.setattr(app_module, "_LAST_EXPORT", sheet)
+    base = "http://%s:%d" % (LAN, port)
+    context = lan_browser.new_context(accept_downloads=True)
+    answers = []
+    context.on("response", lambda r: answers.append((r.status, r.url)))
+    try:
+        tab = context.new_page()
+        tab.goto(base + "/")
+        assert tab.url == base + "/login"
+        tab.fill("#password", PASSWORD)
+        with tab.expect_navigation():
+            tab.get_by_role("button", name="Sign in").click()
+        assert tab.url == base + "/" and tab.title() == "PaperPull"
+        token = next(c["value"] for c in context.cookies()
+                     if c["name"] == server_mode.SESSION_COOKIE)
+
+        tab.wait_for_selector("#view-home .acct .who a")
+        tab.click("#view-home .acct .who a")
+        tab.get_by_role("button", name="Try the newest few first").click()
+        tab.wait_for_function("() => RUN.state === 'done'", timeout=60000)
+        assert asked == ["Shop Receipts"], tab.evaluate("RUN.refused")
+
+        sent = tab.evaluate("""async () => {
+            const r = await fetch('/api/naming/preview', {method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({app: 'Shop Receipts', pattern: '{date} {provider}'})});
+            return [r.status, await r.json()];
+        }""")
+        assert sent[0] == 200 and sent[1]["problem"] is None, sent
+        with tab.expect_download(timeout=15000) as handed:
+            tab.evaluate("revealSpreadsheet()")
+        assert Path(handed.value.path()).read_bytes() == b"an invented spreadsheet"
+
+        server_mode._SESSIONS[token]["screen"] -= 600
+        tab.click("#screenbtn")
+        screen = tab.frame_locator("#dockframe").locator("#screen")
+        assert screen.inner_text(timeout=15000) == "the screen"
+        assert time.time() - server_mode._SESSIONS[token]["screen"] < 30
+    finally:
+        context.close()
+    refused = [(status, url) for status, url in answers if status in (400, 401, 403)]
+    assert not refused, refused
