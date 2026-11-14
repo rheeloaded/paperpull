@@ -84,6 +84,8 @@ def _mode(call):
 
 
 WRITE_FLAGS = ("O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC")
+READ_FLAGS = {"os", "getattr", "O_RDONLY", "O_BINARY", "O_NOFOLLOW", "O_NONBLOCK", "O_CLOEXEC",
+              "O_NOCTTY", "O_NOINHERIT"}
 
 
 def _writes_by_flags(call) -> str:
@@ -96,7 +98,13 @@ def _writes_by_flags(call) -> str:
     text = ast.unparse(flags)
     if any(f in text for f in WRITE_FLAGS):
         return "write"
-    return "" if "O_RDONLY" in text else "?"
+    # A read only when every flag in it is one that only reads, so a
+    # variable mixed in, O_RDONLY | w, is counted.
+    names = {n.attr if isinstance(n, ast.Attribute) else n.id for n in ast.walk(flags)
+             if isinstance(n, (ast.Attribute, ast.Name))}
+    names |= {n.value for n in ast.walk(flags)
+              if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    return "" if names and names <= READ_FLAGS else "?"
 
 
 def _plain_writes(path: Path) -> list:
@@ -155,7 +163,8 @@ def test_nothing_reaches_shutil_os_or_open_by_another_name():
         for n in ast.walk(ast.parse(p.read_text(encoding="utf-8-sig"))):
             if isinstance(n, ast.ImportFrom) and n.module in ("shutil", "io", "os") and \
                     any(a.name in ("move", "copy", "copy2", "copyfile", "copyfileobj",
-                                   "copytree", "open", "link", "symlink", "replace", "rename")
+                                   "copytree", "copystat", "copymode", "open", "link",
+                                   "symlink", "replace", "rename")
                         for a in n.names):
                 found.append("%s:%d from %s import" % (p.name, n.lineno, n.module))
             if isinstance(n, ast.Import) and any(a.name in ("shutil", "os") and a.asname

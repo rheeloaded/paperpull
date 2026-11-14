@@ -610,6 +610,10 @@ def own_page_problems(how: dict, edition: str, path: str, answer: dict, changed:
     if answer.get("sent") is None and answer["status"] in REFUSED:
         problems.append("the panel's own page was refused, %s %s"
                         % (answer["status"], answer["body"][:200]))
+    if answer.get("status") == 422:
+        # FastAPI could not match the request to the function's own
+        # arguments, as when a helper took the route's decorator.
+        problems.append("the panel's own page was answered 422, %s" % answer["body"][:200])
     if how[_kind(edition)] == "changes" and not changed:
         problems.append("the panel's own page was seen changing nothing, so the refusals "
                         "prove nothing here")
@@ -658,6 +662,26 @@ def test_a_route_does_what_it_says_and_nothing_for_a_request_it_refuses(box, edi
         answer, changed = ask(box, edition, key, own)
         problems += own_page_problems(how, edition, path, answer, changed)
     assert not problems, "\n".join(problems)
+
+
+def test_every_route_is_answered_by_the_function_written_for_it():
+    """A function put between a route's decorator and the one written for it
+    takes the route. Remove did nothing for one commit that way, and was
+    caught only because it changes something, since a route that only reads
+    then answers the panel's page 422 and changes nothing. So every route's
+    function is a public one, never a helper, and every api_ function of the
+    panel answers a route."""
+    import ast
+    names = {getattr(r, "endpoint", None).__name__ for r in app_module.app.routes
+             if getattr(r, "endpoint", None) is not None}
+    helpers = sorted(n for n in names if n.startswith("_"))
+    assert not helpers, "a route answered by a helper: %s" % helpers
+    tree = ast.parse(Path(app_module.__file__).read_text(encoding="utf-8"))
+    written = {n.name for n in tree.body
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and n.name.startswith("api_")}
+    assert written - names == set(), "an api_ function that answers no route: %s" % (
+        sorted(written - names))
 
 
 def test_every_route_the_panel_answers_is_in_the_census():

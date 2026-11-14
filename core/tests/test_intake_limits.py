@@ -341,10 +341,12 @@ def test_a_download_whose_file_is_not_known_is_measured_apart_and_never_put_in_p
     monkeypatch.setattr(intake.tempfile, "mkdtemp", noted)
     out = tmp_path / "Statement.pdf"
     out.write_bytes(b"the document already here")
+    too_large = Download(None, b"%PDF-" + b"\0" * 5000)
     with pytest.raises(intake.TooLarge):
-        intake.save_download_as(Download(None, b"%PDF-" + b"\0" * 5000), out)
+        intake.save_download_as(too_large, out)
     assert out.read_bytes() == b"the document already here"
     assert left_in(tmp_path) == ["Statement.pdf"], "something was left beside it"
+    assert Path(too_large.copied[0]).parent == made[0], "saved somewhere but its own folder"
 
     class Failing(Download):
         def save_as(self, target):
@@ -352,6 +354,7 @@ def test_a_download_whose_file_is_not_known_is_measured_apart_and_never_put_in_p
             raise OSError("the browser closed")
     with pytest.raises(OSError):
         intake.save_download_as(Failing(None), out)
+    assert out.read_bytes() == b"the document already here", "a failed save took its place"
     intake.save_download_as(Download(None, b"%PDF-1.4 a small one"), out)
     assert out.read_bytes() == b"%PDF-1.4 a small one"
     assert len(made) == 3 and not any(folder.exists() for folder in made)

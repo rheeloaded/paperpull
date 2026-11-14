@@ -551,7 +551,9 @@ def test_the_status_never_waits_on_a_pipe(server):
     within(3, status.scan_install, server.install)
 
 
-def test_an_archive_in_manual_review_left_as_a_link_is_never_taken_for_the_same_one(server):
+@pytest.mark.parametrize("edition", ["", "1"])
+def test_an_archive_in_manual_review_left_as_a_link_is_never_taken_for_the_same_one(
+        server, monkeypatch, edition):
     """A ZIP set aside is compared with the one already in Manual Review by
     that name, and the same one is not kept twice. A second name of a file
     outside the data folder, left at that name, was opened and compared, and
@@ -560,6 +562,7 @@ def test_an_archive_in_manual_review_left_as_a_link_is_never_taken_for_the_same_
     import io
     import zipfile
     buf = io.BytesIO()
+    monkeypatch.setenv("PAPERPULL_SERVER", edition)
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("1099.pdf", b"%PDF-1.4 a form")
     data = buf.getvalue()
