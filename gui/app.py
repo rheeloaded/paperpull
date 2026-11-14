@@ -4417,6 +4417,23 @@ def _removal_summary(folder: Path) -> dict:
 
 
 @app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
+def _free_removed_name(dest_dir: Path, name: str, stamp: str, taken) -> Path:
+    """Where Remove moves an install, Removed/<name>, or with the time when
+    that is taken, and a number after it when that is taken too. taken is
+    lexists on the server, where a link left at a name, the dated one as
+    well, which anybody can guess to the second, has the whole install
+    moved into wherever it leads."""
+    dest = dest_dir / name
+    if not taken(dest):
+        return dest
+    dest = dest_dir / ("%s (%s)" % (name, stamp))
+    n = 2
+    while taken(dest):
+        dest = dest_dir / ("%s (%s %d)" % (name, stamp, n))
+        n += 1
+    return dest
+
+
 async def api_remove(request: Request):
     """Move an install out of the list. The name must be one the panel
     itself discovered, so nothing outside the root can ever be named."""
@@ -4438,13 +4455,11 @@ async def api_remove(request: Request):
 
     summary = _removal_summary(src)
     dest_dir = root / REMOVED_DIR
-    dest = dest_dir / name
     # On the server a link left at the name counts as taken, and Removed is
     # held inside the data folder, since a move to another disk copies the
     # whole install to wherever a link would lead.
     taken = os.path.lexists if server_mode.enabled() else os.path.exists
-    if taken(dest):
-        dest = dest_dir / ("%s (%s)" % (name, datetime.now().strftime("%Y%m%d-%H%M%S")))
+    dest = _free_removed_name(dest_dir, name, datetime.now().strftime("%Y%m%d-%H%M%S"), taken)
     try:
         _make_folder(dest_dir)
         shutil.move(str(src), str(dest))

@@ -291,6 +291,35 @@ def move(src, dst) -> None:
     os.remove(src)
 
 
+def copy_whole(src, path) -> None:
+    """The file at src copied to path whole, on both editions. The copy is a
+    new file under a short name nobody can guess beside path, opened so it
+    can never be anything already there (O_EXCL), made in that folder as any
+    file is, so it takes the folder's permissions, and moved into path's
+    place, which replaces a link there rather than writing through it. src
+    is the browser's own copy or one in a private temporary folder, never a
+    file of the share. OSError when it cannot be copied, and on the server
+    LeadsOut when path's folder leads out of the data folder."""
+    path = Path(path)
+    if on_server():
+        hold(path.parent)
+    # Its name does not grow with the document's, so a path that fits
+    # Windows' 259 characters as the document still fits as the copy.
+    tmp = path.with_name(".%s.part" % os.urandom(4).hex())
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_BINARY", 0), 0o666)
+    try:
+        with os.fdopen(fd, "wb") as out, open(src, "rb") as f:
+            shutil.copyfileobj(f, out, 1 << 20)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def write_bytes(path, data: bytes) -> None:
     """Path(path).write_bytes(data), through open_to_write on the server."""
     if not on_server():

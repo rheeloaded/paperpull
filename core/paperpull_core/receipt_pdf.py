@@ -1155,7 +1155,7 @@ def _archive_too_big(path: Path) -> str:
                 % _intake._mb(size), "DOCUMENT_BYTES", "lets a larger one in")
     import zipfile
     try:
-        with open(path, "rb") as f:
+        with _open_archive(path) as f:
             # The record at the end of every ZIP, the ZIP64 one included,
             # read by zipfile's own reader of it.
             end = zipfile._EndRecData(f)
@@ -1282,7 +1282,6 @@ def _same_archive(a: Path, b: Path) -> bool:
     """Whether two archives hold the same files. A ZIP built on request
     stamps each file with the moment it was built, so two answers holding
     the same documents differ in their bytes."""
-    import filecmp
     import zipfile
 
     def listing(z):
@@ -1291,14 +1290,43 @@ def _same_archive(a: Path, b: Path) -> bool:
     try:
         if _archive_too_big(a) or _archive_too_big(b):
             # Not listed at all, for the reason open_zip did not list it.
-            return filecmp.cmp(str(a), str(b), shallow=False)
-        with zipfile.ZipFile(a) as za, zipfile.ZipFile(b) as zb:
+            return _same_bytes(a, b)
+        with _open_archive(a) as fa, _open_archive(b) as fb, \
+                zipfile.ZipFile(fa) as za, zipfile.ZipFile(fb) as zb:
             return listing(za) == listing(zb)
     except Exception:
         try:
-            return filecmp.cmp(str(a), str(b), shallow=False)
+            return _same_bytes(a, b)
         except OSError:
             return False
+
+
+def _open_archive(path):
+    """open(path, "rb"), and on PaperPull Server never through a link nor a
+    named pipe, whose open would wait for good, nor a second name of
+    another file, all of which someone on the share can leave at a name in
+    Manual Review. OSError for any of those."""
+    if not _shared_folder.on_server():
+        return open(path, "rb")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    f = os.fdopen(fd, "rb")
+    st = os.fstat(f.fileno())
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+        f.close()
+        raise OSError("%s is not a plain file of its own" % path)
+    return f
+
+
+def _same_bytes(a, b) -> bool:
+    """filecmp.cmp(a, b, shallow=False), each opened by _open_archive."""
+    with _open_archive(a) as fa, _open_archive(b) as fb:
+        while True:
+            x, y = fa.read(1 << 20), fb.read(1 << 20)
+            if x != y:
+                return False
+            if not x:
+                return True
 
 
 def save_download(download, out_path: Path) -> None:

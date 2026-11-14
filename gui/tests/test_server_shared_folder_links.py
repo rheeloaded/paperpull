@@ -248,3 +248,22 @@ def test_a_person_left_as_a_link_with_nothing_at_its_end_is_never_written_throug
     with pytest.raises(Exception):
         app_module._make_account(install, "spouse", "Jamie Example")
     assert not dangling.exists() or MARKER not in dangling.read_text(encoding="utf-8")
+
+
+def test_a_removed_install_never_moves_into_a_link_at_its_dated_name(server):
+    """Removed/<name> taken, the dated name was used unchecked, and anybody
+    can guess it to the second."""
+    removed = server.data / "Removed"
+    removed.mkdir()
+    (removed / "Bank Statements").mkdir()
+    elsewhere = server.canary.parent / "elsewhere"
+    elsewhere.mkdir()
+    dated = removed / "Bank Statements (20261114-120000)"
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(elsewhere), str(dated))
+    else:
+        os.symlink(elsewhere, dated, target_is_directory=True)
+    got = app_module._free_removed_name(removed, "Bank Statements", "20261114-120000",
+                                        os.path.lexists)
+    assert got == removed / "Bank Statements (20261114-120000 2)"

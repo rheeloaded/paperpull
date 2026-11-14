@@ -49,9 +49,11 @@ def _read_config(path: Path):
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
             raise OSError("%s is not a plain file of its own" % path)
-        if st.st_size > 4 * 1024 * 1024:
+        limit = 4 * 1024 * 1024
+        data = f.read(min(st.st_size, limit) + 1)
+        if len(data) > limit:
             raise OSError("%s is larger than any config" % path)
-        return json.loads(f.read().decode("utf-8-sig"))
+        return json.loads(data.decode("utf-8-sig"))
 
 
 def _write_whole(path: Path, text: str) -> None:

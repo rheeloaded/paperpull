@@ -20,16 +20,26 @@ reviewed here with what it touches.
 """
 import ast
 import os
+from collections import Counter
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SKIP = {"tests", ".venv", "venv", "__pycache__", "node_modules"}
 APPROVED = ("shared_folder.", "_shared_folder.")
 
-# The core's plain writes, by file, function and call. Reviewed 2026-11-14.
+# The core's plain writes, by file, function and call, each as many times
+# as it is there. Reviewed 2026-11-14.
 CORE_REVIEWED = {
+    "shared_folder.py:open_to_write:open('?')": "the desktop branch",
+    "shared_folder.py:write_whole:os.open(write)": "a new file of its own, O_EXCL and O_NOFOLLOW",
+    "shared_folder.py:copy_whole:os.open(write)": "a new file of its own, O_EXCL and O_NOFOLLOW",
+    "pdf_reader.py:_trim:os.open(write)": "a new file of its own, O_EXCL and O_NOFOLLOW",
+    "pdf_reader.py:_serve:os.open(write)": "os.devnull",
+    "shared_folder.py:copy_whole:shutil.copyfileobj": "into its own new file, O_EXCL and O_NOFOLLOW",
+    "shared_folder.py:open_to_read:open('?')": "the desktop branch, read or rb only",
     "browser.py:_remember_declined:marker.write_text": "Playwright's browsers folder, never the share",
-    "intake.py:save_download_as:download.save_as": "into a folder tempfile.mkdtemp made for it",
+    "intake.py:save_download_as:download.save_as": "into a private folder in the system's "
+                                                   "temporary folder, never the share",
     "pdf_reader.py:_serve:open('w')": "os.devnull",
     "renaming.py:_moved_across:shutil.copyfileobj": "into a file open_to_write opened",
     "shared_folder.py:move:shutil.move": "the desktop branch",
@@ -45,6 +55,10 @@ CORE_REVIEWED = {
 }
 
 
+# A reviewed write that is there more than once, and how many times.
+CORE_COUNTS = {}
+
+
 def _sources(top_folder: Path):
     for top, dirs, files in os.walk(top_folder):
         dirs[:] = sorted(d for d in dirs if d not in SKIP and not d.endswith("browser-profile"))
@@ -57,12 +71,21 @@ def _mode(call):
     """The mode an open is asked for, the second argument of open() and the
     first of a path's own open()."""
     at = 0 if isinstance(call.func, ast.Attribute) and ast.unparse(call.func) != "io.open" else 1
-    if len(call.args) > at and isinstance(call.args[at], ast.Constant):
-        return str(call.args[at].value)
-    for kw in call.keywords:
-        if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
-            return str(kw.value.value)
-    return "r"
+    if len(call.args) > at:
+        given = call.args[at]
+    else:
+        given = next((kw.value for kw in call.keywords if kw.arg == "mode"), None)
+    if given is None:
+        return "r"
+    # A mode that is not written out could be any, so it is counted.
+    return str(given.value) if isinstance(given, ast.Constant) else "?"
+
+
+WRITE_FLAGS = ("O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC")
+
+
+def _writes_by_flags(call) -> bool:
+    return bool(call.args[1:]) and any(f in ast.unparse(call.args[1]) for f in WRITE_FLAGS)
 
 
 def _plain_writes(path: Path) -> list:
@@ -93,9 +116,14 @@ def _plain_writes(path: Path) -> list:
             what = "%s(path=)" % name
         elif name.startswith("shutil.copy") or name in ("shutil.move", "os.link", "os.symlink"):
             what = name
-        elif (name in ("open", "io.open") or (isinstance(n.func, ast.Attribute)
-                                              and n.func.attr == "open")) \
-                and any(c in _mode(n) for c in "wax+"):
+        elif name == "os.open" and _writes_by_flags(n):
+            what = "os.open(write)"
+        elif name in ("open", "io.open") and any(c in _mode(n) for c in "wax+?"):
+            what = "%s(%r)" % (name, _mode(n))
+        elif (isinstance(n.func, ast.Attribute) and n.func.attr == "open" and name != "os.open"
+              and any(c in _mode(n) for c in "wax+")):
+            # A path's own open, whose mode is written out. Another
+            # object's open, a URL opener's or a ZIP member's, takes no mode.
             what = "%s(%r)" % (name, _mode(n))
         if what:
             out.append((n.lineno, function_of(n), what))
@@ -108,33 +136,39 @@ def test_every_app_writes_through_the_core():
     assert not plain, plain
 
 
-def test_no_app_reaches_shutil_or_open_by_another_name():
-    """So the census above is never passed by `from shutil import move`."""
+def test_nothing_reaches_shutil_os_or_open_by_another_name():
+    """So the census is never passed by `from shutil import move`, in an
+    app or in the core."""
     found = []
-    for p in _sources(REPO / "apps"):
+    for p in list(_sources(REPO / "apps")) + sorted((REPO / "core" / "paperpull_core").glob("*.py")):
         for n in ast.walk(ast.parse(p.read_text(encoding="utf-8-sig"))):
-            if isinstance(n, ast.ImportFrom) and n.module in ("shutil", "io") and \
-                    any(a.name in ("move", "copy", "copy2", "copyfile", "copytree", "open")
-                        for a in n.names):
+            if isinstance(n, ast.ImportFrom) and n.module in ("shutil", "io", "os") and \
+                    any(a.name in ("move", "copy", "copy2", "copyfile", "copytree", "open",
+                                   "link", "symlink", "replace", "rename") for a in n.names):
                 found.append("%s:%d from %s import" % (p.name, n.lineno, n.module))
-            if isinstance(n, ast.Import) and any(a.name == "shutil" and a.asname for a in n.names):
-                found.append("%s:%d import shutil as" % (p.name, n.lineno))
+            if isinstance(n, ast.Import) and any(a.name in ("shutil", "os") and a.asname
+                                                 for a in n.names):
+                found.append("%s:%d import as" % (p.name, n.lineno))
     assert not found, found
 
 
-def _core_writes() -> set:
+def _core_writes() -> Counter:
     core = REPO / "core" / "paperpull_core"
-    return {"%s:%s:%s" % (p.name, fn, what) for p in sorted(core.glob("*.py"))
-            for _line, fn, what in _plain_writes(p)}
+    return Counter("%s:%s:%s" % (p.name, fn, what) for p in sorted(core.glob("*.py"))
+                   for _line, fn, what in _plain_writes(p))
 
 
 def test_every_plain_write_left_in_the_core_is_one_reviewed():
-    unreviewed = sorted(_core_writes() - set(CORE_REVIEWED))
+    """Counted, so a second write added beside a reviewed one is seen."""
+    found = _core_writes()
+    unreviewed = sorted(k for k in found if k not in CORE_REVIEWED)
     assert not unreviewed, "write these through shared_folder, or review them: %s" % unreviewed
+    more = {k: n for k, n in found.items() if n > CORE_COUNTS.get(k, 1)}
+    assert not more, "more of these than were reviewed: %s" % more
 
 
 def test_every_core_write_reviewed_is_still_there():
-    gone = sorted(set(CORE_REVIEWED) - _core_writes())
+    gone = sorted(set(CORE_REVIEWED) - set(_core_writes()))
     assert not gone, gone
 
 

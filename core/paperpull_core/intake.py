@@ -22,11 +22,8 @@ import asyncio
 import base64
 import logging
 import os
-import re
 import shutil
-import stat
 import tempfile
-import time
 import weakref
 from pathlib import Path
 from typing import Optional
@@ -605,10 +602,10 @@ def save_download_as(download, out_path, *, partial=None) -> None:
     did not finish in time is cancelled and raises TooSlow. The browser's
     own copy is measured once it has finished, and one larger than a
     document may be is never copied. Where Playwright cannot say where its
-    copy is, the copy is made beside `out_path` and measured before it
-    takes its place, so a file already at `out_path` is never written over
-    by one that is then refused. Raises TooLarge, and whatever save_as
-    raises."""
+    copy is, the copy is saved in a private temporary folder and measured
+    before it takes its place, so a file already at `out_path` is never
+    written over by one that is then refused. Raises TooLarge, and whatever
+    save_as raises."""
     out_path = Path(out_path)
     if not finish(download, partial=partial):
         raise refusal(download) or TooSlow(_slow_words())
@@ -618,55 +615,34 @@ def save_download_as(download, out_path, *, partial=None) -> None:
         own = None
     if own:
         check_file(own, "The download for this document")
-    # Saved inside a folder made new beside out_path for this one save,
-    # under a name nobody can guess and open to this process alone, since
-    # Playwright writes the name it is given with a plain open, through any
-    # link left there, and a fixed name, x.saving, was one someone on
-    # PaperPull Server's share could leave a link at (a private report of
-    # 2026-11-10). Moved into place by os.replace, which replaces a link at
-    # out_path rather than following it.
+    # Playwright never writes into the folder the document goes to. It
+    # writes the path it is handed with a plain open, through any link left
+    # at that name, and a fixed name beside the document, x.saving, was one
+    # someone on PaperPull Server's share could leave a link at (a private
+    # report of 2026-11-10). Its own finished copy is copied into place
+    # instead, or, where it cannot say where that is, a copy it saves in a
+    # folder of this process's own in the system's temporary folder, outside
+    # the share. The copy goes into a new file of its own beside out_path,
+    # made in that folder as any file is, so it takes the folder's own
+    # permissions, and moves into place whole (shared_folder.copy_whole).
     from . import shared_folder
     if shared_folder.on_server():
         shared_folder.hold(out_path.parent)
-    _clear_stale_saves(out_path.parent)
-    folder = tempfile.mkdtemp(prefix=".", suffix=SAVING, dir=str(out_path.parent))
-    side = Path(folder) / "download"
+    private = None
     try:
-        download.save_as(str(side))
-        size = size_of(side)
+        if own:
+            source = Path(own)
+        else:
+            private = tempfile.mkdtemp(prefix="paperpull-save-")
+            source = Path(private) / "download"
+            download.save_as(str(source))
+        size = size_of(source)
         if size > DOCUMENT_BYTES:
             raise refuse("The download for this document", size=size)
-        os.replace(side, out_path)
+        shared_folder.copy_whole(source, out_path)
     finally:
-        shutil.rmtree(folder, ignore_errors=True)
-
-
-# The folder a download is saved in before it takes its place, ".<8>.saving".
-SAVING = ".saving"
-_SAVE_FOLDER = re.compile(r"\.[A-Za-z0-9_]{8}%s\Z" % re.escape(SAVING))
-# A save folder this much older than now was left by a run that was ended
-# while it saved, since no save takes an hour.
-STALE_SAVE_SECONDS = 3600
-
-
-def _clear_stale_saves(folder: Path) -> None:
-    """Take away the save folders a run ended in the middle of a save left
-    beside the documents. A folder only, never a link, and only one an hour
-    old, so a save another run is making is never touched."""
-    try:
-        entries = list(os.scandir(folder))
-    except OSError:
-        return
-    now = time.time()
-    for entry in entries:
-        if not _SAVE_FOLDER.match(entry.name):
-            continue
-        try:
-            st = entry.stat(follow_symlinks=False)
-        except OSError:
-            continue
-        if stat.S_ISDIR(st.st_mode) and now - st.st_mtime > STALE_SAVE_SECONDS:
-            shutil.rmtree(entry.path, ignore_errors=True)
+        if private is not None:
+            shutil.rmtree(private, ignore_errors=True)
 
 
 def waits_for(download, page, seconds: Optional[float] = None, *, finished=None,

@@ -345,37 +345,95 @@ def test_a_download_saved_where_a_link_was_left_replaces_the_link(server, monkey
     assert sorted(p.name for p in server.install.iterdir()) == [out.name]
 
 
-def test_a_download_leaves_nothing_beside_it_and_clears_what_an_ended_run_left(
-        place, monkeypatch):
-    """Each save is made in a folder of its own, which goes once it is done.
-    One a run ended in the middle of left an hour ago goes too, a fresh one
-    another save may be using stays, and a link named like one is never
-    followed or taken."""
+class _Recorded(_Download):
+    """A download that notes where it was asked to save."""
+
+    def __init__(self, own=None):
+        super().__init__()
+        self.own, self.saved_at = own, []
+
+    def path(self):
+        return self.own
+
+    def save_as(self, path):
+        self.saved_at.append(Path(path))
+        super().save_as(path)
+
+
+@pytest.mark.parametrize("edition", ["", "1"])
+def test_playwright_never_writes_into_the_folder_the_document_goes_to(place, monkeypatch,
+                                                                     tmp_path, edition):
+    """It writes the path it is handed with a plain open, through a link
+    left there. Its own copy is copied into place, or one it saves in a
+    private folder outside the share, and nothing is left beside the
+    document."""
+    from paperpull_core import intake
+    monkeypatch.setenv("PAPERPULL_SERVER", edition)
+    monkeypatch.setattr(intake, "finish", lambda download, partial=None: True)
+    out = place.install / "2026-05-14 Testco Statement.pdf"
+    remote = _Recorded()
+    intake.save_download_as(remote, out)
+    assert out.read_bytes() == b"%PDF-1.4 a statement"
+    assert len(remote.saved_at) == 1
+    assert place.data not in remote.saved_at[0].parents
+    assert not remote.saved_at[0].parent.exists(), "its private folder was left"
+    own = tmp_path / "playwright-artifacts" / "1234"
+    own.parent.mkdir()
+    own.write_bytes(b"%PDF-1.4 its own copy")
+    local = _Recorded(str(own))
+    intake.save_download_as(local, out)
+    assert local.saved_at == [] and out.read_bytes() == b"%PDF-1.4 its own copy"
+    assert sorted(p.name for p in place.install.iterdir()) == [out.name]
+
+
+def _acl(path: Path) -> list:
+    """What icacls says of a file's permissions, without its name."""
+    import subprocess
+    said = subprocess.run(["icacls", str(path)], capture_output=True, text=True,
+                          check=True).stdout.splitlines()
+    lines = [line.strip() for line in said if line.strip()
+             and not line.startswith("Successfully processed")]
+    return sorted([lines[0][len(str(path)):].strip()] + lines[1:])
+
+
+def test_a_saved_document_takes_its_folders_own_permissions_on_windows(place, monkeypatch):
+    """A document saved in a folder of 0700 mode took that folder's
+    protected permissions on Windows, owner, SYSTEM and Administrators
+    alone, and kept them once moved out (the review of 3eaaaccb). It is
+    made in its own folder as any file is now."""
+    if sys.platform != "win32":
+        pytest.skip("Windows permissions, icacls")
+    import subprocess
     from paperpull_core import intake
     monkeypatch.setattr(intake, "finish", lambda download, partial=None: True)
-    old = place.install / ".abcd1234.saving"
-    old.mkdir()
-    (old / "download").write_bytes(b"half")
-    os.utime(old, (time.time() - 7200, time.time() - 7200))
-    fresh = place.install / ".efgh5678.saving"
-    fresh.mkdir()
-    keep = place.outside / "keep"
-    keep.mkdir()
-    (keep / "x").write_bytes(b"x")
-    try:
-        (place.install / ".ijkl9012.saving").symlink_to(keep, target_is_directory=True)
-        linked = True
-    except (OSError, NotImplementedError):
-        linked = False
-    for edition in ("", "1"):
-        monkeypatch.setenv("PAPERPULL_SERVER", edition)
-        out = place.install / ("saved-%s.pdf" % (edition or "desktop"))
-        intake.save_download_as(_Download(), out)
-        assert out.read_bytes() == b"%PDF-1.4 a statement"
-    names = sorted(p.name for p in place.install.iterdir())
-    assert names == sorted([".efgh5678.saving", "saved-1.pdf", "saved-desktop.pdf"]
-                           + ([".ijkl9012.saving"] if linked else [])), names
-    assert (keep / "x").read_bytes() == b"x"
+    # pytest's own temporary folders are the owner's alone, so the folder
+    # is given what an ordinary one carries, Everyone may read, for the two
+    # to be told apart.
+    subprocess.run(["icacls", str(place.install), "/grant", "*S-1-1-0:(OI)(CI)(R)"],
+                   capture_output=True, check=True)
+    plain = place.install / "written plainly.pdf"
+    plain.write_bytes(b"%PDF-1.4")
+    assert any("Everyone" in line or "S-1-1-0" in line for line in _acl(plain))
+    out = place.install / "2026-05-14 Testco Statement.pdf"
+    intake.save_download_as(_Recorded(), out)
+    assert _acl(out) == _acl(plain)
+
+
+def test_on_the_server_a_download_is_never_saved_into_a_folder_that_leads_out(server,
+                                                                             monkeypatch):
+    from paperpull_core import intake
+    monkeypatch.setattr(intake, "finish", lambda download, partial=None: True)
+    elsewhere = server.outside / "profiles"
+    elsewhere.mkdir()
+    folder = server.install / "Statements"
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(elsewhere), str(folder))
+    else:
+        os.symlink(elsewhere, folder, target_is_directory=True)
+    with pytest.raises(SystemExit):
+        intake.save_download_as(_Recorded(), folder / "2026-05-14 Testco Statement.pdf")
+    assert list(elsewhere.iterdir()) == []
 
 
 class _PrintingPage:
@@ -457,6 +515,16 @@ def test_a_link_is_never_moved_into_place_as_a_link(server):
     with pytest.raises(OSError):
         shared_folder.move(src, server.install / "kept.pdf")
     assert not os.path.lexists(server.install / "kept.pdf")
+
+
+def test_a_second_name_of_another_file_is_never_moved_into_place(server):
+    """The file moved has to be a plain file of its own, so a link left
+    where a download arrives is never carried into the archive."""
+    src = server.install / "statement.pdf"
+    os.link(server.canary, src)
+    with pytest.raises(OSError):
+        shared_folder.move(src, server.install / "kept.pdf")
+    assert not os.path.lexists(server.install / "kept.pdf") and untouched(server)
 
 
 def test_a_move_on_the_desktop_is_shutils_as_before(desktop):
