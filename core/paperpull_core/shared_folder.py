@@ -112,8 +112,11 @@ def _open_plain(path, flags: int, doing: str) -> int:
                                or before.st_nlink > 1):
         _refuse(path, _NOT_PLAIN, doing)
     try:
-        fd = os.open(path, flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0),
-                     0o666)
+        # O_NONBLOCK as well, since a named pipe left at the name after the
+        # look above would hold the open for good. On a plain file it
+        # changes nothing.
+        fd = os.open(path, flags | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+                     | getattr(os, "O_NONBLOCK", 0), 0o666)
     except OSError as e:
         if e.errno == errno.ELOOP:
             _refuse(path, _NOT_PLAIN, doing)
@@ -166,6 +169,83 @@ def open_to_read(path, mode: str = "r", encoding=None, newline=None):
         return os.fdopen(fd, mode, encoding=encoding, newline=newline)
     except BaseException:
         os.close(fd)
+        raise
+
+
+# The most read_plain reads. A history of years of documents is a few
+# megabytes.
+READ_LIMIT = 256 * 1024 * 1024
+
+
+def read_plain(path, limit: int = READ_LIMIT) -> bytes:
+    """The bytes of a plain file at path, for the control panel and the
+    tools it runs, which read files of the shared folder that a run wrote.
+    Never a named pipe or a device, whose open or read waits for good and
+    would hold the panel's thread, on either edition. On PaperPull Server
+    never through a link at its name either, and never a file with a second
+    name, a hard link, since what either leads to, the server's password
+    file among them, would be copied into a spreadsheet, a history or an
+    answer. Linux refuses the link in the open itself (O_NOFOLLOW). The
+    desktop's folders are the person's alone, and a link there, to a synced
+    folder say, is read as it always was. OSError for any of that, never
+    the LeadsOut a run stops on, since the panel answers it and goes on.
+    ValueError past limit."""
+    server = on_server()
+    before = os.lstat(path) if server else os.stat(path)
+    if not stat.S_ISREG(before.st_mode) or (server and _is_link(path, before)):
+        raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
+    flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+             | (getattr(os, "O_NOFOLLOW", 0) if server else 0))
+    fd = os.open(path, flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
+            raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
+        parts, got = [], 0
+        while True:
+            piece = os.read(fd, 1 << 20)
+            if not piece:
+                break
+            got += len(piece)
+            if got > limit:
+                raise ValueError("%s is larger than %d bytes" % (path, limit))
+            parts.append(piece)
+        return b"".join(parts)
+    finally:
+        os.close(fd)
+
+
+def read_text(path, encoding: str = "utf-8", errors: str = "strict",
+              limit: int = READ_LIMIT) -> str:
+    """read_plain, as text."""
+    return read_plain(path, limit).decode(encoding, errors)
+
+
+def write_whole(path, data) -> None:
+    """Text or bytes written to path whole, as a new file of its own beside
+    it under a name nobody can guess, opened so it can never be anything
+    already there (O_EXCL), then moved into the name's place. A link left at
+    the name is replaced, never written through, and a file half written
+    is never at the name. The same on both editions, in place of a fixed
+    temporary name, x.tmp or x.trimming, at which someone on the share
+    could leave a link (a private report of 2026-11-10). OSError when it
+    cannot be written, and on the server LeadsOut when the folder leads out
+    of the data folder."""
+    path = Path(path)
+    if on_server():
+        hold(path.parent)
+    tmp = path.with_name(".%s.%s.part" % (path.name, os.urandom(6).hex()))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_BINARY", 0), 0o666)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data.encode("utf-8") if isinstance(data, str) else data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
         raise
 
 

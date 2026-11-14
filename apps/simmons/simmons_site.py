@@ -113,6 +113,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import parse_qsl, urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core import pressing
@@ -1334,7 +1335,7 @@ def _fetch_asked(page, url: str, out_path: Path, trace) -> bool:
         _note(trace, note="the page's PDF address did not answer a PDF", status=_status(resp))
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(body)
+    shared_folder.write_bytes(out_path, body)
     _note(trace, note="document taken", how="fetched")
     return True
 

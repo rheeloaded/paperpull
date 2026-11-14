@@ -62,6 +62,7 @@ from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import List, Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import redirects
 
@@ -364,5 +365,5 @@ def download_document(page, pdf_url: str, out_path) -> bool:
         return False
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(body)
+    shared_folder.write_bytes(out, body)
     return True

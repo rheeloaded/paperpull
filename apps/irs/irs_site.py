@@ -91,6 +91,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.urls import host_matches, host_of
 from paperpull_core import redirects
@@ -869,7 +870,7 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
             raise SessionExpired("the IRS Online Account answered a document with a sign-in body")
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(body)
+    shared_folder.write_bytes(out_path, body)
     return True
 
 

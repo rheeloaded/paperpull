@@ -19,6 +19,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
@@ -707,7 +708,7 @@ class App:
             data = site.fetch_receipt_bytes(page, url)
             if data:
                 log.info("Capture path: receipt link answered with a PDF")
-                out_path.write_bytes(data)
+                shared_folder.write_bytes(out_path, data)
                 return self._finish_pdf(page, purchase, out_path, source_page=None)
             log.info("Capture path: receipt page printed to PDF")
             site.goto_receipt_page(page, url)

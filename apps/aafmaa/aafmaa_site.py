@@ -81,6 +81,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
@@ -1085,7 +1086,7 @@ def download_document_row(page, title: str, date_text: str, account: str,
                 if data.startswith(b"%PDF"):
                     out = Path(out_path)
                     out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_bytes(data)
+                    shared_folder.write_bytes(out, data)
                     saved = True
                     continue
                 held_none += 1
@@ -1104,7 +1105,7 @@ def download_document_row(page, title: str, date_text: str, account: str,
                 if data.startswith(b"%PDF"):
                     out = Path(out_path)
                     out.parent.mkdir(parents=True, exist_ok=True)
-                    out.write_bytes(data)
+                    shared_folder.write_bytes(out, data)
                     saved = True
                     log.info("the PDF came when its address was asked for again")
                 else:

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import io
 import hashlib
 import html
 import json
@@ -908,7 +909,7 @@ def setup_needed(meta: dict) -> str:
 
 def _login_flag(script: Path) -> str:
     try:
-        text = script.read_text(encoding="utf-8", errors="ignore")
+        text = server_mode.read_text(script, errors="ignore")
     except Exception:
         text = ""
     return "--open-browser" if "--open-browser" in text else "--login"
@@ -1142,8 +1143,12 @@ async def api_export(request: Request):
         provider = known[provider.lower()]
     try:
         result = mod.export(apps_root(), None, provider, as_csv)
-    except Exception as e:
-        return {"ok": False, "reason": "The file was not made (%s). Try again." % str(e).splitlines()[0][:120]}
+    except (Exception, SystemExit) as e:
+        # SystemExit too, the core's refusal of a link in the shared folder
+        # (shared_folder.LeadsOut), which inside the panel would otherwise
+        # end the panel itself.
+        return {"ok": False, "reason": "The file was not made (%s). Try again." % (
+            str(e).splitlines()[0][:120] if str(e) else type(e).__name__)}
     if not result["sources"]:
         return {"ok": False, "reason": "No receipts saved yet. Get new documents from a shop such as "
                 "Amazon or Target first."}
@@ -1467,7 +1472,7 @@ def _account_root(meta: dict, account: str) -> Path:
 
 def _read_run_log(root: Path) -> list:
     try:
-        raw = json.loads((root / RUN_LOG).read_text(encoding="utf-8"))
+        raw = json.loads(server_mode.read_text(root / RUN_LOG))
     except (OSError, ValueError):
         return []
     return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
@@ -1515,10 +1520,12 @@ def _saved_this_run(root: Path, started: float) -> list:
     run's, left in place by a run that stopped before writing its own."""
     listed = root / "new-this-run.txt"
     try:
-        if listed.stat().st_mtime < started:
+        if os.lstat(listed).st_mtime < started:
             return []
-        lines = listed.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        # A plain file of its own, never a pipe, which held the panel's
+        # thread for good, and on the server never read through a link.
+        lines = server_mode.read_text(listed, errors="replace").splitlines()
+    except (OSError, ValueError):
         return []
     names = []
     for line in lines:
@@ -1535,7 +1542,7 @@ def _latest_saved(root: Path) -> list:
     """The newest files an account saved, as {"name", "date"}, read from its
     own records. Names only, so nothing here ever names a path to open."""
     try:
-        raw = json.loads((root / "progress.json").read_text(encoding="utf-8-sig"))
+        raw = json.loads(server_mode.read_text(root / "progress.json", "utf-8-sig"))
     except (OSError, ValueError):
         return []
     found = []
@@ -1563,8 +1570,8 @@ def _provider_of(meta: dict) -> tuple:
     """(provider name, kind) for an install, from its own storage.py, the
     way the welcome list reads a template."""
     try:
-        src = (Path(meta["dir"]) / "storage.py").read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        src = server_mode.read_text(Path(meta["dir"]) / "storage.py", errors="ignore")
+    except (OSError, ValueError):
         src = ""
     p, k = _PROVIDER_RE.search(src), _KIND_RE.search(src)
     name = meta["name"]
@@ -1996,7 +2003,7 @@ def _owner_of(meta: dict, account: str) -> str:
     config = Path(meta["dir"]) / ("config.json" if account == "primary"
                                   else "config.%s.json" % account)
     try:
-        owner = json.loads(config.read_text(encoding="utf-8-sig")).get("owner")
+        owner = json.loads(server_mode.read_text(config, "utf-8-sig")).get("owner")
     except (OSError, ValueError, AttributeError):
         return ""
     return owner.strip()[:80] if isinstance(owner, str) else ""
@@ -2340,8 +2347,8 @@ def _saved_folder(meta: dict, account: str) -> str:
     if not names:
         return ""
     try:
-        lines = (root / "new-this-run.txt").read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        lines = server_mode.read_text(root / "new-this-run.txt", errors="replace").splitlines()
+    except (OSError, ValueError):
         return ""
     docs = _documents_in_use(meta, account, root)
     kinds = {c.name: c for c in _document_folders(root, _not_for_documents(meta, account))}
@@ -2827,7 +2834,7 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
         raise HTTPException(400, "PaperPull has no provider called %r. Reload the page." % slug)
     info = next(p for p in list_providers() if p["slug"] == slug)
     dst = root / info["folder"]
-    if dst.exists():
+    if os.path.lexists(dst):
         return "exists"
     # Most double-click launchers call .venv\Scripts\python.exe, which the
     # packaged app never has, and setup.bat wants a system Python it cannot
@@ -2843,17 +2850,23 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
             continue
         if _launcher_left_out(item):
             continue
+        # On the server each folder is held inside the data folder and each
+        # file written as a new one of its own (_make_folder, _copy_file),
+        # since someone on the share can leave a link in a folder just made.
         if item.is_dir():
-            (dst / rel).mkdir(parents=True, exist_ok=True)
+            _make_folder(dst / rel)
         else:
-            (dst / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(item, dst / rel)
-    example = dst / "config.example.json"
+            _make_folder((dst / rel).parent)
+            _copy_file(item, dst / rel)
+    example = src / "config.example.json"
     if example.is_file():
         # The example IS the config for a fresh install. Its output_dir and
         # profile_dir are relative to the install folder. Its port is no
         # other app's example port, but it can still be a second person's.
-        shutil.copy2(example, dst / "config.json")
+        # Copied from PaperPull's own example, never the one just copied
+        # into the shared folder, which a link could have replaced (a
+        # private report of 2026-11-10).
+        _copy_file(example, dst / "config.json")
         _set_free_port(dst / "config.json")
     if owner:
         _set_owner(dst / "config.json", owner)
@@ -2877,7 +2890,7 @@ def _set_free_port(config: Path) -> None:
         return
     with _CONFIG_WRITES:
         try:
-            data = json.loads(config.read_text(encoding="utf-8-sig"))
+            data = json.loads(server_mode.read_text(config, "utf-8-sig"))
         except (OSError, ValueError):
             return
         if not isinstance(data, dict):
@@ -2899,7 +2912,7 @@ def _set_profile(config: Path, profile: str) -> None:
         return
     with _CONFIG_WRITES:
         try:
-            data = json.loads(config.read_text(encoding="utf-8-sig"))
+            data = json.loads(server_mode.read_text(config, "utf-8-sig"))
         except (OSError, ValueError):
             return
         data["profile_dir"] = profile
@@ -2918,7 +2931,7 @@ def _set_owner(config: Path, owner: str) -> None:
         return
     try:
         with _CONFIG_WRITES:
-            data = json.loads(config.read_text(encoding="utf-8-sig"))
+            data = json.loads(server_mode.read_text(config, "utf-8-sig"))
             if not isinstance(data, dict):
                 return
             data["owner"] = owner[:80]
@@ -2957,12 +2970,16 @@ def _make_folder(folder: Path) -> None:
 
 def _copy_file(src: Path, dst: Path) -> None:
     """shutil.copy2, and on the server a copy written the way
-    _write_text writes, which never writes through a link at dst."""
+    _write_text writes, which never writes through a link at dst. The file
+    copied is read as a plain file of its own, never through a link, and
+    its mode and times are set on the new file before it is moved into
+    place, where shutil.copystat followed a link left at dst."""
     if not server_mode.enabled():
         shutil.copy2(src, dst)
         return
-    server_mode.write_in_data(dst, Path(src).read_bytes())
-    shutil.copystat(src, dst)
+    data = server_mode.read_plain(src)
+    st = os.lstat(src)
+    server_mode.write_in_data(dst, data, mode=st.st_mode, times=(st.st_atime_ns, st.st_mtime_ns))
 
 
 def _template_files(src: Path):
@@ -3006,9 +3023,9 @@ def refresh_install_code(dst: Path, src: Path) -> list:
         # backed up into the share nor written.
         through_link = server_mode.enabled() and not server_mode.own_file(target)
         try:
-            if not through_link and target.is_file() and target.read_bytes() == new:
+            if not through_link and target.is_file() and server_mode.read_plain(target) == new:
                 continue
-        except OSError:
+        except (OSError, ValueError):
             continue
         if not through_link and target.is_file():
             bak = dst / "Backups" / ("code-" + stamp) / rel
@@ -3050,8 +3067,8 @@ def ensure_settings(dst: Path, stamp: str = "") -> list:
 
 def _add_settings(dst: Path, example: Path, live: Path, stamp: str) -> list:
     try:
-        template = json.loads(example.read_text(encoding="utf-8-sig"))
-        current = json.loads(live.read_text(encoding="utf-8-sig"))
+        template = json.loads(server_mode.read_text(example, "utf-8-sig"))
+        current = json.loads(server_mode.read_text(live, "utf-8-sig"))
     except (OSError, ValueError):
         return []
     if not isinstance(template, dict) or not isinstance(current, dict):
@@ -3439,7 +3456,7 @@ async def api_account(request: Request):
         raise HTTPException(409, "%s already has a person called %s. Choose another name." % (name, label))
     app_dir = Path(apps[name]["dir"])
     dest = _make_account(app_dir, label, owner)
-    cfg = json.loads(dest.read_text(encoding="utf-8"))
+    cfg = json.loads(server_mode.read_text(dest))
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"app": name, "account": label, "config": dest.name,
@@ -3634,7 +3651,7 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
             raise HTTPException(409, "%s's config.json is a link in the shared folder, so no "
                                      "person was added." % app_dir.name)
         try:
-            first = json.loads(base.read_text(encoding="utf-8-sig"))
+            first = json.loads(server_mode.read_text(base, "utf-8-sig"))
             server_mode.hold_in_data(
                 app_dir / server_mode.with_home(mod.output_dir_for(app_dir, first, label)))
         except (OSError, ValueError, TypeError, AttributeError):
@@ -3642,7 +3659,7 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
                                      "folder, so no person was added." % app_dir.name)
     try:
         dest = mod.make_config(app_dir, label, owner=owner)
-    except Exception as e:
+    except (Exception, SystemExit) as e:
         raise HTTPException(500, "Could not add this person (%s). Try again." % str(e).splitlines()[0][:160])
     if dest is None:
         raise HTTPException(409, NO_CONFIG_YET % app_dir.name)
@@ -3868,7 +3885,9 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
     if first.get("config") is None:
         return None, "its first person's folder has no app to add a person to"
     install = root / first["install"]
-    if (install / ("config.%s.json" % account)).exists():
+    # lexists, since a link left at the name with nothing at its end is
+    # not there to exists(), and the config made next was written through it.
+    if os.path.lexists(install / ("config.%s.json" % account)):
         # There, and its history could not be read, so it was not listed.
         # Never written over, since it is somebody's account.
         return None, "%s already has a person called %s" % (install.name, account)
@@ -4389,7 +4408,7 @@ def _removal_summary(folder: Path) -> dict:
             pdfs += 1
     history = 0
     try:
-        raw = json.loads((folder / "progress.json").read_text(encoding="utf-8-sig"))
+        raw = json.loads(server_mode.read_text(folder / "progress.json", "utf-8-sig"))
         history = sum(1 for v in raw.values() if isinstance(v, dict)) if isinstance(raw, dict) else 0
     except (OSError, ValueError):
         pass
@@ -5255,8 +5274,8 @@ def _naming():
 
 def _storage_src(d: Path) -> str:
     try:
-        return (d / "storage.py").read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        return server_mode.read_text(d / "storage.py", errors="ignore")
+    except (OSError, ValueError):
         return ""
 
 
@@ -5273,8 +5292,11 @@ def _provider_name(d: Path) -> str:
 
 
 def _read_json(p: Path):
+    """A JSON file of an install, read as a plain file of its own, never a
+    pipe and on the server never through a link (server_mode.read_plain).
+    None for anything else."""
     try:
-        return json.loads(p.read_text(encoding="utf-8-sig"))
+        return json.loads(server_mode.read_text(p, "utf-8-sig"))
     except (OSError, ValueError):
         return None
 
@@ -5994,8 +6016,8 @@ def _indexed_files(root: Path):
     found = None
     for index in sorted(root.glob("* Index.csv")):
         try:
-            with open(index, encoding="utf-8-sig", newline="") as fh:
-                rows = [read_stored_row(r) for r in csv.DictReader(fh)]
+            text = server_mode.read_text(index, "utf-8-sig")
+            rows = [read_stored_row(r) for r in csv.DictReader(io.StringIO(text, newline=""))]
         except (OSError, ValueError, csv.Error):
             continue
         found = found if found is not None else set()

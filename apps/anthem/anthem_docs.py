@@ -20,6 +20,7 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import renaming
@@ -987,12 +988,12 @@ class App:
             written: List[Path] = []
             try:
                 written.append(out_path)
-                out_path.write_bytes(pdf)
+                shared_folder.write_bytes(out_path, pdf)
                 for ending, data in (beside(r) if beside is not None else ()):
                     path = unique_path(out_path.parent, out_path.stem + ending,
                                        self.config["max_path_length"])
                     written.append(path)
-                    path.write_bytes(data)
+                    shared_folder.write_bytes(path, data)
                     companions.append(path)
             except Exception as e:
                 log.warning("could not write %s: %s", label, e)

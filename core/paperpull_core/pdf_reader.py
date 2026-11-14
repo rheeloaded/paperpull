@@ -185,11 +185,14 @@ def trim_blank_tail(path) -> int:
         return 0
     answer = _ask({"op": "trim_blank_tail"}, path, None)
     # A worker ended in the middle of the write leaves the copy it was
-    # writing beside the PDF, which is left as it was.
-    try:
-        os.remove(path + TRIMMING)
-    except OSError:
-        pass
+    # writing beside the PDF, which is left as it was. A link someone left
+    # under such a name goes as a link, never what it leads to.
+    import glob
+    for left in glob.glob(glob.escape(path + TRIMMING) + ".*"):
+        try:
+            os.remove(left)
+        except OSError:
+            pass
     if answer.get("over_limit") or answer.get("error"):
         log.info("could not look for blank pages at the end (%s)",
                  answer.get("over_limit") or answer.get("error"))
@@ -850,8 +853,16 @@ def _trim(reader, total: int, path: str) -> dict:
         writer.add_page(page)
     # Written beside and put in place whole, since the worker can be ended
     # at any moment, and a PDF written over in place would be left cut off.
-    beside = path + TRIMMING
-    with open(beside, "wb") as out:
+    # Beside it under a name nobody can guess, opened so it can never be
+    # anything already there, where a fixed name was one someone on
+    # PaperPull Server's share could leave a link at, and the PDF was
+    # written through it (a private report of 2026-11-10).
+    beside = "%s%s.%s" % (path, TRIMMING, os.urandom(6).hex())
+    fd = os.open(beside, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_BINARY", 0), 0o666)
+    # One cut off is left for trim_blank_tail to take away, as a worker
+    # ended in the middle of it leaves it.
+    with os.fdopen(fd, "wb") as out:
         writer.write(out)
     os.replace(beside, path)
     return {"opened": True, "pages": total, "removed": total - keep}

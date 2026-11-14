@@ -125,13 +125,11 @@ from __future__ import annotations
 import argparse
 import ast
 import copy
-import errno
 import io
 import json
 import os
 import posixpath
 import re
-import stat
 import sys
 import zipfile
 from datetime import datetime
@@ -145,6 +143,7 @@ if (_CORE / "paperpull_core").is_dir():
 from paperpull_core.keys import account_component  # noqa: E402
 from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
 from paperpull_core.ports import is_example  # noqa: E402
+from paperpull_core.shared_folder import read_plain  # noqa: E402
 from paperpull_core.storage import (  # noqa: E402
     json_text, on_provider_site, sanitize_component, with_home)
 
@@ -340,47 +339,6 @@ def _version() -> str:
         return ""
 
 
-# The most a file read from an install may hold. A history of years of
-# documents is a few megabytes.
-MAX_READ_BYTES = 256 * 1024 * 1024
-
-
-def read_plain(path: Path, limit: int = MAX_READ_BYTES) -> bytes:
-    """The bytes of a plain file at path, never a named pipe or a device,
-    whose open or read waits for good and would hold the panel's thread.
-    On PaperPull Server it is never read through a link at its name either,
-    which someone who can write to the shared folder can leave there, so
-    what it leads to, the server's password file among them, would be
-    copied into a history, a backup or the download of an export, and a
-    file with a second name, a hard link, is refused too. Linux refuses the
-    link in the open itself (O_NOFOLLOW). The desktop's own folders are the
-    person's alone, and a link there, to a synced folder say, is read as
-    it always was. OSError for any of that, ValueError past limit."""
-    on_server = os.environ.get("PAPERPULL_SERVER") == "1"
-    before = os.lstat(path) if on_server else os.stat(path)
-    if not stat.S_ISREG(before.st_mode):
-        raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
-    flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-             | (getattr(os, "O_NOFOLLOW", 0) if on_server else 0))
-    fd = os.open(path, flags)
-    try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or (on_server and st.st_nlink > 1):
-            raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
-        parts, got = [], 0
-        while True:
-            piece = os.read(fd, 1 << 20)
-            if not piece:
-                break
-            got += len(piece)
-            if got > limit:
-                raise ValueError("%s is larger than %d bytes" % (path, limit))
-            parts.append(piece)
-        return b"".join(parts)
-    finally:
-        os.close(fd)
-
-
 def _read_json(path: Path):
     try:
         return json.loads(read_plain(path).decode("utf-8-sig"))
@@ -448,8 +406,10 @@ def _provider_kind(folder: Path):
     None when it has none."""
     src = ""
     try:
-        src = (folder / "storage.py").read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        # A plain file, never a pipe, whose open would hold an import's
+        # scan for good, and on PaperPull Server never through a link.
+        src = read_plain(folder / "storage.py", 4 * 1024 * 1024).decode("utf-8", "ignore")
+    except (OSError, ValueError):
         pass
     p = PROVIDER_RE.search(src)
     k = KIND_RE.search(src)
@@ -1150,10 +1110,16 @@ def write_history(where: Path, records: dict, stamp: str, write=None) -> None:
         backups = Path(where) / "Backups"
         backups.mkdir(parents=True, exist_ok=True)
         kept = backups / ("progress.%s.before-import.bak" % stamp)
+        # Read as a plain file, never a pipe, and on PaperPull Server never
+        # through a link, whose file would be copied into the share's Backups.
+        try:
+            before = read_plain(path)
+        except ValueError as e:
+            raise OSError(str(e)) from e
         if write is not None:
-            write(kept, path.read_bytes())
+            write(kept, before)
         else:
-            kept.write_bytes(path.read_bytes())
+            kept.write_bytes(before)
     if write is not None:
         write(path, text)
         return

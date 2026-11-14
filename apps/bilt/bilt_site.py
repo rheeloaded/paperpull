@@ -146,6 +146,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core import pressing
@@ -1591,7 +1592,7 @@ def _catch_statement(page, run: Run, target: Target, out_path: Path,
         log.info("the PDF of the statement dated %s was not kept: %s", target.date, why)
         raise _stop("The statement's PDF was not kept, since %s." % why, "the pdf is not this statement")
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(data)
+    shared_folder.write_bytes(out_path, data)
     _KEPT[hashlib.sha256(data).hexdigest()] = target.statement_id
     _note(trace, note="statement kept")
     return True

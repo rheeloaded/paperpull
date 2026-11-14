@@ -28,6 +28,7 @@ import time
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import page_check as _page_check
 from paperpull_core import redirects
@@ -1136,7 +1137,7 @@ def download_invoice_pdf(page, url: str, out_path) -> bool:
         return False
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(body)
+    shared_folder.write_bytes(out, body)
     return True
 
 

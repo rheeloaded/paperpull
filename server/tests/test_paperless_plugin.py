@@ -128,3 +128,72 @@ def test_the_manifest_says_what_the_panel_needs():
     manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
     assert manifest["events"] == ["run-finished"]
     assert manifest["run"] == ["python", "paperless.py"]
+
+
+# -- links left in the data folder or the consume folder ---------------------------------
+#
+# Someone who can write to either can leave a link there. A document read
+# through one copied what it led to, the server's own password file among
+# the places, into Paperless, and a copy written through one landed where it
+# led (a private report of 2026-11-10). A hard link stands in on Windows for
+# a link at a file's name, and a junction for a folder that is a link.
+
+CANARY = b'{"password": {"salt": "MARKER-7f3a"}}'
+
+
+@pytest.fixture()
+def canary(tmp_path):
+    outside = tmp_path / "config"
+    outside.mkdir()
+    f = outside / "server.json"
+    f.write_bytes(CANARY)
+    return f
+
+
+def test_a_document_left_as_a_link_is_never_copied_into_paperless(saved, tmp_path, canary):
+    consume = tmp_path / "consume"
+    consume.mkdir()
+    saved[0].unlink()
+    os.link(canary, saved[0])
+    code, said = run(event_for(saved), consume)
+    assert code == 0 and "1 was not copied" in said, said
+    assert all(p.read_bytes() != CANARY for p in consume.iterdir())
+    assert sorted(p.name for p in consume.iterdir()) == [saved[1].name]
+
+
+def test_a_name_a_link_holds_is_taken_and_never_written_through(saved, tmp_path, canary):
+    consume = tmp_path / "consume"
+    consume.mkdir()
+    os.link(canary, consume / saved[0].name)
+    code, said = run(event_for(saved[:1]), consume)
+    assert code == 0 and "Copied 1 new document" in said, said
+    assert canary.read_bytes() == CANARY
+    assert (consume / ("%s (2)%s" % (saved[0].stem, saved[0].suffix))).read_bytes() \
+        == b"%PDF-1.7 one"
+
+
+def test_a_providers_folder_that_is_a_link_is_refused(saved, tmp_path, canary):
+    consume = tmp_path / "consume"
+    consume.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(elsewhere), str(consume / "Shop Receipts"))
+    else:
+        os.symlink(elsewhere, consume / "Shop Receipts", target_is_directory=True)
+    code, said = run(event_for(saved), consume, PAPERLESS_SUBFOLDERS="1")
+    assert code == 0 and "is a link rather than a folder" in said, said
+    assert list(elsewhere.iterdir()) == []
+
+
+def test_no_temporary_copy_is_left_and_none_is_at_a_name_anyone_could_guess(saved, tmp_path):
+    """The copy is written under a dot name nobody can guess, never the
+    fixed .<name>.part a link could wait at."""
+    consume = tmp_path / "consume"
+    consume.mkdir()
+    planted = consume / (".%s.part" % saved[0].name)
+    planted.write_bytes(b"somebody else's")
+    code, said = run(event_for(saved[:1]), consume)
+    assert code == 0 and planted.read_bytes() == b"somebody else's"
+    assert sorted(p.name for p in consume.iterdir()) == sorted([planted.name, saved[0].name])

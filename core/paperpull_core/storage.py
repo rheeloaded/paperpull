@@ -1671,11 +1671,13 @@ class JsonStore:
         candidates = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
         for c in candidates:
             try:
-                with open(c, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
+                # A plain file of its own, never a pipe, and on the server
+                # never through a link left after the look above, which
+                # would put what it leads to into the share as the records.
+                raw = json.loads(shared_folder.read_text(c))
                 if isinstance(raw, dict):
                     return _whole_records(raw)
-            except (json.JSONDecodeError, OSError):
+            except (ValueError, OSError):
                 continue
         return None
 

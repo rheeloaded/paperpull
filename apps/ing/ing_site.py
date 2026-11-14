@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import unquote, urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here.
@@ -1051,7 +1052,7 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
         if data:
             out_path = Path(out_path)
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_bytes(data)
+            shared_folder.write_bytes(out_path, data)
             return row["item_id"]
     if failed is not None:
         raise failed

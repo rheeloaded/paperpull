@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core.dates import last_day as _last_day
@@ -452,7 +453,7 @@ def download_by_url(page, url: str, out_path) -> bool:
         if b64:
             data = intake.decode(b64)
             if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
+                shared_folder.write_bytes(out_path, data)
                 return True
     except Exception as e:
         log.info("download_by_url blob fallback failed for %s: %s", url, e)

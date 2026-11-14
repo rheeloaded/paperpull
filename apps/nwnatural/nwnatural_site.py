@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
@@ -715,7 +716,7 @@ def _fetch(page, bill: RawDoc, out_path: Path, trace: Optional[list]) -> bool:
     if data[:5] != b"%PDF-":
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(data)
+    shared_folder.write_bytes(out_path, data)
     return True
 
 

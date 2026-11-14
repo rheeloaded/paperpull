@@ -52,6 +52,7 @@ from datetime import date as _date
 from pathlib import Path
 from typing import List, Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.controls import escape_for_locator
@@ -454,7 +455,7 @@ def download_document(page, title: str, date: str, out_path: Path,
         log.warning("not a PDF for %s %s (%d bytes)", title, date, len(data or b""))
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(data)
+    shared_folder.write_bytes(out_path, data)
     return True
 
 

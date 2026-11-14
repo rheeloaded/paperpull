@@ -108,6 +108,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
@@ -1798,7 +1799,7 @@ def _take_viewer(page, out_path: Path, trace: Optional[list]) -> bool:
                 if b64:
                     data = intake.decode(b64)
                     if data[:5] == b"%PDF-":
-                        out_path.write_bytes(data)
+                        shared_folder.write_bytes(out_path, data)
                         return True
         except Exception as e:
             log.info("viewer read failed: %s", e)
@@ -1891,7 +1892,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         if downloads and _take_download(downloads[0], dl_dir, seen, out_path, zip_ok=True):
             return True
         if got:
-            out_path.write_bytes(got["body"])
+            shared_folder.write_bytes(out_path, got["body"])
             return True
         return _take_new_pdf(dl_dir, seen, out_path, zip_ok=True)
 

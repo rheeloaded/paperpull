@@ -87,6 +87,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.characters import whole_json
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -825,7 +826,7 @@ def _fetch(page, doc: RawDoc, session: _Session, out_path: Path, trace: Optional
             trace.append({"note": "the answer is not a PDF"})
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(data)
+    shared_folder.write_bytes(out_path, data)
     return True
 
 

@@ -19,6 +19,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
@@ -877,7 +878,7 @@ class App:
             if body:
                 purchase.document_type = "Receipt"
                 self._record_state(purchase, State.RECEIPT_LOCATED)
-                out_path.write_bytes(body)
+                shared_folder.write_bytes(out_path, body)
                 log.info("Capture path: the row's own receipt control")
                 # This path has no page to print again, so the one retry is a
                 # second press of the same control. Until 0.41.0 it said it
@@ -913,7 +914,7 @@ class App:
             data = site.fetch_receipt_bytes(page, url)
             if data:
                 log.info("Capture path: receipt link answered with a PDF")
-                out_path.write_bytes(data)
+                shared_folder.write_bytes(out_path, data)
                 return self._finish_pdf(page, purchase, out_path, source_page=None)
             log.info("Capture path: receipt page printed to PDF")
             site.goto_receipt_page(page, url)
@@ -1361,7 +1362,7 @@ class App:
                     log.warning("Retry failed: %s", e)
                 if body:
                     result = self._second_capture(out_path, tokens, result,
-                                                  lambda path: path.write_bytes(body))
+                                                  lambda path: shared_folder.write_bytes(path, body))
             elif source_page is not None:
                 log.warning("Validation failed (%s); retrying once", result.reason)
                 result = self._second_capture(

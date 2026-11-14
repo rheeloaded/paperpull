@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
@@ -576,7 +577,7 @@ def download_by_id(page, document_id: str, document_date: str, out_path) -> bool
         if b64:
             data = intake.decode(b64)
             if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
+                shared_folder.write_bytes(out_path, data)
                 return True
             log.info("deep-link blob for %s not a PDF (%d bytes)", document_id, len(data))
     except Exception as e:
@@ -664,7 +665,7 @@ def download_document_row(page, title: str, date_text: str, account: str,
         if b64:
             data = intake.decode(b64)
             if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
+                shared_folder.write_bytes(out_path, data)
                 return True
             log.info("blob for %r was not a PDF (%d bytes)", title, len(data))
     except Exception as e:

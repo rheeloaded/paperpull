@@ -51,6 +51,7 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.urls import host_matches, host_of
 from paperpull_core.dates import last_day as _last_day
@@ -1119,7 +1120,7 @@ def download_document(page, doc_id: str, out_path) -> bool:
         return False
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(body)
+    shared_folder.write_bytes(out, body)
     return True
 
 

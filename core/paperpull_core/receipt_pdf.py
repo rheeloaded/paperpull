@@ -22,6 +22,7 @@ from typing import Iterable, NamedTuple, Optional
 from . import browser as _launcher
 from . import intake as _intake
 from . import pdf_reader as _pdf_reader
+from . import shared_folder as _shared_folder
 from .characters import whole_characters
 from .identity import MIN_TEXT, amount_variants, date_variants, on_its_own
 from .models import ValidationResult
@@ -309,7 +310,9 @@ def print_page_to_pdf(page, out_path: Path) -> None:
                 pass
         if not data.startswith(PDF_MAGIC):
             raise RuntimeError("printToPDF returned non-PDF data")
-        out_path.write_bytes(data)
+        # On PaperPull Server never written through a link left at its name,
+        # a staged ".delivering" name among them.
+        _shared_folder.write_bytes(out_path, data)
     finally:
         try:
             page.emulate_media(media="print" if before == "print" else "null")

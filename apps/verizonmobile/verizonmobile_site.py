@@ -53,6 +53,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
@@ -642,7 +643,7 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
             raise SessionExpired("Verizon answered a bill with a page")
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(data)
+    shared_folder.write_bytes(out_path, data)
     return True
 
 

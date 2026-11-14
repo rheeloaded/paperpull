@@ -86,6 +86,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
@@ -927,7 +928,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
 
 
 def _written(out_path: Path, body: bytes) -> bool:
-    out_path.write_bytes(body)
+    shared_folder.write_bytes(out_path, body)
     return True
 
 

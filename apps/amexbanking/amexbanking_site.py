@@ -19,12 +19,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.characters import whole_json
 from paperpull_core.dates import last_day as _last_day
@@ -635,14 +635,10 @@ def _write_if_pdf(data: bytes, out_path: Path) -> bool:
         return False
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = out_path.with_suffix(f".tmp.{os.getpid()}")
-    try:
-        tmp_path.write_bytes(data)
-        os.replace(tmp_path, out_path)
-    except Exception:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise
+    # A new file of its own under a name nobody can guess, moved into
+    # place, where a temporary name of the process's number was one
+    # someone on PaperPull Server's share could leave a link at.
+    shared_folder.write_whole(out_path, data)
     return True
 
 

@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import receipt_pdf
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -844,7 +845,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         if downloads and _take_download(downloads[0], dl_dir, seen, out_path, zip_ok=True):
             return True
         if got.get("body"):
-            out_path.write_bytes(got["body"])
+            shared_folder.write_bytes(out_path, got["body"])
             return True
         if got.get("refetch"):
             try:
@@ -855,7 +856,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                                                 timeout=60000)
                 body = intake.body(resp) if resp.ok else b""
                 if _is_document(body, zip_ok=True):
-                    out_path.write_bytes(body)
+                    shared_folder.write_bytes(out_path, body)
                     return True
             except Exception:
                 pass

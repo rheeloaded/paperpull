@@ -37,6 +37,7 @@ WHAT IT ADDS
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import hmac
 import html
@@ -1182,7 +1183,9 @@ def output_root(install: Path, account: str) -> Path:
     """The folder an account's documents and records are written to."""
     config = install / ("config.json" if account == "primary" else "config.%s.json" % account)
     try:
-        out = json.loads(config.read_text(encoding="utf-8-sig")).get("output_dir") or "."
+        # A plain file of its own, never a pipe, which held the end of a
+        # run for good, nor read through a link.
+        out = json.loads(read_text(config, "utf-8-sig")).get("output_dir") or "."
     except (OSError, ValueError, AttributeError):
         out = "."
     # A config written by hand can hold a number or a list here, which no
@@ -1257,22 +1260,82 @@ def own_file(path) -> bool:
     return inside_data(Path(path).parent) and not linked(path)
 
 
-def write_in_data(path, data) -> None:
+# The most read_plain reads. A history of years of documents is a few
+# megabytes.
+READ_LIMIT = 256 * 1024 * 1024
+
+
+def read_plain(path, limit: int = READ_LIMIT) -> bytes:
+    """The bytes of a plain file at path, for a file in the shared folder a
+    run or someone on the share may have written. Never a named pipe or a
+    device, whose open or read waits for good and would hold the panel's
+    thread, on either edition. On the server never through a link at its
+    name either, and never a file with a second name, a hard link, since
+    what either leads to, the server's password file among them, would be
+    shown, handed over or written back into the share. Linux refuses the
+    link in the open itself (O_NOFOLLOW). The desktop's folders are the
+    person's alone, and a link there is read as it always was. OSError for
+    any of that, ValueError past limit. paperpull_core.shared_folder.read_plain
+    is the same rule for the tools and the apps."""
+    server = enabled()
+    before = os.lstat(path) if server else os.stat(path)
+    if not stat.S_ISREG(before.st_mode) or (server and linked(path)):
+        raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
+    flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+             | (getattr(os, "O_NOFOLLOW", 0) if server else 0))
+    fd = os.open(path, flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
+            raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
+        parts, got = [], 0
+        while True:
+            piece = os.read(fd, 1 << 20)
+            if not piece:
+                break
+            got += len(piece)
+            if got > limit:
+                raise ValueError("%s is larger than %d bytes" % (path, limit))
+            parts.append(piece)
+        return b"".join(parts)
+    finally:
+        os.close(fd)
+
+
+def read_text(path, encoding: str = "utf-8", errors: str = "strict",
+              limit: int = READ_LIMIT) -> str:
+    """read_plain, as text."""
+    return read_plain(path, limit).decode(encoding, errors)
+
+
+def write_in_data(path, data, mode=None, times=None) -> None:
     """Write text or bytes to a file in the shared folder on the server, in
     a folder held inside the data folder, as a new file of its own moved
-    into the file's place."""
+    into the file's place. mode and times (atime_ns, mtime_ns), when given,
+    are set on the new file before it is moved, through its own open file,
+    so nothing at its name is ever followed."""
     path = Path(path)
     hold_in_data(path.parent)
     tmp = path.with_name("%s.%s.tmp" % (path.name, os.urandom(6).hex()))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
                  | getattr(os, "O_BINARY", 0), 0o666)
+    by_fd = os.utime in os.supports_fd
     try:
-        if isinstance(data, str):
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(data)
-        else:
-            with os.fdopen(fd, "wb") as f:
-                f.write(data)
+        if mode is not None and hasattr(os, "fchmod"):
+            os.fchmod(fd, stat.S_IMODE(mode))
+        with (os.fdopen(fd, "w", encoding="utf-8") if isinstance(data, str)
+              else os.fdopen(fd, "wb")) as f:
+            f.write(data)
+            f.flush()
+            if times is not None and by_fd:
+                os.utime(f.fileno(), ns=times)
+        # Windows, where the panel runs as a server only in tests, takes
+        # neither through the open file, so there they go on its own
+        # temporary name, which nothing else knows.
+        if mode is not None and not hasattr(os, "fchmod"):
+            os.chmod(tmp, stat.S_IMODE(mode))
+        if times is not None and not by_fd:
+            os.utime(tmp, ns=times)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -1295,10 +1358,12 @@ def new_files(install: Path, account: str, started: float) -> list:
         return []
     listed = root / "new-this-run.txt"
     try:
-        if listed.stat().st_mtime < started:
+        if os.lstat(listed).st_mtime < started:
             return []
-        lines = listed.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        # Read as a plain file of its own, never a pipe, which would hold
+        # the end of the run for good, nor through a link.
+        lines = read_text(listed, errors="replace").splitlines()
+    except (OSError, ValueError):
         return []
     data = data_root().resolve()
     out = []

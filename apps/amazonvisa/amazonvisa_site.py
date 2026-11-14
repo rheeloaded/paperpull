@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import doc_types
 from paperpull_core import failure
 from paperpull_core import intake
@@ -692,5 +693,5 @@ def download_document(page, title, date, out_path, occurrence=0, item_hint="",
         return ""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(data)
+    shared_folder.write_bytes(out_path, data)
     return row["item_id"]
