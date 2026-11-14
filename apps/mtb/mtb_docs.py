@@ -20,6 +20,7 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import pressing
@@ -893,8 +894,7 @@ class App:
                     "title": (d.get("title") or "")[:90],
                     "date": d.get("date", ""),
                     "category": cat, "summary": summ})
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
         except pressing.Stop as stop:
             # A press it would not make anywhere else in the look ends it
             # there, and the file still says what was seen and why.

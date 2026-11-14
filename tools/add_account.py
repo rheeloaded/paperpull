@@ -43,8 +43,8 @@ def _read_config(path: Path):
     before = os.lstat(path) if server else os.stat(path)
     if not stat.S_ISREG(before.st_mode):
         raise OSError("%s is not a plain file" % path)
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-                 | (getattr(os, "O_NOFOLLOW", 0) if server else 0))
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                 | ((getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)) if server else 0))
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):

@@ -299,3 +299,141 @@ def test_a_second_persons_config_is_never_written_through_a_link_at_its_name(ser
     assert json.loads((install / "config.spouse.json").read_text(encoding="utf-8"))["owner"] \
         == "Jamie Example"
     assert untouched(server)
+
+
+# -- what Playwright and shutil write, and the status the panel reads ----------------
+
+class _Download:
+    """A finished download that writes the file it is handed the way
+    Playwright's save_as does, with a plain open."""
+
+    def __init__(self, data=b"%PDF-1.4 a statement"):
+        self.data = data
+
+    def path(self):
+        return None
+
+    def failure(self):
+        return None
+
+    def save_as(self, path):
+        with open(path, "wb") as f:
+            f.write(self.data)
+
+
+def test_a_download_is_never_saved_through_a_link_beside_its_place(server, monkeypatch):
+    """It was saved at a fixed name beside its place first, x.saving, which a
+    link left there sent to the server's password file."""
+    from paperpull_core import intake
+    monkeypatch.setattr(intake, "finish", lambda download, partial=None: True)
+    out = server.install / "Statements" / "2026-05-14 Testco Statement.pdf.delivering"
+    out.parent.mkdir()
+    plant(server, out.with_name(out.name + ".saving"))
+    intake.save_download_as(_Download(), out)
+    assert untouched(server)
+    assert out.read_bytes() == b"%PDF-1.4 a statement"
+
+
+def test_a_download_saved_where_a_link_was_left_replaces_the_link(server, monkeypatch):
+    from paperpull_core import intake
+    monkeypatch.setattr(intake, "finish", lambda download, partial=None: True)
+    out = server.install / "2026-05-14 Testco Statement.pdf"
+    plant(server, out)
+    intake.save_download_as(_Download(), out)
+    assert untouched(server) and out.read_bytes() == b"%PDF-1.4 a statement"
+    assert os.stat(out).st_nlink == 1
+    assert sorted(p.name for p in server.install.iterdir()) == [out.name]
+
+
+def test_shared_folder_saves_a_download_whole_on_either_edition(place, monkeypatch):
+    for edition in ("", "1"):
+        monkeypatch.setenv("PAPERPULL_SERVER", edition)
+        out = place.install / ("saved-%s.pdf" % (edition or "desktop"))
+        shared_folder.save_download(_Download(), out)
+        assert out.read_bytes() == b"%PDF-1.4 a statement"
+    assert sorted(p.name for p in place.install.iterdir()) == ["saved-1.pdf", "saved-desktop.pdf"]
+
+
+class _PrintingPage:
+    """A page whose pdf() writes a path it is handed the way Playwright
+    does, with a plain open, and answers its bytes either way."""
+
+    def emulate_media(self, **_k):
+        pass
+
+    def pdf(self, path=None, **_k):
+        data = b"%PDF-1.4 printed"
+        if path is not None:
+            with open(path, "wb") as f:
+                f.write(data)
+        return data
+
+
+def test_a_page_printed_headless_is_never_written_through_a_link(server):
+    out = server.install / "2026-05-14 Shop Receipt.pdf"
+    plant(server, out)
+    with pytest.raises(SystemExit):
+        receipt_pdf._print_checked(_PrintingPage(), out, lambda: None)
+    assert untouched(server)
+
+
+def test_a_page_printed_headless_is_written_as_before_on_the_desktop(desktop):
+    out = desktop.install / "2026-05-14 Shop Receipt.pdf"
+    receipt_pdf._print_checked(_PrintingPage(), out, lambda: None)
+    assert out.read_bytes() == b"%PDF-1.4 printed"
+
+
+def test_a_move_replaces_a_link_at_its_place_and_never_follows_it(server):
+    src = server.install / "downloads" / "statement.pdf"
+    src.parent.mkdir()
+    src.write_bytes(b"%PDF-1.4 moved")
+    dst = server.install / "2026-05-14 Testco Statement.pdf"
+    plant(server, dst)
+    shared_folder.move(src, dst)
+    assert untouched(server) and dst.read_bytes() == b"%PDF-1.4 moved" and not src.exists()
+
+
+def test_a_move_across_drives_is_written_whole_and_reads_no_link(server, monkeypatch):
+    import errno
+    src = server.install / "downloads" / "statement.pdf"
+    src.parent.mkdir()
+    src.write_bytes(b"%PDF-1.4 moved")
+    dst = server.install / "2026-05-14 Testco Statement.pdf"
+    plant(server, dst)
+    real = os.replace
+
+    def other_drive(a, b):
+        if Path(a) == src:
+            raise OSError(errno.EXDEV, "Invalid cross-device link")
+        return real(a, b)
+    monkeypatch.setattr(shared_folder.os, "replace", other_drive)
+    shared_folder.move(src, dst)
+    assert untouched(server) and dst.read_bytes() == b"%PDF-1.4 moved" and not src.exists()
+    os.link(server.canary, src)
+    with pytest.raises(OSError):
+        shared_folder.move(src, server.install / "another.pdf")
+    assert not (server.install / "another.pdf").exists()
+
+
+def test_a_move_on_the_desktop_is_shutils_as_before(desktop):
+    src = desktop.install / "a.pdf"
+    src.write_bytes(b"x")
+    shared_folder.move(src, desktop.install / "b.pdf")
+    assert (desktop.install / "b.pdf").read_bytes() == b"x" and not src.exists()
+
+
+def test_the_status_the_panel_reads_for_every_account_never_goes_through_a_link(server):
+    import status
+    install = server.install
+    (install / "storage.py").write_text('SPEC = AppSpec(provider="Testco", kind=DOCUMENT)\n',
+                                        encoding="utf-8")
+    server.canary.write_text('{"k": {"date": "2026-05-14", "downloaded_ok": true, '
+                             '"title": "MARKER-7f3a"}}', encoding="utf-8")
+    os.link(server.canary, install / "progress.json")
+    assert status._read_json(install / "progress.json") == {}
+
+
+def test_the_status_never_waits_on_a_pipe(server):
+    import status
+    fifo_or_skip(server.install / "progress.json")
+    within(3, status.scan_install, server.install)

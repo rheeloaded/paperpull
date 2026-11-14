@@ -20,6 +20,7 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import delivery
 from paperpull_core import identity
 from paperpull_core import failure
@@ -922,8 +923,7 @@ class App:
                         controls.append({"role": role, "text": t,
                                          "safe": site.is_safe_control(t)})
             info["controls"] = controls
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"

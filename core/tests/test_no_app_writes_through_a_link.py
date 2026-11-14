@@ -9,6 +9,12 @@ staged name it is written to first. A plain write_bytes there wrote the
 document through a link left at the name, wherever it led, the server's own
 password file among the places (a private report of 2026-11-10). There
 were 97 of them, in 64 apps.
+
+Playwright writes a file the same plain way when it is handed a path, a
+download's save_as, a page's pdf(path=) and screenshot(path=), the last at
+fixed names such as Diagnostics/diagnose-documents.png in 28 apps. So do
+shutil's copies and its move, which also moves a file into the folder a
+link at its name leads to. Each goes through shared_folder too.
 """
 import ast
 import os
@@ -50,7 +56,14 @@ def test_every_app_writes_through_the_core():
             name = ast.unparse(n.func)
             if name.startswith(APPROVED):
                 continue
-            if isinstance(n.func, ast.Attribute) and n.func.attr in ("write_bytes", "write_text"):
+            if isinstance(n.func, ast.Attribute) and n.func.attr in ("write_bytes", "write_text",
+                                                                     "save_as"):
+                plain.append("%s:%d %s" % (where, n.lineno, name))
+            elif (isinstance(n.func, ast.Attribute) and n.func.attr in ("pdf", "screenshot")
+                  and any(k.arg == "path" for k in n.keywords)):
+                plain.append("%s:%d %s(path=)" % (where, n.lineno, name))
+            elif name.startswith("shutil.copy") or name in ("shutil.move", "os.link",
+                                                            "os.symlink"):
                 plain.append("%s:%d %s" % (where, n.lineno, name))
             elif (name in ("open", "io.open") or (isinstance(n.func, ast.Attribute)
                                                   and n.func.attr == "open")) \

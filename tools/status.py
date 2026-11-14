@@ -36,7 +36,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import stat
 import statistics
 import sys
 from datetime import date, datetime, timedelta
@@ -62,10 +64,28 @@ def _iso(value):
         return None
 
 
+def _read_text(path, errors="strict") -> str:
+    """A file of an install as text, read as a plain file, never a named
+    pipe, whose open waits for good and held the control panel, which asks
+    this of every account, and on PaperPull Server never through a link
+    left at its name in the shared folder (a private report of
+    2026-11-10). OSError for anything else."""
+    server = os.environ.get("PAPERPULL_SERVER") == "1"
+    before = os.lstat(path) if server else os.stat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError("%s is not a plain file" % path)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                 | ((getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)) if server else 0))
+    with os.fdopen(fd, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
+            raise OSError("%s is not a plain file of its own" % path)
+        return fh.read(256 * 1024 * 1024).decode("utf-8", errors)
+
+
 def _read_json(path):
     try:
-        with open(path, encoding="utf-8") as fh:
-            data = json.load(fh)
+        data = json.loads(_read_text(path))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
@@ -82,7 +102,7 @@ def _kind_and_provider(install: Path, records=None):
     """
     src = ""
     try:
-        src = (install / "storage.py").read_text(encoding="utf-8", errors="ignore")
+        src = _read_text(install / "storage.py", errors="ignore")
     except Exception:
         pass
     k = KIND_RE.search(src)
@@ -105,7 +125,7 @@ def _last_run(install: Path):
     """When the tool last ran at all, from its run summary. Secondary signal:
     a verify run counts here but tells you nothing about new documents."""
     try:
-        txt = (install / "run-summary.txt").read_text(encoding="utf-8", errors="ignore")
+        txt = _read_text(install / "run-summary.txt", errors="ignore")
     except Exception:
         return None, ""
     end = re.search(r"Run end:\s*(\S+)", txt)

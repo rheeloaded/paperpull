@@ -613,7 +613,12 @@ def save_download_as(download, out_path, *, partial=None) -> None:
         own = None
     if own:
         check_file(own, "The download for this document")
-    side = out_path.with_name(out_path.name + ".saving")
+    # Beside out_path under a short name nobody can guess, since Playwright
+    # writes the name it is given through any link left there, and a fixed
+    # name, x.saving, was one someone on PaperPull Server's share could
+    # leave a link at (a private report of 2026-11-10). Moved into place by
+    # os.replace, which replaces a link at out_path rather than following it.
+    side = out_path.with_name(".%s.saving" % os.urandom(4).hex())
     try:
         download.save_as(str(side))
         size = size_of(side)

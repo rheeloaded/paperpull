@@ -1281,8 +1281,11 @@ def read_plain(path, limit: int = READ_LIMIT) -> bytes:
     before = os.lstat(path) if server else os.stat(path)
     if not stat.S_ISREG(before.st_mode) or (server and linked(path)):
         raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
-    flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-             | (getattr(os, "O_NOFOLLOW", 0) if server else 0))
+    # O_NONBLOCK on the server alone, since a named pipe is what someone on the share
+    # can leave there, and the desktop's files can be cloud placeholders a
+    # non-blocking open has not been tried on.
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+             | ((getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)) if server else 0))
     fd = os.open(path, flags)
     try:
         st = os.fstat(fd)

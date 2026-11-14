@@ -877,10 +877,12 @@ def _print_checked(page, out_path: Path, still_the_providers) -> None:
     remove what was printed when the page left while it printed."""
     still_the_providers()
     page.emulate_media(media="print")
-    page.pdf(path=str(out_path), format="Letter", print_background=True,
-             prefer_css_page_size=True, display_header_footer=False,
-             margin={"top": "0.4in", "bottom": "0.4in",
-                     "left": "0.4in", "right": "0.4in"})
+    # Printed to bytes and written by the core, never by Playwright's own
+    # plain open, which follows a link left at out_path.
+    _shared_folder.write_bytes(out_path, page.pdf(
+        format="Letter", print_background=True, prefer_css_page_size=True,
+        display_header_footer=False,
+        margin={"top": "0.4in", "bottom": "0.4in", "left": "0.4in", "right": "0.4in"}))
     try:
         still_the_providers()
     except ValueError:
@@ -1237,7 +1239,6 @@ def _set_aside(path: Path, folder=None) -> Optional[Path]:
     must not. An archive already kept under that name that holds the same
     files is the same answer again, and this one goes, so a document tried
     on every run does not pile up copies. None only when it is gone."""
-    import shutil
 
     path = Path(path)
     if not path.exists():
@@ -1255,7 +1256,7 @@ def _set_aside(path: Path, folder=None) -> Optional[Path]:
                 return target
             n += 1
             target = where / ("%s (%d).zip" % (path.stem, n))
-        shutil.move(str(path), str(target))
+        _shared_folder.move(path, target)
         return target
     except OSError as e:
         log.warning("could not keep the archive %s: %s", path.name, e)

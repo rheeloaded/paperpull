@@ -679,13 +679,30 @@ def test_a_relative_path_through_a_link_out_of_the_folder_is_cleared(tmp_path):
     assert migrate._rewrite_path("Statements/linked/x.pdf", [], install, install) == ""
 
 
+def _walked(start: list, rel: str) -> list:
+    """The folders a relative path names from `start`, a list of folder
+    names from the root, walked one part at a time, as a tree with no links
+    in it is walked. A rule of its own, so it checks the import's answer
+    rather than repeating how the import works it out."""
+    at = list(start)
+    for part in rel.replace("\\", "/").split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if at:
+                at.pop()
+        else:
+            at.append(part)
+    return at
+
+
 def test_a_relative_path_is_kept_exactly_when_it_leads_into_the_persons_folder(tmp_path):
     """A seeded run of relative spellings, "..", ".", the folder's own
-    names, the sibling's name and both separators, against what the file
-    system says of each once it is followed from the install."""
-    import os
+    names, the sibling's name and both separators. A path is kept exactly
+    when, walked from the install, it ends below the person's own folder."""
     import random
     install, spouse, _ = _places(tmp_path)
+    root = list(install.parent.parts)
     rng = random.Random(20261114)
     parts = ["..", ".", "Statements", "Manual Review", "Bank Statements",
              "Bank Statements - spouse", "outside", "a.pdf"]
@@ -693,10 +710,10 @@ def test_a_relative_path_is_kept_exactly_when_it_leads_into_the_persons_folder(t
         rel = rng.choice(["/", "\\"]).join(rng.choice(parts) for _ in range(rng.randint(1, 6)))
         for own in (install, spouse):
             got = migrate._rewrite_path(rel, [], own, install)
-            target = os.path.realpath(os.path.join(str(install), rel.replace("\\", os.sep).replace("/", os.sep)))
-            root = os.path.realpath(str(own))
-            inside = target != root and os.path.commonpath(
-                [os.path.normcase(target), os.path.normcase(root)]) == os.path.normcase(root)
+            ends = _walked(root + [install.name], rel)
+            mine = root + [own.name]
+            inside = len(ends) > len(mine) and [p.lower() for p in ends[:len(mine)]] == \
+                [p.lower() for p in mine]
             assert got == (rel if inside else ""), (rel, own.name)
 
 

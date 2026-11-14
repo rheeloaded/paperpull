@@ -20,7 +20,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 FILES = ["gui/app.py", "gui/server_mode.py", "tools/export_purchases.py",
          "tools/export_transactions.py", "tools/add_account.py", "tools/migrate.py",
-         "server/plugins/paperless/paperless.py"]
+         "tools/status.py", "server/plugins/paperless/paperless.py"]
 CALLS = {"read_text", "read_bytes", "write_text", "write_bytes", "copy", "copy2", "copyfile",
          "copystat", "copytree", "save", "load"}
 HELPERS = ("server_mode.read_text", "server_mode.read_plain", "shared_folder.")
@@ -53,6 +53,8 @@ REVIEWED = {
     "tools/migrate.py:export:out.write_bytes": "the archive, in a folder the caller chose",
     "tools/migrate.py:write_history:kept.write_bytes": "the desktop branch, the server passes write",
     "tools/migrate.py:write_history:tmp.write_text": "the desktop branch, the server passes write",
+    "tools/status.py:write_html:out.write_text": "the command line's --html report, at a path "
+                                                 "the person names, never called by the panel",
 }
 
 

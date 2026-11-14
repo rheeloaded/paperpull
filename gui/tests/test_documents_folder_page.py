@@ -1151,7 +1151,8 @@ def test_every_writer_of_a_config_holds_the_one_lock(apps, tmp_path, monkeypatch
     app_module._set_owner(cfg, "Dana Example")
     assert app_module.ensure_settings(target, "t") == ["new"]
     migrate = SimpleNamespace(settings_to_apply=lambda install, cfg, settings,
-                              check_pattern=None: {"browser": "bundled"})
+                              check_pattern=None, **_: {"browser": "bundled"},
+                              url_settings_of=lambda source: {})
     app_module._apply_settings(migrate, cfg, target, {"browser": "bundled"})
     assert app_module._write_config(cfg, "documents_dir", str(tmp_path / "W"), "t", why="documents")
     now = config(target)

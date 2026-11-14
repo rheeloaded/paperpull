@@ -857,7 +857,7 @@ def _trim(reader, total: int, path: str) -> dict:
     # anything already there, where a fixed name was one someone on
     # PaperPull Server's share could leave a link at, and the PDF was
     # written through it (a private report of 2026-11-10).
-    beside = "%s%s.%s" % (path, TRIMMING, os.urandom(6).hex())
+    beside = "%s%s.%s" % (path, TRIMMING, os.urandom(4).hex())
     fd = os.open(beside, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
                  | getattr(os, "O_BINARY", 0), 0o666)
     # One cut off is left for trim_blank_tail to take away, as a worker

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import errno
 import os
+import shutil
 import stat
 from pathlib import Path
 
@@ -194,8 +195,11 @@ def read_plain(path, limit: int = READ_LIMIT) -> bytes:
     before = os.lstat(path) if server else os.stat(path)
     if not stat.S_ISREG(before.st_mode) or (server and _is_link(path, before)):
         raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
-    flags = (os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
-             | (getattr(os, "O_NOFOLLOW", 0) if server else 0))
+    # O_NONBLOCK on the server alone, since a named pipe is what someone on the share
+    # can leave there, and the desktop's files can be cloud placeholders a
+    # non-blocking open has not been tried on.
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+             | ((getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)) if server else 0))
     fd = os.open(path, flags)
     try:
         st = os.fstat(fd)
@@ -234,7 +238,9 @@ def write_whole(path, data) -> None:
     path = Path(path)
     if on_server():
         hold(path.parent)
-    tmp = path.with_name(".%s.%s.part" % (path.name, os.urandom(6).hex()))
+    # Eight characters nobody can guess, kept short, since the name is
+    # longer than the file's own and Windows refuses a path past 259.
+    tmp = path.with_name(".%s.%s.part" % (path.name, os.urandom(4).hex()))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
                  | getattr(os, "O_BINARY", 0), 0o666)
     try:
@@ -247,6 +253,51 @@ def write_whole(path, data) -> None:
         except OSError:
             pass
         raise
+
+
+def move(src, dst) -> None:
+    """shutil.move(src, dst) for a file. On the server a link left at dst
+    is replaced, never followed, where shutil.move moved the file into the
+    folder a link there led to, or copied it through one to wherever it led
+    when the two were on different drives (a private report of 2026-11-10).
+    Across drives the file is read as a plain file of its own and written
+    whole (write_whole). LeadsOut when dst's folder leads out of the data
+    folder, OSError when it cannot be moved."""
+    if not on_server():
+        shutil.move(str(src), str(dst))
+        return
+    dst = Path(dst)
+    hold(dst.parent)
+    try:
+        os.replace(src, dst)
+        return
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            raise
+    write_whole(dst, read_plain(src))
+    os.remove(src)
+
+
+def save_download(download, path) -> None:
+    """A Playwright download saved at path, whole. Playwright writes the
+    file it is given with a plain open, which follows a link left at its
+    name, so it is given a new name nobody can guess, short and beside path,
+    and the file is moved into path's place after, which replaces a link
+    there rather than writing through it. The same on both editions, where
+    a fixed name, x.saving, was one someone on the server's share could
+    leave a link at (a private report of 2026-11-10)."""
+    path = Path(path)
+    if on_server():
+        hold(path.parent)
+    side = path.with_name(".%s.saving" % os.urandom(4).hex())
+    try:
+        download.save_as(str(side))
+        os.replace(side, path)
+    finally:
+        try:
+            os.remove(side)
+        except OSError:
+            pass
 
 
 def write_bytes(path, data: bytes) -> None:

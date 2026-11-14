@@ -1330,8 +1330,8 @@ def signin_address_ok(url) -> bool:
     Chromium reads anything there that begins with - or / as a switch of
     its own. An account's settings can hold an address (UKG's base_url),
     and a history file from another computer can carry one into them, so a
-    value like --no-sandbox was a switch the browser obeyed (a private
-    report of 2026-11-10). A javascript:, file: or chrome: address opens
+    value naming the switch that turns the browser's sandbox off was obeyed
+    (a private report of 2026-11-10). A javascript:, file: or chrome: address opens
     something other than a sign-in page, so none of those is taken either.
     Every address the apps open is https (the census in
     core/tests/test_every_sign_in_address_is_a_web_address.py)."""
@@ -1541,6 +1541,10 @@ def open_signin_browser(profile_dir, port: str, url: str,
     first, since a sign-in there joins whichever browser holds the port,
     the other person's included (ports.say_at_sign_in).
     """
+    # Space around an address typed into a config is taken off, as a
+    # browser would, never anything else.
+    if isinstance(url, str):
+        url = url.strip()
     if not signin_address_ok(url):
         print(NOT_AN_ADDRESS)
         return None

@@ -20,6 +20,7 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import pdf_reader
 from paperpull_core import failure
 from paperpull_core import listing
@@ -1091,8 +1092,7 @@ class App:
                     and len(c["text"]) < 40]
             except Exception:
                 pass
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"

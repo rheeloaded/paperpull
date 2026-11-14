@@ -20,6 +20,7 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
@@ -35,7 +36,6 @@ import argparse
 import logging
 import random
 import re
-import shutil
 import sys
 import time
 from datetime import datetime
@@ -861,7 +861,7 @@ class App:
                               "since it was neither a PDF nor a spreadsheet, CSV, text or ZIP file.")
                         continue
                     extra_path = unique_path(out_path.parent, stem + ".pdf", max_len)
-                    shutil.move(str(held), str(extra_path))
+                    shared_folder.move(held, extra_path)
                 if receipt_pdf.is_zip(extra_path) and (not as_named or ext not in (".zip", ".xlsx")):
                     opened = receipt_pdf.open_zip(extra_path)
                     extra_path = opened.pdf or opened.kept or extra_path
@@ -1172,8 +1172,7 @@ class App:
                         controls.append({"role": role, "text": t,
                                          "safe": site.is_safe_control(t)})
             info["controls"] = controls
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"

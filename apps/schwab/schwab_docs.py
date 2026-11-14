@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import schwab_site as site
@@ -969,8 +970,7 @@ class App:
             }
             info["controls"] = [{"text": c[:60], "safe": site.is_safe_control(c)}
                                 for c in (ui.get("buttons") or [])[:60]]
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"

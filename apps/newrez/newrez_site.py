@@ -41,7 +41,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import sys
 import time
 from dataclasses import dataclass, field
@@ -2103,7 +2102,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         try:
             if out_path.exists():
                 out_path.unlink()
-            shutil.move(os.path.join(dl_dir, new[0]), str(out_path))
+            shared_folder.move(os.path.join(dl_dir, new[0]), out_path)
         except OSError as e:
             log.info("could not move the downloaded PDF: %s", e)
             return ""

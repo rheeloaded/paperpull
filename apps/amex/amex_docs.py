@@ -21,6 +21,7 @@ service.
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import pressing
@@ -1179,8 +1180,7 @@ class App:
                         controls.append({"role": role, "text": t,
                                          "safe": site.is_safe_control(t)})
             info["controls"] = controls
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
         except pressing.Stop as stop:
             # A press it would not make, or one that brought nothing, ends
             # the look there, and the file still says what was seen and why

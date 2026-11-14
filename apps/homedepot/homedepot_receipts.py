@@ -19,6 +19,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
@@ -1228,7 +1229,7 @@ class App:
                     site.receipt_text(page))][:20]
                 info["number_matches"] = site.details_number(page) == p.order_number
                 shot = self.paths.diagnostics / f"diagnose-{ptype}.png"
-                page.screenshot(path=str(shot), full_page=True)
+                shared_folder.write_bytes(str(shot), page.screenshot(full_page=True))
                 info["screenshot"] = str(shot)
             except Exception as e:
                 info["error"] = str(e)

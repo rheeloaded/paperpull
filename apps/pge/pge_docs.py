@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import pge_site as site
@@ -835,7 +836,7 @@ class App:
         try:
             self.paths.diagnostics.mkdir(parents=True, exist_ok=True)
             shot_path = self.paths.diagnostics / "diagnose-documents.png"
-            page.screenshot(path=str(shot_path), full_page=True)
+            shared_folder.write_bytes(str(shot_path), page.screenshot(full_page=True))
             info["screenshot"] = str(shot_path)
         except Exception as e:
             info["screenshot_error"] = str(e)

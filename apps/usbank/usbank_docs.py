@@ -1,6 +1,7 @@
 """U.S. Bank credit-card statements."""
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import renaming
@@ -1084,8 +1085,7 @@ class App:
                 info["period_options"] = site.period_options(page) or years
             except Exception as e:
                 info["selectors_error"] = str(e)
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
 
 
             try:
