@@ -4416,7 +4416,6 @@ def _removal_summary(folder: Path) -> dict:
     return {"pdfs": pdfs, "history": history, "profile": profile}
 
 
-@app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 def _free_removed_name(dest_dir: Path, name: str, stamp: str, taken) -> Path:
     """Where Remove moves an install, Removed/<name>, or with the time when
     that is taken, and a number after it when that is taken too. taken is
@@ -4434,6 +4433,7 @@ def _free_removed_name(dest_dir: Path, name: str, stamp: str, taken) -> Path:
     return dest
 
 
+@app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
 async def api_remove(request: Request):
     """Move an install out of the list. The name must be one the panel
     itself discovered, so nothing outside the root can ever be named."""

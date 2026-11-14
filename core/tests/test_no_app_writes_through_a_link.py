@@ -35,6 +35,8 @@ CORE_REVIEWED = {
     "shared_folder.py:copy_whole:os.open(write)": "a new file of its own, O_EXCL and O_NOFOLLOW",
     "pdf_reader.py:_trim:os.open(write)": "a new file of its own, O_EXCL and O_NOFOLLOW",
     "pdf_reader.py:_serve:os.open(write)": "os.devnull",
+    "shared_folder.py:_open_plain:os.open(?)": "the link-safe open itself, O_NOFOLLOW and fstat",
+    "shared_folder.py:read_plain:os.open(?)": "the link-safe reader itself, O_RDONLY",
     "shared_folder.py:copy_whole:shutil.copyfileobj": "into its own new file, O_EXCL and O_NOFOLLOW",
     "shared_folder.py:open_to_read:open('?')": "the desktop branch, read or rb only",
     "browser.py:_remember_declined:marker.write_text": "Playwright's browsers folder, never the share",
@@ -84,8 +86,17 @@ def _mode(call):
 WRITE_FLAGS = ("O_WRONLY", "O_RDWR", "O_CREAT", "O_APPEND", "O_TRUNC")
 
 
-def _writes_by_flags(call) -> bool:
-    return bool(call.args[1:]) and any(f in ast.unparse(call.args[1]) for f in WRITE_FLAGS)
+def _writes_by_flags(call) -> str:
+    """"write" for an os.open whose flags ask to write, "?" for one whose
+    flags are not written out where it is called, and "" for a read."""
+    flags = call.args[1] if call.args[1:] else next(
+        (kw.value for kw in call.keywords if kw.arg == "flags"), None)
+    if flags is None:
+        return "?"
+    text = ast.unparse(flags)
+    if any(f in text for f in WRITE_FLAGS):
+        return "write"
+    return "" if "O_RDONLY" in text else "?"
 
 
 def _plain_writes(path: Path) -> list:
@@ -117,7 +128,7 @@ def _plain_writes(path: Path) -> list:
         elif name.startswith("shutil.copy") or name in ("shutil.move", "os.link", "os.symlink"):
             what = name
         elif name == "os.open" and _writes_by_flags(n):
-            what = "os.open(write)"
+            what = "os.open(%s)" % _writes_by_flags(n)
         elif name in ("open", "io.open") and any(c in _mode(n) for c in "wax+?"):
             what = "%s(%r)" % (name, _mode(n))
         elif (isinstance(n.func, ast.Attribute) and n.func.attr == "open" and name != "os.open"
@@ -143,8 +154,9 @@ def test_nothing_reaches_shutil_os_or_open_by_another_name():
     for p in list(_sources(REPO / "apps")) + sorted((REPO / "core" / "paperpull_core").glob("*.py")):
         for n in ast.walk(ast.parse(p.read_text(encoding="utf-8-sig"))):
             if isinstance(n, ast.ImportFrom) and n.module in ("shutil", "io", "os") and \
-                    any(a.name in ("move", "copy", "copy2", "copyfile", "copytree", "open",
-                                   "link", "symlink", "replace", "rename") for a in n.names):
+                    any(a.name in ("move", "copy", "copy2", "copyfile", "copyfileobj",
+                                   "copytree", "open", "link", "symlink", "replace", "rename")
+                        for a in n.names):
                 found.append("%s:%d from %s import" % (p.name, n.lineno, n.module))
             if isinstance(n, ast.Import) and any(a.name in ("shutil", "os") and a.asname
                                                  for a in n.names):

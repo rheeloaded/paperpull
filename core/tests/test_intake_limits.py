@@ -326,17 +326,37 @@ def test_a_download_the_browser_measured_too_large_is_never_copied(tmp_path, mon
     assert out.read_bytes() == b"the document already here"
 
 
-def test_a_download_whose_file_is_not_known_is_measured_beside_and_never_put_in_place(
+def test_a_download_whose_file_is_not_known_is_measured_apart_and_never_put_in_place(
         tmp_path, monkeypatch):
+    """Where Playwright cannot say where its copy is, it saves one in a
+    private temporary folder outside the document's, measured there, and
+    that folder goes whatever comes of it, refused, saved or failed."""
     monkeypatch.setattr(intake, "DOCUMENT_BYTES", 2000)
+    made = []
+    real = intake.tempfile.mkdtemp
+
+    def noted(*a, **k):
+        made.append(Path(real(*a, **k)))
+        return str(made[-1])
+    monkeypatch.setattr(intake.tempfile, "mkdtemp", noted)
     out = tmp_path / "Statement.pdf"
     out.write_bytes(b"the document already here")
     with pytest.raises(intake.TooLarge):
         intake.save_download_as(Download(None, b"%PDF-" + b"\0" * 5000), out)
     assert out.read_bytes() == b"the document already here"
-    assert left_in(tmp_path) == ["Statement.pdf"], "the copy made beside it was left"
+    assert left_in(tmp_path) == ["Statement.pdf"], "something was left beside it"
+
+    class Failing(Download):
+        def save_as(self, target):
+            Path(target).write_bytes(b"%PDF-half")
+            raise OSError("the browser closed")
+    with pytest.raises(OSError):
+        intake.save_download_as(Failing(None), out)
     intake.save_download_as(Download(None, b"%PDF-1.4 a small one"), out)
     assert out.read_bytes() == b"%PDF-1.4 a small one"
+    assert len(made) == 3 and not any(folder.exists() for folder in made)
+    assert all(tmp_path not in folder.parents for folder in made)
+    assert left_in(tmp_path) == ["Statement.pdf"]
 
 
 def test_a_file_too_large_in_the_folder_is_left_there_by_take_download(tmp_path, monkeypatch):
