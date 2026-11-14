@@ -1637,6 +1637,8 @@ def run_for(app, apply_changes: bool = False, say=print,
     finally:
         tidy(result, folders)
     if result.renamed and documents:
+        # Nothing left in a folder of a kind the documents came out of.
+        getattr(app.paths, "drop_empty_kind_folders", lambda: None)()
         # Written down, so they are found there after the setting changes.
         try:
             app.paths.remember_documents()

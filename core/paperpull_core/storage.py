@@ -46,6 +46,10 @@ _KEPT_WITH_RECORDS = {folder.attr for folder in INFRASTRUCTURE_FOLDERS}
 # _folder_key of that folder (#102). Paths reads it, so every app gets it
 # from the Paths it builds from its config's output_dir.
 _DOCUMENTS = {}
+# The output folders whose account files documents straight into its
+# documents folder, with no folder of their kind (#201), by _folder_key, as
+# load_config read "kind_folders": false in each one's config.
+_FLAT = set()
 # Each documents folder an account's documents were moved to, a JSON list
 # of full paths in its output folder (Paths.documents_roots).
 DOCUMENTS_FOLDERS = "documents-folders.json"
@@ -67,6 +71,13 @@ def documents_dir_for(output_dir) -> str:
     return _DOCUMENTS.get(_folder_key(output_dir), "")
 
 
+def kind_folders_for(output_dir) -> bool:
+    """Whether documents of this output folder's account are filed in a
+    folder of their kind inside its documents folder, as they always were,
+    which is so unless its config said "kind_folders": false (#201)."""
+    return _folder_key(output_dir) not in _FLAT
+
+
 def bind(spec) -> None:
     """Attach this process's AppSpec. Called once by the app's storage shim."""
     global _SPEC, _CONFIG_READ, _CONFIG_GIVEN
@@ -74,6 +85,7 @@ def bind(spec) -> None:
     # A documents folder belongs to the config load_config reads next, and
     # so does the file a sign-in asks about.
     _DOCUMENTS.clear()
+    _FLAT.clear()
     _CONFIG_READ = _CONFIG_GIVEN = None
     from . import receipt_pdf
     receipt_pdf.bind(spec)
@@ -320,6 +332,9 @@ def load_config(path: Optional[Path] = None) -> dict:
     set_filename_patterns(cfg)
     # Where documents go (#102), read here for the same reason.
     set_documents_dir(cfg, path)
+    # Whether they go into a folder of their kind there (#201), which
+    # depends on both of the above.
+    set_kind_folders(cfg, path)
     global _CONFIG_READ, _CONFIG_GIVEN
     _CONFIG_READ, _CONFIG_GIVEN = path, given
     return cfg
@@ -438,6 +453,83 @@ def set_documents_dir(cfg: dict, path) -> str:
     cfg["documents_dir"] = docs
     _DOCUMENTS[_folder_key(cfg["output_dir"])] = docs
     return docs
+
+
+def _kinds_filed() -> List[str]:
+    """The folders of a kind this app files documents in, by name: every
+    folder it declares but Manual Review, Logs, Diagnostics and Backups."""
+    return [f.name for f in spec().folders if f.attr not in _KEPT_WITH_RECORDS]
+
+
+def pattern_names_kind(pattern: str) -> bool:
+    """Whether names built by `pattern` say which kind a document is, so
+    documents of several kinds can share one folder (#201).
+
+    Any field that names kind counts, in an optional section or as one of
+    a field's alternatives too, as {number|kind} is, so the usual names,
+    which carry it in [ {kind}], are taken as they are."""
+    from . import naming
+
+    def names_kind(nodes) -> bool:
+        for node in nodes:
+            if isinstance(node, naming._Field) and "kind" in node.names:
+                return True
+            if isinstance(node, naming._Optional) and names_kind(node.parts):
+                return True
+        return False
+
+    return names_kind(naming.parse(pattern))
+
+
+def set_kind_folders(cfg: dict, path) -> bool:
+    """Take "kind_folders" from a config, for the Paths built from its
+    output_dir, and return it (#201).
+
+    true, or no setting, files each document in the folder of its kind in
+    the documents folder, as always. false files it straight into the
+    documents folder. That is refused, and the run stops before anything is
+    saved or moved, when the setting is not true or false, when there is no
+    documents folder of the account's own, since documents would then sit
+    loose beside the run's records, and when the app files more than one
+    kind and its names do not say which, since two kinds sharing a folder
+    could want one file name. A warning would scroll past."""
+    raw = cfg.get("kind_folders", True)
+    key = _folder_key(cfg["output_dir"])
+    _FLAT.discard(key)
+    if raw is True:
+        return True
+    name = Path(path).name if path else "config.json"
+    if raw is not False:
+        raise SystemExit(
+            "kind_folders in %s is %s, and it has to be true or false, so this run "
+            "stopped before saving or moving anything." % (name, json.dumps(raw)))
+    docs = cfg.get("documents_dir") or ""
+    if not docs or _folder_key(docs) == key:
+        raise SystemExit(
+            "kind_folders is false in %s, which files documents straight into the "
+            "documents folder, but documents_dir names no folder of its own, so they "
+            "would sit loose beside this run's records. This run stopped before saving "
+            "or moving anything. Set documents_dir to a full path, or take kind_folders "
+            "out, and run again." % name)
+    kinds = _kinds_filed()
+    if len(kinds) > 1:
+        from . import naming
+        pattern = _FILENAME_PATTERN or (naming.DEFAULT_RECEIPTS if spec().kind == RECEIPT
+                                        else naming.DEFAULT_STATEMENTS)
+        if not pattern_names_kind(pattern):
+            raise SystemExit(
+                "kind_folders is false in %s, but %s files %s, which would then share one "
+                "folder with nothing in a file's name to say which kind it is, and two of "
+                "them could want the same name. This run stopped before saving or moving "
+                "anything. Put {kind} in the file naming pattern, as a folder or in the "
+                "name, or take kind_folders out, and run again."
+                % (name, spec().provider, _listed_kinds(kinds)))
+    _FLAT.add(key)
+    return False
+
+
+def _listed_kinds(kinds: List[str]) -> str:
+    return ", ".join(kinds[:-1]) + " and " + kinds[-1] if len(kinds) > 1 else kinds[0]
 
 
 # -- PaperPull Server ----------------------------------------------------------
@@ -722,12 +814,20 @@ class Paths:
     path here is what it always was, documents_dir or not.
     """
 
-    def __init__(self, output_dir, app_spec=None, documents_dir=None):
+    def __init__(self, output_dir, app_spec=None, documents_dir=None, kind_folders=None):
         self._spec = app_spec or spec()
         self.root = Path(output_dir)
         if documents_dir is None:
             documents_dir = documents_dir_for(output_dir)
         self.documents = Path(documents_dir) if documents_dir else self.root
+        # Whether a document goes into the folder of its kind in the
+        # documents folder, or straight into it (#201). Always into the
+        # folder of its kind when the documents folder is the output
+        # folder, so no document sits loose beside the run's records.
+        if kind_folders is None:
+            kind_folders = kind_folders_for(output_dir)
+        self.kind_folders = bool(kind_folders) or (
+            _folder_key(self.documents) == _folder_key(self.root))
         # Each documents folder this account's documents were moved to.
         self.documents_folders_json = self.root / DOCUMENTS_FOLDERS
         for folder in self._spec.folders:
@@ -821,12 +921,21 @@ class Paths:
         held = [getattr(self, folder.attr) for folder in self._spec.folders
                 if folder.attr not in _RECORD_FOLDERS]
         seen = {_folder_key(f) for f in held}
-        for root in [self.documents] + self.documents_roots():
+        used = self.documents_roots()
+        for root in [self.documents] + used:
             for folder in self._routed():
                 path = Path(root) / folder.name
                 if _folder_key(path) not in seen:
                     seen.add(_folder_key(path))
                     held.append(path)
+        # Filed with no folder of its kind, a document is in the documents
+        # folder itself (#201), and so it may be in each documents folder
+        # it was moved to before, whatever kind_folders says now, so it is
+        # still found after the setting is taken out.
+        for root in ([] if self.kind_folders else [self.documents]) + used:
+            if _folder_key(root) not in seen:
+                seen.add(_folder_key(root))
+                held.append(Path(root))
         return held
 
     def _routed(self):
@@ -865,15 +974,35 @@ class Paths:
         folder and in each documents folder used before. With no documents
         folder set, it is each documents folder used before and the output
         folder, so a Move brings documents back. Empty when every document
-        is where it belongs."""
+        is where it belongs.
+
+        Without kind folders (#201) a document belongs in the documents
+        folder itself, so each folder of a kind in it moves there too."""
         here = self.documents
+        roots = [self.root] + self.documents_roots()
+        if not self.kind_folders:
+            roots.append(here)
         moves = {}
-        for root in [self.root] + self.documents_roots():
-            if _folder_key(root) == _folder_key(here):
-                continue
+        for root in roots:
             for folder in self._routed():
-                moves[Path(root) / folder.name] = here / folder.name
+                source = Path(root) / folder.name
+                target = here / folder.name if self.kind_folders else here
+                if _folder_key(source) != _folder_key(target):
+                    moves[source] = target
         return moves
+
+    def drop_empty_kind_folders(self) -> None:
+        """Take away each folder of a kind left empty in the documents
+        folder, once a Move without kind folders (#201) has brought its
+        documents out. Only an empty one goes, since rmdir refuses any
+        other, so no file is ever removed."""
+        if self.kind_folders:
+            return
+        for folder in self._routed():
+            try:
+                (self.documents / folder.name).rmdir()
+            except OSError:
+                pass
 
     def remember_documents(self) -> None:
         """Write down the documents folder in documents-folders.json, once

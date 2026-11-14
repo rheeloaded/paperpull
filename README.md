@@ -615,6 +615,11 @@ terminal uses it too, and from a terminal the move is a Rename run with
 folder has to be inside the data folder, see
 [SERVER.md](SERVER.md#paperless).
 
+Documents go into a folder of their kind, `Statements` or `Tax Documents`,
+inside the documents folder. For a provider with one kind, `"kind_folders":
+false` in its config.json files them straight into the documents folder
+instead, see [file naming](docs/file-naming.md#without-a-folder-for-each-kind).
+
 ## Moving to another computer
 
 The simplest move brings everything. Copy your PaperPull folder to the new
