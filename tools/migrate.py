@@ -961,7 +961,21 @@ def _stays_inside(rel: str) -> bool:
     return norm not in (".", "..") and not norm.startswith("../")
 
 
-def _rewrite_path(old: str, old_bases, new_base: Path) -> str:
+def _leads_inside(rel: str, home: Path, own: Path) -> bool:
+    """Whether a relative path a record holds, read from home as the app
+    reads it, names something inside own, the person's own folder, once
+    ".." and links are followed."""
+    try:
+        # Either separator, as the app on either system wrote it.
+        target = os.path.realpath(os.path.join(str(home), rel.replace("\\", os.sep).replace("/", os.sep)))
+        root = os.path.realpath(str(own))
+        target, root = os.path.normcase(target), os.path.normcase(root)
+        return target != root and os.path.commonpath([target, root]) == root
+    except (OSError, ValueError):
+        return False
+
+
+def _rewrite_path(old: str, old_bases, new_base: Path, home=None) -> str:
     """Point a recorded PDF path at this machine, or clear it.
 
     A path that cannot be rewritten is CLEARED rather than left alone. The
@@ -975,10 +989,16 @@ def _rewrite_path(old: str, old_bases, new_base: Path) -> str:
     # folder, others the full absolute one. A relative path is already portable
     # and is left exactly as it is. Only an absolute path names a machine. A
     # second person's paths begin with "..", since their folder sits beside
-    # the install a run starts in, so a relative path is never judged by
-    # whether it leaves a folder (a saved invoice with no path is taken
-    # again by Target).
+    # the install a run starts in, so a relative path is judged by where it
+    # leads from the folder the app runs in, home, never by whether it
+    # leaves that folder (a saved invoice with no path is taken again by
+    # Target). One that leads out of the person's own folder is cleared,
+    # since an app that moves the file a record names, AT&T's repair at
+    # start among them, then moved a file of this computer's that the file
+    # chose (a private report of 2026-11-10).
     if not _is_absolute(old):
+        if home is not None and not _leads_inside(old, Path(home), Path(new_base)):
+            return ""
         return old
     norm = old.replace("\\", "/")
     for base in old_bases or ():
@@ -1000,7 +1020,7 @@ def _under(path: str, old_bases) -> bool:
                          for x in old_bases or ()))
 
 
-def _moved(rec: dict, old_bases, new_base: Path) -> dict:
+def _moved(rec: dict, old_bases, new_base: Path, home=None) -> dict:
     """A record from another machine with its paths pointed at this one.
 
     Target keeps one file for each invoice of an order as well. An invoice
@@ -1010,14 +1030,14 @@ def _moved(rec: dict, old_bases, new_base: Path) -> dict:
     old folder that would lead out of it once moved is cleared, as a PDF
     path is."""
     rec = dict(rec)
-    rec["pdf_path"] = _rewrite_path(str(rec.get("pdf_path") or ""), old_bases, new_base)
+    rec["pdf_path"] = _rewrite_path(str(rec.get("pdf_path") or ""), old_bases, new_base, home)
     invoices = rec.get("invoices")
     if isinstance(invoices, list):
         out = []
         for inv in invoices:
             if isinstance(inv, dict) and isinstance(inv.get("file"), str) and inv["file"]:
                 old = inv["file"]
-                moved = _rewrite_path(old, old_bases, new_base)
+                moved = _rewrite_path(old, old_bases, new_base, home)
                 if not moved and _is_absolute(old) and not _under(old, old_bases):
                     moved = old
                 inv = dict(inv, file=moved)
@@ -1043,7 +1063,7 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
     for key, inc in incoming.items():
         cur = target.get(key)
         if cur is None:
-            rec = _moved(inc, old_bases, new_base)
+            rec = _moved(inc, old_bases, new_base, Path(home or new_base))
             rec["imported_at"] = datetime.now().isoformat(timespec="seconds")
             target[key] = rec
             added += 1
@@ -1070,7 +1090,7 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
         # lacks is filled in, with its paths pointed at this machine as a
         # record added is, and one it holds stays, since a run here wrote it
         # or emptied it on purpose.
-        here = _moved(inc, old_bases, new_base)
+        here = _moved(inc, old_bases, new_base, Path(home or new_base))
         lacking = {f: here[f] for f in _own_fields(inc, provider) if f in inc and f not in cur}
         # Where a run stopped on the old computer goes on here only for a
         # purchase this install has not finished either, and only when it

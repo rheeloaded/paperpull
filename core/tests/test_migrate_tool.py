@@ -639,6 +639,82 @@ def test_every_other_providers_settings_come_across_as_before(tmp_path):
     assert got == {"default_start_date": "2020-01-01", "owner": "Pat"} and left == []
 
 
+def _places(tmp_path):
+    root = tmp_path / "data"
+    install, spouse, outside = root / "Bank Statements", root / "Bank Statements - spouse", root / "outside"
+    for d in (install / "Statements", spouse / "Statements", outside):
+        d.mkdir(parents=True)
+    return install, spouse, outside
+
+
+def test_a_relative_path_that_leads_out_of_the_persons_folder_is_cleared(tmp_path):
+    """A relative path is kept as the app wrote it, read from the folder
+    the app runs in, as long as it leads into the person's own folder. One
+    that climbed out of it named any file of this computer, and AT&T's
+    repair at start moved that file into Manual Review (a private report of
+    2026-11-10). A second person's paths, which begin with "..", still lead
+    into their own folder beside the install."""
+    install, spouse, _ = _places(tmp_path)
+    rw = migrate._rewrite_path
+    for kept in ("Statements/a.pdf", "Statements\\a.pdf", "Manual Review/a.pdf",
+                 "./Statements/../Statements/a.pdf"):
+        assert rw(kept, [], install, install) == kept, kept
+    for out in ("../outside/x.pdf", "..\\outside\\x.pdf", "Statements/../../outside/x.pdf",
+                "../Bank Statements - spouse/Statements/a.pdf", ".", "Statements/../..",
+                "../../../../etc/passwd"):
+        assert rw(out, [], install, install) == "", out
+    theirs = "..\\Bank Statements - spouse\\Statements\\a.pdf"
+    assert rw(theirs, [], spouse, install) == theirs
+    assert rw("../Bank Statements - spouse/../outside/x.pdf", [], spouse, install) == ""
+    # A caller that does not say where the app runs gets what it always did.
+    assert rw("../outside/x.pdf", [], install) == "../outside/x.pdf"
+
+
+def test_a_relative_path_through_a_link_out_of_the_folder_is_cleared(tmp_path):
+    install, _, outside = _places(tmp_path)
+    try:
+        (install / "Statements" / "linked").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("this system does not let a test make a symbolic link")
+    assert migrate._rewrite_path("Statements/linked/x.pdf", [], install, install) == ""
+
+
+def test_a_relative_path_is_kept_exactly_when_it_leads_into_the_persons_folder(tmp_path):
+    """A seeded run of relative spellings, "..", ".", the folder's own
+    names, the sibling's name and both separators, against what the file
+    system says of each once it is followed from the install."""
+    import os
+    import random
+    install, spouse, _ = _places(tmp_path)
+    rng = random.Random(20261114)
+    parts = ["..", ".", "Statements", "Manual Review", "Bank Statements",
+             "Bank Statements - spouse", "outside", "a.pdf"]
+    for _ in range(3000):
+        rel = rng.choice(["/", "\\"]).join(rng.choice(parts) for _ in range(rng.randint(1, 6)))
+        for own in (install, spouse):
+            got = migrate._rewrite_path(rel, [], own, install)
+            target = os.path.realpath(os.path.join(str(install), rel.replace("\\", os.sep).replace("/", os.sep)))
+            root = os.path.realpath(str(own))
+            inside = target != root and os.path.commonpath(
+                [os.path.normcase(target), os.path.normcase(root)]) == os.path.normcase(root)
+            assert got == (rel if inside else ""), (rel, own.name)
+
+
+def test_an_import_clears_a_path_that_leads_out_and_keeps_the_rest(tmp_path):
+    old = tmp_path / "old"
+    _install(old, "Bank Statements", "Bank",
+             {"id:1": _rec(path="Statements\\2026-01-31 Statement.pdf"),
+              "id:2": _rec(path="..\\..\\outside\\decoy.pdf")})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+    new = tmp_path / "new"
+    _install(new, "Bank Statements", "Bank", {})
+    migrate.do_import(archive, new, assume_yes=True)
+    got = json.loads((new / "Bank Statements" / "progress.json").read_text(encoding="utf-8"))
+    assert got["id:1"]["pdf_path"] == "Statements\\2026-01-31 Statement.pdf"
+    assert got["id:2"]["pdf_path"] == "" and got["id:2"]["downloaded_ok"] is True
+
+
 def test_a_first_persons_folder_is_never_taken_for_the_start_of_a_seconds():
     """The first version compared the start of a path with the folder and no
     separator, so a path in "Bank Statements - spouse" was taken for one in

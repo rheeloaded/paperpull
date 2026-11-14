@@ -93,7 +93,8 @@ def test_the_app_clears_them_when_it_starts_and_moves_a_copy_left_on_disk(tmp_pa
         if rec["date"] == "2025-06-22":
             rec["pdf_path"] = str(real)
     app = SimpleNamespace(progress=progress, discovery=discovery,
-                          paths=SimpleNamespace(manual_review=review),
+                          paths=SimpleNamespace(manual_review=review,
+                                                filing_folders=lambda: [tmp_path, review]),
                           config={"max_path_length": 240})
     att_docs.App._clear_wrong_year_copies(app)
     out = capsys.readouterr().out
@@ -104,6 +105,63 @@ def test_the_app_clears_them_when_it_starts_and_moves_a_copy_left_on_disk(tmp_pa
     saved = JsonStore(tmp_path / "progress.json", tmp_path / "backups")
     saved.load()
     assert sum(not r["downloaded_ok"] for r in saved.data.values()) == 1
+
+
+def _repair_naming(tmp_path, monkeypatch, named):
+    """The repair, run in the account's folder, with the copy's record
+    naming `named` and the account filing in that folder alone."""
+    folder = tmp_path / "acct"
+    review = folder / "Manual Review"
+    review.mkdir(parents=True)
+    monkeypatch.chdir(folder)
+    progress = JsonStore(folder / "progress.json", folder / "backups")
+    discovery = JsonStore(folder / "discovery.json", folder / "backups")
+    progress.data, discovery.data = _store(), {}
+    for rec in progress.data.values():
+        if rec["date"] == "2025-07-22" and not rec["account"]:
+            rec["pdf_path"] = named
+    app = SimpleNamespace(progress=progress, discovery=discovery,
+                          paths=SimpleNamespace(manual_review=review,
+                                                filing_folders=lambda: [folder, review]),
+                          config={"max_path_length": 240})
+    att_docs.App._clear_wrong_year_copies(app)
+    return folder, review, progress
+
+
+@pytest.mark.parametrize("how", ["absolute", "relative", "backslashes"])
+def test_a_record_naming_a_file_outside_the_accounts_folders_never_moves_it(
+        tmp_path, monkeypatch, capsys, how):
+    """A record names its file, and a history imported from somewhere else
+    can name any file on this computer of the copy's size. The repair moved
+    that file into Manual Review whenever the app started (a private report
+    of 2026-11-10). The record is still cleared, so the bill is fetched
+    again."""
+    decoy = tmp_path / "outside" / "decoy.pdf"
+    decoy.parent.mkdir()
+    decoy.write_bytes(b"x" * 240546)
+    named = {"absolute": str(decoy), "relative": "../outside/decoy.pdf",
+             "backslashes": "Statements\\..\\..\\outside\\decoy.pdf"}[how]
+    if how == "backslashes" and sys.platform != "win32":
+        named = named.replace("\\", "/")
+    folder, review, progress = _repair_naming(tmp_path, monkeypatch, named)
+    assert "1 bill(s) saved under the wrong year" in capsys.readouterr().out
+    assert decoy.read_bytes() == b"x" * 240546 and list(review.iterdir()) == []
+    assert sum(not r["downloaded_ok"] for r in progress.data.values()) == 1
+
+
+def test_a_link_in_the_accounts_folder_is_not_followed_out_of_it(tmp_path, monkeypatch, capsys):
+    decoy = tmp_path / "outside" / "decoy.pdf"
+    decoy.parent.mkdir()
+    decoy.write_bytes(b"x" * 240546)
+    (tmp_path / "acct").mkdir()
+    link = tmp_path / "acct" / "2025-07-22 AT&T Monthly Statement.pdf"
+    try:
+        link.symlink_to(decoy)
+    except OSError:
+        pytest.skip("this system does not let a test make a symbolic link")
+    folder, review, _ = _repair_naming(tmp_path, monkeypatch, str(link))
+    assert decoy.read_bytes() == b"x" * 240546 and link.is_symlink()
+    assert list(review.iterdir()) == []
 
 
 def test_the_repair_runs_when_the_app_starts():
@@ -154,3 +212,37 @@ def test_a_copy_moved_to_another_computer_is_cleared_there(tmp_path, capsys, min
             for rec in _store().values()}
     assert done.pop("2025-07-22") is False, "the copy would stay done for good"
     assert all(done.values()), done
+
+
+def test_a_moved_history_naming_a_file_outside_moves_nothing_when_the_app_starts(
+        tmp_path, capsys):
+    """The way in the private report of 2026-11-10. A history file whose
+    copy names a file beside the new computer's folders, by a path relative
+    to the folder the app runs in. The import kept it as the app wrote it,
+    and AT&T moved that file into Manual Review as it started. The import
+    clears a path that leads out of the person's folder now, and the repair
+    moves only a file the account holds."""
+    sys.path.insert(0, str(APP.parents[1] / "tools"))
+    import migrate
+    old, new = tmp_path / "old" / "AT&T Statements", tmp_path / "new" / "AT&T Statements"
+    old.mkdir(parents=True)
+    (old / "storage.py").write_bytes((APP / "storage.py").read_bytes())
+    records = _store()
+    for rec in records.values():
+        if rec["date"] == "2025-07-22" and not rec["account"]:
+            rec["pdf_path"] = "../../outside/decoy.pdf"
+    (old / "progress.json").write_text(json.dumps(records), encoding="utf-8")
+    decoy = tmp_path / "outside" / "decoy.pdf"
+    decoy.parent.mkdir()
+    decoy.write_bytes(b"x" * 240546)
+    app_in(new)
+    archive = tmp_path / "history.ppz"
+    assert migrate.export(old.parent, archive) == 0
+    assert migrate.do_import(archive, new.parent, assume_yes=True) == 0
+    kept = json.loads((new / "progress.json").read_text(encoding="utf-8"))
+    assert all("outside" not in (r.get("pdf_path") or "") for r in kept.values())
+
+    app_in(new)
+    assert "1 bill(s) saved under the wrong year" in capsys.readouterr().out
+    assert decoy.read_bytes() == b"x" * 240546
+    assert not list((new / "Manual Review").glob("decoy*"))

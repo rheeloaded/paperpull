@@ -731,11 +731,14 @@ class App:
         manual review and no longer counted as downloaded, so neither copy
         stands as either bill's (review of the Bill details change)."""
         rec = dict(self.progress.get(key) or {})
-        path = Path(rec.get("pdf_path") or "")
+        # Only a document this account holds, in a folder it files in once
+        # links and ".." are followed, never a file a record merely names (a
+        # private report of 2026-11-10).
+        path = renaming.held_document(rec.get("pdf_path") or "", self.paths.filing_folders())
         # Asked of each in full, since a record a run started in another
         # folder saved from 0.62.0 to 0.65.0 names its file in full (#166).
         set_aside = self.paths.manual_review.resolve()
-        if rec.get("pdf_path") and path.exists() and path.resolve().parent != set_aside:
+        if path is not None and path.resolve().parent != set_aside:
             moved = unique_path(self.paths.manual_review, path.name, self.config["max_path_length"])
             try:
                 path.replace(moved)

@@ -273,11 +273,17 @@ class App:
         self.discovery.save(backup=True)
         print(f"Found {len(cleared)} bill(s) saved under the wrong year by 0.34.0. "
               "They will be downloaded again.")
+        # Only a document this account holds is moved, one in a folder it
+        # files in once links and ".." are followed. A record names its file,
+        # and a history imported from somewhere else could name any file on
+        # this computer, which the repair then moved into Manual Review (a
+        # private report of 2026-11-10).
+        folders = self.paths.filing_folders()
         for key, date, later, old_path, old_size in cleared:
             note = ""
-            p = Path(old_path) if old_path else None
+            p = renaming.held_document(old_path, folders) if old_path else None
             try:
-                if p and p.is_file() and str(p.stat().st_size) == str(old_size):
+                if p and str(p.stat().st_size) == str(old_size):
                     dest = unique_path(self.paths.manual_review, p.name,
                                        self.config["max_path_length"])
                     p.replace(dest)

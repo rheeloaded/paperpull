@@ -1084,8 +1084,12 @@ class App:
             if not (isinstance(rec, dict) and rec.get("held") is True
                     and rec.get("plan") in self._plans_by_digest):
                 continue
-            at = Path(str(rec.get("pdf_path") or ""))
-            if not at.is_file():
+            # Only a document this account holds, in a folder it files in once
+            # links and ".." are followed, is filed or set aside, never a file
+            # a record merely names (a private report of 2026-11-10).
+            at = renaming.held_document(str(rec.get("pdf_path") or ""),
+                                        self.paths.filing_folders())
+            if at is None:
                 # Gone, so it counts as not done and is made again.
                 continue
             if not site.employer_of(self._plans_by_digest[rec["plan"]]):
