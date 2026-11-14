@@ -291,3 +291,50 @@ def test_every_api_endpoint_carries_the_guard():
         if "_same_origin_only" not in m.group(3):
             missing.append(m.group(2))
     assert not missing, "these answer anybody: %s" % missing
+
+
+# -- every combination, against the rule written out -------------------------------------
+#
+# Hand-picked cases miss combinations, Sec-Fetch-Site absent with a good
+# Origin and a bad Referer for one. The rule: the Host is the panel's,
+# Sec-Fetch-Site is absent or same-origin, any Origin or Referer sent names
+# the panel's own address, and on PaperPull Server at least one of the three
+# is sent at all.
+
+SITES = [None, "", "none", "same-origin", "same-site", "cross-site"]
+ORIGINS = [None, "own", "other port", "other host", "null", ""]
+REFERERS = [None, "own", "own with a path", "other port", "other host"]
+
+
+def _value(kind, host):
+    name = host.split(":")[0]
+    return {"own": "http://%s" % host, "own with a path": "http://%s/x?y=1#z" % host,
+            "other port": "http://%s:5000" % name, "other host": "http://evil.example",
+            "null": "null", "": ""}.get(kind, kind)
+
+
+def _by_the_rule(edition, site, origin, referer):
+    if site not in (None, "", "same-origin"):
+        return False
+    if origin is not None and origin != "own":
+        return False
+    if referer is not None and referer not in ("own", "own with a path"):
+        return False
+    return not (edition == "server" and not site and origin is None and referer is None)
+
+
+@pytest.mark.parametrize("edition", ["desktop", "server"])
+def test_every_combination_of_the_three_headers_follows_the_rule(edition, monkeypatch):
+    if edition == "server":
+        monkeypatch.setenv("PAPERPULL_SERVER", "1")
+    host = "nas.local:8765" if edition == "server" else HOST
+    wrong = []
+    for site in SITES:
+        for origin in ORIGINS:
+            for referer in REFERERS:
+                got = allowed(host=host, sec_fetch_site=site,
+                              origin=None if origin is None else _value(origin, host),
+                              referer=None if referer is None else _value(referer, host))
+                if got != _by_the_rule(edition, site, origin, referer):
+                    wrong.append((site, origin, referer, got))
+    assert not wrong, wrong
