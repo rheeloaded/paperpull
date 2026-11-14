@@ -180,6 +180,18 @@ def test_a_sign_in_with_such_an_address_opens_nothing_and_says_why(monkeypatch, 
     assert "not a web address" in capsys.readouterr().out
 
 
+def test_space_around_an_address_in_a_config_is_taken_off(monkeypatch):
+    """As a browser would. Nothing else of the address is changed."""
+    opened = []
+    monkeypatch.setattr(browser, "debug_port_holder", lambda *a, **k: "a browser")
+    monkeypatch.setattr(browser, "_open_tab_in", lambda port, url: opened.append(url) or True)
+    monkeypatch.setattr(browser, "bring_forward", lambda port: True)
+    monkeypatch.setattr(browser, "_say_shared_port", lambda port: None)
+    assert browser.open_signin_browser("p", "9231", "  https://example.ultipro.com \n") \
+        == browser.ALREADY_ON_PORT
+    assert opened == ["https://example.ultipro.com"]
+
+
 def test_a_browser_already_on_the_port_is_never_handed_such_an_address(monkeypatch):
     """There the address goes to the browser's own /json/new, where a
     javascript: or file: address opens as a tab."""

@@ -80,7 +80,11 @@ def _read_text(path, errors="strict") -> str:
         st = os.fstat(fh.fileno())
         if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
             raise OSError("%s is not a plain file of its own" % path)
-        return fh.read(256 * 1024 * 1024).decode("utf-8", errors)
+        # Refused past its size rather than read into a buffer that size,
+        # which on Windows cost a tenth of a second for every account.
+        if st.st_size > 256 * 1024 * 1024:
+            raise OSError("%s is larger than any record PaperPull keeps" % path)
+        return fh.read().decode("utf-8", errors)
 
 
 def _read_json(path):

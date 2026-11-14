@@ -22,7 +22,7 @@ FILES = ["gui/app.py", "gui/server_mode.py", "tools/export_purchases.py",
          "tools/export_transactions.py", "tools/add_account.py", "tools/migrate.py",
          "tools/status.py", "server/plugins/paperless/paperless.py"]
 CALLS = {"read_text", "read_bytes", "write_text", "write_bytes", "copy", "copy2", "copyfile",
-         "copystat", "copytree", "save", "load"}
+         "copystat", "copytree", "save", "load", "move", "open"}
 HELPERS = ("server_mode.read_text", "server_mode.read_plain", "shared_folder.")
 
 REVIEWED = {
@@ -55,6 +55,25 @@ REVIEWED = {
     "tools/migrate.py:write_history:tmp.write_text": "the desktop branch, the server passes write",
     "tools/status.py:write_html:out.write_text": "the command line's --html report, at a path "
                                                  "the person names, never called by the panel",
+    # The safe helpers themselves, each opening with O_NOFOLLOW, and O_EXCL
+    # for a new file or O_NONBLOCK for a read.
+    "gui/app.py:_note_run:os.open": "a new file of its own, O_EXCL and O_NOFOLLOW",
+    "gui/app.py:_open_plain:os.open": "the panel's own link-safe open",
+    "gui/server_mode.py:read_plain:os.open": "the panel's link-safe reader",
+    "gui/server_mode.py:write_in_data:os.open": "a new file of its own, O_EXCL and O_NOFOLLOW",
+    "server/plugins/paperless/paperless.py:copy_into:os.open": "a new file, O_EXCL and O_NOFOLLOW",
+    "server/plugins/paperless/paperless.py:open_plain:os.open": "the plug-in's link-safe open",
+    "tools/add_account.py:_read_config:os.open": "its link-safe reader",
+    "tools/add_account.py:_write_whole:os.open": "a new file of its own, O_EXCL and O_NOFOLLOW",
+    "tools/status.py:_read_text:os.open": "its link-safe reader",
+    # Never the share.
+    "gui/server_mode.py:_write:os.open": "the password file in /config, never the share",
+    "gui/app.py:_settings_path:shutil.move": "the person's settings file, never the share",
+    "gui/app.py:api_aside_download:z.open": "a member of the zip it is building to hand over",
+    "tools/migrate.py:_member:z.open": "a member of the history file handed in",
+    # Already link-aware.
+    "gui/app.py:api_remove:shutil.move": "a link at the place counts as taken on the server, "
+                                         "and the folder is held inside the data folder",
 }
 
 

@@ -1292,14 +1292,18 @@ def read_plain(path, limit: int = READ_LIMIT) -> bytes:
         if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
             raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
         parts, got = [], 0
+        # The first read is the size the file says, so a small file is one
+        # read of its own size, never a buffer of the limit's.
+        want = min(st.st_size, limit) + 1
         while True:
-            piece = os.read(fd, 1 << 20)
+            piece = os.read(fd, want)
             if not piece:
                 break
             got += len(piece)
             if got > limit:
                 raise ValueError("%s is larger than %d bytes" % (path, limit))
             parts.append(piece)
+            want = 1 << 20
         return b"".join(parts)
     finally:
         os.close(fd)

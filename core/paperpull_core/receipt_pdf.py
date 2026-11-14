@@ -15,7 +15,9 @@ from __future__ import annotations
 import base64
 import html as _html
 import logging
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Iterable, NamedTuple, Optional
 
@@ -1250,8 +1252,11 @@ def _set_aside(path: Path, folder=None) -> Optional[Path]:
         where.mkdir(parents=True, exist_ok=True)
         target = where / (path.stem + ".zip")
         n = 1
-        while target.exists():
-            if _same_archive(target, path):
+        # lexists, so a link left at a name takes the name, and only a plain
+        # file of its own is opened to compare, never a link or a pipe,
+        # whose open would wait for good.
+        while os.path.lexists(target):
+            if _plain_file(target) and _same_archive(target, path):
                 path.unlink()
                 return target
             n += 1
@@ -1261,6 +1266,16 @@ def _set_aside(path: Path, folder=None) -> Optional[Path]:
     except OSError as e:
         log.warning("could not keep the archive %s: %s", path.name, e)
         return path if path.exists() else None
+
+
+def _plain_file(path) -> bool:
+    """Whether a name holds a plain file of its own, not a link, a named
+    pipe or a second name of another file."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and not os.path.islink(path)
 
 
 def _same_archive(a: Path, b: Path) -> bool:

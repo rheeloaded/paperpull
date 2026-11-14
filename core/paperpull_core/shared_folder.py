@@ -206,14 +206,18 @@ def read_plain(path, limit: int = READ_LIMIT) -> bytes:
         if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
             raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
         parts, got = [], 0
+        # The first read is the size the file says, so a small file is one
+        # read of its own size, never a buffer of the limit's.
+        want = min(st.st_size, limit) + 1
         while True:
-            piece = os.read(fd, 1 << 20)
+            piece = os.read(fd, want)
             if not piece:
                 break
             got += len(piece)
             if got > limit:
                 raise ValueError("%s is larger than %d bytes" % (path, limit))
             parts.append(piece)
+            want = 1 << 20
         return b"".join(parts)
     finally:
         os.close(fd)
@@ -268,36 +272,23 @@ def move(src, dst) -> None:
         return
     dst = Path(dst)
     hold(dst.parent)
+    # The file moved has to be a plain file of its own too, never a link,
+    # which a same-drive move would carry into place as a link.
+    st = os.lstat(src)
+    if _is_link(src, st) or not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+        raise OSError(errno.EINVAL, "not a plain file of its own", str(src))
     try:
         os.replace(src, dst)
         return
     except OSError as e:
         if e.errno != errno.EXDEV:
             raise
-    write_whole(dst, read_plain(src))
-    os.remove(src)
-
-
-def save_download(download, path) -> None:
-    """A Playwright download saved at path, whole. Playwright writes the
-    file it is given with a plain open, which follows a link left at its
-    name, so it is given a new name nobody can guess, short and beside path,
-    and the file is moved into path's place after, which replaces a link
-    there rather than writing through it. The same on both editions, where
-    a fixed name, x.saving, was one someone on the server's share could
-    leave a link at (a private report of 2026-11-10)."""
-    path = Path(path)
-    if on_server():
-        hold(path.parent)
-    side = path.with_name(".%s.saving" % os.urandom(4).hex())
     try:
-        download.save_as(str(side))
-        os.replace(side, path)
-    finally:
-        try:
-            os.remove(side)
-        except OSError:
-            pass
+        data = read_plain(src)
+    except ValueError as e:
+        raise OSError(errno.EFBIG, str(e), str(src)) from e
+    write_whole(dst, data)
+    os.remove(src)
 
 
 def write_bytes(path, data: bytes) -> None:

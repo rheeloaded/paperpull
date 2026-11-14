@@ -345,13 +345,37 @@ def test_a_download_saved_where_a_link_was_left_replaces_the_link(server, monkey
     assert sorted(p.name for p in server.install.iterdir()) == [out.name]
 
 
-def test_shared_folder_saves_a_download_whole_on_either_edition(place, monkeypatch):
+def test_a_download_leaves_nothing_beside_it_and_clears_what_an_ended_run_left(
+        place, monkeypatch):
+    """Each save is made in a folder of its own, which goes once it is done.
+    One a run ended in the middle of left an hour ago goes too, a fresh one
+    another save may be using stays, and a link named like one is never
+    followed or taken."""
+    from paperpull_core import intake
+    monkeypatch.setattr(intake, "finish", lambda download, partial=None: True)
+    old = place.install / ".abcd1234.saving"
+    old.mkdir()
+    (old / "download").write_bytes(b"half")
+    os.utime(old, (time.time() - 7200, time.time() - 7200))
+    fresh = place.install / ".efgh5678.saving"
+    fresh.mkdir()
+    keep = place.outside / "keep"
+    keep.mkdir()
+    (keep / "x").write_bytes(b"x")
+    try:
+        (place.install / ".ijkl9012.saving").symlink_to(keep, target_is_directory=True)
+        linked = True
+    except (OSError, NotImplementedError):
+        linked = False
     for edition in ("", "1"):
         monkeypatch.setenv("PAPERPULL_SERVER", edition)
         out = place.install / ("saved-%s.pdf" % (edition or "desktop"))
-        shared_folder.save_download(_Download(), out)
+        intake.save_download_as(_Download(), out)
         assert out.read_bytes() == b"%PDF-1.4 a statement"
-    assert sorted(p.name for p in place.install.iterdir()) == ["saved-1.pdf", "saved-desktop.pdf"]
+    names = sorted(p.name for p in place.install.iterdir())
+    assert names == sorted([".efgh5678.saving", "saved-1.pdf", "saved-desktop.pdf"]
+                           + ([".ijkl9012.saving"] if linked else [])), names
+    assert (keep / "x").read_bytes() == b"x"
 
 
 class _PrintingPage:
@@ -413,6 +437,26 @@ def test_a_move_across_drives_is_written_whole_and_reads_no_link(server, monkeyp
     with pytest.raises(OSError):
         shared_folder.move(src, server.install / "another.pdf")
     assert not (server.install / "another.pdf").exists()
+
+
+def test_a_move_onto_a_link_to_a_folder_never_moves_into_that_folder(server):
+    """shutil.move moved a file into the folder a link at its place led to,
+    the server's own settings folder among them."""
+    src = server.install / "statement.pdf"
+    src.write_bytes(b"%PDF-1.4 moved")
+    dst = server.install / "2026-05-14 Testco Statement.pdf"
+    symlink_or_skip(server.outside, dst)
+    shared_folder.move(src, dst)
+    assert sorted(p.name for p in server.outside.iterdir()) == ["server.json"]
+    assert not dst.is_symlink() and dst.read_bytes() == b"%PDF-1.4 moved"
+
+
+def test_a_link_is_never_moved_into_place_as_a_link(server):
+    src = server.install / "statement.pdf"
+    symlink_or_skip(server.canary, src)
+    with pytest.raises(OSError):
+        shared_folder.move(src, server.install / "kept.pdf")
+    assert not os.path.lexists(server.install / "kept.pdf")
 
 
 def test_a_move_on_the_desktop_is_shutils_as_before(desktop):
