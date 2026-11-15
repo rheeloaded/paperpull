@@ -516,8 +516,9 @@ def test_a_year_that_runs_past_the_page_limit_stops_the_run(attached, tmp_path, 
     assert len(known(tmp_path)) == 30, "what was read before the limit is kept"
     assert listing_note(tmp_path)["complete"] is False
     assert list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
-    # A page that was not what it expected, which the panel answers with a
-    # support report, not a sign-in and Continue, which would stop here again.
+    # A page that was not what it expected. After Check what's there the
+    # panel answers it with Check again and a support report, not a sign-in,
+    # and the app's own words say running it again stops at the same place.
     assert '"stopped": 1' in out and '"stop": "page"' in out, out
 
 
