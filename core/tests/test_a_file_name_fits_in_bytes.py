@@ -155,6 +155,33 @@ def test_a_companion_named_from_a_long_first_file_keeps_its_part(tmp_path):
         assert first.startswith(p.name[:-len(" (2 of 3)" + ending)])
 
 
+def test_a_part_stays_when_the_120_character_cut_reaches_it():
+    """A review of 2026-11-15. The 120-character cut came before the byte
+    cut and took the part off a name past 120 characters, so the invoices
+    of one order had one name and Rename read invoice 2 as the whole order.
+    The summary gives way now, as it does for the byte cut, and a name with
+    no part is cut where it always was."""
+    summary = "Invented Garden Hose " * 8
+    whole = storage.build_pdf_filename("2026-03-31", summary, "Invoice")
+    assert len(whole) - len(".pdf") == 120 and not whole.endswith(")"), whole
+    names = [storage.build_pdf_filename("2026-03-31", summary, "Invoice", part=(k, 3))
+             for k in (1, 2, 3)]
+    assert len(set(names)) == 3, names
+    for k, name in enumerate(names, start=1):
+        assert name.endswith(" (%d of 3).pdf" % k), name
+        assert len(name) - len(".pdf") <= 120
+        stem = name[:-len(" (%d of 3).pdf" % k)]
+        assert whole.startswith(stem) and len(stem) >= 100, name
+
+
+def test_a_name_of_120_characters_with_its_part_is_as_it_was():
+    summary = "Invented Garden Hose " * 4
+    name = storage.build_pdf_filename("2026-03-31", summary, "Invoice", part=(2, 3))
+    assert len(name) - len(".pdf") <= 120
+    assert name == storage.sanitize_component(name[:-len(".pdf")]) + ".pdf"
+    assert name.endswith(" (2 of 3).pdf")
+
+
 def test_sanitize_component_still_cuts_at_120_characters():
     """N9-6. It builds record keys, so it cuts where it always did."""
     assert storage.sanitize_component(TITLE * 30) == (TITLE * 18)[:120]

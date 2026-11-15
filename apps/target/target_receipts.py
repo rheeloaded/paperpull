@@ -1495,6 +1495,16 @@ class App:
         else:
             print("  No printable receipt. The order's %d invoices are saved to the "
                   "Invoices folder." % len(kept))
+        # Every invoice kept is new to this run, those an earlier run saved
+        # included. Each is filed now, and new-this-run.txt is what the
+        # panel's Move after a run takes, so an order finished over two runs
+        # moved its last invoice alone and left the rest behind (a review of
+        # 2026-11-15).
+        listed = set(self.stats["new_files"])
+        for e in kept:
+            if e["file"] not in listed:
+                listed.add(e["file"])
+                self.stats["new_files"].append(e["file"])
         return True
 
     def _invoice_tokens(self, purchase: Purchase) -> list:

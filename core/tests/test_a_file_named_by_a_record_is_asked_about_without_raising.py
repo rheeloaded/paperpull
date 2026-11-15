@@ -10,6 +10,7 @@ shared_folder.file_there now, which counts such a file as not there. The
 refusal is stood in for at os.stat, as in
 test_every_app_asks_of_a_review_copy_without_raising.py.
 """
+import os
 import re
 import sys
 from pathlib import Path
@@ -69,11 +70,27 @@ def test_robinhood_asks_of_its_saved_forms_without_raising(refused, tmp_path, mo
                                                   key="mine", category="Statement"), "abc")
 
 
-def test_rename_leaves_a_file_it_cannot_look_at(refused, tmp_path):
+def _exists_as_in_3_14(self, *, follow_symlinks=True):
+    """Python 3.14's Path.exists, which answers False for every OSError.
+    Through os.stat, since os.path.exists on Windows takes a way of its own
+    past the refusal refuse_under stands in."""
+    try:
+        (os.stat if follow_symlinks else os.lstat)(self)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+@pytest.mark.parametrize("python", ["3.12", "3.14"])
+def test_rename_leaves_a_file_it_cannot_look_at(refused, tmp_path, monkeypatch, python):
     """Rename and Move plan from the index's rows. A row naming a file in a
     folder Rename may not search ended the plan, and so every Rename and
-    Move. The file is left as it is now and the others are planned."""
+    Move. The file is left as it is now and the others are planned. Under
+    3.14's exists() the row read "not on disk" (WSL, a review of
+    2026-11-15), so Rename asks with a stat and says the same on both."""
     from paperpull_core import renaming
+    if python == "3.14":
+        monkeypatch.setattr(Path, "exists", _exists_as_in_3_14)
     plain = tmp_path / "Statements" / "2025-11-30 Statement.pdf"
     plain.parent.mkdir()
     plain.write_bytes(testkit.sample_pdf())

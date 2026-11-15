@@ -163,7 +163,11 @@ def test_the_next_run_asks_only_for_the_file_that_did_not_come(tmp_path, monkeyp
     assert rec["notes"] == "form set has 3 files"
     rows = app.index_csv.read_all()
     assert [(r["PDF Filename"], r["Processing Status"]) for r in rows] == [(FIRST, "Completed")]
-    assert [Path(p).name for p in app.stats["new_files"]] == ["2031-12-31 Tax Document (2 of 3).xls"]
+    # Every file of the form is new to the run that completed it, those the
+    # first run saved included (test_a_move_of_what_the_run_saved_takes_the_form_whole).
+    assert sorted(Path(p).name for p in app.stats["new_files"]) == sorted([
+        FIRST, "2031-12-31 Tax Document (2 of 3).xls", "2031-12-31 Tax Document (3 of 3).pdf"])
+    assert len(app.stats["new_files"]) == 3
     assert app.stats["tax_documents"] == 1 and app.stats["failed"] == 0
     assert app._already_done(doc)
 
@@ -257,6 +261,96 @@ def test_a_move_after_takes_every_file_of_the_form(tmp_path, monkeypatch):
     assert companion.files(tmp_path) == {body: "Watched/" + path[len("out/"):]
                                          for body, path in before.items()}
     assert companion.bodies_listed(stored(app, doc)) == [FILES[u][1] for u in THREE]
+
+
+def test_a_move_of_what_the_run_saved_takes_the_form_whole(tmp_path, monkeypatch):
+    """After a run the panel moves what new-this-run.txt lists into the
+    documents folder. The run that completed a form listed only the file it
+    fetched, so the Move took that one and left the form itself and its
+    other file behind (a review of 2026-11-15)."""
+    a_run(tmp_path, monkeypatch, THREE, everything_but(link(2)))
+    app, _tab, doc = a_run(tmp_path, monkeypatch, THREE, everything_but())
+    for key in ("discovered", "skipped_completed", "skipped_out_of_scope"):
+        app.stats.setdefault(key, 0)
+    app.stats.update(started="2031-12-31T00:00:00", mode="download")
+    app.write_run_summary()
+    before = companion.files(tmp_path)
+    mover = companion.make_app(tmp_path, documents=True)
+    monkeypatch.setenv(renaming.MOVE_DOCUMENTS_ENV, "new")
+    code, said = companion.rename(mover)
+    assert code == 0 and "Moved 3 file(s)" in said, said
+    assert companion.files(tmp_path) == {body: "Watched/" + path[len("out/"):]
+                                         for body, path in before.items()}
+
+
+def test_a_form_completed_in_one_run_lists_each_file_once(tmp_path, monkeypatch):
+    app, _tab, _doc = a_run(tmp_path, monkeypatch, THREE, everything_but())
+    assert sorted(Path(p).name for p in app.stats["new_files"]) == sorted([
+        FIRST, "2031-12-31 Tax Document (2 of 3).xls", "2031-12-31 Tax Document (3 of 3).pdf"])
+    assert len(app.stats["new_files"]) == 3
+
+
+def refusing_once(monkeypatch, when):
+    """make_app's app, whose discovery refuses its first save once `when`
+    holds of the form's folder, as a file another program holds refuses."""
+    real_make = companion.make_app
+    refused = []
+
+    def make_app(*a, **k):
+        app = real_make(*a, **k)
+        real_save = app.discovery.save
+
+        def save(*sa, **sk):
+            if not refused and when(app):
+                refused.append(True)
+                raise PermissionError(13, "held by another program", "discovery.json")
+            return real_save(*sa, **sk)
+
+        app.discovery.save = save
+        return app
+
+    monkeypatch.setattr(companion, "make_app", make_app)
+    return real_make, refused
+
+
+def test_a_file_the_record_lists_stays_when_the_record_write_is_refused(tmp_path, monkeypatch):
+    """A file of the set is written into the record, and the record's write
+    is refused. The record in memory lists it still, and the form's Failed
+    write after it keeps the entry, so the next run counts it as had. The
+    cleanup deleted it all the same, and the next run marked the form done
+    for good without it (a review of 2026-11-15)."""
+    real_make, refused = refusing_once(
+        monkeypatch, lambda app: any("(2 of 3)" in n for n in saved(app)))
+    app, _tab, doc = a_run(tmp_path, monkeypatch, THREE, everything_but())
+    assert refused, "the record's write was never refused"
+    assert "2031-12-31 Tax Document (2 of 3).xls" in saved(app)
+    monkeypatch.setattr(companion, "make_app", real_make)
+    app, tab, doc = a_run(tmp_path, monkeypatch, THREE, everything_but())
+    rec = stored(app, doc)
+    assert rec["downloaded_ok"] is True and tab.asked == []
+    assert all(Path(e["file"]).is_file() for e in rec["invoices"]), rec["invoices"]
+    assert saved(app) == {FIRST: FILES[link(1)][1],
+                          "2031-12-31 Tax Document (2 of 3).xls": FILES[link(2)][1],
+                          "2031-12-31 Tax Document (3 of 3).pdf": FILES[link(3)][1]}
+
+
+def test_a_file_set_aside_stays_when_the_record_write_is_refused(tmp_path, monkeypatch):
+    """The same for a file of the set held in Manual Review."""
+    four = [link(1), link(2), link(3), link(4)]
+    script = {link(2): ("run.command", b"#!/bin/sh\necho invented\n")}
+
+    def held(app):
+        return any(p.is_file() for p in app.paths.manual_review.rglob("*"))
+    real_make, refused = refusing_once(monkeypatch, held)
+    app, _tab, doc = a_run(tmp_path, monkeypatch, four, dict(everything_but(of=5), **script))
+    assert refused, "the record's write was never refused"
+    monkeypatch.setattr(companion, "make_app", real_make)
+    app, tab, doc = a_run(tmp_path, monkeypatch, four, dict(everything_but(of=5), **script))
+    rec = stored(app, doc)
+    assert rec["downloaded_ok"] is True and tab.asked == []
+    assert [Path(e["file"]).name for e in rec["set_aside"]] == [
+        "2031-12-31 Tax Document (2 of 4) command.held"]
+    assert all(Path(e["file"]).is_file() for e in rec["set_aside"])
 
 
 def test_the_first_file_that_never_comes_saves_nothing_as_before(tmp_path, monkeypatch):

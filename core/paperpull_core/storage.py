@@ -1064,6 +1064,26 @@ def _folder_name(text: str) -> str:
     return sanitize_component(cleaned, max_len=FOLDER_MAX).strip(" .")
 
 
+NAME_MAX = 120
+
+
+def _name_cut(text: str) -> str:
+    """sanitize_component's name, cut to NAME_MAX characters, its part
+    "(2 of 3)" at the end kept as _in_bytes keeps it, the text before it
+    giving way. The cut took the part off a name past 120 characters before
+    the byte cut could keep it, and Rename then read invoice 2 of an order
+    as the whole order (a review of 2026-11-15). A name of NAME_MAX
+    characters or fewer, and one with no part, is what it always was."""
+    whole = sanitize_component(text, max_len=sys.maxsize)
+    if len(whole) > NAME_MAX:
+        part = _PART_AT_END.search(whole)
+        if part and len(part.group(0)) < NAME_MAX:
+            head = whole[:part.start()][:NAME_MAX - len(part.group(0))].rstrip(" .")
+            if head:
+                return head + part.group(0)
+    return sanitize_component(text, max_len=NAME_MAX)
+
+
 def file_name_of(parts: List[str]) -> FileName:
     """A file's name and folders from the text naming.render_path gives,
     the folders first and the name last, each made safe. A folder that
@@ -1079,7 +1099,7 @@ def file_name_of(parts: List[str]) -> FileName:
     they give the same one."""
     *folders, name = parts or [""]
     kept = [f for f in (_folder_name(text) for text in folders) if f]
-    name = sanitize_component(name)
+    name = _name_cut(name)
     if name.startswith("."):
         # Taken off here and never in sanitize_component, which builds the
         # keys of most apps' records, so a key stays what it was. Made safe
@@ -1609,13 +1629,32 @@ WAITING_ENDING = " (rows waiting).json"
 _LEDGERS = {}
 
 
+# Windows says PermissionError for a file another program has open. A Mac,
+# Linux and PaperPull Server say it only for a file or folder the run may not
+# write, which no wait mends, and where the run had said the file was open in
+# another program, perhaps Excel (a review of 2026-11-15).
+_PERMISSION_IS_HELD = os.name == "nt"
+
+
 def _refused_while_held(e: OSError) -> bool:
     """Whether a write was refused the way a file another program holds is
     refused. Windows says PermissionError while Excel has the file open, and
     a shared folder may say the file is busy while it is open on another
     computer. Only such a refusal is waited for."""
     import errno
-    return isinstance(e, PermissionError) or e.errno in (errno.EBUSY, errno.ETXTBSY)
+    return ((isinstance(e, PermissionError) and _PERMISSION_IS_HELD)
+            or e.errno in (errno.EBUSY, errno.ETXTBSY))
+
+
+class _BrokeOff(OSError):
+    """A ledger's write that failed after the file opened, a disk that filled
+    or a shared folder that dropped, with where in the file it began. Rows
+    before the break can be in the file, and the rows kept beside it carry
+    that place, so none is written twice (_not_written)."""
+
+    def __init__(self, began: Optional[int], error: OSError):
+        super().__init__(error.errno, error.strerror or str(error))
+        self.began, self.error = began, error
 
 
 class CsvFile:
@@ -1713,9 +1752,12 @@ class CsvFile:
         entries = self._not_written(kept) if kept else []
         key = _held_key(self.path)
         first = key not in _HELD
+        began = None
         try:
             self._write_in(entries, rows, _LOCKED_TRIES if first else 1)
             return
+        except _BrokeOff as e:
+            refused, began = e.error, e.began
         except OSError as e:
             refused = e
         _HELD.add(key)
@@ -1733,7 +1775,7 @@ class CsvFile:
             return
         try:
             self._keep(entries + [{"id": os.urandom(8).hex(), "row": stored} for stored in new],
-                       unread=bool(kept and kept.get("unread")))
+                       writing_from=began, unread=bool(kept and kept.get("unread")))
         except OSError:
             # Neither written nor kept, which only a folder that takes no
             # file at all does, and then nothing is saved anyway.
@@ -1763,29 +1805,40 @@ class CsvFile:
     def _write_in(self, entries: list, rows: list, tries: int) -> None:
         """Append the kept rows still to go in, in order, each kept as
         store_value gave it, then `rows`. OSError when the file was not
-        opened, and then nothing of it was written."""
+        opened, and then nothing of it was written. _BrokeOff when the write
+        failed after the file opened, with where it began."""
         self._ensure_header()
         held = self._held() if self.once else None
-        with self._open_to_append(tries) as f:
-            if entries:
-                # Where they begin is kept with them until they are taken
-                # away below, so a run stopped in between, by Ctrl+C say,
-                # finds them in the file and writes none of them twice. An
-                # order history holds no row once, and would hold them twice.
-                try:
-                    self._keep(entries, writing_from=os.fstat(f.fileno()).st_size)
-                except OSError:
-                    pass
-            w = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore",
-                               quoting=csv.QUOTE_MINIMAL)
-            new = [{c: store_value(row.get(c, "")) for c in self.columns} for row in rows]
-            for stored in [e["row"] for e in entries] + new:
-                if held is not None:
-                    written = self._as_read(stored)
-                    if written in held:
-                        continue
-                    held.add(written)
-                w.writerow(stored)
+        f = self._open_to_append(tries)
+        began = None
+        try:
+            with f:
+                began = os.fstat(f.fileno()).st_size
+                if entries:
+                    # Where they begin is kept with them until they are taken
+                    # away below, so a run stopped in between, by Ctrl+C say,
+                    # finds them in the file and writes none of them twice. An
+                    # order history holds no row once, and would hold them twice.
+                    try:
+                        self._keep(entries, writing_from=began)
+                    except OSError:
+                        pass
+                w = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore",
+                                   quoting=csv.QUOTE_MINIMAL)
+                new = [{c: store_value(row.get(c, "")) for c in self.columns} for row in rows]
+                for stored in [e["row"] for e in entries] + new:
+                    if held is not None:
+                        written = self._as_read(stored)
+                        if written in held:
+                            continue
+                        held.add(written)
+                    w.writerow(stored)
+        except OSError as e:
+            # Rows before the break can be in the file. Taken as a refusal,
+            # they were kept whole and written in again, so an order history,
+            # which holds no row once, held them twice (a review of
+            # 2026-11-15). The place the write began goes with them.
+            raise _BrokeOff(began, e) from e
         _HELD.discard(_held_key(self.path))
         if entries:
             self._forget_kept()
@@ -1896,11 +1949,13 @@ class CsvFile:
                   % ("Its row is" if one else "Its %d rows are" % len(rows), name, saved),
                   flush=True)
             return
-        why = ("was still held by another program after a minute" if _refused_while_held(error)
+        held = _refused_while_held(error)
+        why = ("was still held by another program after a minute" if held
                else "could not be written (%s)" % type(error).__name__)
-        print("  ! %s %s, so %s kept beside it, in %s.%s %s into %s once that file is closed."
+        print("  ! %s %s, so %s kept beside it, in %s.%s %s into %s %s."
               % (name, why, "the new row is" if one else "the %d new rows are" % len(rows),
-                 self.waiting_path.name, saved, "The row goes" if one else "They go", name),
+                 self.waiting_path.name, saved, "The row goes" if one else "They go", name,
+                 "once that file is closed" if held else "once it can be written"),
               flush=True)
 
     def read_all(self) -> List[dict]:

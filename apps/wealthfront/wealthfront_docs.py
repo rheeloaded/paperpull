@@ -952,6 +952,10 @@ class App:
                               "since it was neither a PDF nor a spreadsheet, CSV, text or ZIP file.")
                         doc.set_aside.append({"file": str(held), "link": href,
                                               "part": "%d of %d" % (n, total)})
+                        # The record names it now, and a later write of the
+                        # record keeps that, so it stays even when this write
+                        # is refused, as a kept file does below.
+                        written.clear()
                         self._record(doc, State.PDF_SAVED)
                         continue
                     extra_path = unique_path(first.parent, stem + ".pdf", max_len)
@@ -963,6 +967,15 @@ class App:
                 print(f"  + additional file: {extra_path.name}")
                 doc.invoices.append({"file": str(extra_path), "kept": True, "link": href,
                                      "part": "%d of %d" % (n, total)})
+                # Listed, so never taken away below. A record write refused
+                # here, its file held a minute by another program, still
+                # leaves the entry in the record in memory, and the form's
+                # Failed write after it keeps the entry, so the next run
+                # counts the link as had. The cleanup below deleted the file
+                # all the same, and the next run marked the form done for good
+                # without it (a review of 2026-11-15). A file kept that the
+                # record never reached at all is at worst saved again as " (2)".
+                written.clear()
                 self._record(doc, State.PDF_SAVED)
                 self.stats["new_files"].append(str(extra_path))
             except Exception as e:
@@ -1007,7 +1020,23 @@ class App:
         if doc.set_aside:
             doc.notes = (doc.notes + "; " if doc.notes else "") + \
                 _set_aside_note(len(doc.set_aside))
+        self._list_the_set_as_new(doc)
         return True
+
+    def _list_the_set_as_new(self, doc: Document) -> None:
+        """Every kept file of a form whose set this run completed, in the run's
+        list of new files, those an earlier run saved included. Each is filed
+        now, with its index row, and new-this-run.txt is what the panel's Move
+        after a run takes. A set finished over two runs listed only the last
+        file, so the Move took that one alone into the documents folder and
+        left the form itself behind (a review of 2026-11-15)."""
+        files = [doc.pdf_path] + [e.get("file") for e in (doc.invoices or ())
+                                  if e.get("kept") is not False]
+        listed = set(self.stats["new_files"])
+        for path in files:
+            if isinstance(path, str) and path and path not in listed:
+                listed.add(path)
+                self.stats["new_files"].append(path)
 
     def _completed(self, doc: Document, out_path: Path) -> None:
         """Write a document down as saved for good and count it."""

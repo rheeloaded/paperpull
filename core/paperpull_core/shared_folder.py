@@ -223,6 +223,23 @@ def read_plain(path, limit: int = READ_LIMIT) -> bytes:
         os.close(fd)
 
 
+# The errors Python 3.12's Path.exists() answers False for rather than raises.
+_NOT_THERE = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
+# Not ready, an invalid name, a name that cannot be resolved, which 3.12's
+# pathlib answers False for on Windows as well (_IGNORED_WINERRORS).
+_NOT_THERE_ON_WINDOWS = (21, 123, 1921)
+
+
+def not_there(error: OSError) -> bool:
+    """Whether a stat's error says the file is not there, as Python 3.12's
+    exists() read it, rather than that it could not be looked at. 3.12
+    raised the others from exists(), and 3.14 answers False for every one,
+    so a caller that stats and sorts the error here answers the same on
+    every Python (validate_pdf, renaming.plan)."""
+    return (error.errno in _NOT_THERE
+            or getattr(error, "winerror", None) in _NOT_THERE_ON_WINDOWS)
+
+
 def path_text(value) -> str:
     """The text of a path a record, an index row or a listing holds, and ""
     for anything that is not text or a path. A hand edit or a damaged file

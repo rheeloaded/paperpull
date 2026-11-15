@@ -79,9 +79,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   spreadsheet as long as any other write waits, once in a run for each
   file, and keeps the rows it could not write beside the index. They go in
   by themselves, each once and in order, the next time the app writes or
-  reads that index or as the run ends. The run and the panel say how many rows wait and that
-  every document is saved. A document an earlier version left this way is
-  not repaired and stays out of Rename until it is downloaded again.
+  reads that index or as the run ends, and a write that breaks partway,
+  on a full disk say, writes none of them twice. The run and the panel say
+  how many rows wait and that every document is saved. On a Mac, Linux and
+  PaperPull Server an index the run may not write is said to be one it
+  cannot write, with no wait. A document an earlier version left this way
+  is not repaired and stays out of Rename until it is downloaded again.
 - **An Amazon order split across sellers is done only once every invoice
   is on file.** An invoice after the first that did not come was passed
   over and the order marked done for good, so its other invoices were never
@@ -89,13 +92,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
   as it is put in place, the order stays Failed until every invoice the
   menu lists is on file, and the next run fetches only the ones still
   missing. An invoice that fails its check is put aside in Manual Review
-  and counted, where it had been moved there and counted nowhere.
+  and counted, where it had been moved there and counted nowhere. The run
+  that completes an order lists every invoice of it as new, so the move to
+  a documents folder after that run takes the order whole, and Target's
+  orders of several invoices are moved whole the same way.
 - **A Wealthfront tax form is done only once every file of its set has
   come.** A companion file that did not come was passed over, and the form
   was marked done with notes counting files that were never saved. The
   form now stays Failed until every file has come, the next run fetches
   only the missing ones and names each beside the first, and the first is
-  never saved a second time as "(2)".
+  never saved a second time as "(2)". The run that completes a form lists
+  every file of it as new, so the move to a documents folder after that run
+  takes the form whole.
 - **A named pipe or a device a record names no longer holds a run.** A
   record or an index row naming a named pipe, a device or a link to one
   held Target's invoice walk and its Rename preview, and Robinhood's tax

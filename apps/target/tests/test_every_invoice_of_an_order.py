@@ -596,6 +596,12 @@ def test_an_invoice_that_did_not_open_is_asked_for_on_the_next_run(attached, tmp
     assert invoice_numbers(saved) == sorted(inv for inv, _, _ in SPLIT.invoices), saved
     assert len(saved) == 2, "the first invoice is on file once, %s" % saved
     assert record(tmp_path, SPLIT)["downloaded_ok"] is True
+    # The run that completed the order lists both, the first an earlier run
+    # saved too, so the panel's Move after it takes the order whole. It
+    # listed the second alone, and the Move left the first behind (a review
+    # of 2026-11-15).
+    assert [n for n in new_this_run(tmp_path) if n.startswith(SPLIT.iso + " ")] == \
+        sorted(p.name for p in saved)
 
 
 def test_another_orders_invoice_page_is_never_printed_for_this_order(attached, tmp_path):

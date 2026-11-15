@@ -183,7 +183,11 @@ def test_the_next_run_asks_only_for_the_invoice_that_did_not_come(tmp_path, monk
     assert rec["receipt_count"] == 3
     assert rec["notes"].startswith("Also saved: %s, %s" % (name(2), name(3))), rec["notes"]
     assert [Path(e["file"]).name for e in rec["invoices"]] == [name(1), name(2), name(3)]
-    assert [Path(p).name for p in app.stats["new_files"]] == [name(2)]
+    # Every invoice of the order is new to the run that completed it, those
+    # the first run saved included, so the panel's Move after it takes the
+    # order whole (test_a_move_of_what_the_run_saved_takes_the_order_whole).
+    assert sorted(Path(p).name for p in app.stats["new_files"]) == [name(1), name(2), name(3)]
+    assert len(app.stats["new_files"]) == 3
     assert app.stats["failed"] == 0 and app.stats["receipts_downloaded"] == 1
     assert app._already_done(listed())
 
@@ -398,6 +402,29 @@ def test_a_rename_waits_for_the_order_and_then_takes_every_invoice(tmp_path, mon
     said = []
     renaming.run_for(app, apply_changes=True, say=said.append)
     assert DONE in "\n".join(said), said
+
+
+def test_a_move_of_what_the_run_saved_takes_the_order_whole(tmp_path, monkeypatch):
+    """After a run the panel moves what new-this-run.txt lists into the
+    documents folder. The run that completed an order listed only the
+    invoice it fetched, so the Move took that one and left the invoices of
+    the earlier run, the one the index row names among them, behind (a
+    review of 2026-11-15)."""
+    watched = str(tmp_path / "Watched")
+    first, _ = run(tmp_path, monkeypatch, LINKS, {LINKS[1]: False}, documents_dir=watched)
+    app, asked = run(tmp_path, monkeypatch, LINKS, documents_dir=watched)
+    assert asked == [LINKS[1]]
+    files = sorted(app.stats["new_files"])
+    (app.paths.root / "new-this-run.txt").write_text(
+        "# %d file(s) downloaded on this run:\n" % len(files) + "\n".join(files) + "\n",
+        encoding="utf-8")
+    mover = testkit.receipt_app(app_mod, tmp_path, documents_dir=watched)
+    monkeypatch.setenv(renaming.MOVE_DOCUMENTS_ENV, "new")
+    said = []
+    renaming.run_for(mover, apply_changes=True, say=said.append)
+    moved = {p.name: p.read_bytes() for p in Path(watched).rglob("*") if p.is_file()}
+    assert moved == {name(k): BODIES[LINKS[k - 1]] for k in (1, 2, 3)}, (moved, said)
+    assert on_disk(app) == {}, "an invoice of the order stayed behind"
 
 
 def test_a_record_an_older_version_left_is_still_done(tmp_path, monkeypatch):
