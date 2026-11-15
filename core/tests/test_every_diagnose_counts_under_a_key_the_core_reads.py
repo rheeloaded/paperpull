@@ -10,7 +10,7 @@ in and make it again.
 The core read only "collected". Most apps keep what the provider's own list
 gave another way. Four count it as "documents_total", U.S. Bank its own
 reader's count as "statements_read", Discover Card its statement links as
-"statement_links", and 37 apps built from one template keep the documents
+"statement_links", and 36 apps built from one template keep the documents
 their run's own reader recognized as a list, "documents_recognized" or
 "bills_recognized". A report of theirs that read the list where a check also
 tripped told the person to sign in, when it held what a repair needs. The

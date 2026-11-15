@@ -17,14 +17,24 @@ here, the app's own function, against three made-up pages. A sign-in page
 with lists of links, a security check, and a sign-in page that also lists
 dated notices with View and Download controls. Each must find nothing, or
 refuse with one of the errors a reader refuses with, which Diagnose writes
-as an error and no count. A reader that fails any other way fails here,
-since then nothing is proven. A reader that reads more than the page is
-named with what it reads.
+as an error and no count. A refusal's documents, where it carries some,
+are what it found. A reader that fails any other way fails here, since
+then nothing is proven. A reader that reads more than the page is named
+with what it reads.
+
+A refusal proves only what it says. About a third of the readers refuse
+before reading these pages at all, because the address is not their
+provider's, because the address they go to never answers here, every
+request being refused, or because a request from a made-up page fails.
+For those this shows that nothing is counted where the reader cannot reach
+its list, not what it would count on a sign-in page at its own address.
+Each of them today is asked only once its app found the documents page, or
+reads its provider's own answers rather than the page.
 
 On the dated page alone two kinds are named. Eight apps whose "collected"
 the core read before it read anything else, whose Diagnose-only or
 fallback scrape counts a dated row with a View, Open or PDF control. And
-three whose run's reader counts such notices, which their Diagnose asks
+four whose run's reader counts such notices, which their Diagnose asks
 only once goto_documents found the documents page, which each refuses on a
 page its sign-in check calls signed out. Each named one must still count
 there, so the name comes off when it stops.
@@ -94,12 +104,12 @@ MORE_THAN_THE_PAGE = {
     ("ing", "collected"): "the Postbox's own list, asked with the run's config",
     ("schwab", "documents_total"): "the documents API, asked for each account",
     ("sparkassepc", "collected"): "the Postfach's own list, asked with the run's config",
-    ("newrez", "documents_recognized"): "the documents list along the walk Diagnose took to it",
 }
 
-# What a reader is given beside the page, where that is a list to fill.
+# What a reader is given beside the page, where that is something it fills.
 GIVEN = {
     ("ibkr", "documents_total"): {"why": []},
+    ("newrez", "documents_recognized"): {"walk": {}},
 }
 
 _KNOWN = ("a scrape of every row holding a date and a View, Open or PDF control, read as "
@@ -113,7 +123,7 @@ DATED_NAMED = {
     ("dominion", "collected"): _KNOWN, ("robinhood", "collected"): _KNOWN,
     ("verizon", "collected"): _KNOWN, ("wealthfront", "collected"): _KNOWN,
     ("sba", "documents_recognized"): _GATED, ("smud", "documents_recognized"): _GATED,
-    ("wellsfargo", "documents_recognized"): _GATED,
+    ("wellsfargo", "documents_recognized"): _GATED, ("newrez", "documents_recognized"): _GATED,
 }
 
 # Loose scrapes whose count the core reads past, which these pages must
@@ -238,7 +248,11 @@ def _found(fn, browser, html, kws=()):
         try:
             got = fn(pg, **dict(kws))
         except Exception as e:
-            return 0 if type(e).__name__ in REFUSALS else "raised %s" % type(e).__name__
+            if type(e).__name__ not in REFUSALS:
+                return "raised %s" % type(e).__name__
+            # Three apps write what a stopped list carries into the list
+            # the core reads.
+            return len(getattr(e, "docs", None) or [])
         return 0 if got is None else len(got)
     finally:
         pg.close()
@@ -289,3 +303,14 @@ def test_a_reader_that_fails_another_way_is_not_taken_for_a_refusal(browser):
     def broken(_page):
         raise AttributeError("a reader with a mistake in it")
     assert _found(broken, browser, SIGN_IN) == "raised AttributeError"
+
+
+def test_a_refusal_that_carries_documents_found_them(browser):
+    class ListStopped(Exception):
+        def __init__(self, docs):
+            super().__init__("the list stopped")
+            self.docs = docs
+
+    def stopped(_page):
+        raise ListStopped(["a sign-in page's link", "another"])
+    assert _found(stopped, browser, SIGN_IN) == 2
