@@ -1375,6 +1375,9 @@ class Together(tuple):
 
 # The errors Python 3.12's Path.exists() answers False for rather than raises.
 _NOT_THERE = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
+# Not ready, an invalid name, a name that cannot be resolved, which 3.12's
+# pathlib answers False for on Windows as well (_IGNORED_WINERRORS).
+_NOT_THERE_ON_WINDOWS = (21, 123, 1921)
 
 
 def copy_still_valid(path, min_bytes: int = 3000) -> bool:
@@ -1415,16 +1418,18 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
     # One stat, inside a try. Python 3.12's exists() and stat() raise for a
     # file in a folder the run may not search, which ended Verify and every
     # app's check of a review copy at that document on every run (a bug hunt
-    # of 2026-11-14). "Not there" is what exists() answered False for, and
-    # anything else is a file that could not be read.
+    # of 2026-11-14). "Not there" is what exists() answered False for, a path
+    # it could not encode among them, and anything else is a file that could
+    # not be read.
     try:
         size = path.stat().st_size
     except OSError as e:
-        if e.errno in _NOT_THERE:
+        if (e.errno in _NOT_THERE
+                or getattr(e, "winerror", None) in _NOT_THERE_ON_WINDOWS):
             return ValidationResult(False, "File does not exist")
         return ValidationResult(False, f"Cannot read file: {e}")
-    except ValueError as e:
-        return ValidationResult(False, f"Cannot read file: {e}")
+    except ValueError:
+        return ValidationResult(False, "File does not exist")
     if size == 0:
         return ValidationResult(False, "File is zero bytes", size_bytes=0)
     if size < min_bytes:

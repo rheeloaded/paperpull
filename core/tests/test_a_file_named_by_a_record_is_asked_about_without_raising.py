@@ -10,6 +10,7 @@ shared_folder.file_there now, which counts such a file as not there. The
 refusal is stood in for at os.stat, as in
 test_every_app_asks_of_a_review_copy_without_raising.py.
 """
+import re
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -66,6 +67,43 @@ def test_robinhood_asks_of_its_saved_forms_without_raising(refused, tmp_path, mo
     monkeypatch.setattr(app.progress, "data", {"k": statement}, raising=False)
     app._other_accounts_statement(SimpleNamespace(date="2025-12-31", account="...1111",
                                                   key="mine", category="Statement"), "abc")
+
+
+def test_rename_leaves_a_file_it_cannot_look_at(refused, tmp_path):
+    """Rename and Move plan from the index's rows. A row naming a file in a
+    folder Rename may not search ended the plan, and so every Rename and
+    Move. The file is left as it is now and the others are planned."""
+    from paperpull_core import renaming
+    plain = tmp_path / "Statements" / "2025-11-30 Statement.pdf"
+    plain.parent.mkdir()
+    plain.write_bytes(testkit.sample_pdf())
+    rows = [{"PDF Full Path": str(refused), "PDF Filename": refused.name},
+            {"PDF Full Path": str(plain), "PDF Filename": plain.name}]
+    changes = renaming.plan(rows, lambda r: "Renamed " + r["PDF Filename"], folders=[tmp_path])
+    by = {c.row["PDF Filename"]: c for c in changes}
+    assert not by[refused.name].renaming
+    assert "could not be looked at" in by[refused.name].reason
+    assert by[plain.name].renaming and by[plain.name].new_name == "Renamed " + plain.name
+
+
+RECEIPT_APPS = [d for d in census.APPS if (d / ("%s_receipts.py" % d.name)).exists()]
+
+
+@pytest.mark.parametrize("app_dir", RECEIPT_APPS, ids=[d.name for d in RECEIPT_APPS])
+def test_a_pilot_report_reads_a_path_that_is_not_text_as_none(app_dir, tmp_path, monkeypatch,
+                                                              capsys):
+    """A receipt app's pilot report says whether each receipt's PDF is
+    there. A path a hand edit left as a number raised TypeError there."""
+    from test_every_app_asks_of_a_review_copy_without_raising import _Any
+    app = census.Home(app_dir, tmp_path, monkeypatch, capsys).build()
+    rec = {"state": "Completed", "pdf_filename": "x.pdf", "pdf_path": 5}
+    monkeypatch.setattr(app.progress, "get", lambda key: rec)
+    app._pilot_report([_Any()])
+    assert re.search(r"PDF exists:?\s+False", capsys.readouterr().out)
+
+
+def test_there_are_receipt_apps_to_ask():
+    assert len(RECEIPT_APPS) == 14
 
 
 def test_the_transactions_export_counts_a_statement_it_cannot_ask_about_as_missing(

@@ -1943,11 +1943,14 @@ def _set_aside_file(root: Path, record: dict, kept_out=(), base=None):
     for path in tries:
         if not _named_inside(path, root):
             continue
+        # A file in a folder the panel may not search raises from is_file()
+        # on Python 3.12 (a bug hunt of 2026-11-14), so it is asked here too.
         try:
             inside = path.resolve(strict=True).is_relative_to(root.resolve())
+            plain = path.is_file() and not path.is_symlink()
         except (OSError, RuntimeError, ValueError):
             continue
-        if (inside and path.is_file() and not path.is_symlink()
+        if (inside and plain
                 and path.suffix.lower() in OPENS_FROM_THE_PANEL
                 and not any(_within(path, other) for other in kept_out)):
             return path
@@ -6081,11 +6084,15 @@ def _documents_left(meta: dict, account: str) -> int:
                 continue
             path = Path(raw.strip())
             path = path if path.is_absolute() else root / path
+            # is_file() raises on Python 3.12 for a file in a folder the
+            # panel may not search, which failed the Documents settings with
+            # a 500 (a bug hunt of 2026-11-14). Such a file is not counted.
             try:
                 where = path.resolve()
-            except (OSError, RuntimeError):
+                plain = where.is_file()
+            except (OSError, RuntimeError, ValueError):
                 continue
-            if here in where.parents or not where.is_file():
+            if here in where.parents or not plain:
                 continue
             for top in roots:
                 if top == here or top not in where.parents:

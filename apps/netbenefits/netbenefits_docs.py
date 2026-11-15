@@ -1062,7 +1062,7 @@ class App:
                 continue
             if site.employer_of(self._plans_by_digest[rec["plan"]]) != rec["employer"]:
                 continue
-            path = Path(str(rec.get("pdf_path") or ""))
+            path = Path(shared_folder.path_text(rec.get("pdf_path")))
             if shared_folder.file_there(path):
                 site.note_combined(receipt_pdf.pdf_text(path), rec["plan"], plans)
 
@@ -1182,7 +1182,7 @@ class App:
                 continue
             if (rec.get("text_sha256") or "") in ours:
                 return key
-            own = str(rec.get("pdf_path") or "").strip()
+            own = shared_folder.path_text(rec.get("pdf_path")).strip()
             if own and shared_folder.file_there(own):
                 text = receipt_pdf.pdf_text(Path(own))
                 if text.strip() and site.statement_digest(text) == digest:

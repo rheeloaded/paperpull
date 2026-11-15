@@ -1502,7 +1502,7 @@ class App:
                   f"[confidence: {rec.get('confidence','')}]")
             print(f"    PDF:        {fn or '(none)'}")
             if fn:
-                path = Path(rec.get("pdf_path", ""))
+                path = Path(shared_folder.path_text(rec.get("pdf_path")))
                 exists = shared_folder.file_there(path)
                 size, pages = rec.get("pdf_size"), rec.get("pdf_pages")
                 # Only a receipt that passed its check has its size and pages

@@ -1034,7 +1034,7 @@ class App:
         listed or saved says nothing about which year's form it is, since a
         form comes out in the year after its own, so a file that is gone or
         prints no clear year moves nowhere."""
-        path = str(rec.get("pdf_path") or "").strip()
+        path = shared_folder.path_text(rec.get("pdf_path")).strip()
         if not listed or not path or not shared_folder.file_there(path):
             return None
         year = site.printed_tax_year(receipt_pdf.pdf_text(Path(path)))
@@ -1320,7 +1320,7 @@ class App:
                     or (rec.get("title") or "") != doc.title
                     or (rec.get("account") or "") != (doc.account or "")):
                 continue
-            own = str(rec.get("pdf_path") or "").strip()
+            own = shared_folder.path_text(rec.get("pdf_path")).strip()
             if own and shared_folder.file_there(own):
                 printed = site.printed_tax_year(receipt_pdf.pdf_text(Path(own)))
                 if printed and printed != year:
@@ -1402,7 +1402,7 @@ class App:
                 continue
             theirs = rec.get("pdf_sha256") or ""
             their_text = rec.get("text_sha256") or ""
-            own = str(rec.get("pdf_path") or "").strip()
+            own = shared_folder.path_text(rec.get("pdf_path")).strip()
             if own and shared_folder.file_there(own):
                 theirs = theirs or _sha256(own)
                 their_text = _text_sha256(own) or their_text

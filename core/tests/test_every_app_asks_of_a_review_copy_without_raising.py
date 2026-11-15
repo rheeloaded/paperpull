@@ -65,6 +65,16 @@ def test_validate_pdf_still_says_a_missing_file_does_not_exist(tmp_path):
     assert receipt_pdf.validate_pdf(tmp_path / "gone.pdf", 1000).reason == "File does not exist"
 
 
+def test_validate_pdf_says_a_name_no_file_can_have_does_not_exist(tmp_path):
+    """What 3.12's exists() answered False for without raising, a path it
+    cannot encode and, on Windows, a name Windows will not hold, Verify
+    still says does not exist."""
+    assert receipt_pdf.validate_pdf(tmp_path / "a\0b.pdf", 1000).reason == "File does not exist"
+    if os.name == "nt":
+        assert receipt_pdf.validate_pdf(tmp_path / "a<b.pdf", 1000).reason == \
+            "File does not exist"
+
+
 class _Any:
     """A document or a purchase, whatever an app's _already_done reads of
     it, with the key the record is kept under."""

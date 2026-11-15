@@ -366,7 +366,17 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
         if not raw and not old_name:
             continue
         old_path = Path(raw) if raw else Path(old_name)
-        if raw and old_path.exists() and _held_row(row, inside, path_key) is None:
+        # Asked once, in a try. Python 3.12's exists() raises for a file in a
+        # folder Rename may not search, which ended every Rename and Move at
+        # that row (a bug hunt of 2026-11-14). Such a file is left as it is.
+        try:
+            on_disk = bool(raw) and old_path.exists()
+        except OSError as e:
+            changes.append(Change(row, old_path, old_name,
+                                  reason="its file could not be looked at (%s)"
+                                         % (e.strerror or type(e).__name__)))
+            continue
+        if on_disk and _held_row(row, inside, path_key) is None:
             changes.append(Change(row, old_path, old_name, reason=NOT_HELD))
             continue
         try:
@@ -402,7 +412,7 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
         if new_name == old_path.name and _same_folder(where, old_path.parent):
             changes.append(Change(row, old_path, new_name, reason="already named that"))
             continue
-        if not raw or not old_path.exists():
+        if not on_disk:
             changes.append(Change(row, old_path, new_name,
                                   reason="not on disk, so only the record would change"))
             continue

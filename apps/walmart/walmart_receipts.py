@@ -1343,7 +1343,7 @@ class App:
                   f"[confidence: {rec.get('confidence','')}]")
             print(f"    PDF:        {fn or '(none)'}")
             if fn:
-                path = Path(rec.get("pdf_path", ""))
+                path = Path(shared_folder.path_text(rec.get("pdf_path")))
                 exists = shared_folder.file_there(path)
                 # Measured from the file itself. The size and pages were
                 # only ever recorded for a file that passed its check, so a

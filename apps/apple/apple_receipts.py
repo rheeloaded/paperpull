@@ -1465,7 +1465,7 @@ class App:
                 print(f"    Bought by   {rec.get('purchaser')}")
             print(f"    PDF         {fn or '(none)'}")
             if fn:
-                path = Path(rec.get("pdf_path", ""))
+                path = Path(shared_folder.path_text(rec.get("pdf_path")))
                 exists = shared_folder.file_there(path)
                 print(f"    PDF exists  {exists}  "
                       f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
