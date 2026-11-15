@@ -264,12 +264,13 @@ def _text_sha256s(path) -> tuple:
 
 
 def _sha256(path) -> str:
-    """The file's SHA-256, or "" when it cannot be read."""
-    import hashlib
-    try:
-        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-    except OSError:
-        return ""
+    """The file's SHA-256, or "" when it cannot be read. Read a block at a
+    time and never past the most a document may be (intake.sha256_of). A
+    statement just taken is never larger, so a file that is cannot be it,
+    and another record's file read whole failed the statement just taken
+    once it outgrew free memory (the bug hunt of 2026-11-14)."""
+    from paperpull_core import intake
+    return intake.sha256_of(path)
 
 
 class _Ledger:

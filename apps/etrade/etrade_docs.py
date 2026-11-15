@@ -1343,6 +1343,7 @@ class App:
         record kept before 0.53.0 of its date and title, saved once for
         every account's statement of the day. Its bytes being this
         account's say only that it held this account's (#96)."""
+        from paperpull_core import intake
         legacy = legacy_key(doc) if (doc.account or "").strip() else None
         for key, rec in self.progress.data.items():
             if key in (doc.key, legacy) or not isinstance(rec, dict) or rec.get("date") != doc.date:
@@ -1355,7 +1356,13 @@ class App:
             try:
                 if not rec.get("pdf_path") or not saved.is_file() or saved.resolve() == out_path.resolve():
                     continue
-                if hashlib.sha256(saved.read_bytes()).hexdigest() == digest:
+                # Never read past the most a document may be. A document
+                # just taken is never larger, so a file that is cannot hold
+                # its bytes, and read whole it failed this document once it
+                # outgrew free memory (the bug hunt of 2026-11-14). A file
+                # with no digest of its own is never the same as anything.
+                theirs = intake.sha256_of(saved)
+                if theirs and theirs == digest:
                     return True
             except OSError:
                 continue
