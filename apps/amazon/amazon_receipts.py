@@ -31,6 +31,7 @@ from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING
                                           after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
+import hashlib
 import logging
 import random
 import re
@@ -51,6 +52,47 @@ from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("amazon_receipts")
+
+# An invoice's place among its order's, "2 of 3", as the record keeps it.
+_PART = re.compile(r"(\d+) of (\d+)")
+
+
+def _place(part) -> Optional[tuple]:
+    """(2, 3) for "2 of 3", or None for anything a run did not write there."""
+    found = _PART.fullmatch(part) if isinstance(part, str) else None
+    return (int(found.group(1)), int(found.group(2))) if found else None
+
+
+def _place_order(entry: dict):
+    """An invoice's place among its order's, "2 of 3" coming second."""
+    return _place(entry.get("part")) or (99, 99)
+
+
+def _there(path) -> bool:
+    """Whether a file is there, and False for one that cannot be asked
+    about, in a folder the person may not read for instance."""
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
+
+
+def _discard(path) -> None:
+    """Remove a staging file, if it is still there."""
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _sha256(path) -> str:
+    """The SHA-256 of a file this run just downloaded, read a block at a
+    time."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def ask(prompt: str) -> str:
@@ -756,60 +798,225 @@ class App:
             return False
 
     def _save_invoices(self, page, purchase: Purchase, invoices: list) -> bool:
-        """Download the order's invoice PDF(s) as Amazon issued them. The
-        first is the order's document of record and goes through the full
-        validation; an order split across sellers has more than one, and the
-        others are saved beside it as "(2 of 3)" and so on."""
+        """Download the order's invoice PDF(s) as Amazon issued them, each
+        checked on its own. An order split across sellers has more than one,
+        and each is saved beside the first as "(2 of 3)" and so on.
+
+        The order is done only once every invoice its menu lists is on file.
+        The first was marked done for good the moment it was saved, and one
+        after it that did not come was passed over, so the order was never
+        asked for again and its other invoices were never saved. A run
+        stopped between two invoices left it the same. Now each invoice is
+        written into the record as it is saved, and an order with one still
+        to come is tried again on the next run, which fetches only what is
+        missing. A saved invoice counts as saved after its file is deleted,
+        the promise every download here makes (_invoices_on_file).
+
+        Amazon makes its invoice links afresh for each request, so a link
+        says nothing on the next run. An invoice is known by its place in
+        the menu and by the SHA-256 of its bytes, which the record keeps, so
+        none is kept twice whatever its place. When one comes at a place
+        other than the one it was saved at, the menu has moved, and every
+        place is asked so the one still missing is found (_take_invoices).
+        True when the order is done, and process_one then writes it down
+        and counts it, as it does a receipt."""
         purchase.document_type = "Invoice"
-        folder = self.paths.online
-        n = len(invoices)
-
-        def target(i: int) -> Path:
-            filename = build_pdf_filename(purchase.purchase_date, purchase.summary,
-                                          purchase.document_type, part=(i, n), record=purchase)
-            path = unique_path(folder, filename, self.config["max_path_length"],
-                               distinguisher=purchase.order_number)
-            if path.name != filename:
-                self.stats["duplicate_filenames"] += 1
-            return path
-
         self._record_state(purchase, State.RECEIPT_LOCATED)
         purchase.receipt_url = site.invoice_popover_url(purchase.order_number)
+        n = len(invoices)
+        walk = {"n": n, "saved": self._invoices_on_file(purchase), "lacking": [],
+                "moved": False, "refused": False, "reason": "",
+                "tokens": receipt_pdf.expected_tokens_for(purchase)}
+        every = list(range(1, n + 1))
+        held = {e["part"] for e in walk["saved"]}
+        recorded = max((_place(part)[1] for part in held), default=0)
+        # A menu that lists as many as were recorded is asked only for the
+        # places not on file. One that lists another number is asked for
+        # every place, and only what matches nothing on file is kept.
+        places = ([k for k in every if "%d of %d" % (k, n) not in held]
+                  if walk["saved"] and recorded == n else every)
+        self._take_invoices(page, purchase, invoices, places, walk)
+        if walk["moved"] and not walk["refused"] and len(places) < n:
+            self._take_invoices(page, purchase, invoices,
+                                [k for k in every if k not in places], walk)
+        return self._file_invoices(purchase, walk)
 
-        out_path = target(1)
-        _, first_url = invoices[0]
-        if not site.download_invoice_pdf(page, first_url, out_path):
-            self._record_state(purchase, State.FAILED,
-                               notes="Invoice PDF download failed")
+    def _invoices_on_file(self, purchase: Purchase) -> list:
+        """The order's invoices saved on an earlier run, as its record lists
+        them, so none is saved twice.
+
+        One kept counts after its file is deleted, unless --redownload asks
+        for missing files again. One put aside in Manual Review counts only
+        while its copy is there and passes the check _already_done gives a
+        copy put aside, as Target's do, since that copy is all there is of
+        it. An entry a hand edit or a damaged file left without a file or a
+        place names no invoice, and that invoice is fetched again."""
+        rec = self.progress.get(purchase.key) or {}
+        listed = rec.get("invoices")
+        again = getattr(self.args, "redownload", False)
+        out = []
+        for entry in listed if isinstance(listed, list) else ():
+            if not (isinstance(entry, dict) and isinstance(entry.get("file"), str)
+                    and entry["file"].strip() and _place(entry.get("part"))):
+                continue
+            path = Path(entry["file"])
+            if entry.get("kept", True):
+                on_file = not again or _there(path)
+            else:
+                on_file = _there(path) and receipt_pdf.validate_pdf(
+                    path, self.config["min_pdf_bytes"]).ok
+            if on_file:
+                out.append(dict(entry, kept=bool(entry.get("kept", True))))
+        return out
+
+    def _take_invoices(self, page, purchase: Purchase, invoices: list, places: list,
+                       walk: dict) -> None:
+        """Fetch the invoice at each of `places` in the menu to a staging
+        file, and put each one in place whose bytes match nothing on file.
+
+        What did not come goes in walk["lacking"], and the order is tried
+        again for it. A refusal before anything of the order has come stops
+        the walk, as the first invoice's refusal always did, since Amazon is
+        then refusing them all. An invoice whose bytes match one on file is
+        on file already, and walk["moved"] says when it came at a place other
+        than the one it was saved at."""
+        n = walk["n"]
+        for k in places:
+            _label, url = invoices[k - 1]
+            staged = self.paths.online / (".%s-%d.pdf.delivering" % (purchase.order_number, k))
+            try:
+                if not site.download_invoice_pdf(page, url, staged):
+                    if not walk["saved"]:
+                        walk["refused"] = True
+                        break
+                    log.warning("Invoice %d of %d did not come for %s", k, n, purchase.key)
+                    walk["lacking"].append("invoice %d of %d" % (k, n))
+                    continue
+                digest = _sha256(staged)
+                same = next((e for e in walk["saved"] if e.get("sha256") == digest), None)
+                if same is not None:
+                    walk["moved"] = walk["moved"] or same["part"] != "%d of %d" % (k, n)
+                    continue
+                result = receipt_pdf.validate_pdf(staged, self.config["min_pdf_bytes"],
+                                                  walk["tokens"])
+                if not self._place_invoice(staged, purchase, self._free_place(walk, k),
+                                           digest, result, walk):
+                    walk["lacking"].append("invoice %d of %d, which could not be put in place"
+                                           % (k, n))
+            except Exception as e:
+                log.warning("Invoice %d of %d of %s could not be saved: %s", k, n,
+                            purchase.key, e)
+                walk["lacking"].append("invoice %d of %d (%s)" % (k, n, type(e).__name__))
+            finally:
+                _discard(staged)
+
+    @staticmethod
+    def _free_place(walk: dict, k: int) -> tuple:
+        """The place an invoice that came at place k is saved under. Its own,
+        unless an invoice on file holds that place, as when the menu moved,
+        and then the first place no invoice holds."""
+        n = walk["n"]
+        held = {e["part"] for e in walk["saved"]}
+        if "%d of %d" % (k, n) not in held:
+            return k, n
+        free = next((i for i in range(1, n + 1) if "%d of %d" % (i, n) not in held), k)
+        return free, n
+
+    def _place_invoice(self, staged: Path, purchase: Purchase, part: tuple, digest: str,
+                       result, walk: dict) -> bool:
+        """Move a checked invoice into place and write it down at once, so a
+        run stopped before the next invoice does not save this one again.
+        One that passed its check goes beside the order's others, one that
+        did not goes to Manual Review, counted, never thrown away. False,
+        with nothing moved, when it could not be put in place, and the next
+        run fetches it again."""
+        kept = result.ok
+        folder = self.paths.online if kept else self.paths.manual_review
+        name = build_pdf_filename(purchase.purchase_date, purchase.summary,
+                                  purchase.document_type, part=part, record=purchase)
+        out = unique_path(folder, name, self.config["max_path_length"],
+                          distinguisher=purchase.order_number)
+        if out.name != name:
+            self.stats["duplicate_filenames"] += 1
+        try:
+            staged.replace(out)
+        except OSError as e:
+            log.warning("Invoice %d of %d of %s could not be put in place: %s",
+                        part[0], part[1], purchase.key, e)
+            if not kept:
+                print("  !! Invoice %d of %d did not pass its check (%s), and Manual Review "
+                      "would not take it. It is fetched again next run." % (part + (result.reason,)))
+            return False
+        if kept:
+            self.stats["new_files"].append(str(out))
+        else:
+            self.stats["validation_failures"] += 1
+            self.stats["manual_review"] += 1
+            walk["reason"] = walk["reason"] or result.reason
+            if walk["n"] > 1:
+                print("  !! Invoice %d of %d did not pass its check (%s). Put aside in Manual "
+                      "Review." % (part + (result.reason,)))
+        walk["saved"].append({"file": str(out), "part": "%d of %d" % part, "kept": kept,
+                              "sha256": digest, "size": result.size_bytes,
+                              "pages": result.page_count})
+        walk["saved"].sort(key=_place_order)
+        self._record_state(purchase, State.PDF_SAVED, extra={"invoices": walk["saved"]})
+        return True
+
+    def _file_invoices(self, purchase: Purchase, walk: dict) -> bool:
+        """What the walk came to. True when every invoice the menu lists is
+        on file, with at least one that passed its check, and the order is
+        then recorded as saved, its other invoices named in its notes as
+        they always were, since Rename and Review Names read them there."""
+        if walk["refused"]:
+            self._record_state(purchase, State.FAILED, notes="Invoice PDF download failed")
             self.stats["failed"] += 1
             print("  Invoice PDF download failed.")
             return False
-        if not self._finish_pdf(page, purchase, out_path, reprint=False):
+        if walk["lacking"]:
+            what = ", ".join(walk["lacking"])
+            # Written False, since a write merges into the record and a
+            # True an earlier write left would stay.
+            self._record_state(purchase, State.FAILED,
+                               notes="Not every invoice is saved yet (%s), tried again next run"
+                               % what,
+                               extra={"invoices": walk["saved"], "downloaded_ok": False})
+            self.stats["failed"] += 1
+            print("  !! Not every invoice of this order could be saved (%s). "
+                  "It is tried again next run." % what)
             return False
-
-        extra_names = []
-        tokens = receipt_pdf.expected_tokens_for(purchase)
-        for i, (label, url) in enumerate(invoices[1:], start=2):
-            extra = target(i)
-            if not site.download_invoice_pdf(page, url, extra):
-                log.warning("Additional invoice (%s) download failed for %s",
-                            label, purchase.key)
-                continue
-            result = receipt_pdf.validate_pdf(extra, self.config["min_pdf_bytes"], tokens)
-            if not result.ok:
-                quarantine = unique_path(self.paths.manual_review, extra.name,
-                                         self.config["max_path_length"])
-                extra.replace(quarantine)
-                print(f"  !! Additional invoice failed validation ({result.reason}); "
-                      f"moved to Manual Review.")
-                continue
-            extra_names.append(extra.name)
-            self.stats["new_files"].append(str(extra))
-        if extra_names:
-            purchase.receipt_count = 1 + len(extra_names)
-            self._record_state(purchase, State.PDF_VERIFIED,
-                               notes="Also saved: " + ", ".join(extra_names),
-                               extra={"receipt_count": purchase.receipt_count})
+        kept = [e for e in walk["saved"] if e["kept"]]
+        aside = [e for e in walk["saved"] if not e["kept"]]
+        if not kept:
+            # Every one put aside, as a lone invoice that failed its check
+            # always was, rows and all.
+            reason = walk["reason"] or "no invoice of the order passed its check"
+            purchase.pdf_path = aside[0]["file"]
+            purchase.pdf_filename = Path(aside[0]["file"]).name
+            self._record_state(purchase, State.NEEDS_MANUAL_REVIEW,
+                               notes=f"PDF validation failed: {reason}",
+                               extra={"invoices": walk["saved"]})
+            self._write_csv_rows(purchase, receipt_status="Validation Failed",
+                                 processing_status=State.NEEDS_MANUAL_REVIEW.value,
+                                 notes_extra=f"Validation: {reason}")
+            print(f"  !! Validation failed ({reason}); moved to Manual Review.")
+            return False
+        doc = kept[0]
+        purchase.pdf_path = doc["file"]
+        purchase.pdf_filename = Path(doc["file"]).name
+        purchase.receipt_count = len(kept)
+        notes = []
+        if kept[1:]:
+            notes.append("Also saved: " + ", ".join(Path(e["file"]).name for e in kept[1:]))
+        if aside:
+            notes.append("Put aside in Manual Review: "
+                         + ", ".join(Path(e["file"]).name for e in aside))
+        # Done for good, so it is not downloaded again even after its files
+        # are deleted.
+        self._record_state(purchase, State.PDF_VERIFIED, notes="; ".join(notes), extra={
+            "pdf_size": doc.get("size", ""), "pdf_pages": doc.get("pages", ""),
+            "downloaded_ok": True, "receipt_count": purchase.receipt_count,
+            "invoices": walk["saved"]})
         return True
 
     def _refuse_page(self, purchase: Purchase, why: str) -> bool:
@@ -924,8 +1131,10 @@ class App:
             rec.update(extra)
         not_shown.let_go_on_save(self, purchase, state, rec)
         # A receipt saved before keeps its record while a Download again
-        # saves no copy of its own (paperpull_core.saved_copy).
-        if saved_copy.holds(self, purchase.key, rec):
+        # saves no copy of its own (paperpull_core.saved_copy). The list of
+        # the invoices the attempt put on disk is written all the same, so
+        # none of them is saved twice.
+        if saved_copy.holds(self, purchase.key, rec, also=("invoices",)):
             return
         self.progress.update(purchase.key, rec)  # atomic save on every update
         self.discovery.update(purchase.key, {"state": state.value})

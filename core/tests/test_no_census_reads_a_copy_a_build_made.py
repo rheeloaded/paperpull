@@ -50,7 +50,8 @@ KNOWN = {"test_no_app_forces_a_press.sources",
          "test_no_app_moves_a_file_a_record_names._sources",
          "test_no_app_writes_through_a_link._sources",
          "test_no_path_a_record_names_is_asked_about_bare._sources",
-         "test_a_saved_document_stays_saved_while_its_ledger_is_open._app_sources"}
+         "test_a_saved_document_stays_saved_while_its_ledger_is_open._app_sources",
+         "test_every_file_of_a_set_is_on_file_before_its_record_is_done._sources"}
 
 
 def _walks_for_python(fn: ast.FunctionDef) -> bool:
