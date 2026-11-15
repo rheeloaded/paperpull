@@ -602,9 +602,11 @@ class ListStopped(Exception):
     """The order list did not come to its end, a year that still showed a
     next page at the most Discover reads of one year. The core knows a stop
     by this name and reports the run as stopped at a page that was not what
-    it expected (paperpull_core.run_reporting.stop_reason), so the panel
-    offers a support report, not a sign-in and Continue, which would read
-    the same pages and stop at the same place."""
+    it expected (paperpull_core.run_reporting.stop_reason). The panel then
+    offers a support report and no sign-in, beside Continue after a run that
+    downloads and Check again after Check what's there. Either reads the
+    list again first, so for a year past the limit it stops at the same
+    place, which the app's own words say when it stops."""
 
 
 def goto_orders(page) -> bool:
