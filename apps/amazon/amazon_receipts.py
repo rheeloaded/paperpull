@@ -617,6 +617,7 @@ class App:
             self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+        self._note_done_before(purchase)
         # ---- open details (retry once, per spec 22) ----
         for attempt in (1, 2):
             try:
@@ -841,6 +842,23 @@ class App:
                                 [k for k in every if k not in places], walk)
         return self._file_invoices(purchase, walk)
 
+    def _done_before(self, purchase: Purchase) -> bool:
+        """Whether the order was done before this run, as process_one found
+        it. Any write of the attempt after that can take the record and say
+        it is not, a Download again whose purchase names the saved file
+        (saved_copy._names_its_copy), so it is read once, as the attempt
+        begins (_note_done_before)."""
+        found = getattr(self, "_done_as_found", {})
+        if purchase.key in found:
+            return found[purchase.key]
+        return (self.progress.get(purchase.key) or {}).get("downloaded_ok") is True
+
+    def _note_done_before(self, purchase: Purchase) -> None:
+        if not hasattr(self, "_done_as_found"):
+            self._done_as_found = {}
+        self._done_as_found[purchase.key] = (
+            (self.progress.get(purchase.key) or {}).get("downloaded_ok") is True)
+
     def _invoices_on_file(self, purchase: Purchase) -> list:
         """The order's invoices saved on an earlier run, as its record lists
         them, so none is saved twice.
@@ -1017,16 +1035,18 @@ class App:
             "pdf_size": doc.get("size", ""), "pdf_pages": doc.get("pages", ""),
             "downloaded_ok": True, "receipt_count": purchase.receipt_count,
             "invoices": walk["saved"]})
-        # Every invoice kept is new to this run, those an earlier run saved
-        # included. Each is filed now, and new-this-run.txt is what the
-        # panel's Move after a run takes, so an order finished over two runs
-        # moved its last invoice alone and left the rest behind (a review of
-        # 2026-11-15).
+        # Every invoice kept is new to the run that completes the order,
+        # those an earlier run saved included. Each is filed now, and
+        # new-this-run.txt is what the panel's Move after a run takes, so an
+        # order finished over two runs moved its last invoice alone and left
+        # the rest behind (a review of 2026-11-15). A Download again of an
+        # order done before lists only what it fetched, as before.
         listed = set(self.stats["new_files"])
-        for e in kept:
-            if e["file"] not in listed:
-                listed.add(e["file"])
-                self.stats["new_files"].append(e["file"])
+        if not self._done_before(purchase):
+            for e in kept:
+                if e["file"] not in listed:
+                    listed.add(e["file"])
+                    self.stats["new_files"].append(e["file"])
         return True
 
     def _refuse_page(self, purchase: Purchase, why: str) -> bool:

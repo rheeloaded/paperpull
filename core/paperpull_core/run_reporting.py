@@ -262,7 +262,7 @@ def report_run_result(stats):
     from .storage import rows_left_waiting, unsaved_on_leaving
     unsaved = unsaved_on_leaving()
     result["stopped"] = int(stopped_early() or bool(unsaved))
-    # Rows a ledger another program had open would not take, kept beside it
+    # Rows a ledger would not take, open in another program most often, kept beside it
     # (storage.CsvFile), tried once more here. Every document they are for
     # is saved and recorded, so the next run downloads none of them again,
     # and the run is not one that stopped. The panel is told how many still
@@ -272,8 +272,9 @@ def report_run_result(stats):
     if waiting:
         result["rows_waiting"] = sum(n for _name, n, _kept in waiting)
     for name, n, kept in waiting:
-        print("\n%s to go into %s, which another program had open. %s kept beside it, "
-              "in %s, and %s into it by %s the next time this app runs with it closed. "
+        print("\n%s to go into %s, which could not be written, most often because another "
+              "program had it open. %s kept beside it, "
+              "in %s, and %s into it by %s the next time this app can write it. "
               "Nothing is lost."
               % ("1 row waits" if n == 1 else "%d rows wait" % n, name,
                  "It is" if n == 1 else "They are", kept, "goes" if n == 1 else "go",

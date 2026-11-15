@@ -377,6 +377,18 @@ def test_a_download_again_of_an_order_on_file_saves_no_second_copy(tmp_path, mon
     app, asked = run(tmp_path, monkeypatch, LINKS, redownload=True)
     assert asked == [] and set(on_disk(app)) == {name(1), name(2), name(3)}
     assert stored(app)["downloaded_ok"] is True
+    # Nothing fetched, so nothing is new. The run that completes an order
+    # lists every invoice of it, and a Download again over one done before
+    # listed all three (a review of 2026-11-15).
+    assert app.stats["new_files"] == []
+
+
+def test_a_download_again_that_fetches_a_deleted_invoice_lists_that_one(tmp_path, monkeypatch):
+    first, _ = run(tmp_path, monkeypatch, LINKS)
+    (first.paths.online / name(2)).unlink()
+    app, asked = run(tmp_path, monkeypatch, LINKS, redownload=True)
+    assert asked == [LINKS[1]]
+    assert [Path(p).name for p in app.stats["new_files"]] == [name(2)]
 
 
 # -- Rename -------------------------------------------------------------------------

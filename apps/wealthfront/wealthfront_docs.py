@@ -1032,6 +1032,10 @@ class App:
         left the form itself behind (a review of 2026-11-15)."""
         files = [doc.pdf_path] + [e.get("file") for e in (doc.invoices or ())
                                   if e.get("kept") is not False]
+        # Reached only for a form that was not done before this run, or one a
+        # Download again fetched whole, so the set is new either way, even
+        # when this run put none of it in place, a run after one whose
+        # record's write was refused.
         listed = set(self.stats["new_files"])
         for path in files:
             if isinstance(path, str) and path and path not in listed:

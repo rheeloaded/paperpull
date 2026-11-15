@@ -761,6 +761,12 @@ def test_a_redownload_saves_the_missing_invoice_and_not_the_first_again(
         ("No printable receipt available", "Review Needed"), ("Downloaded", "Completed"),
         ("Downloaded", "Completed")], index
     assert same_file(index[-1]["PDF Full Path"], item[0]), index
+    # An order done before lists only what the Download again fetched, as
+    # before. The run that completes an order lists every invoice of it,
+    # and a Download again over a done one listed those it never fetched
+    # (a review of 2026-11-15).
+    assert [n for n in new_this_run(tmp_path) if n.startswith(TIPPED.iso + " ")] == \
+        [item[0].name]
 
 
 def test_a_deleted_copy_of_an_invoice_put_aside_is_fetched_again_once(attached, tmp_path):

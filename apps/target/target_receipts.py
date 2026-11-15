@@ -816,6 +816,7 @@ class App:
             self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+        self._note_done_before(purchase)
         # The number the purchase was listed under. extract_details takes a
         # labeled number off the page in its place, so a wrong page would
         # otherwise be checked against its own number.
@@ -1495,16 +1496,18 @@ class App:
         else:
             print("  No printable receipt. The order's %d invoices are saved to the "
                   "Invoices folder." % len(kept))
-        # Every invoice kept is new to this run, those an earlier run saved
-        # included. Each is filed now, and new-this-run.txt is what the
-        # panel's Move after a run takes, so an order finished over two runs
-        # moved its last invoice alone and left the rest behind (a review of
-        # 2026-11-15).
+        # Every invoice kept is new to the run that completes the order,
+        # those an earlier run saved included. Each is filed now, and
+        # new-this-run.txt is what the panel's Move after a run takes, so an
+        # order finished over two runs moved its last invoice alone and left
+        # the rest behind (a review of 2026-11-15). A Download again of an
+        # order done before lists only what it fetched, as before.
         listed = set(self.stats["new_files"])
-        for e in kept:
-            if e["file"] not in listed:
-                listed.add(e["file"])
-                self.stats["new_files"].append(e["file"])
+        if not self._done_before(purchase):
+            for e in kept:
+                if e["file"] not in listed:
+                    listed.add(e["file"])
+                    self.stats["new_files"].append(e["file"])
         return True
 
     def _invoice_tokens(self, purchase: Purchase) -> list:
@@ -1517,6 +1520,23 @@ class App:
             if len(name) >= 6:
                 tokens.append(name[:24])
         return tokens
+
+    def _done_before(self, purchase: Purchase) -> bool:
+        """Whether the order was done before this run, as process_one found
+        it. Any write of the attempt after that can take the record and say
+        it is not, a Download again whose purchase names the saved file
+        (saved_copy._names_its_copy), so it is read once, as the attempt
+        begins (_note_done_before)."""
+        found = getattr(self, "_done_as_found", {})
+        if purchase.key in found:
+            return found[purchase.key]
+        return (self.progress.get(purchase.key) or {}).get("downloaded_ok") is True
+
+    def _note_done_before(self, purchase: Purchase) -> None:
+        if not hasattr(self, "_done_as_found"):
+            self._done_as_found = {}
+        self._done_as_found[purchase.key] = (
+            (self.progress.get(purchase.key) or {}).get("downloaded_ok") is True)
 
     def _invoices_on_file(self, purchase: Purchase) -> list:
         """The order's invoices already saved, so none is saved twice.

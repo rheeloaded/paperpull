@@ -1809,10 +1809,18 @@ class CsvFile:
         failed after the file opened, with where it began."""
         self._ensure_header()
         held = self._held() if self.once else None
+        cut = self._ends_mid_line()
         f = self._open_to_append(tries)
         began = None
         try:
             with f:
+                if cut:
+                    # A write cut short left its last row with no line break,
+                    # and the next row went onto the same line, both lost (a
+                    # review of 2026-11-15). That row is read as whole or not
+                    # by _not_written either way.
+                    f.write("\r\n")
+                    f.flush()
                 began = os.fstat(f.fileno()).st_size
                 if entries:
                     # Where they begin is kept with them until they are taken
@@ -1843,6 +1851,19 @@ class CsvFile:
         if entries:
             self._forget_kept()
 
+    def _ends_mid_line(self) -> bool:
+        """Whether the file's last row has no line break after it, as a write
+        cut short leaves it. False for a file that cannot be read."""
+        try:
+            with shared_folder.open_to_read(self.path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                if f.tell() == 0:
+                    return False
+                f.seek(-1, os.SEEK_END)
+                return f.read(1) not in (b"\n", b"\r")
+        except OSError:
+            return False
+
     def _write_waiting(self) -> list:
         """Write the rows kept beside the file into it, with one try and no
         wait, and give back the ones that still wait."""
@@ -1857,6 +1878,13 @@ class CsvFile:
         try:
             self._write_in(entries, [], 1)
         except OSError:
+            # A write that broke after some went in leaves the place it began
+            # beside them, and only the rest still wait. All of them were
+            # given back, and a rewrite of what read_all read wrote those
+            # already in twice (a review of 2026-11-15).
+            again = self._kept()
+            if again and not again.get("unread"):
+                return self._not_written(again)
             return entries
         return []
 
@@ -1898,9 +1926,9 @@ class CsvFile:
                 backup_file(path, self.backups_dir)
             except OSError:
                 pass
-        data = {"note": "Rows PaperPull could not write into %s while another program had it "
-                        "open. They go into it by themselves the next time the app runs with "
-                        "it closed. Leave this file where it is." % self.path.name,
+        data = {"note": "Rows PaperPull could not write into %s, most often because another "
+                        "program had it open. They go into it by themselves the next time the "
+                        "app can write it. Leave this file where it is." % self.path.name,
                 "ledger": self.path.name, "rows": entries}
         if writing_from is not None:
             data["writing_from"] = writing_from
@@ -1928,8 +1956,10 @@ class CsvFile:
             with shared_folder.open_to_read(self.path, "rb") as f:
                 f.seek(at)
                 tail = f.read()
-            for line, entry in zip(csv.reader(io.StringIO(tail.decode("utf-8"), newline="")),
-                                   entries):
+            # A write cut short can end in half a character, and a strict
+            # read of it took every row before for one not yet written.
+            for line, entry in zip(csv.reader(io.StringIO(tail.decode("utf-8", "replace"),
+                                                          newline="")), entries):
                 if [read_stored(v) for v in line] != [read_stored(entry["row"].get(c, ""))
                                                       for c in self.columns]:
                     break
@@ -1984,6 +2014,15 @@ class CsvFile:
         after."""
         if backup and self.backups_dir is not None:
             backup_file(self.path, self.backups_dir)
+        # The kept rows the file held already, from the place a write of them
+        # began, read before the file is written over. A command read them
+        # in the file and meant them in `rows`, and they went in a second
+        # time after (a review of 2026-11-15).
+        kept = self._kept()
+        already = set()
+        if kept and kept["rows"] and kept["from"] is not None:
+            still = {e["id"] for e in self._not_written(kept)}
+            already = {e["id"] for e in kept["rows"] if e["id"] not in still}
         import io
         buf = io.StringIO()
         w = csv.DictWriter(buf, fieldnames=self.columns, extrasaction="ignore",
@@ -1994,10 +2033,9 @@ class CsvFile:
         # utf-8-sig: prepend BOM manually since we write text atomically
         atomic_write_text(self.path, "﻿" + buf.getvalue())
         read, self._read_waiting = self._read_waiting, set()
-        kept = self._kept()
         if not kept or not kept["rows"]:
             return
-        left = [e for e in kept["rows"] if e["id"] not in read]
+        left = [e for e in kept["rows"] if e["id"] not in read and e["id"] not in already]
         try:
             if not left:
                 self._forget_kept()

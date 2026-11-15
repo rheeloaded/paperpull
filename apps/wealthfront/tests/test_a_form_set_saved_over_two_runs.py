@@ -329,6 +329,9 @@ def test_a_file_the_record_lists_stays_when_the_record_write_is_refused(tmp_path
     rec = stored(app, doc)
     assert rec["downloaded_ok"] is True and tab.asked == []
     assert all(Path(e["file"]).is_file() for e in rec["invoices"]), rec["invoices"]
+    # The run that completes the form lists it whole, though it fetched
+    # nothing, so the Move after it takes the form.
+    assert sorted(Path(p).name for p in app.stats["new_files"]) == sorted(saved(app))
     assert saved(app) == {FIRST: FILES[link(1)][1],
                           "2031-12-31 Tax Document (2 of 3).xls": FILES[link(2)][1],
                           "2031-12-31 Tax Document (3 of 3).pdf": FILES[link(3)][1]}

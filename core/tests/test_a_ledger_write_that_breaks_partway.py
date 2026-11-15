@@ -21,7 +21,9 @@ COLUMNS = ["Order", "Item"]
 
 
 def items(path):
-    with open(path, encoding="utf-8-sig", newline="") as f:
+    # A row cut in half a character is left as it was cut, so it is read
+    # with that character replaced.
+    with open(path, encoding="utf-8-sig", errors="replace", newline="") as f:
         return [r["Item"] for r in csv.DictReader(f)]
 
 
@@ -69,6 +71,105 @@ def test_a_write_that_breaks_before_any_row_writes_each_once(tmp_path, monkeypat
     assert items(ledger.path) == ["Garden Hose"]
     ledger.append_rows([])
     assert items(ledger.path) == ["Garden Hose", "Rake", "Paint"]
+
+
+class CutShort:
+    """A file opened to append whose write of the row naming `on` puts in
+    the first `keep` bytes of it and then fails, as a disk that filled can
+    cut a buffered write at any byte."""
+
+    def __init__(self, f, on, keep):
+        self.f, self.on, self.keep = f, on, keep
+
+    def write(self, text):
+        if self.on in text:
+            self.f.flush()
+            self.f.buffer.write(text.encode("utf-8")[:self.keep(text)])
+            self.f.buffer.flush()
+            raise OSError(28, "No space left on device")
+        return self.f.write(text)
+
+    def flush(self):
+        self.f.flush()
+
+    def fileno(self):
+        return self.f.fileno()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.f.close()
+
+
+def cutting(monkeypatch, on, keep):
+    real = shared_folder.open_to_write
+    cut = []
+
+    def open_to_write(path, mode="w", *a, **k):
+        f = real(path, mode, *a, **k)
+        if mode == "a" and not cut:
+            cut.append(path)
+            return CutShort(f, on, keep)
+        return f
+
+    monkeypatch.setattr(storage.shared_folder, "open_to_write", open_to_write)
+    return cut
+
+
+def test_a_row_cut_before_its_line_break_keeps_the_next_row_apart(tmp_path, monkeypatch):
+    """The row went in whole but for its line break, and the next append
+    put a row on the same line, both lost (a review of 2026-11-15)."""
+    ledger = storage.CsvFile(tmp_path / "Testco Order History.csv", COLUMNS)
+    ledger.append_rows([row("Garden Hose")])
+    cut = cutting(monkeypatch, "Paint", lambda text: len(text.rstrip("\r\n").encode("utf-8")))
+    ledger.append_rows([row("Rake"), row("Paint"), row("Shovel")])
+    assert cut
+    ledger.append_rows([row("Hoe")])
+    assert items(ledger.path) == ["Garden Hose", "Rake", "Paint", "Shovel", "Hoe"]
+
+
+def test_a_row_cut_in_half_a_character_writes_the_rows_before_it_once(tmp_path, monkeypatch):
+    """A cut in the middle of a character made the whole place unreadable,
+    and every row kept was written again, those already in too."""
+    ledger = storage.CsvFile(tmp_path / "Testco Order History.csv", COLUMNS)
+    ledger.append_rows([row("Garden Hose")])
+    cutting(monkeypatch, "Paint", lambda text: len(text.split("ü")[0].encode("utf-8")) + 1)
+    ledger.append_rows([row("Rake"), row("Paint für Holz"), row("Shovel")])
+    ledger.append_rows([row("Hoe")])
+    got = items(ledger.path)
+    assert got.count("Rake") == 1, got
+    assert got[-3:] == ["Paint für Holz", "Shovel", "Hoe"], got
+
+
+def test_a_look_after_a_broken_write_gives_each_row_once(tmp_path, monkeypatch):
+    """read_all writes the kept rows in first. A write of them that broke
+    after some went in gave every kept row back as still waiting, so a
+    command that rewrites what it read, Rename or Meijer's, wrote those
+    already in twice (a review of 2026-11-15)."""
+    ledger = storage.CsvFile(tmp_path / "Testco Order History.csv", COLUMNS)
+    ledger.append_rows([row("Garden Hose")])
+    real, _refused = refusing_appends(monkeypatch, OSError(28, "No space left on device"))
+    ledger.append_rows([row("Rake"), row("Paint"), row("Shovel")])
+    monkeypatch.setattr(storage.shared_folder, "open_to_write", real)
+    assert items(ledger.path) == ["Garden Hose"]
+    real_writerow = csv.DictWriter.writerow
+    broke = []
+
+    def writerow(self, stored):
+        if stored.get("Item") == "Shovel" and not broke:
+            broke.append(True)
+            raise OSError(28, "No space left on device")
+        return real_writerow(self, stored)
+
+    monkeypatch.setattr(csv.DictWriter, "writerow", writerow)
+    got = ledger.read_all()
+    assert broke
+    assert [r["Item"] for r in got] == ["Garden Hose", "Rake", "Paint", "Shovel"]
+    monkeypatch.setattr(csv.DictWriter, "writerow", real_writerow)
+    ledger.rewrite(got, backup=False)
+    assert items(ledger.path) == ["Garden Hose", "Rake", "Paint", "Shovel"]
+    assert not ledger.waiting_path.exists()
 
 
 def refusing_appends(monkeypatch, error):

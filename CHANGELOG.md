@@ -79,8 +79,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   spreadsheet as long as any other write waits, once in a run for each
   file, and keeps the rows it could not write beside the index. They go in
   by themselves, each once and in order, the next time the app writes or
-  reads that index or as the run ends, and a write that breaks partway,
-  on a full disk say, writes none of them twice. The run and the panel say
+  reads that index or as the run ends, and a write that breaks partway
+  writes none of them twice. The run and the panel say
   how many rows wait and that every document is saved. On a Mac, Linux and
   PaperPull Server an index the run may not write is said to be one it
   cannot write, with no wait. A document an earlier version left this way

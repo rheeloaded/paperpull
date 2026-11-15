@@ -247,4 +247,4 @@ def test_rows_waiting_for_a_ledger_need_a_look_and_never_read_as_a_stop():
     assert run_result.parse(line(new_files=5), MARK)["attention"] is False
     assert run_result.parse(line(rows_waiting=-1), MARK) is None
     assert run_result.parse(line(rows_waiting="5"), MARK) is None
-    assert "waiting to go into a spreadsheet that was open" in app.HTML
+    assert "waiting to go into a spreadsheet PaperPull could not write" in app.HTML
