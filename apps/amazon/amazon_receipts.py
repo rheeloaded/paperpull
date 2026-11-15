@@ -20,6 +20,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 from __future__ import annotations
 
 from paperpull_core import shared_folder
+from paperpull_core import intake
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
@@ -31,7 +32,6 @@ from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING
                                           after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
-import hashlib
 import logging
 import random
 import re
@@ -86,13 +86,12 @@ def _discard(path) -> None:
 
 
 def _sha256(path) -> str:
-    """The SHA-256 of a file this run just downloaded, read a block at a
-    time."""
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    """The SHA-256 of a file this run just downloaded, and "" for one past
+    the largest a document may be, which matches nothing. Read through
+    intake.plain_sha256, a plain file only, so on PaperPull Server a pipe
+    put at the staging name after the download cannot hold the run (a
+    release review of 2026-11-15)."""
+    return intake.plain_sha256(path) or ""
 
 
 def ask(prompt: str) -> str:
@@ -911,7 +910,8 @@ class App:
                     walk["lacking"].append("invoice %d of %d" % (k, n))
                     continue
                 digest = _sha256(staged)
-                same = next((e for e in walk["saved"] if e.get("sha256") == digest), None)
+                same = next((e for e in walk["saved"]
+                             if digest and e.get("sha256") == digest), None)
                 if same is not None:
                     walk["moved"] = walk["moved"] or same["part"] != "%d of %d" % (k, n)
                     continue
@@ -957,7 +957,10 @@ class App:
         if out.name != name:
             self.stats["duplicate_filenames"] += 1
         try:
-            staged.replace(out)
+            # On PaperPull Server a link or a second name put at the staging
+            # name is never carried into place (a release review of
+            # 2026-11-15), and the invoice is fetched again next run.
+            shared_folder.move(staged, out)
         except OSError as e:
             log.warning("Invoice %d of %d of %s could not be put in place: %s",
                         part[0], part[1], purchase.key, failure.error_kind(e))

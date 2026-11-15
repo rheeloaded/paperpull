@@ -301,15 +301,16 @@ def test_an_invoice_that_cannot_be_put_aside_is_not_left_where_it_came(tmp_path,
                                                                          capsys):
     """Moving it to Manual Review raised. The run goes on, says it could not
     put the invoice aside rather than that it did, keeps no copy of it under
-    a name, and the next run fetches it again."""
-    real = Path.replace
+    a name, and the next run fetches it again. The refusal is stood in for
+    at shared_folder.move, which puts every invoice in place."""
+    real = app_mod.shared_folder.move
 
-    def replace(self, target):
+    def move(src, target):
         if Path(target).parent.name == "Manual Review":
             raise PermissionError(13, "Access is denied", str(target))
-        return real(self, target)
+        return real(src, target)
 
-    monkeypatch.setattr(Path, "replace", replace)
+    monkeypatch.setattr(app_mod.shared_folder, "move", move)
     app, asked = run(tmp_path, monkeypatch, LINKS, {LINKS[1]: ANOTHERS})
     said = capsys.readouterr().out
     rec = stored(app)
@@ -319,7 +320,7 @@ def test_an_invoice_that_cannot_be_put_aside_is_not_left_where_it_came(tmp_path,
     assert "invoice 2 of 3" in rec["notes"]
     assert on_disk(app) == {name(1): BODIES[LINKS[0]], name(3): BODIES[LINKS[2]]}
     assert in_review(app) == {}
-    monkeypatch.setattr(Path, "replace", real)
+    monkeypatch.setattr(app_mod.shared_folder, "move", real)
     app, asked = run(tmp_path, monkeypatch, LINKS)
     assert asked == [LINKS[1]]
     assert on_disk(app) == {name(k): BODIES[LINKS[k - 1]] for k in (1, 2, 3)}
@@ -389,6 +390,30 @@ def test_a_download_again_that_fetches_a_deleted_invoice_lists_that_one(tmp_path
     app, asked = run(tmp_path, monkeypatch, LINKS, redownload=True)
     assert asked == [LINKS[1]]
     assert [Path(p).name for p in app.stats["new_files"]] == [name(2)]
+
+
+def test_a_staging_file_the_move_refuses_is_asked_for_again(tmp_path, monkeypatch):
+    """On PaperPull Server shared_folder.move refuses a link or a second
+    name put at the staging name after the download, so it is never carried
+    into place. The invoice is then not on file, and the next run asks for
+    it again. A plain replace carried it into place (a release review of
+    2026-11-15)."""
+    real = app_mod.shared_folder.move
+
+    def refusing(src, dst):
+        if Path(src).name.endswith("-2.pdf.delivering"):
+            raise OSError(22, "not a plain file of its own", str(src))
+        return real(src, dst)
+
+    monkeypatch.setattr(app_mod.shared_folder, "move", refusing)
+    first, _ = run(tmp_path, monkeypatch, LINKS)
+    assert name(2) not in on_disk(first)
+    assert stored(first)["downloaded_ok"] is False
+    assert not list(first.paths.online.glob("*.delivering")), "the staging file is left behind"
+    monkeypatch.setattr(app_mod.shared_folder, "move", real)
+    app, asked = run(tmp_path, monkeypatch, LINKS)
+    assert asked == [LINKS[1]] and on_disk(app)[name(2)] == BODIES[LINKS[1]]
+    assert stored(app)["downloaded_ok"] is True
 
 
 # -- Rename -------------------------------------------------------------------------
