@@ -1752,7 +1752,8 @@ def _fits_whole(folder: Path, name: str, token: str, max_path_length: int) -> bo
     max_path_length whole in `folder`, the one the row's file is filed in
     under that name. Measured as a download measures the room a name has
     (storage.path_length), the whole path on Windows, so Rename and a
-    download agree on what fits."""
+    download agree on what fits. NAME_BYTES never cuts such an ending, since
+    a cut by bytes takes the stem before it."""
     stem, ext = os.path.splitext(name)
     return (path_length(folder) + name_length("/%s %s (99)%s" % (stem, token, ext))
             <= max_path_length)

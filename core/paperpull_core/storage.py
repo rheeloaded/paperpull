@@ -938,6 +938,13 @@ def sanitize_component(name: str, max_len: int = 120) -> str:
 # How long a name and a path are
 # ---------------------------------------------------------------------------
 
+# The most bytes of UTF-8 a file's name may take. ext4 and btrfs, the file
+# systems PaperPull Server runs on, and APFS on a Mac hold a name in 255
+# bytes, and NTFS in 255 UTF-16 units, which a name of 255 bytes never
+# passes. The 120 characters sanitize_component keeps are 360 bytes in
+# Japanese, and such a name could not be saved on the Server at all.
+NAME_BYTES = 255
+
 # Whether max_path_length is measured as Windows measures a path, the whole
 # of it from the drive, in UTF-16 units. Windows with long paths turned off
 # refuses a path past 260 of them. Every install's output_dir is ".", so a
@@ -945,6 +952,11 @@ def sanitize_component(name: str, max_len: int = 120) -> str:
 # longer in full. A Mac and PaperPull Server have no such limit, and there a
 # path is measured as written, as it always was, so no name changes there.
 _WINDOWS_MEASURE = sys.platform == "win32"
+
+# The part "(2 of 3)" at the end of a name, which a cut keeps, since Rename
+# reads it only from there (renaming._part_of), and a file that lost it is
+# renamed as though it were the whole order.
+_PART_AT_END = re.compile(r" ?\(\d+ of \d+\)$", re.IGNORECASE)
 
 
 def name_length(text: str) -> int:
@@ -971,6 +983,12 @@ def path_length(path) -> int:
     return name_length(text)
 
 
+def _size(text: str) -> int:
+    """A name's bytes in UTF-8. Half of a character counts the three bytes
+    a file system would be handed for it rather than stopping the count."""
+    return len(text.encode("utf-8", "surrogatepass"))
+
+
 def _cut(text: str, most: int, length) -> str:
     """The longest start of `text` that `length` counts at most `most`,
     made of whole characters."""
@@ -982,6 +1000,20 @@ def _cut(text: str, most: int, length) -> str:
         if used > most:
             return text[:i]
     return text
+
+
+def _in_bytes(text: str, most: int) -> str:
+    """`text` cut to `most` bytes of UTF-8 between two characters, never
+    ending in a space or a dot, which Windows takes off. A part "(2 of 3)"
+    at its end stays, the text before it giving way."""
+    if _size(text) <= most:
+        return text
+    part = _PART_AT_END.search(text)
+    if part and _size(part.group(0)) < most:
+        head = _cut(text[:part.start()], most - _size(part.group(0)), _size).rstrip(" .")
+        if head:
+            return head + part.group(0)
+    return _cut(text, most, _size).rstrip(" .")
 
 
 # ---------------------------------------------------------------------------
@@ -1042,8 +1074,9 @@ def file_name_of(parts: List[str]) -> FileName:
     pattern can start with a field whose value does, American Family's
     masked account "...1234" say, and a Mac, Linux and PaperPull Server's
     share hide a file so named, and the panel's zip of what was set aside
-    leaves it out. The File names page, a download and Rename all build a
-    name here, so they give the same one."""
+    leaves it out. And the name fits NAME_BYTES, its part "(2 of 3)" kept.
+    The File names page, a download and Rename all build a name here, so
+    they give the same one."""
     *folders, name = parts or [""]
     kept = [f for f in (_folder_name(text) for text in folders) if f]
     name = sanitize_component(name)
@@ -1053,7 +1086,7 @@ def file_name_of(parts: List[str]) -> FileName:
         # again, since what is left can be a name Windows keeps for a
         # device, CON say.
         name = sanitize_component(name.lstrip(" ."))
-    return FileName(name + ".pdf", "/".join(kept))
+    return FileName(_in_bytes(name, NAME_BYTES - len(".pdf")) + ".pdf", "/".join(kept))
 
 
 def _put_aside_in(directory: Path) -> bool:
@@ -1334,7 +1367,13 @@ def fitted_name(directory: Path, filename: str, max_path_length: int = 240) -> s
 def _free_name(directory: Path, filename: str, max_path_length: int,
                existing: set, distinguisher: str) -> str:
     """The name unique_path gives *filename* in *directory*, where `existing`
-    is every name held there, in lower case."""
+    is every name held there, in lower case.
+
+    It fits two limits. The room the path leaves under max_path_length,
+    measured as the system measures it (path_length), takes off the end of
+    the name, as it always did. And NAME_BYTES takes off the end of the
+    name's own stem, a part "(2 of 3)" there kept, with what tells it apart
+    and a " (2)" after it whole, so such an ending still reads as itself."""
     stem, ext = os.path.splitext(filename)
 
     # An empty stem used to return the DIRECTORY itself, because "dir / ''" is
@@ -1361,9 +1400,20 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
         keep = room - name_length(ext) - name_length(suffix)
         return (_cut(base, keep, name_length) or base[:1]).rstrip(" .") + suffix + ext
 
-    candidate = stem + ext
-    if name_length(candidate) > room:
-        candidate = shorten(stem, "")
+    def named(told: str, suffix: str = "") -> str:
+        """The stem with `told` and `suffix` after it and the ending, cut
+        to fit both limits."""
+        most = NAME_BYTES - _size(suffix + ext)
+        base = _in_bytes(stem, most - _size(told)) + told
+        if _size(base) > most:
+            # What tells it apart is too long to be kept whole.
+            base = _in_bytes(stem + told, most)
+        candidate = base + suffix + ext
+        if name_length(candidate) > room:
+            candidate = shorten(base, suffix)
+        return candidate
+
+    candidate = named("")
 
     # What tells this one from the other, when the caller knows. It is
     # sanitized like any other part of a name, and it is not used when the
@@ -1373,22 +1423,17 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
     # distinguisher would tell two files apart by telling you nothing.
     raw_token = str(distinguisher or "").strip()
     token = sanitize_component(raw_token).strip(" .") if raw_token else ""
+    told = ""
     if candidate.lower() in existing and token and token.lower() not in stem.lower():
-        with_token = "%s %s" % (stem, token)
-        candidate = with_token + ext
-        if name_length(candidate) > room:
-            candidate = shorten(with_token, "")
+        candidate = named(" " + token)
         if candidate.lower() not in existing:
             return candidate
-        stem = with_token
+        told = " " + token
 
     n = 1
     while candidate.lower() in existing:
         n += 1
-        suffix = " (%d)" % n
-        candidate = stem + suffix + ext
-        if name_length(candidate) > room:
-            candidate = shorten(stem, suffix)
+        candidate = named(told, " (%d)" % n)
     return candidate
 
 
