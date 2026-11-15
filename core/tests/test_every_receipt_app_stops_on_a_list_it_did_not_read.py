@@ -327,7 +327,7 @@ def test_the_apps_that_keep_a_mark_are_checked_for_their_ways_out():
     """The second check passes on an app with no mark to stop on, so it has
     to be seen reaching the apps that keep one."""
     with_a_mark = {p.parent.name for p in ENTRIES if stop_flags(methods_of(p))[1]}
-    assert {"apple", "bestbuy", "homedepot", "kroger", "uber"} <= with_a_mark, with_a_mark
+    assert {"amazon", "apple", "bestbuy", "homedepot", "kroger", "uber"} <= with_a_mark, with_a_mark
 
 
 def test_each_failure_named_as_not_the_list_is_still_there():

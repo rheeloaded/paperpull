@@ -15,11 +15,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   read sixty pages of one year's list at most, ten orders a page, and then
   went on to the year before with no word, the rest of that year never
   looked for and the list noted as read whole, so the run finished clean
-  with those orders missed. It now reads up to 500 pages of a year, and a
-  year that still shows a next page there stops the run with a failure file,
-  keeping what it read, rather than call the list whole. A run with a start
-  date goes on when the last page it read holds only orders older than that
-  date, since every order in its scope is already read.
+  with those orders missed. It now reads up to 500 pages of a year. A year
+  that still shows a next page there is not called whole. The run reads on
+  through the older years, does what it was run to do with the orders it
+  did read, Run All and Get new documents downloading every one, and then
+  stops with a failure file rather than finish clean. The next run reads the
+  list again, takes anything new and stops at the same place. A support
+  report is still written. A run with a start date goes on when the last
+  page it read holds only orders older than that date, since every order in
+  its scope is already read.
 - **PayPal reads a business statement list whose fields each come held in
   an object (#224).** A tester's PayPal answered with every field of a
   report as an object holding only its value. The period was read only as

@@ -600,10 +600,12 @@ CHALLENGE_WAIT_MS = 15000
 
 class ListStopped(Exception):
     """The order list did not come to its end, a year that still showed a
-    next page at the most Discover reads of one year. The core knows a stop
-    by this name and reports the run as stopped at a page that was not what
-    it expected (paperpull_core.run_reporting.stop_reason). The panel then
-    offers a support report and no sign-in, beside Continue after a run that
+    next page at the most Discover reads of one year. A run downloads what
+    it did read first, then leaves with this as the cause (App
+    _stop_if_cut_short). The core knows a stop by this name and reports the
+    run as stopped at a page that was not what it expected
+    (paperpull_core.run_reporting.stop_reason). The panel then offers a
+    support report and no sign-in, beside Continue after a run that
     downloads and Check again after Check what's there. Either reads the
     list again first, so for a year past the limit it stops at the same
     place, which the app's own words say when it stops."""
