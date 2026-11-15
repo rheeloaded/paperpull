@@ -575,3 +575,16 @@ def test_an_archive_in_manual_review_left_as_a_link_is_never_taken_for_the_same_
     kept = receipt_pdf._set_aside(path, review)
     assert kept == review / "1099 (2).zip" and kept.read_bytes() == data
     assert server.canary.read_bytes() == data and os.stat(server.canary).st_nlink == 2
+
+
+@pytest.mark.parametrize("edition", ["", "1"])
+def test_a_copy_into_a_folder_not_made_yet_makes_it(place, monkeypatch, tmp_path, edition):
+    """As Playwright's save_as did. An AAFMAA statement went to a folder no
+    earlier step had made, and the copy that took save_as's place failed."""
+    monkeypatch.setenv("PAPERPULL_SERVER", edition)
+    src = tmp_path / "artifact"
+    src.write_bytes(b"%PDF-1.4 copied")
+    out = place.install / ("Statements-%s" % (edition or "desktop")) / "2026" / "statement.pdf"
+    shared_folder.copy_whole(src, out)
+    assert out.read_bytes() == b"%PDF-1.4 copied"
+    assert sorted(p.name for p in out.parent.iterdir()) == ["statement.pdf"]

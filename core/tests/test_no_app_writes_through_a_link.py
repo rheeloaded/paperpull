@@ -24,7 +24,10 @@ from collections import Counter
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SKIP = {"tests", ".venv", "venv", "__pycache__", "node_modules"}
+# Never into a virtual environment a checkout keeps beside an app's code,
+# nor a copy a build or an install made (test_no_census_reads_a_copy_a_build_made).
+SKIP = {"tests", ".venv", "venv", "__pycache__", "node_modules", "build", "dist",
+        "site-packages"}
 APPROVED = ("shared_folder.", "_shared_folder.")
 
 # The core's plain writes, by file, function and call, each as many times

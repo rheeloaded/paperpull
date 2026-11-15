@@ -231,7 +231,6 @@ def test_the_bundled_chromium_opens_the_address_after_the_end_of_its_switches(
     its tab, and a switch given there is a tab too, not a switch it obeys.
     Measured first by hand on 2026-11-14."""
     import json
-    import urllib.request
     sync_api = pytest.importorskip("playwright.sync_api")
     with sync_api.sync_playwright() as pw:
         exe = pw.chromium.executable_path
@@ -252,7 +251,7 @@ def test_the_bundled_chromium_opens_the_address_after_the_end_of_its_switches(
             return str(s.getsockname()[1])
 
     def tabs(port):
-        with urllib.request.urlopen("http://127.0.0.1:%s/json/list" % port, timeout=5) as r:
+        with browser.open_local("http://127.0.0.1:%s/json/list" % port, timeout=5) as r:
             return [t["url"] for t in json.load(r) if t.get("type") == "page"]
 
     try:
@@ -274,7 +273,7 @@ def test_the_bundled_chromium_opens_the_address_after_the_end_of_its_switches(
         time.sleep(1)
         assert any("remote-debugging-port" in t for t in tabs(port)), tabs(port)
         with pytest.raises(OSError):
-            urllib.request.urlopen("http://127.0.0.1:%s/json/version" % other, timeout=2)
+            browser.open_local("http://127.0.0.1:%s/json/version" % other, timeout=2)
     finally:
         for proc in started:
             proc.kill()

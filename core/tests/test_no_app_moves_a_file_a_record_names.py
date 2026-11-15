@@ -20,7 +20,10 @@ import os
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-SKIP = {"tests", ".venv", "venv", "__pycache__", "node_modules"}
+# Never into a virtual environment a checkout keeps beside an app's code,
+# nor a copy a build or an install made (test_no_census_reads_a_copy_a_build_made).
+SKIP = {"tests", ".venv", "venv", "__pycache__", "node_modules", "build", "dist",
+        "site-packages"}
 RECORD_KEYS = {"pdf_path", "file"}
 # Path.replace and Path.rename take one argument, where str.replace takes two.
 MOVES = {"replace": 1, "rename": 1, "unlink": None}

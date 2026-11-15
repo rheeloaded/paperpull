@@ -188,7 +188,7 @@ def trim_blank_tail(path) -> int:
     # writing beside the PDF, which is left as it was. A link someone left
     # under such a name goes as a link, never what it leads to.
     import glob
-    for left in glob.glob(glob.escape(path + TRIMMING) + ".*"):
+    for left in sorted(glob.glob(glob.escape(path + TRIMMING) + ".*")):
         try:
             os.remove(left)
         except OSError:

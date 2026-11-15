@@ -303,6 +303,8 @@ def copy_whole(src, path) -> None:
     path = Path(path)
     if on_server():
         hold(path.parent)
+    # Made when it is not there yet, as Playwright's save_as made it.
+    path.parent.mkdir(parents=True, exist_ok=True)
     # Its name does not grow with the document's, so a path that fits
     # Windows' 259 characters as the document still fits as the copy.
     tmp = path.with_name(".%s.part" % os.urandom(4).hex())
