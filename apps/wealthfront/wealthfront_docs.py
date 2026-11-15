@@ -663,10 +663,14 @@ class App:
         """
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
+        # A form whose set of files an earlier run saved in part is taken up
+        # where it was left, and read before any name is planned, since its
+        # first file has the name this run would plan.
+        so_far = self._form_set_so_far(doc)
         # Planned with no folder made, since a form with nothing to download
         # left the folders a naming pattern names empty.
         out_path = unique_path(folder, filename, self.config["max_path_length"], make=False)
-        if out_path.name != filename:
+        if out_path.name != filename and so_far is None:
             self.stats["duplicate_filenames"] += 1
 
         def saving_to() -> Path:
@@ -681,6 +685,7 @@ class App:
         # Tax rows carry no href: their "Download" button opens a dialog that
         # lists the actual PDF link(s). Resolve those now.
         extra_hrefs: List[str] = []
+        links: List[str] = []
         if not doc.href and doc.category == doc_types.TAX:
             if page.locator(site.FALLBACK["doc_row"]).count() == 0:
                 site.goto_documents(page)
@@ -694,6 +699,9 @@ class App:
                 extra_hrefs = links[1:]
                 log.info("Tax dialog gave %d file link(s) for %s / %s",
                          len(links), doc.account, doc.title)
+        if so_far is not None:
+            self._take_up_form_set(page, doc, so_far, links)
+            return
 
         saved = False
         # --- preferred: direct document URL -------------------------------
@@ -814,16 +822,99 @@ class App:
             print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
             return
 
+        doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
+        self.stats["new_files"].append(str(out_path))
         # A form set can include corrected versions (idx=1, ...). Save those
-        # alongside the primary file so nothing is silently dropped.
-        extra_paths: List[Path] = []
-        set_aside = 0
-        for n, href in enumerate(extra_hrefs, start=2):
+        # alongside the primary file so nothing is silently dropped. The
+        # first is written into the record at once with the link it came
+        # from, so a run stopped before the others, or one that does not
+        # get them all, leaves the next run what it needs to fetch only
+        # the rest (_form_set_so_far).
+        if extra_hrefs:
+            doc.invoices = [{"file": str(out_path), "kept": True, "link": doc.href,
+                             "part": "1 of %d" % len(links)}]
+            doc.set_aside = []
+            self._record(doc, State.PDF_SAVED)
+            lacking = self._save_companions(page, doc, out_path, links, set())
+            if not self._file_form_set(doc, links, lacking):
+                return
+        self._completed(doc, out_path)
+
+    def _form_set_so_far(self, doc: Document) -> Optional[dict]:
+        """What an earlier run saved of this form's set of files, when it
+        saved the first and not every other, or None.
+
+        A file of the set that did not come was passed over, and the form
+        was marked done for good, so the next run never asked for it. A run
+        that did ask through the same code would have saved the first file
+        again as "(2)", since its name is taken by then. Now the record
+        lists each file saved with the dialog link it came from, and the
+        next run fetches only the links whose files did not come. A file
+        set aside in Manual Review came, and is not asked for again. The
+        first file counts after it is deleted, the promise every download
+        here makes, and a Download again takes the form whole as before.
+
+        The lists are taken onto `doc`, so each write of this run keeps
+        them. The first file, its link and the links already on file."""
+        if getattr(self.args, "redownload", False):
+            return None
+        rec = self.progress.get(doc.key) or {}
+        if rec.get("downloaded_ok") is True:
+            return None
+
+        def entries(field):
+            found = rec.get(field)
+            return [dict(e) for e in (found if isinstance(found, list) else ())
+                    if isinstance(e, dict) and isinstance(e.get("file"), str)
+                    and e["file"].strip() and isinstance(e.get("link"), str) and e["link"]]
+
+        kept, aside = entries("invoices"), entries("set_aside")
+        first = next((e for e in kept if str(e.get("part") or "").startswith("1 of ")), None)
+        if first is None:
+            return None
+        doc.invoices, doc.set_aside = kept, aside
+        doc.pdf_path, doc.pdf_filename = first["file"], Path(first["file"]).name
+        doc.pdf_size, doc.pdf_pages = rec.get("pdf_size", ""), rec.get("pdf_pages", "")
+        return {"first": Path(first["file"]), "link": first["link"],
+                "have": {e["link"] for e in kept + aside}}
+
+    def _take_up_form_set(self, page, doc: Document, so_far: dict, links: List[str]) -> None:
+        """Fetch the files of a form's set an earlier run did not get, each
+        named from the first file that run saved, beside it, whatever the
+        naming pattern says now. The first is never saved again. A dialog
+        that gives no link, or whose first link is not the one the first
+        file came from, says nothing about which file is which, so nothing
+        is saved and the form is tried again next run."""
+        if not links or links[0] != so_far["link"]:
+            why = ("the form's dialog gave no file" if not links else
+                   "the form's dialog lists other files than when its first file was saved")
+            self._record(doc, State.FAILED, notes="Not every file of the form set is saved yet, "
+                                                  "%s, tried again next run" % why)
+            self.stats["failed"] += 1
+            print("  !! Not every file of this form is saved yet, and %s. It is tried "
+                  "again next run." % why)
+            return
+        lacking = self._save_companions(page, doc, so_far["first"], links, so_far["have"])
+        if self._file_form_set(doc, links, lacking):
+            self._completed(doc, so_far["first"])
+
+    def _save_companions(self, page, doc: Document, first: Path, links: List[str],
+                         have: set) -> List[str]:
+        """Save each file of the form's set after the first whose link is
+        not in `have`, beside `first` and named from it, and write each into
+        the record as it comes. What did not come, for the notes."""
+        total = len(links)
+        wanted = [(n, href) for n, href in enumerate(links, start=1)
+                  if n > 1 and href not in have]
+        lacking: List[str] = []
+        for n, href in wanted:
+            written: List[Path] = []
             try:
                 url = href if href.startswith("http") else site.BASE + href
                 if not site.is_safe_url(url):
                     log.warning("refusing an extra file URL that is not on "
                                 "Wealthfront: %s", url[:80])
+                    lacking.append("file %d of %d is not on Wealthfront" % (n, total))
                     continue
                 with page.expect_download(timeout=45000) as dl:
                     try:
@@ -838,55 +929,93 @@ class App:
                 suggested = getattr(download, "suggested_filename", "") or ""
                 ext = Path(suggested).suffix.lower()
                 as_named = ext in COMPANION_ENDINGS
-                stem = f"{out_path.stem} ({n} of {len(extra_hrefs) + 1})"
+                stem = f"{first.stem} ({n} of {total})"
                 max_len = self.config["max_path_length"]
                 if as_named:
-                    extra_path = unique_path(out_path.parent, stem + ext, max_len)
+                    extra_path = unique_path(first.parent, stem + ext, max_len)
+                    written.append(extra_path)
                     receipt_pdf.save_download(download, extra_path)
                 else:
                     # Saved first where nothing opens it, and filed only once
                     # its bytes say what it is.
                     held = unique_path(self.paths.manual_review, _held_name(stem, ext), max_len)
+                    written.append(held)
                     receipt_pdf.save_download(download, held)
                     # A ZIP goes in under a PDF's name too, since open_zip
                     # puts a lone PDF in the archive's own place and renames
                     # an archive it keeps whole to .zip.
                     if not (_starts_as_pdf(held) or receipt_pdf.is_zip(held)):
-                        set_aside += 1
                         self.stats["manual_review"] += 1
                         log.warning("a form set file was kept in Manual Review, it is not a "
                                     "PDF or a ZIP and was named as a kind of file a form set "
                                     "does not hold")
                         print(f"  !! An additional file was kept in Manual Review as {held.name}, "
                               "since it was neither a PDF nor a spreadsheet, CSV, text or ZIP file.")
+                        doc.set_aside.append({"file": str(held), "link": href,
+                                              "part": "%d of %d" % (n, total)})
+                        self._record(doc, State.PDF_SAVED)
                         continue
-                    extra_path = unique_path(out_path.parent, stem + ".pdf", max_len)
+                    extra_path = unique_path(first.parent, stem + ".pdf", max_len)
+                    written.append(extra_path)
                     shared_folder.move(held, extra_path)
                 if receipt_pdf.is_zip(extra_path) and (not as_named or ext not in (".zip", ".xlsx")):
                     opened = receipt_pdf.open_zip(extra_path)
                     extra_path = opened.pdf or opened.kept or extra_path
                 print(f"  + additional file: {extra_path.name}")
-                extra_paths.append(extra_path)
+                doc.invoices.append({"file": str(extra_path), "kept": True, "link": href,
+                                     "part": "%d of %d" % (n, total)})
+                self._record(doc, State.PDF_SAVED)
                 self.stats["new_files"].append(str(extra_path))
             except Exception as e:
                 log.warning("Extra tax file %s failed: %s", href, e)
+                lacking.append("file %d of %d" % (n, total))
+                # Each name unique_path gave was free, so what is there now is
+                # this attempt's own and nothing names it. It goes, so the
+                # next run's copy takes the name rather than a " (2)".
+                for path in written:
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+        return lacking
 
+    def _file_form_set(self, doc: Document, links: List[str], lacking: List[str]) -> bool:
+        """What saving a form's set came to. True when every file of it has
+        come, kept or set aside, and the form is then saved for good. While
+        one has not, the form is recorded as failed, with no index row, and
+        tried again on the next run."""
+        if lacking:
+            what = ", ".join(lacking)
+            doc.downloaded_ok = False
+            self._record(doc, State.FAILED,
+                         notes="Not every file of the form set is saved yet (%s), tried again "
+                               "next run" % what)
+            self.stats["failed"] += 1
+            print("  !! Not every file of this form could be saved (%s). It is tried again "
+                  "next run." % what)
+            return False
         # The list is what a Rename or a move reads and keeps up to date, so
-        # the files of a form stay together (renaming._invoices_alone).
-        if extra_paths:
+        # the files of a form stay together (renaming._invoices_alone). It
+        # is in the order the dialog gives them, and a form whose only file
+        # kept is its first lists nothing, as one of a single file does.
+        place = {href: i for i, href in enumerate(links)}
+        doc.invoices.sort(key=lambda e: place.get(e.get("link"), len(place)))
+        if len(doc.invoices) > 1:
             doc.notes = (doc.notes + "; " if doc.notes else "") + \
-                f"form set has {len(extra_hrefs) + 1} files"
-            doc.invoices = [{"file": str(out_path), "kept": True}] + [
-                {"file": str(p), "kept": True} for p in extra_paths]
-        if set_aside:
-            doc.notes = (doc.notes + "; " if doc.notes else "") + _set_aside_note(set_aside)
+                f"form set has {len(links)} files"
+        else:
+            doc.invoices = None
+        if doc.set_aside:
+            doc.notes = (doc.notes + "; " if doc.notes else "") + \
+                _set_aside_note(len(doc.set_aside))
+        return True
 
-        doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
+    def _completed(self, doc: Document, out_path: Path) -> None:
+        """Write a document down as saved for good and count it."""
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
         self._record(doc, State.COMPLETED)
         self.journal.checkpoint('a document is saved')
         self._write_row(doc, "Downloaded", "Completed")
-        self.stats["new_files"].append(str(out_path))
         if doc.date:
             self.stats["dates"].append(doc.date)
         if doc.category == doc_types.TAX:
