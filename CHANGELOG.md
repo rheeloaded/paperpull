@@ -69,6 +69,72 @@ All notable changes to PaperPull are recorded here. Versioning follows
   against the bank yet, and whether the bank marks a document read when
   its PDF is taken has not been checked. Contributed by @MelleD.
 
+### Fixed
+- **A saved document stays saved while a spreadsheet has its index open.**
+  On Windows, an app's index or order history open in Excel refused the
+  new row of a document already saved and checked, and the app then
+  recorded that document Failed. No later run asked for it again, its row
+  was never written, and Rename, Review Names, Verify and the move to a
+  documents folder never reached the file. Every app now waits for the
+  spreadsheet as long as any other write waits, once in a run for each
+  file, and keeps the rows it could not write beside the index. They go in
+  by themselves, each once and in order, the next time the app writes or
+  reads that index or as the run ends. The run and the panel say how many rows wait and that
+  every document is saved. A document an earlier version left this way is
+  not repaired and stays out of Rename until it is downloaded again.
+- **An Amazon order split across sellers is done only once every invoice
+  is on file.** An invoice after the first that did not come was passed
+  over and the order marked done for good, so its other invoices were never
+  saved. Each invoice is now checked and written into the order's record
+  as it is put in place, the order stays Failed until every invoice the
+  menu lists is on file, and the next run fetches only the ones still
+  missing. An invoice that fails its check is put aside in Manual Review
+  and counted, where it had been moved there and counted nowhere.
+- **A Wealthfront tax form is done only once every file of its set has
+  come.** A companion file that did not come was passed over, and the form
+  was marked done with notes counting files that were never saved. The
+  form now stays Failed until every file has come, the next run fetches
+  only the missing ones and names each beside the first, and the first is
+  never saved a second time as "(2)".
+- **A named pipe or a device a record names no longer holds a run.** A
+  record or an index row naming a named pipe, a device or a link to one
+  held Target's invoice walk and its Rename preview, and Robinhood's tax
+  form checks, until the run was killed. Such a path is now answered at
+  once as a PDF that did not open and is never read.
+- **A record naming a file in a folder the run may not search no longer
+  ends the run.** With Python 3.12, which every build ships, asking whether
+  such a file is there raised instead of answering, as it can after a
+  person changes a shared folder's permissions. Every app
+  ended its run at that document on every run, and Verify, Robinhood,
+  Amazon's Reparse, the transactions export, Rename and Move, and the
+  panel's Documents count and set-aside page failed the same way. Such a
+  file now counts as not there, so its document is fetched again as a
+  deleted copy is, and Verify says it cannot read the file. A path a hand
+  edit left as a number or a list names nothing, where it raised on every
+  system.
+- **Robinhood and E*TRADE no longer read another record's file whole.**
+  To tell whether a new statement was already saved, they read an older
+  record's file whole into memory to hash it. One larger than free memory
+  failed the document just taken, and every later run fetched it again and
+  failed the same way. They now hash it a block at a time, never past the
+  largest a document may be.
+- **A file name never starts with a dot.** With a naming pattern that
+  starts with the account, a masked account such as "...1234" made a hidden
+  file, which a Mac and Linux do not show and which PaperPull Server left
+  out of the set-aside download. Leading dots are now taken off a name.
+- **On Windows the path limit counts the whole path.** The longest path
+  was measured from the install's folder, while Windows with long paths
+  turned off counts from the drive, so a name filed three folders deep
+  passed the check and was more than 300 characters in full. It is now
+  measured as Windows measures it. A Mac and PaperPull Server keep the
+  names they had.
+- **A file name fits 255 bytes.** A name was counted in characters, so a
+  long title in Japanese or with emoji passed and then could not be saved
+  on PaperPull Server or a Mac, which hold a name in 255 bytes of UTF-8,
+  and Windows refused a long name of emoji. A name is now cut to fit
+  between two characters, keeping a part such as "(2 of 3)" at its end
+  that Rename reads. Every name that fit before is unchanged.
+
 ## [0.66.0] - 2026-11-13
 
 Renault Bank direkt is new, contributed by @MelleD. One bill Ziply Fiber
