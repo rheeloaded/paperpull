@@ -28,6 +28,7 @@ OTHER = "Other Document"
 
 SPEC = AppSpec(
     provider="NetBenefits",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

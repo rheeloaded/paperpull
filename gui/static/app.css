@@ -434,6 +434,7 @@ pre.log.short { max-height: 220px; }
 .ptile:has(input:disabled) { cursor: default; opacity: .6; }
 .ptile b { display: block; font-weight: 600; }
 .ptile .gets { display: block; font-size: 13px; color: var(--muted); }
+.ptile .where { display: block; font-size: 12px; font-weight: 500; color: var(--ink-2); }
 /* On the blue of a picked tile or option the lighter gray falls under 4.5:1,
    so the darker one. */
 .ptile:has(input:checked) .gets { color: var(--ink-2); }

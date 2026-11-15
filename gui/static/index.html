@@ -69,6 +69,7 @@ __CSS__
           its own, and you can add more later.</p>
         <label class="searchbox"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
           <span class="sr">Search providers</span><input id="w-search" type="search" autocomplete="off" placeholder="Search providers, like Chase or Verizon"></label>
+        <div class="chips" id="w-countries" role="group" aria-label="Countries" hidden></div>
         <div class="chips" id="w-groups" role="group" aria-label="Kinds of provider"></div>
         <div class="tiles" id="providers"></div>
         <p class="hint" style="margin-top:12px">Not in the list? <button type="button" class="link" data-do="request" data-kind="provider" id="w-request">Request a provider</button></p>
@@ -85,6 +86,7 @@ __CSS__
           It stays on this computer, and lets PaperPull take your name out of a file you share or put it
           in your file names.</p>
         <div class="card pad stack">
+          <div class="stack" id="w-stores" hidden></div>
           <label class="field" for="owner">Name on the account</label>
           <input id="owner" type="text" autocomplete="name" spellcheck="false" maxlength="80">
           <p class="hint">Leave it blank to skip. To add a second person at the same provider, use Add another

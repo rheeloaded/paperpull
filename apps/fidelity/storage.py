@@ -35,6 +35,7 @@ ALL_CATEGORIES = [STATEMENT, TAX, CONFIRM, LETTER]
 
 SPEC = AppSpec(
     provider="Fidelity",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

@@ -46,6 +46,7 @@ FALLBACK_SUMMARY = {
 
 SPEC = AppSpec(
     provider="CIBC",
+    countries=("CA",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

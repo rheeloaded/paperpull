@@ -59,8 +59,9 @@ def test_every_card_is_in_a_group_the_page_can_name():
 def test_not_tested_yet_is_exactly_the_readme_untested_rows():
     untested = set()
     for line in (REPO / "README.md").read_text(encoding="utf-8").splitlines():
-        m = re.match(r"\|\s*\[`([a-z0-9_]+)`\][^|]*\|([^|]*)\|([^|]*)\|([^|]*)\|", line)
-        if m and "**Untested" in m.group(4):
+        # App, Provider, Country, Documents, Notes, and Notes says it.
+        m = re.match(r"\|\s*\[`([a-z0-9_]+)`\][^|]*\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|", line)
+        if m and "**Untested" in m.group(5):
             untested.add(m.group(1))
     marked = {slug for slug, card in CARDS["providers"].items() if card.get("tested", True) is False}
     assert untested and marked == untested

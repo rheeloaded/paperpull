@@ -44,6 +44,7 @@ FALLBACK_SUMMARY = {
 
 SPEC = AppSpec(
     provider="1822direkt",
+    countries=("DE",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

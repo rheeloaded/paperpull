@@ -39,6 +39,7 @@ FALLBACK_SUMMARY = {
 
 SPEC = AppSpec(
     provider="Amazon Visa",
+    countries=("DE",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

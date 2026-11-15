@@ -33,6 +33,7 @@ ALL_CATEGORIES = [STATEMENT, TAX]
 
 SPEC = AppSpec(
     provider="Invest529",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

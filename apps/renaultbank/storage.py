@@ -50,6 +50,7 @@ FALLBACK_SUMMARY = {
 
 SPEC = AppSpec(
     provider="Renault Bank direkt",
+    countries=("DE",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

@@ -39,6 +39,7 @@ FALLBACK_SUMMARY = {
 
 SPEC = AppSpec(
     provider="MBNA",
+    countries=("CA",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

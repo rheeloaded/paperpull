@@ -100,6 +100,21 @@ class AppSpec:
     # Rules file for item/document classification, relative to project_dir.
     rules_filename: Optional[str] = None
 
+    # The countries whose accounts this app is for, as ISO 3166 codes from
+    # core countries.NAMES, such as ("US",) or ("DE",). The panel's provider
+    # list, PROVIDERS.md, the README and the website say them as
+    # countries.label does, and read them from this file's source without
+    # running it, so they are written as a plain tuple of strings.
+    countries: Tuple[str, ...] = ()
+    # True for a service with one site worldwide, built on an account in its
+    # one country, which may well work for an account elsewhere.
+    may_work_elsewhere: bool = False
+    # For a provider with a separate store per country, each store's site and
+    # its country, and the config setting that names the one an install
+    # reads. Setting up such a provider in the panel asks which store.
+    stores: Dict[str, str] = field(default_factory=dict)
+    store_setting: Optional[str] = None
+
     def __post_init__(self):
         self.project_dir = Path(self.project_dir)
         # On PaperPull Server the data anchor is the install's folder in the
@@ -132,6 +147,9 @@ class AppSpec:
                 raise ValueError(
                     f"AppSpec.url_settings[{key!r}] must be a tuple of plain lowercase "
                     f"domain names, such as ('example.com',)")
+        from . import countries as _countries
+        _countries.check(self.countries, self.may_work_elsewhere, self.stores,
+                         self.store_setting)
 
     @property
     def slug(self) -> str:

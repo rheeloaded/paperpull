@@ -28,6 +28,7 @@ DOCUMENT_INDEX_COLUMNS = [
 
 SPEC = AppSpec(
     provider="ETRADE",  # E*TRADE, but a star is not a filename character
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

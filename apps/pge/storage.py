@@ -24,6 +24,7 @@ DOCUMENT_INDEX_COLUMNS = [
 
 SPEC = AppSpec(
     provider="PG&E",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

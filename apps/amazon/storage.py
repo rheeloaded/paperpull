@@ -34,6 +34,25 @@ RECEIPT_INDEX_COLUMNS = [
 
 SPEC = AppSpec(
     provider="Amazon",
+    # A store per country, the marketplaces amazon_site.MARKETPLACES reads.
+    countries=("US", "CA", "GB", "IE", "AU", "DE", "FR", "IT", "ES", "NL", "BE", "SE", "PL", "MX"),
+    stores={
+        "amazon.com": "US",
+        "amazon.ca": "CA",
+        "amazon.co.uk": "GB",
+        "amazon.ie": "IE",
+        "amazon.com.au": "AU",
+        "amazon.de": "DE",
+        "amazon.fr": "FR",
+        "amazon.it": "IT",
+        "amazon.es": "ES",
+        "amazon.nl": "NL",
+        "amazon.com.be": "BE",
+        "amazon.se": "SE",
+        "amazon.pl": "PL",
+        "amazon.com.mx": "MX",
+    },
+    store_setting="marketplace",
     project_dir=Path(__file__).resolve().parent,
     kind=RECEIPT,
     folders=[

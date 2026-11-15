@@ -164,7 +164,9 @@ Your app's `storage.py` is a short `AppSpec` declaration, not a copy of anyone
 else's storage code, the folders you file into, how a document routes to one,
 your CSV columns, and a few config defaults. Everything else comes from
 `paperpull-core`. See [core/README.md](../core/README.md) for the fields, and
-any existing app for a worked example.
+any existing app for a worked example. Say which country the provider is for
+with `countries`, such as `countries=("DE",)`, since the panel's list starts
+on the person's own country.
 
 Mark a folder `precreate=False` when the provider *can* route there but rarely
 does. It is then created only when a document actually lands in it, so an
@@ -267,7 +269,8 @@ reports **"already downloaded, skipping"** (delete-safe works).
 ### 8. Scrub and open a PR
 
 `git status`, only source should be staged (no profile/config/PDFs/state). Add
-your provider to [PROVIDERS.md](../PROVIDERS.md) and give it a short line in
+your provider to [PROVIDERS.md](../PROVIDERS.md) and the README's table, with
+its Country as the census expects it, and give it a short line in
 [gui/providers.json](../gui/providers.json) for the panel's welcome list, fill
 in the PR checklist, and open it. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 

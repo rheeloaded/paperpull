@@ -2039,6 +2039,7 @@ def _account_row(mod, cards: dict, name: str, meta: dict, provider: str, kind: s
     quiet = _quieted(state, last, _done_at(root), (row or {}).get("cadence_days"), gaps=gaps)
     return {
         "app": name, "account": account, "provider": provider,
+        "store": _store_of(meta, account),
         "owner": _owner_of(meta, account),
         # The name its issues use, chase or amex, which a problem report
         # is filed under (static/app.js reportLink).
@@ -2804,8 +2805,67 @@ def install_folder_name(provider: str, kind: str) -> str:
     return "%s %s" % (provider, "Receipts" if kind == "RECEIPT" else "Statements")
 
 
+_COUNTRIES = None
+
+
+def _countries():
+    """paperpull_core.countries, from the core the panel ships beside, or
+    None, in which case no provider says a country, Amazon is set up on its
+    default store as before, and nothing else changes."""
+    global _COUNTRIES
+    if _COUNTRIES is None:
+        core = HERE.parent / "core"
+        if (core / "paperpull_core" / "countries.py").is_file() and str(core) not in sys.path:
+            sys.path.insert(0, str(core))
+        try:
+            from paperpull_core import countries as mod
+            _COUNTRIES = mod
+        except Exception:
+            _COUNTRIES = False
+    return _COUNTRIES or None
+
+
+def _where(template: Path, src: str) -> dict:
+    """A template's countries and stores, read from its storage.py source
+    without running it, as countries.declared reads them. A store app's
+    default store is the one its example config names, the store a run
+    reads when the setting is left out."""
+    mod = _countries()
+    if mod is None:
+        return {"countries": [], "country_names": [], "country_label": "",
+                "may_work_elsewhere": False, "stores": [], "store_setting": "",
+                "store_default": ""}
+    d = mod.declared(src)
+    out = mod.offered(d["countries"], d["may_work_elsewhere"])
+    stores, setting = d["stores"], d["store_setting"] or ""
+    default = ""
+    if stores and setting:
+        try:
+            example = json.loads((template / "config.example.json").read_text(encoding="utf-8-sig"))
+            default = example.get(setting) if isinstance(example, dict) else ""
+        except (OSError, ValueError):
+            default = ""
+        if default not in stores:
+            default = next(iter(stores))
+    out.update({"stores": [{"site": s, "country": c, "name": mod.store_label(s, c)}
+                           for s, c in stores.items()] if setting else [],
+                "store_setting": setting if stores else "", "store_default": default})
+    return out
+
+
+def store_folder(info: dict, store: str) -> str:
+    """"Amazon Receipts" for the default store, the name an install has
+    always had, and "Amazon Receipts (amazon.de)" for any other, so a second
+    store is an install of its own beside the first."""
+    if not info.get("stores") or not store or store == info.get("store_default"):
+        return info["folder"]
+    return "%s (%s)" % (info["folder"], store)
+
+
 def list_providers() -> list:
-    """Every provider an install can be made for, with what it downloads."""
+    """Every provider an install can be made for, with what it downloads,
+    which countries it is for, and the stores of one with a store per
+    country."""
     root = _templates_root()
     if root is None:
         return []
@@ -2823,19 +2883,73 @@ def list_providers() -> list:
         provider = p.group(1) if p else d.name
         kind = k.group(1) if k else "DOCUMENT"
         n = notes.get(d.name, {})
-        out.append({"slug": d.name, "provider": provider, "kind": kind,
-                    "folder": install_folder_name(provider, kind),
-                    "documents": n.get("documents", ""),
-                    "category": n.get("category", ""),
-                    "group": n.get("group", ""),
-                    "tested": n.get("tested", True),
-                    "note": n.get("note", "")})
+        item = {"slug": d.name, "provider": provider, "kind": kind,
+                "folder": install_folder_name(provider, kind),
+                "documents": n.get("documents", ""),
+                "category": n.get("category", ""),
+                "group": n.get("group", ""),
+                "tested": n.get("tested", True),
+                "note": n.get("note", "")}
+        item.update(_where(d, src))
+        out.append(item)
     return out
 
 
-def create_install(root: Path, slug: str, owner: str = "") -> str:
+_STORE_PROVIDERS = None
+
+
+def _store_providers() -> dict:
+    """The providers with a store per country, by their entry script's name,
+    which an install shares with its template. Read once, since the
+    templates are PaperPull's own and do not change while it runs."""
+    global _STORE_PROVIDERS
+    root = _templates_root()
+    if _STORE_PROVIDERS is None or _STORE_PROVIDERS[0] != str(root):
+        found = {}
+        for info in list_providers():
+            script = _entry_script(root / info["slug"]) if root else None
+            if info.get("stores") and script:
+                found[script.name] = info
+        _STORE_PROVIDERS = (str(root), found)
+    return _STORE_PROVIDERS[1]
+
+
+def _store_of(meta: dict, account: str) -> str:
+    """The store an account of a provider with a store per country reads,
+    such as amazon.de, the default one when its config names none, and ""
+    for every other provider or a store that is not one."""
+    info = _store_providers().get(meta.get("script_name"))
+    if not info:
+        return ""
+    value = _config_of(meta, account).get(info["store_setting"])
+    store = value if isinstance(value, str) and value else info["store_default"]
+    return store if store in {s["site"] for s in info["stores"]} else ""
+
+
+def _stores_set_up(info: dict, apps: dict) -> list:
+    """The stores a store provider already has an install or a person for,
+    read from each account's own config, since a store can be set by hand
+    in a folder of any name. An account that names no store reads the
+    default one."""
+    if not info.get("stores"):
+        return []
+    found = set()
+    for meta in apps.values():
+        if _store_providers().get(meta.get("script_name"), {}).get("slug") != info["slug"]:
+            continue
+        for account in meta.get("accounts") or []:
+            store = _store_of(meta, account)
+            if store:
+                found.add(store)
+    return sorted(found)
+
+
+def create_install(root: Path, slug: str, owner: str = "", store: str = "") -> str:
     """Make one install from its template. Returns "created" or "exists".
-    Never overwrites, because an existing folder may hold years of history."""
+    Never overwrites, because an existing folder may hold years of history.
+    For a provider with a store per country, `store` is the one it reads,
+    its default store when none is given, and a store it does not have is
+    refused, as the app itself refuses one."""
     tmpl_root = _templates_root()
     if tmpl_root is None:
         raise HTTPException(500, "This copy of PaperPull has no providers to set up. Download it again from paperpull.net.")
@@ -2843,7 +2957,14 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
     if not src.is_dir() or not _entry_script(src):
         raise HTTPException(400, "PaperPull has no provider called %r. Reload the page." % slug)
     info = next(p for p in list_providers() if p["slug"] == slug)
-    dst = root / info["folder"]
+    if info.get("stores"):
+        store = store or info["store_default"]
+        if store not in {s["site"] for s in info["stores"]}:
+            raise HTTPException(400, "%s has no store called %r. Reload the page."
+                                     % (info["provider"], str(store)[:60]))
+    else:
+        store = ""
+    dst = root / store_folder(info, store)
     if os.path.lexists(dst):
         return "exists"
     # Most double-click launchers call .venv\Scripts\python.exe, which the
@@ -2880,9 +3001,33 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
         _set_free_port(dst / "config.json")
     if owner:
         _set_owner(dst / "config.json", owner)
+    # The store goes in whatever else happens, since an install that read
+    # another store than the one its folder names would file one country's
+    # orders as another's.
+    if store and not _set_setting(dst / "config.json", info["store_setting"], store):
+        raise HTTPException(500, "%s was set up in %s, but its store could not be saved in its "
+                                 "config.json. Write \"%s\": \"%s\" there before its first run."
+                                 % (info["provider"], dst, info["store_setting"], store))
     if server_mode.enabled():
         _set_profile(dst / "config.json", server_mode.profile_for(dst.name))
     return "created"
+
+
+def _set_setting(config: Path, key: str, value: str) -> bool:
+    """One setting written into a new install's config, as _set_owner
+    writes the owner. False when it could not be."""
+    if not server_mode.own_file(config):
+        return False
+    try:
+        with _CONFIG_WRITES:
+            data = json.loads(server_mode.read_text(config, "utf-8-sig"))
+            if not isinstance(data, dict):
+                return False
+            data[key] = value
+            _write_text(config, json.dumps(data, indent=2))
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _set_free_port(config: Path) -> None:
@@ -3345,9 +3490,15 @@ def api_providers():
     if root.is_dir() and not fresh_checkout():
         installed = {d.name for d in root.iterdir() if d.is_dir() and _entry_script(d)}
     out = list_providers()
+    apps = discover_apps() if installed else {}
     for p in out:
         p["installed"] = p["folder"] in installed
-    suggested = (server_mode.data_root() if server_mode.enabled()
+        if p.get("stores"):
+            # A store provider is offered until every store has an account,
+            # with the stores already set up left out of its store list.
+            p["stores_set_up"] = _stores_set_up(p, apps)
+            p["installed"] = len(p["stores_set_up"]) == len(p["stores"])
+    suggested =(server_mode.data_root() if server_mode.enabled()
                  else Path.home() / "Documents" / "PaperPull")
     return {"providers": out, "templates": _templates_root() is not None,
             "suggested_root": str(suggested), "server": server_mode.enabled()}
@@ -3388,11 +3539,17 @@ async def api_create(request: Request):
     except OSError as e:
         raise HTTPException(400, "Could not create that folder (%s). Choose a folder you can write to." % e)
 
+    # The store chosen for each provider that has a store per country.
+    stores = (body or {}).get("stores") or {}
+    if not isinstance(stores, dict):
+        raise HTTPException(400, "expected the stores as an object")
     created, existed = [], []
     for slug in slugs:
         if not isinstance(slug, str):
             continue
-        result = create_install(root, slug, owner=owner)
+        store = stores.get(slug)
+        result = create_install(root, slug, owner=owner,
+                                store=store if isinstance(store, str) else "")
         (created if result == "created" else existed).append(slug)
 
     if not server:

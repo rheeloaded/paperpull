@@ -7,6 +7,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+
+- **Every provider says which country it is for.** The panel's provider
+  list, PROVIDERS.md, the README and paperpull.net name each provider's
+  country, "Germany" for a German bank, "14 countries" for Amazon, and
+  "United States, may work elsewhere" for a service with one site worldwide
+  such as PayPal. The panel's list starts on your computer's country when
+  PaperPull has a provider for that country alone, with All countries one
+  click away, and a search finds a provider of any country. Amazon Visa says
+  it is the German card, and that the US Amazon Prime Visa comes through
+  Chase.
+- **Setting up Amazon asks which store.** An Amazon order is only on the
+  store it was placed on, and the panel set Amazon up on amazon.com wherever
+  you were. It now asks, starting on your country's store, and writes the
+  store into the new account's settings. amazon.com keeps the folder Amazon
+  Receipts, and any other store gets one of its own, such as Amazon Receipts
+  (amazon.de), so a second store is a second account. An account's line on
+  the home page says its store.
+
 ## [0.67.0] - 2026-11-15
 
 1822direkt, Amazon Visa and Sparkasse Pforzheim Calw are new, all three

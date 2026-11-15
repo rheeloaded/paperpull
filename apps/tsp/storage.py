@@ -25,6 +25,7 @@ DOCUMENT_INDEX_COLUMNS = [
 
 SPEC = AppSpec(
     provider="TSP",  # filenames say TSP, the folder says Thrift Savings Plan
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

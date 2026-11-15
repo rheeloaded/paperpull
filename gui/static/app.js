@@ -107,8 +107,10 @@ function whose(name) { return /'s$/.test(name) ? name : name + "'s"; }
 const CADENCE = {'weekly': 'every week', '2x month': 'twice a month', 'monthly': 'every month',
                  'quarterly': 'every three months', '2x year': 'twice a year', 'yearly': 'once a year'};
 function whoOf(r) { return r.owner || (r.account !== 'primary' ? r.account : ''); }
+// Under an account's name, whose it is, the store of a provider with a
+// store per country (amazon.de), and what it gets.
 function subOf(r) {
-  return [whoOf(r), r.gets || (r.kind === 'RECEIPT' ? 'Receipts' : 'Statements')].filter(Boolean).join(' · ');
+  return [whoOf(r), r.store, r.gets || (r.kind === 'RECEIPT' ? 'Receipts' : 'Statements')].filter(Boolean).join(' · ');
 }
 // Each provider's symbol is its kind's, from its group in providers.json, so
 // the symbol says something true about the row. A provider with no card has
@@ -1866,7 +1868,25 @@ function openDock(provider) {
 function closeDock() { document.body.classList.remove('docked'); }
 
 // -- choosing providers, first and later --------------------------------------------
-const W = {step: 1, add: false, picked: new Set(), group: 'all', search: ''};
+const W = {step: 1, add: false, picked: new Set(), group: 'all', search: '', country: null, stores: {}};
+// The country of this computer's language setting, "DE" for de-DE and for a
+// bare "de", or "" when there is none to read. PaperPull Server's browser
+// can be anywhere, so it starts on every country.
+function homeRegion() {
+  if (SERVER) return '';
+  try { return (new Intl.Locale(navigator.language || '').maximize().region || '').toUpperCase(); }
+  catch (e) { return ''; }
+}
+// The list starts on the home country only when some provider is for that
+// one country alone, so a language setting of a country with no provider
+// of its own (en-GB on a US account, say) never hides a person's own.
+function startingCountry(all) {
+  const home = homeRegion();
+  return home && all.some(p => (p.countries || []).length === 1 && p.countries[0] === home) ? home : 'all';
+}
+// Shown under a country when it is for that country, or for every country,
+// a service with one site worldwide.
+const forCountry = (p, c) => c === 'all' || (p.countries || []).includes(c) || p.may_work_elsewhere;
 // The groups in gui/providers.json, in the order the chips show them.
 const GROUP_ORDER = ['banks', 'shopping', 'bills', 'pay', 'investing', 'loans', 'insurance'];
 // What the welcome's first step says of the folder typed, on Continue,
@@ -1948,25 +1968,68 @@ function wShow() {
   $('w-title2').textContent = W.add ? 'Add providers' : 'Which providers do you use?';
   const n = W.picked.size;
   $('w-create').textContent = 'Set up' + (n ? ' ' + many(n, 'provider') : '');
+  if (W.step === 3) renderStores();
+}
+// A provider with a store per country, Amazon, asks which store, since an
+// order is only on the store it was placed on. The list leaves out the
+// stores already set up and starts on the home country's store.
+function storeChoices(p) {
+  const done = new Set(p.stores_set_up || []);
+  return (p.stores || []).filter(s => !done.has(s.site));
+}
+function startingStore(p, choices) {
+  const home = homeRegion();
+  const pick = choices.find(s => s.country === home) || choices.find(s => s.site === p.store_default) || choices[0];
+  return pick ? pick.site : '';
+}
+function renderStores() {
+  const box = $('w-stores');
+  const asks = (PROVIDERS.providers || []).filter(p => W.picked.has(p.slug) && storeChoices(p).length);
+  box.hidden = !asks.length;
+  box.innerHTML = asks.map(p => {
+    const choices = storeChoices(p);
+    if (!choices.some(s => s.site === W.stores[p.slug])) W.stores[p.slug] = startingStore(p, choices);
+    return '<label class="field" for="w-store-' + esc(p.slug) + '">Which ' + esc(p.provider) + ' store?</label>' +
+      '<select id="w-store-' + esc(p.slug) + '" data-store-for="' + esc(p.slug) + '">' + choices.map(s =>
+        '<option value="' + esc(s.site) + '"' + (s.site === W.stores[p.slug] ? ' selected' : '') + '>' + esc(s.name) + '</option>').join('') +
+      '</select><p class="hint">An order is only on the store it was placed on. For a second store, add ' +
+      esc(p.provider) + ' again once this one is set up.</p>';
+  }).join('');
 }
 function renderTiles() {
   const box = $('providers');
   if (!PROVIDERS || !PROVIDERS.templates) { box.textContent = 'This copy of PaperPull has no providers to choose from. Download it again from paperpull.net.'; return; }
   const all = PROVIDERS.providers.filter(p => !W.add || !p.installed);
   if (!all.length) { box.textContent = 'Every provider is already set up.'; return; }
+  // Countries first, every one some provider is for, by name.
+  const names = {};
+  for (const p of all) (p.countries || []).forEach((c, i) => { names[c] = (p.country_names || [])[i] || c; });
+  if (W.country === null || (W.country !== 'all' && !names[W.country])) W.country = startingCountry(all);
+  const inCountry = all.filter(p => forCountry(p, W.country));
+  $('w-countries').hidden = Object.keys(names).length < 2;
+  $('w-countries').innerHTML = '<button type="button" class="fchip" data-do="w-country" data-country="all" aria-pressed="' +
+    (W.country === 'all') + '">All countries</button>' + Object.entries(names).sort((a, b) => a[1].localeCompare(b[1])).map(([c, name]) =>
+    '<button type="button" class="fchip" data-do="w-country" data-country="' + esc(c) + '" aria-pressed="' + (W.country === c) + '">' +
+    esc(name) + ' ' + all.filter(p => forCountry(p, c)).length + '</button>').join('');
   const groups = {};
-  for (const g of GROUP_ORDER) for (const p of all) if (p.group === g) groups[g] = p.category || g;
-  for (const p of all) if (p.group && !groups[p.group]) groups[p.group] = p.category || p.group;
+  for (const g of GROUP_ORDER) for (const p of inCountry) if (p.group === g) groups[g] = p.category || g;
+  for (const p of inCountry) if (p.group && !groups[p.group]) groups[p.group] = p.category || p.group;
+  if (W.group !== 'all' && !groups[W.group]) W.group = 'all';
   $('w-groups').innerHTML = '<button type="button" class="fchip" data-do="w-group" data-group="all" aria-pressed="' + (W.group === 'all') + '">All ' +
-    all.length + '</button>' + Object.entries(groups).map(([g, name]) => '<button type="button" class="fchip" data-do="w-group" data-group="' +
+    inCountry.length + '</button>' + Object.entries(groups).map(([g, name]) => '<button type="button" class="fchip" data-do="w-group" data-group="' +
     esc(g) + '" aria-pressed="' + (W.group === g) + '">' + esc(name) + '</button>').join('');
   const q = W.search.trim().toLowerCase();
-  const shown = all.filter(p => (W.group === 'all' || p.group === W.group) &&
-    (!q || [p.provider, p.slug, p.documents, p.category].some(t => String(t || '').toLowerCase().includes(q))));
+  // A search finds a provider in any country, so one is never lost behind
+  // the country chosen.
+  const shown = (q ? all : inCountry).filter(p => (W.group === 'all' || p.group === W.group) &&
+    (!q || [p.provider, p.slug, p.documents, p.category, ...(p.country_names || [])].some(t => String(t || '').toLowerCase().includes(q))));
   box.innerHTML = shown.map(p => '<label class="ptile"><input type="checkbox" value="' + esc(p.slug) + '"' +
     (p.installed ? ' disabled checked' : W.picked.has(p.slug) ? ' checked' : '') + '>' +
     glyph(p.group) + '<span><b>' + esc(p.provider) + '</b>' +
+    (p.country_label ? '<span class="where"' + ((p.country_names || []).length > 1 ? ' title="' + esc(p.country_names.join(', ')) + '"' : '') +
+      '>' + esc(p.country_label) + '</span>' : '') +
     (p.documents ? '<span class="gets">' + esc(p.documents) + '</span>' : '') +
+    ((p.stores_set_up || []).length ? '<span class="tag plain">Set up for ' + esc(p.stores_set_up.join(', ')) + '</span>' : '') +
     (p.tested === false ? '<span class="tag warn">Not tested on a real account yet</span>' : '') +
     (p.note ? '<span class="tag plain">' + esc(p.note) + '</span>' : '') +
     (p.installed ? '<span class="tag plain">Already set up</span>' : '') +
@@ -1990,15 +2053,17 @@ async function wCreate() {
   if (!root) { $('newmsg').textContent = 'Choose a folder first.'; return; }
   if (!picked.length) { $('newmsg').textContent = 'Choose at least one provider.'; return; }
   $('newmsg').textContent = 'Setting up…';
+  const stores = {};
+  for (const slug of picked) if (W.stores[slug]) stores[slug] = W.stores[slug];
   let r;
   try {
     r = await fetch('/api/create', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({root, providers: picked, owner})});
+      body: JSON.stringify({root, providers: picked, owner, stores})});
   } catch (e) { $('newmsg').textContent = 'PaperPull is not answering. Check that it is still running, then reload this page.'; return; }
   let d = {};
   try { d = await r.json(); } catch (e) { /* not JSON */ }
   if (!r.ok) { $('newmsg').textContent = d.detail || 'That did not work, and PaperPull gave no reason. Reload the page and try again.'; return; }
-  W.picked = new Set(); W.step = 1; $('owner').value = ''; $('newmsg').textContent = '';
+  W.picked = new Set(); W.stores = {}; W.step = 1; $('owner').value = ''; $('newmsg').textContent = '';
   PROVIDERS = null;
   await load();
   location.hash = '#/';
@@ -2966,6 +3031,7 @@ const DO = {
     W.step = Math.max(1, W.step - 1); wShow();
   },
   'w-group': el => { W.group = el.dataset.group; renderTiles(); },
+  'w-country': el => { W.country = el.dataset.country; renderTiles(); },
   'w-create': () => wCreate(),
   'xl-build': () => buildSpreadsheet(),
   'tx-build': () => buildTransactions(),
@@ -3011,7 +3077,8 @@ document.addEventListener('change', e => {
   if (t.closest('#providers') && t.type === 'checkbox') {
     if (t.checked) W.picked.add(t.value); else W.picked.delete(t.value);
     wPicked();
-  } else if (t.name === 'rsby') rsBy();
+  } else if (t.dataset && t.dataset.storeFor) W.stores[t.dataset.storeFor] = t.value;
+  else if (t.name === 'rsby') rsBy();
   else if (t.id === 'rs-year' || t.id === 'rs-start' || t.id === 'rs-end') rsLabel();
   else if (t.name === 'theme') { store.set('theme', t.value); applyTheme(); }
   else if (t.id === 'dcpick') dcLoad();

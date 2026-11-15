@@ -29,6 +29,7 @@ DOCUMENT_INDEX_COLUMNS = [
 
 SPEC = AppSpec(
     provider="Apple Card",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

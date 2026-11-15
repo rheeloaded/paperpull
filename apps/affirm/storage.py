@@ -32,6 +32,7 @@ ALL_CATEGORIES = [STATEMENT, TAX, AGREEMENT]
 
 SPEC = AppSpec(
     provider="Affirm",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

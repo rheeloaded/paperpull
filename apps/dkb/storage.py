@@ -49,6 +49,7 @@ FALLBACK_SUMMARY = {
 
 SPEC = AppSpec(
     provider="DKB",
+    countries=("DE",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

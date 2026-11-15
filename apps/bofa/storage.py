@@ -33,6 +33,7 @@ ALL_CATEGORIES = [STATEMENT, TAX]
 
 SPEC = AppSpec(
     provider="Bank of America",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

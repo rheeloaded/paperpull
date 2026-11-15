@@ -32,6 +32,7 @@ from paperpull_core import storage as _core
 
 SPEC = AppSpec(
     provider="T-Mobile",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[Folder("statements", "Statements"),
@@ -53,6 +54,17 @@ Two families are supported: **receipt** apps route by purchase type
 A folder marked `precreate=False` is created the moment something routes
 there, which is why an install never grows an empty folder for a document
 type that provider cannot produce.
+
+`countries` names the countries whose accounts the app is for, as ISO 3166
+codes from `paperpull_core.countries.NAMES`, such as `("DE",)`. The panel's
+provider list, PROVIDERS.md, the README and the website say them alike, and
+the panel and the website read them from the source without running it, so
+write them as a plain tuple of strings. Set `may_work_elsewhere=True` for a
+service with one site worldwide that was built on an account in its one
+country. A provider with a separate store per country, as Amazon has, lists
+each store's site and country in `stores` and the config setting naming the
+one an install reads in `store_setting`, and setting it up in the panel asks
+which store. A census holds every app to all of this.
 
 ## Installing
 

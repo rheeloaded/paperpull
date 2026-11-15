@@ -43,6 +43,7 @@ FALLBACK_SUMMARY = {
 
 SPEC = AppSpec(
     provider="Sparkasse Pforzheim Calw",
+    countries=("DE",),
     project_dir=Path(__file__).resolve().parent,
     kind=DOCUMENT,
     folders=[

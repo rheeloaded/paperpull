@@ -34,6 +34,8 @@ RECEIPT_INDEX_COLUMNS = [
 
 SPEC = AppSpec(
     provider="GitHub",
+    countries=("US",),
+    may_work_elsewhere=True,
     project_dir=Path(__file__).resolve().parent,
     kind=RECEIPT,
     folders=[

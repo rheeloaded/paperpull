@@ -34,6 +34,7 @@ RECEIPT_INDEX_COLUMNS = [
 
 SPEC = AppSpec(
     provider="Best Buy",
+    countries=("US",),
     project_dir=Path(__file__).resolve().parent,
     kind=RECEIPT,
     folders=[
