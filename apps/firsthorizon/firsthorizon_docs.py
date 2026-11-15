@@ -648,9 +648,11 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except site.SessionExpired:
-                # The bank answered a statement as a signed-out session.
-                # Every statement after it would get the same answer, so the
-                # run stops here, with nothing recorded against this one.
+                # The bank answered as a signed-out session, on the way to a
+                # statement or on the statements page read again after the
+                # statement was refused. Every statement after it would get
+                # the same answer, so the run stops here, with nothing
+                # recorded against this one.
                 self.session_ended()
             except site.DeadlineReached:
                 self.out_of_time()

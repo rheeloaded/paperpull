@@ -53,6 +53,12 @@ def mdy(iso):
     return f"{iso[5:7]}/{iso[8:10]}/{iso[:4]}"
 
 
+SIGN_IN = "https://security.firsthorizon.com/fhnsso/login"
+# A page of the bank's own where a statement's PDF should be. Its words
+# must never leave.
+REFUSAL_PAGE = b"<!doctype html><p>made-up refusal words QUOLLDEN</p>"
+
+
 # ---------------------------------------------------------------------------
 # The made-up bank
 # ---------------------------------------------------------------------------
@@ -259,6 +265,8 @@ class Bank:
         self.on_goto = None
         self.download_url = None
         self.pdf_status = 200
+        self.refuse = {}              # document id -> how the bank refuses that statement
+        self.refused_stays = False    # the refused statement's popup will not close
         self.reset()
 
     # -- the page's own behavior -------------------------------------------
@@ -326,9 +334,30 @@ class Bank:
             a = self.accounts[i]
             doc = [d for dd, d in a["statements"] if dd == date][0]
             url = self.download_url or API + file_of(a["id"], date, doc)
+            if doc in self.refuse:
+                self.do_refuse(url, self.refuse[doc])
+                return
             self.do_download(url)
         else:
             raise AssertionError("pressed something else")
+
+    def do_refuse(self, url, how):
+        """The bank refuses one statement. Its popup's address is answered
+        with a 401, a 403, a redirect, the sign-in page or a page of the
+        bank's own, and no download comes. As in Chromium the answers come
+        before the popup's page is known, and the popup stays open on what
+        it was answered with, since it never became a download."""
+        pop = Popup(self, self.context)
+        self.popups.append(pop)
+        if how == "sign-in":
+            pop.go(url, 302, "text/html", b"")
+            pop.go(SIGN_IN, 200, "text/html", b"<!doctype html><title>Sign in</title>")
+        elif how == "page":
+            pop.go(url, 200, "text/html", REFUSAL_PAGE)
+        else:
+            pop.go(url, int(how), "text/html", b"")
+        self.context.emit("page", pop)
+        pop.stuck = self.refused_stays
 
     def do_download(self, url):
         how = self.download
@@ -1019,14 +1048,177 @@ def test_a_download_from_another_statement_address_stops_the_run(tmp_path):
     assert not (tmp_path / "o.pdf").exists()
 
 
-def test_a_pdf_answer_or_popup_that_is_signed_out_is_session_expired(tmp_path):
-    bank = Bank([acct1()], download="popup")
-    bank.pdf_status = 302
+# Each way the bank can refuse one statement's popup. "redirect with a
+# download" is a 302 for the statement's address while a download still
+# came, the case read after the download's second wait.
+REFUSALS = ["401", "403", "302", "sign-in", "page", "redirect with a download", "popup to sign-in"]
+
+
+def refusing(how, accounts=None):
+    """A bank that refuses DOC1 (2026-09-16 in acct1) `how`, its session and
+    list still signed in."""
+    bank = Bank(accounts or [acct1(), acct2()])
+    if how == "redirect with a download":
+        bank.download, bank.pdf_status = "popup", 302
+    elif how == "popup to sign-in":
+        bank.download = "signin"
+    else:
+        bank.refuse[DOC1] = how
+    return bank
+
+
+def presses_of(bank, kind="download"):
+    return [p for p in bank.presses if p[0] == kind]
+
+
+@pytest.mark.parametrize("how", REFUSALS)
+def test_a_statement_refused_while_the_list_still_reads_fails_alone(tmp_path, how):
+    """A 401, a 403, a redirect, the sign-in page or a page where one
+    statement's PDF should be was read as a sign-out, so every run stopped
+    at that statement and Continue stopped there again (#124). The
+    statements page is opened afresh and the bank's session probe asked
+    again, and a session that still reads leaves the refusal that
+    statement's own. Its Download PDF is pressed once, never again."""
+    bank = refusing(how)
+    ok, out, trace = take(bank, tmp_path)
+    assert ok is False
+    assert not out.exists() and not list((tmp_path / "dl").iterdir())
+    assert presses_of(bank) == [("download", 0, "2026-09-16")]
+    # The page was opened for the statement, then once more after the
+    # refusal, and the session probe asked each time.
+    assert len(bank.gotos) == 2 and len(bank.context.request.asked) == 2
+    assert {"note": "refused, the list still reads"} in trace
+    assert all(p.closed for p in bank.popups), "every page the press made is closed"
+    assert all(dl.canceled for dl in bank.downloads), "a download that came is not taken"
+    assert not bank.listeners["download"], "the press's listeners are removed"
+    assert "QUOLLDEN" not in json.dumps(trace)
+
+
+def test_the_page_read_again_after_a_refusal_serves_the_next_statement(tmp_path):
+    bank = refusing("403")
+    run = run_on(bank)
+    assert take(bank, tmp_path, run=run)[0] is False
+    ok, out, _ = take(bank, tmp_path, run=run, doc=DOC2, date="2026-08-15")
+    assert ok and out.read_bytes() == PDF
+    assert presses_of(bank) == [("download", 0, "2026-09-16"), ("download", 0, "2026-08-15")]
+
+
+@pytest.mark.parametrize("how", REFUSALS)
+@pytest.mark.parametrize("signed_out", ["probe 401", "probe redirect", "sign-in page"])
+def test_a_statement_refused_and_the_session_refused_after_it_is_a_sign_out(tmp_path, how, signed_out):
+    """A session that ended refuses the page read again too, and only that
+    stops the run as signed out."""
+    bank = refusing(how)
+
+    def second_load(b):
+        if len(b.gotos) < 2:
+            return
+        if signed_out == "probe 401":
+            b.probe = Resp(site.SESSION_URL, 401)
+        elif signed_out == "probe redirect":
+            b.probe = Resp(site.SESSION_URL, 302, "text/html", b"", "https://www.firsthorizon.com/")
+        else:
+            b.url = SIGN_IN
+    bank.on_goto = second_load
     with pytest.raises(site.SessionExpired):
         take(bank, tmp_path)
-    bank = Bank([acct1()], download="signin")
+    assert not (tmp_path / "o.pdf").exists()
+    assert presses_of(bank) == [("download", 0, "2026-09-16")]
+    assert len(bank.gotos) == 2
+
+
+@pytest.mark.parametrize("how", ["401", "sign-in", "page"])
+def test_a_statement_refused_and_a_page_that_stops_after_it_stops_the_run_with_the_list_unread(
+        tmp_path, how):
+    bank = refusing(how)
+    bank.on_goto = lambda b: setattr(b, "url", f"https://{HOST}/#accounts") if len(b.gotos) > 1 else None
+    with pytest.raises(site.pressing.Stop) as stop:
+        take(bank, tmp_path)
+    assert stop.value.reason == "the statements page stopped" and stop.value.list_unread
+    assert presses_of(bank) == [("download", 0, "2026-09-16")]
+    assert not (tmp_path / "o.pdf").exists()
+
+
+def _no_panel(bank):
+    bank.accounts = []
+
+
+def _times_out_with_no_panel(bank):
+    """The statements page loads with no account panel yet, and its wait
+    times out, as a page that stops answering does."""
+    _no_panel(bank)
+
+    def timed_out(ms):
+        raise TimeoutError("Timeout 30000ms exceeded")
+    bank.wait_for_timeout = timed_out
+
+
+# What the statements page opened afresh after a refusal can do that says
+# nothing of the session. Each stops the run with the list unread, never as
+# signed out and never as one statement's failure.
+LIST_UNREAD = {
+    "probe 500": lambda b: setattr(b, "probe", Resp(site.SESSION_URL, 500)),
+    # A gateway's own error page, not the bank's sign-in.
+    "probe 502 page": lambda b: setattr(b, "probe", Resp(
+        site.SESSION_URL, 502, ctype="text/html", body=b"<html>made-up gateway</html>")),
+    "probe 503 page": lambda b: setattr(b, "probe", Resp(
+        site.SESSION_URL, 503, ctype="text/html", body=b"<html>made-up gateway</html>")),
+    "timeout": _times_out_with_no_panel,
+    "no account panel": _no_panel,
+}
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_a_page_that_does_not_answer_after_a_refusal_stops_the_run_with_the_list_unread(
+        tmp_path, how):
+    """A timeout reached the loop as the statement's own failure, so the
+    run went on with no session shown. None of these says the session
+    holds."""
+    bank = refusing("403")
+    bank.on_goto = lambda b: LIST_UNREAD[how](b) if len(b.gotos) == 2 else None
+    with pytest.raises(site.pressing.Stop) as stop:
+        take(bank, tmp_path)
+    assert stop.value.reason == "the statements page stopped" and stop.value.list_unread
+    assert presses_of(bank) == [("download", 0, "2026-09-16")]
+    assert len(bank.gotos) == 2
+    assert not (tmp_path / "o.pdf").exists()
+
+
+@pytest.mark.parametrize("shown", ["timeout dialog", "sign-in page", "page's own answer"])
+def test_the_page_itself_signed_out_while_a_statement_is_taken_stops_at_once(tmp_path, shown):
+    """What the run's own page shows, or the page's own request answered as
+    signed out, stops the run as before, with no page read again."""
+    bank = Bank([acct1()], download="none" if shown == "page's own answer" else "popup")
+    original = bank.click
+
+    def click(loc):
+        original(loc)
+        if loc.kind != "button":
+            return
+        if shown == "timeout dialog":
+            bank.dialog = True
+        elif shown == "sign-in page":
+            bank.password = True
+        else:
+            bank.context.emit("response", links_err(ACCT1, 401, page=bank))
+    bank.click = click
     with pytest.raises(site.SessionExpired):
         take(bank, tmp_path)
+    assert len(bank.gotos) == 1, "nothing is loaded again"
+    assert not (tmp_path / "o.pdf").exists()
+
+
+def test_a_refused_statement_whose_page_will_not_close_stops_the_run(tmp_path):
+    """A refusal is weighed only once every page the press made is closed.
+    A page left open on the bank's answer stops the run, as any press that
+    left one does."""
+    bank = refusing("401")
+    bank.refused_stays = True
+    with pytest.raises(site.pressing.Stop) as stop:
+        take(bank, tmp_path)
+    assert stop.value.reason == "a page the press opened stayed open"
+    assert len(bank.gotos) == 1
+    assert not (tmp_path / "o.pdf").exists()
 
 
 def test_a_download_pending_before_the_press_stops_the_run(tmp_path):
@@ -1306,6 +1498,93 @@ def test_an_expired_session_stops_the_run_and_records_nothing(tmp_path):
     assert "signed out" in said.getvalue()
     assert app.progress.data == {}
     assert app.stats["manual_review"] + app.stats["failed"] == 0
+
+
+def _run_all(app, bank):
+    """A Run All's downloads over what discovery listed, with what it
+    printed and logged, and the SystemExit it ended with, if any."""
+    seen, handler, old = _capture_logs()
+    ended = None
+    try:
+        with redirect_stdout(seen):
+            app.process(app._select())
+    except SystemExit as e:
+        ended = e
+    finally:
+        logging.getLogger().removeHandler(handler)
+        logging.getLogger().setLevel(old)
+    return ended, seen.getvalue()
+
+
+def _listed(tmp_path, bank):
+    app = make_app(tmp_path, "--all")
+    wire(app, bank, tmp_path)
+    with redirect_stdout(io.StringIO()):
+        app.cmd_discover()
+    app.check_session = lambda page: None
+    return app
+
+
+@pytest.mark.parametrize("how", ["403", "page"])
+def test_one_statement_refused_while_the_list_reads_fails_alone_and_the_rest_are_saved(tmp_path, how):
+    """The refused statement stopped the run before, so the statements after
+    it were never asked for, and every later run stopped at it again."""
+    from paperpull_core.models import State
+    bank = refusing(how, [acct1()])
+    app = _listed(tmp_path, bank)
+    ended, said = _run_all(app, bank)
+    assert ended is None, said
+    states = {r["document_id"]: r["state"] for r in app.progress.data.values()}
+    assert states == {DOC1: State.FAILED.value, DOC2: State.COMPLETED.value}
+    assert (app.stats["failed"], len(app.stats["new_files"])) == (1, 1)
+    assert said.count("Nothing was saved, and the next run tries it again") == 1
+    assert "signed out" not in said
+    assert presses_of(bank).count(("download", 0, "2026-09-16")) == 1
+    attempt = (app.paths.diagnostics / "download-attempt.json").read_text()
+    assert "refused, the list still reads" in attempt
+    everything = _everything(app, said, tmp_path)
+    for word in PRIVATE + [TITLE1, "QUOLLDEN"]:
+        assert word not in everything, word
+    # The next run tries it again, and takes it once the bank gives it.
+    bank.refuse.clear()
+    ended, said = _run_all(app, bank)
+    assert ended is None, said
+    states = {r["document_id"]: r["state"] for r in app.progress.data.values()}
+    assert states == {DOC1: State.COMPLETED.value, DOC2: State.COMPLETED.value}
+    assert presses_of(bank).count(("download", 0, "2026-09-16")) == 2
+
+
+def test_one_statement_refused_and_the_session_after_it_stop_the_run_as_signed_out(tmp_path):
+    bank = refusing("401", [acct1()])
+    app = _listed(tmp_path, bank)
+    loads = len(bank.gotos)
+    bank.on_goto = lambda b: setattr(b, "probe", Resp(site.SESSION_URL, 401)) \
+        if len(b.gotos) > loads + 1 else None
+    ended, said = _run_all(app, bank)
+    assert isinstance(ended, SystemExit)
+    assert "signed out" in said
+    assert "Nothing was saved" not in said
+    assert app.progress.data == {}
+    assert app.stats["manual_review"] + app.stats["failed"] == 0
+    assert len(presses_of(bank)) == 1
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_one_statement_refused_and_a_page_that_does_not_answer_after_it_stop_the_run_unread(
+        tmp_path, how):
+    """The run stops at the refused statement with the list unread, so the
+    panel offers a run that lists first. Nothing is recorded against the
+    statement, and nothing after it is pressed."""
+    bank = refusing("403", [acct1()])
+    app = _listed(tmp_path, bank)
+    loads = len(bank.gotos)
+    bank.on_goto = lambda b: LIST_UNREAD[how](b) if len(b.gotos) == loads + 2 else None
+    ended, said = _run_all(app, bank)
+    assert isinstance(ended, site.pressing.Stop) and ended.list_unread, said
+    assert app.progress.data == {}
+    assert app.stats["manual_review"] + app.stats["failed"] == 0
+    assert "signed out" not in said and "Nothing was saved" not in said
+    assert presses_of(bank) == [("download", 0, "2026-09-16")]
 
 
 def test_an_expired_session_during_discovery_stops_the_run(tmp_path):

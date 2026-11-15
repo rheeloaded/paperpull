@@ -55,8 +55,9 @@ KNOWN CEILINGS (left as they are until a run shows otherwise)
   * A PDF asked for and answered 200 with anything but a PDF fails that
     document alone. This API refuses a session with a 401 or 403, so a
     PDF refused that way has the lists read again. Lists that refuse too
-    stop the run as signed out, and lists that answer fail that document
-    alone.
+    stop the run as signed out, lists that do not answer, hold nothing or
+    reach a page that stops answering stop it with the lists unread, and
+    lists that answer fail that document alone.
   * A statement row's name is kept as the list gives it, so a
     confirmation or a tax form the list may hold is filed or left out by
     its own name. Only statements have been seen in it.
@@ -88,7 +89,7 @@ from typing import List, Optional, Tuple
 from urllib.parse import parse_qs, urlsplit
 
 from paperpull_core import shared_folder
-from paperpull_core import intake
+from paperpull_core import intake, refused
 from paperpull_core.characters import whole_json
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
@@ -847,7 +848,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     the portal refuses this one document, which then fails alone, since a
     stop here would stop every run at this document for good. ListStopped
     propagates when the lists cannot be read again, since every document
-    after this one would read the same lists."""
+    after this one would read the same lists. Lists that do not answer, hold
+    nothing, or reach a page that stops answering raise it too, since that
+    says neither that the session ended nor that it holds
+    (refused.list_again)."""
     out_path = Path(out_path)
     doc_id = (document_id or "").strip()
     if href not in (DOWNLOAD_PATH, QPR_DOWNLOAD_PATH) or not DOC_ID_RE.fullmatch(doc_id):
@@ -858,7 +862,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     why = ""
     for fresh in ((False, True) if _RUN else (True,)):
         if fresh:
-            _read(page)
+            # Read for this document, or again after a refusal of headers
+            # kept from an earlier reading. Lists that do not answer, or
+            # hold nothing, stop the run with the list unread, since every
+            # document after this one would read the same lists.
+            refused.list_again(lambda: _read(page), SessionExpired, ListStopped)
         session, listed = _RUN["session"], _RUN["docs"]
         found = [d for d in listed if d.document_id == doc_id and d.href == href
                  and d.date_text == (iso_date or "")]
@@ -873,8 +881,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             if fresh:
                 # Refused with headers the page has just given. The lists
                 # are read once more, and a signed-out session stops the
-                # run there. Lists that answer leave this document alone.
-                _read(page)
+                # run there. Lists that do not answer, or hold nothing, stop
+                # it with the list unread, since that says neither
+                # (refused.list_again). Lists that answer leave this
+                # document alone.
+                refused.list_again(lambda: _read(page), SessionExpired, ListStopped)
                 why = "the PDF was refused while the lists still answer"
                 break
         why = "the PDF was refused with the headers kept from an earlier reading"

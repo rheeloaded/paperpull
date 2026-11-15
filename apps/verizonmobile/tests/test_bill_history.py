@@ -110,6 +110,35 @@ class Page:
         return {"status": 200, "type": "application/pdf", "b64": base64.b64encode(self.pdf).decode()}
 
 
+class HistoryFailsAfterTheBill(Page):
+    """The bill is refused, and the history read again after it answers
+    500, lists no bill, answers with an error code, or the page stops
+    answering while it loads, so the browser raises its own error. None of
+    them says the session ended, and none says it still holds."""
+
+    def __init__(self, how, **kw):
+        kw.setdefault("pdf_status", 403)
+        second = {"500": (answer(ENDS), 500, False), "empty": (answer([]), 200, False),
+                  "error code": (dict(answer(ENDS), responseInfo={"responseCode": "99"}), 200, False),
+                  "timeout": (answer(ENDS), 200, False)}[how]
+        super().__init__(loads=[(answer(ENDS), 200, False), second], **kw)
+        self.how, self.gone = how, False
+
+    def goto(self, url, **k):
+        if self.gotos and self.how == "timeout":
+            self.gotos += 1
+            self.gone = True
+            raise TimeoutError("Timeout 60000ms exceeded")
+        super().goto(url, **k)
+
+    def wait_for_timeout(self, ms):
+        if self.gone:
+            raise TimeoutError("Timeout 30000ms exceeded")
+
+
+UNREAD = ("500", "timeout", "empty", "error code")
+
+
 def stop_of(page):
     try:
         site.collect_download_docs(page)
@@ -252,6 +281,21 @@ class Download(unittest.TestCase):
             self.assertFalse(self.fetch(page))
             self.assertEqual(page.gotos, 2, "read again once to tell a sign-out apart")
             self.assertFalse(self.out.exists())
+
+    def test_a_history_read_again_after_a_refusal_that_does_not_answer_stops_unread(self):
+        """A history that answers 500, lists no bill or an error code, or a
+        page that stops answering, when read again after a refusal, is
+        neither a sign-out nor this bill's own failure. The history was
+        only opened again, never read, so a history listing nothing left the
+        bill failed alone, and a page that stopped answering reached the
+        run as the bill's failure."""
+        for how in UNREAD:
+            page = HistoryFailsAfterTheBill(how)
+            with self.assertRaises(site.ListStopped, msg=how):
+                self.fetch(page)
+            self.assertEqual(page.gotos, 2, how)
+            self.assertEqual(len(page.asked), 1, how)
+            self.assertFalse(self.out.exists(), how)
 
     def test_no_single_match_or_a_non_pdf_saves_nothing(self):
         for page, day, doc_id in ((Page(), "2026-01-11", f"bill-{TAG}-2026-01-11"),

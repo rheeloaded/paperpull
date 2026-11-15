@@ -636,9 +636,11 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except site.SessionExpired:
-                # Bilt answered a statement as a signed-out session. Every
-                # statement after it would get the same answer, so the run
-                # stops here, with nothing recorded against this one.
+                # The wallet, read for this statement or read again after
+                # the statement was refused, answered as a signed-out
+                # session. Every statement after it would get the same
+                # answer, so the run stops here, with nothing recorded
+                # against this one.
                 self.session_ended()
             except Exception as e:
                 # Neither the key nor the message, which can carry the

@@ -29,7 +29,7 @@ from typing import Dict, List, Optional
 from urllib.parse import unquote, urlsplit
 
 from paperpull_core import shared_folder
-from paperpull_core import intake
+from paperpull_core import intake, refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 # Everything on its way into a diagnostic file goes through here.
 from paperpull_core.redact import redact, set_private_words  # noqa: F401
@@ -104,7 +104,9 @@ LOGIN_URL_MARKERS = ["/login", "/logout", "/timeout", "/anmeldung", "/abmeldung"
 
 
 class SessionExpired(RuntimeError):
-    """ING answered with a sign-in page or a 401 instead of the thing asked for."""
+    """ING answered with a sign-in page or a 401 instead of the thing asked
+    for. A document refused that way raises it only when its list, opened
+    and read again, shows the sign-in page too (download_document)."""
 
 
 class ListStopped(Exception):
@@ -608,6 +610,13 @@ def _safe_download(href: str) -> bool:
 SKIPS = ("unread", "no_link", "unclear", "refused")
 
 
+def _rows_again(page, source: str, settings: Optional[dict]) -> list:
+    """The rows of one list, opened by its own address and read whole
+    again after one of its documents was refused (refused.list_again)."""
+    area = _read_area(page, source, settings, again=True)
+    return area["rows"]
+
+
 def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool = True,
                scroll: bool = True, again: bool = False) -> dict:
     """One list, "postbox" or "archive", read whole or not at all.
@@ -973,8 +982,9 @@ _FILE_STARTS = (b"%PDF", b"PK\x03\x04")
 def _fetch(page, href: str) -> Optional[bytes]:
     """The document at `href`, fetched from inside the Postbox page, or None
     when ING answered with a page of its own, as it may for a link that has
-    expired. A sign-in page, a 401 or a 403 raises SessionExpired, a fetch
-    the browser did not finish FetchFailed, an answer over the size limit
+    expired. A sign-in page, a 401 or a 403 raises SessionExpired, which
+    download_document weighs against the list read again, a fetch the
+    browser did not finish FetchFailed, an answer over the size limit
     intake.TooLarge, and any other answer RuntimeError."""
     try:
         got = intake.evaluate(page, _FETCH_JS, {"url": href, "host": HOST})
@@ -1026,14 +1036,26 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
                       category: str, number_rows, twins: int = 1,
                       config: Optional[dict] = None) -> str:
     """Save one document, and answer the id of the row it came from, or ""
-    when it was over the size limit and nothing was saved.
+    when nothing was saved for it, since it was over the size limit or was
+    refused while the list still reads.
 
     Its row is found in a recent listing (resolve_item, which raises
     NotToldApart when that cannot be told), and its download link is read
     again from the Postbox, opened afresh by its address. The PDF is fetched
     from inside the page. When ING answers with a page instead, or the fetch
     does not finish, the list is opened afresh once more and the link read
-    and fetched again. Nothing is pressed."""
+    and fetched again. Nothing is pressed.
+
+    A document answered with a 401, a 403 or a sign-in page has its list
+    opened afresh and read again, with the same call that reads it for a
+    listing (paperpull_core.refused). A session that has ended shows ING's
+    sign-in page there, and its SessionExpired stops the run. A list that
+    does not open, cannot be read whole, or holds no document, though it
+    listed this one, says neither, and raises ListStopped, which stops the
+    run with the list unread. A list that still reads leaves the refusal
+    this document's own, so it fails alone, since a stop here would stop
+    every run at this document for good. The document is not asked for
+    after the list is read again."""
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins,
                        config=config)
@@ -1049,6 +1071,17 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
             return ""
         except FetchFailed as e:
             data, failed = None, e
+        except SessionExpired:
+            # A refusal may be the session ending or this one document. The
+            # list is opened and read again, and a session that ended shows
+            # there and stops the run. A list that does not answer, or holds
+            # nothing, stops it with the list unread. One that still reads
+            # leaves this document failed, so it never stops every later run
+            # at the same document.
+            refused.list_again(lambda: _rows_again(page, row["source"], config),
+                               SessionExpired, ListStopped)
+            log.info("the document dated %s was refused while the list still reads", date)
+            return ""
         if data:
             out_path = Path(out_path)
             out_path.parent.mkdir(parents=True, exist_ok=True)

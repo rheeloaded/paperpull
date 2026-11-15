@@ -63,7 +63,14 @@ address, a password field, a links or PDF answer that is a redirect, a 401
 or 403, HTML, or not JSON, or a session probe that is not the signed-in
 shape, checked before and after every wait and press, raises
 SessionExpired. The run saves, says so and stops; nothing is recorded for
-review.
+review. A statement's own PDF address answered that way may be the bank
+refusing that one statement, so the statements page is opened afresh and
+the session probe asked again first (download_statement). A session that
+ended shows there and stops the run, and one that still reads leaves that
+statement failed alone, for the next run to try again. A page that does
+not open, times out or shows no account says nothing of the session, so it
+stops the run with the list unread, nothing recorded against the
+statement, and a run that lists first takes it.
 
 KNOWN CEILINGS (left until a live run shows otherwise)
   * A panel's cards are read inside the element its aria-controls names.
@@ -84,6 +91,11 @@ KNOWN CEILINGS (left until a live run shows otherwise)
     online tax statements, which this app never does.
   * The bank ends an idle session after ten minutes; a run stops itself
     eight minutes after its session probe (Run).
+  * What the bank answers for a statement it will not give has not been
+    seen. A 401, a 403, a redirect, a page or the sign-in page at the
+    statement's own address, with the session probe still signed in
+    after it, fails that statement alone, and a page the press made that
+    will not close stops the run.
 """
 from __future__ import annotations
 
@@ -102,6 +114,7 @@ from urllib.parse import quote, unquote, urlsplit
 from paperpull_core import intake
 from paperpull_core import pressing
 from paperpull_core import redirects
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -330,7 +343,9 @@ class SessionExpired(Exception):
     """First Horizon answered as a signed-out session: its timeout words on
     the page, its sign-in page, a password field, or an answer that is a
     redirect, a 401 or 403, HTML, or not the signed-in JSON. The run stops
-    for the account holder."""
+    for the account holder. A statement's own address refused that way
+    stops it only when the statements page, opened afresh, or its session
+    probe refuses too (download_statement)."""
 
 
 class ListStopped(Exception):
@@ -734,10 +749,13 @@ def session_alive(page, run: Run) -> bool:
         body = intake.body(resp)
     except Exception:
         raise ListStopped("the session probe could not be read")
-    if _ctype(resp).startswith("text/html") or body.lstrip()[:1] == b"<":
-        raise SessionExpired("the session probe answered with a page")
+    # The status first, so a gateway's own error page, a 502 or a 503, is a
+    # probe that did not answer rather than the bank's sign-in. A page is
+    # read as the sign-in only when it came with a 200.
     if resp.status != 200:
         raise ListStopped("the session probe was answered %d" % resp.status)
+    if _ctype(resp).startswith("text/html") or body.lstrip()[:1] == b"<":
+        raise SessionExpired("the session probe answered with a page")
     try:
         got = whole_json(json.loads(body.decode("utf-8")))
     except (ValueError, UnicodeDecodeError):
@@ -1428,6 +1446,27 @@ def _to_sign_in(url: str) -> bool:
     return any(m in (url or "").lower() for m in LOGIN_URL_MARKERS)
 
 
+def _refused_answer(response) -> bool:
+    """A navigation answer heard for a statement's press that refuses it, a
+    401, a 403, a redirect, a page (HTML) or the sign-in address. It may be
+    the session ending or the bank refusing that one statement, which
+    download_statement tells apart."""
+    return _signed_out_status(response) or _ctype(response).startswith("text/html") \
+        or _to_sign_in(response.url)
+
+
+def _let_go(downloads: list, made: list) -> bool:
+    """Cancel every download a press brought and close every page it made.
+    False when a page it made stays open or cannot be asked."""
+    _cancel_all(downloads)
+    return _closed(made)
+
+
+def _left_open():
+    return _stop("The page the bank opened for the statement could not be closed, so nothing "
+                 "was taken.", "a page the press opened stayed open")
+
+
 def _catch_statement(page, run: Run, dl_dir, target: Target, iso_date: str, out_path: Path,
                      trace: Optional[list]) -> Optional[bool]:
     """Press the bound card's Download PDF once and take the one download it
@@ -1450,6 +1489,12 @@ def _catch_statement(page, run: Run, dl_dir, target: Target, iso_date: str, out_
     not a PDF stops the run: nothing more is pressed for this or any later
     statement. Only pages this press made are ever closed. Every wait is
     capped by the run's deadline.
+
+    An answer that refuses the statement (_refused_answer) ends the wait
+    for a download at once. After the short second wait, whatever came is
+    canceled and every page the press made is closed, and then it raises
+    SessionExpired, which download_statement weighs against the statements
+    page opened afresh. A page that will not close stops the run instead.
 
     None when the page has turned the Download PDF off: nothing was
     pressed, nothing is waited for, and the statement is left for the next
@@ -1505,9 +1550,11 @@ def _catch_statement(page, run: Run, dl_dir, target: Target, iso_date: str, out_
         while not downloads:
             check_signed_in(page)
             run.watch.raise_if_signed_out(page)
-            if any(_signed_out_status(r) or _to_sign_in(r.url) for r in navs):
-                give_up()
-                raise SessionExpired("the statement's address answered as signed out")
+            if any(_refused_answer(r) for r in navs):
+                # Refused, so no download is coming. The wait below lets the
+                # page the press made be known, so it is closed with the rest
+                # before the refusal is read there.
+                break
             if waited >= DOWNLOAD_WAIT_MS:
                 gone = _close(made)
                 if any(_to_sign_in(u) for u in gone):
@@ -1523,9 +1570,12 @@ def _catch_statement(page, run: Run, dl_dir, target: Target, iso_date: str, out_
             waited += POLL_MS
         check_signed_in(page)
         went = [r.url or "" for r in navs]
-        if any(_signed_out_status(r) or _ctype(r).startswith("text/html") or _to_sign_in(r.url)
-               for r in navs):
-            give_up()
+        if any(_refused_answer(r) for r in navs):
+            # The statement's own address was refused. download_statement
+            # weighs that against the statements page read again, once
+            # nothing the press brought is left open.
+            if not _let_go(downloads, made):
+                raise _left_open()
             raise SessionExpired("the statement's address answered as signed out")
         if len(made) > 1:
             give_up()
@@ -1540,7 +1590,8 @@ def _catch_statement(page, run: Run, dl_dir, target: Target, iso_date: str, out_
                 raise _stop("Where the page the bank opened went could not be read, so the "
                             "download was not taken.", "a page the press opened could not be read")
         if any(_to_sign_in(u) for u in ended):
-            give_up()
+            if not _let_go(downloads, made):
+                raise _left_open()
             raise SessionExpired("the statement's popup landed on the sign-in page")
         if len(downloads) != 1:
             give_up()
@@ -1594,6 +1645,16 @@ def _catch_statement(page, run: Run, dl_dir, target: Target, iso_date: str, out_
 _DOCUMENT_ID_RE = re.compile(_DOC_ID_RE)
 
 
+def _shown_again(page, run: Run) -> list:
+    """The account panels of the statements page opened afresh after a
+    statement was refused, once the page the refusal left shows no sign-in
+    of the bank's. A page whose address cannot be read raises as it is, so
+    refused.list_again reads it as the list unread."""
+    check_signed_in(page)
+    run.watch.raise_if_signed_out(page)
+    return _open(page, run).state.get("panels")
+
+
 def download_statement(page, run: Run, dl_dir, out_path, *, account_id: str, product: str,
                        document_id: str, iso_date: str,
                        trace: Optional[list] = None) -> Optional[bool]:
@@ -1607,7 +1668,19 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_id: str, pro
     open, the session probe fails, a panel is turned off, hidden or changes)
     stops the run with pressing.Stop, since the next statement would meet
     the same page. SessionExpired, DeadlineReached and every other stop of
-    the run propagate."""
+    the run propagate.
+
+    A statement whose own address was refused once its Download PDF was
+    pressed is weighed first. The run's page showing the sign-in page or
+    the session timeout, or the page's own request answered as signed out,
+    stops the run as before. Otherwise the statements page is opened
+    afresh, which asks the session probe, with nothing pressed. A session
+    that ended shows there and its SessionExpired stops the run, a page
+    that stops the list, times out or shows no account stops it with the
+    list unread (refused.list_again), and a page that still reads leaves
+    the refusal this statement's own, so it answers False and fails
+    alone. A stop here would stop every run at this statement for good
+    (#124). Download PDF is not pressed a second time."""
     out_path = Path(out_path)
     if not (account_id and product and _DOCUMENT_ID_RE.fullmatch(document_id or "")
             and _no_dots(document_id) and statement_date(iso_date) == iso_date):
@@ -1630,6 +1703,31 @@ def download_statement(page, run: Run, dl_dir, out_path, *, account_id: str, pro
         if trace is not None:
             trace.append({"note": "the card's control was not pressed"})
         raise _page_stopped(stop)
+    except SessionExpired:
+        # What the run's own page shows, or the page's own request answered
+        # as signed out, stops the run as it always did.
+        # A refusal of the statement's own address may be the session ending
+        # or this one statement. The page the refusal left is looked at for
+        # the bank's sign-in, then the statements page is opened afresh,
+        # which asks the bank's session probe, and a session that ended
+        # shows there and stops the run. One that still reads leaves this
+        # statement failed, so it never stops every later run at the same
+        # statement. Nothing is pressed for it again. A page that times out,
+        # cannot be read or shows no account says nothing of the session, so
+        # it stops the run with the list unread (refused.list_again).
+        try:
+            refused.list_again(lambda: _shown_again(page, run),
+                               SessionExpired, ListStopped, stops=(DeadlineReached,))
+        except ListStopped as stop:
+            log.info("the list stopped when read again after the statement dated %s was refused",
+                     iso_date)
+            if trace is not None:
+                trace.append({"note": "the list stopped"})
+            raise _page_stopped(stop)
+        log.info("the statement dated %s was refused while the list still reads", iso_date)
+        if trace is not None:
+            trace.append({"note": "refused, the list still reads"})
+        return False
 
 
 def _page_stopped(stop: ListStopped) -> pressing.Stop:

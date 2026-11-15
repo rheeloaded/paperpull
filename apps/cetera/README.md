@@ -56,9 +56,12 @@ a tab of its own. A tab of another site is never used.
 - **Signing out.** A 401, a 403 or a redirect on a list just read stops the
   run and keeps what it saved. Sign in again and run Resume. A PDF refused
   with a 401 or a 403 right after the lists were read has them read once
-  more. If they refuse too, the run stops the same way. If they answer,
-  the portal is refusing that one document, which fails alone, and the
-  next run tries it again.
+  more. If they refuse too, the run stops the same way. If they do not
+  answer, hold nothing, or the page stops answering while they are read,
+  that says neither, so the run stops there with nothing recorded for that
+  document, and the panel offers a run that reads the lists first. If they
+  answer, the portal is refusing that one document, which fails alone, and
+  the next run tries it again.
 
 ## Validation status
 

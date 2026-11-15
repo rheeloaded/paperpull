@@ -49,6 +49,14 @@ elections. This tool does none of it. Concretely:
   from any stored string.
 - **A short session that expires stops the run** and says so, rather than
   filing everything as "needs manual review" and exiting as though it worked.
+  A document myPay refuses on its own has its type's list read again. A
+  list refused too, with a 401, a 403 or a page where the list should be,
+  means you are signed out, and the run stops. A list that answers with an
+  error, does not answer in time or holds nothing says nothing of your
+  session, so the run stops with the list unread, nothing is recorded
+  against that document, and Get new documents reads the list first. A
+  list that still reads leaves that document failed with nothing saved,
+  the run goes on to the others, and the next run tries it again.
 
 ## Setup
 

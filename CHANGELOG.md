@@ -142,6 +142,45 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and Windows refused a long name of emoji. A name is now cut to fit
   between two characters, keeping a part such as "(2 of 3)" at its end
   that Rename reads. Every name that fit before is unchanged.
+- **One document a provider refuses no longer stops every run in sixteen
+  more apps.** Affirm, American Express Banking, Anthem, Bank of America,
+  Bilt, FedEx, First Horizon, ING, the IRS, myPay, Portland General
+  Electric, SDG&E, Simmons Bank, Stripe, Tualatin Water and UPS read a 401,
+  a 403, a redirect or a page answered for one document as a sign-out, so
+  the run stopped at that document, and every run after it, Continue
+  included, stopped at the same one (#124). Now the list is read again when
+  one document is refused, as Ziply Fiber's is. A list refused too means
+  you are signed out, and the run stops as before. A list that still reads
+  leaves that document counted as failed with nothing saved, the run goes
+  on to the others, and the next run tries it again. A list that does not
+  answer, times out, comes back with a server's error page or holds
+  nothing says neither, so the run stops there without calling you signed
+  out, nothing is recorded against the document, and the panel offers Get
+  new documents, which reads the list first and asks for it again. Ziply
+  Fiber, Cetera, Verizon Mobile and NW Natural now read a list that times
+  out or stops answering after a refusal that way too, where it counted
+  the bill as failed and went on, and so do Cetera, NW Natural and
+  Portland General Electric when they read the list for a bill this run
+  holds no list for. Anthem's member documents and ID cards read their own
+  lists again the same way, and a list there that does not answer ends that
+  kind of document for the run, counted as failed, as it does when it will
+  not open. A document is not asked for twice, apart from the one more ask
+  with a fresh sign-in token that Anthem and Portland General Electric
+  already made. In First Horizon a page answered for a statement no longer
+  waits a minute for a download that never comes. M&T stays as it was,
+  since its list is the one you opened in your own tab, and nothing can
+  read that again without wiping it.
+- **FedEx reads an invoice list it refuses as a sign-out.** When FedEx
+  Billing Online answered every call of the invoices page with a 401 or a
+  403, Discover took that for a list with no invoices, said Discovery
+  complete and found nothing new with the session ended. After one refused
+  invoice, the list read again stopped the run as a list that did not
+  answer and never said you were signed out. Both now stop the run as
+  signed out. A list that answers with a server's error, times out, never
+  comes or holds no invoice is still not read as one, and nor is one call
+  refused while another answers. A FedEx tab that fedex.com will not open
+  in now stops the run with the list unread, where it was called a
+  sign-out.
 
 ## [0.66.0] - 2026-11-13
 

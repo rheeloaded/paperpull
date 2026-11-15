@@ -237,6 +237,7 @@ class Page:
         self.list_readable = True
         self.on_press = None          # what a press brings, by default the PDF
         self.pdf_override = {}
+        self.pdf_refused = {}         # documentId -> (status, location) its PDF address answers
         self.later_rows = None        # rows drawn after the first poll
         self.more_buttons = []        # buttons beyond the rows, as the script reads them
         self.hear_institution = True
@@ -294,6 +295,10 @@ class Page:
             answer = self.answer if self.answer is not None else {"documents": self.docs}
             return Resp(url, answer, page=self)
         for d in self.docs:
+            if url == pdf_url(d["documentId"]) and d["documentId"] in self.pdf_refused:
+                status, location = self.pdf_refused[d["documentId"]]
+                return Resp(url, raw=b"", status=status, ctype="text/html", page=self,
+                            location=location)
             if url == pdf_url(d["documentId"]):
                 data = self.pdf_override.get(d["documentId"], pdf_for(d))
                 return Resp(url, raw=data, ctype="application/pdf", page=self)
@@ -1010,6 +1015,137 @@ def test_two_rows_of_one_title_press_neither(tmp_path):
     assert got is False and page.presses == []
 
 
+# What one document's PDF address, asked once more, can answer that reads
+# as a sign-out, a 401, a 403 and a redirect, as (status, where it points).
+PDF_REFUSALS = {
+    "401": (401, None),
+    "403": (403, None),
+    "redirect": (302, BASE + "/login"),
+}
+
+
+def asks_only(page, d):
+    """A press that makes the page ask the document's PDF, with no download."""
+    page.fire("request", Req(pdf_url(d["documentId"])))
+
+
+def refused_page(how, did=D1):
+    page = Page()
+    page.on_press = asks_only
+    page.pdf_refused[did] = PDF_REFUSALS[how]
+    return page
+
+
+@pytest.mark.parametrize("how", sorted(PDF_REFUSALS))
+def test_a_document_refused_while_the_list_still_reads_fails_alone(tmp_path, how):
+    """A 401, a 403 or a redirect at one document's PDF address was read as
+    a sign-out, so every run stopped at that document and Continue stopped
+    there again (#124). The list is read again with the call that proves a
+    session, and a list that still reads leaves the refusal that
+    document's own."""
+    page = refused_page(how)
+    got, out, trace = take(page, tmp_path)
+    assert got is False and not out.exists()
+    # The row is pressed once and the PDF address asked once, never a
+    # second time, and the documents page is loaded once more for the list.
+    assert page.presses == [row_text(DOCS[0])]
+    assert page.context.request.asked == [(pdf_url(D1), 0)]
+    assert len(page.gotos) == 2
+    assert {"note": "refused, the list still reads"} in trace
+    for word in PRIVATE:
+        assert word not in json.dumps(trace), word
+
+
+@pytest.mark.parametrize("ends", ["sign-in page", "list refused"])
+@pytest.mark.parametrize("how", sorted(PDF_REFUSALS))
+def test_a_document_refused_and_a_list_refused_after_it_is_a_sign_out(tmp_path, how, ends):
+    """A session that ended refuses the list too, and only that stops the
+    run as signed out."""
+    page = refused_page(how)
+
+    def signs_out(page, d):
+        asks_only(page, d)
+        if ends == "sign-in page":
+            page.password = True
+        else:
+            page.list_status = 401
+    page.on_press = signs_out
+    with pytest.raises(site.SessionExpired):
+        take(page, tmp_path)
+    assert page.presses == [row_text(DOCS[0])]
+    assert page.context.request.asked == [(pdf_url(D1), 0)]
+    assert len(page.gotos) == 2
+    assert not (tmp_path / "out" / "doc.pdf").exists()
+
+
+def test_a_list_that_stops_when_read_after_a_refusal_stops_the_run_unread(tmp_path):
+    page = refused_page("403")
+
+    def list_stops(page, d):
+        asks_only(page, d)
+        page.rows = [row_text(x) for x in DOCS[1:]]
+    page.on_press = list_stops
+    with pytest.raises(pressing.Stop) as stop:
+        take(page, tmp_path)
+    assert stop.value.list_unread
+    assert page.presses == [row_text(DOCS[0])]
+    assert page.context.request.asked == [(pdf_url(D1), 0)]
+
+
+def _times_out_on_the_next_load(page):
+    """The page's waits time out from the next load on, as a page that
+    stops answering does."""
+    goto = page.goto
+
+    def load(url, **kw):
+        goto(url, **kw)
+
+        def timed_out(ms):
+            raise TimeoutError("Timeout 30000ms exceeded")
+        page.wait_for_timeout = timed_out
+    page.goto = load
+
+
+def _holds_nothing(page):
+    """The list holds no document from the next load on."""
+    goto = page.goto
+
+    def load(url, **kw):
+        page.docs, page.rows = [], []
+        goto(url, **kw)
+    page.goto = load
+
+
+# What the list read again after a refusal can do that says nothing of the
+# session. Each stops the run with the list unread, never as signed out and
+# never as one document's failure.
+LIST_UNREAD = {
+    "500": lambda page: setattr(page, "list_status", 500),
+    "timeout": _times_out_on_the_next_load,
+    "empty": _holds_nothing,
+}
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_a_list_that_does_not_answer_after_a_refusal_stops_the_run_unread(tmp_path, how):
+    """A timeout reached the loop as the document's own failure, so the run
+    went on with no session shown, and a list that held nothing was read as
+    one that still reads. Neither says the session holds."""
+    page = refused_page("403")
+
+    def unread(page, d):
+        asks_only(page, d)
+        LIST_UNREAD[how](page)
+    page.on_press = unread
+    with pytest.raises(pressing.Stop) as stop:
+        take(page, tmp_path)
+    assert stop.value.list_unread
+    assert page.presses == [row_text(DOCS[0])]
+    assert page.context.request.asked == [(pdf_url(D1), 0)]
+    assert len(page.gotos) == 2
+    assert not (tmp_path / "out" / "doc.pdf").exists()
+
+
 def test_a_list_that_stops_while_a_document_is_sought_stops_the_run(tmp_path):
     page = Page(rows=[row_text(d) for d in DOCS[1:]])
     with pytest.raises(pressing.Stop) as stop:
@@ -1130,6 +1266,98 @@ def test_a_pdf_that_does_not_name_its_document_goes_to_review(tmp_path, monkeypa
     assert list(app.paths.manual_review.glob("*.pdf"))
     rec = next(iter(app.progress.data.values()))
     assert rec["state"] == docs.State.NEEDS_MANUAL_REVIEW.value
+
+
+def run_all(app, caplog):
+    """A Run All, with what it printed and logged and how it ended."""
+    caplog.set_level(logging.INFO)
+    buf = io.StringIO()
+    ended = None
+    try:
+        with redirect_stdout(buf):
+            app.cmd_run("all")
+    except SystemExit as e:
+        ended = e
+    return ended, buf.getvalue() + caplog.text
+
+
+def test_one_document_refused_while_the_list_reads_fails_alone_and_the_rest_are_saved(
+        tmp_path, monkeypatch, caplog):
+    """The refused document stopped the run before, so the documents after
+    it were never pressed, and every later run stopped at it again."""
+    page = Page()
+    page.pdf_refused[D2] = PDF_REFUSALS["403"]
+    page.on_press = lambda page, d: (asks_only if d["documentId"] == D2 else Page.brings_pdf)(page, d)
+    app = make_app(tmp_path, monkeypatch, page)
+    ended, said = run_all(app, caplog)
+    assert ended is None, said
+    states = {r["date"]: r["state"] for r in app.progress.data.values()}
+    assert states == {d["date"]: (docs.State.FAILED.value if d["documentId"] == D2
+                                  else docs.State.COMPLETED.value) for d in DOCS}
+    assert (app.stats["failed"], len(app.stats["new_files"])) == (1, 3)
+    assert said.count("Nothing was saved, and the next run tries it again") == 1
+    assert "signed out" not in said
+    assert page.presses.count(row_text(DOCS[1])) == 1
+    assert page.context.request.asked == [(pdf_url(D2), 0)]
+    # The attempt file says why, and like everything a person reads it
+    # names no private word.
+    attempt = (app.paths.diagnostics / "download-attempt.json").read_text(encoding="utf-8")
+    assert "refused, the list still reads" in attempt
+    seen = without_the_folder(said + attempt + everything_written(tmp_path), tmp_path)
+    for word in PRIVATE:
+        assert word not in seen, word
+    # The next run asks for it again, and only for it.
+    page.pdf_refused.clear()
+    page.on_press = None
+    page.presses.clear()
+    ended, said = run_all(app, caplog)
+    assert ended is None, said
+    assert page.presses == [row_text(DOCS[1])]
+    assert {r["state"] for r in app.progress.data.values()} == {docs.State.COMPLETED.value}
+
+
+def test_one_document_refused_and_the_list_after_it_stop_the_run_as_signed_out(
+        tmp_path, monkeypatch, caplog):
+    page = Page()
+    page.pdf_refused = {d["documentId"]: PDF_REFUSALS["401"] for d in DOCS}
+
+    def signs_out(page, d):
+        asks_only(page, d)
+        page.list_status = 401
+    page.on_press = signs_out
+    app = make_app(tmp_path, monkeypatch, page)
+    ended, said = run_all(app, caplog)
+    assert isinstance(ended, SystemExit)
+    assert "answered as signed out" in " ".join(said.split())
+    assert "Nothing was saved" not in said
+    assert app.progress.data == {}
+    assert len(page.presses) == 1 and len(page.context.request.asked) == 1
+
+
+@pytest.mark.parametrize("how", sorted(LIST_UNREAD))
+def test_one_document_refused_and_a_list_that_does_not_answer_after_it_stop_the_run_unread(
+        tmp_path, monkeypatch, caplog, how):
+    """The run stops at the refused document with the list unread, so the
+    panel offers a run that lists first. Nothing is recorded against the
+    document, and nothing after it is pressed."""
+    page = Page()
+    page.pdf_refused[D2] = PDF_REFUSALS["403"]
+
+    def press(page, d):
+        if d["documentId"] != D2:
+            return Page.brings_pdf(page, d)
+        asks_only(page, d)
+        LIST_UNREAD[how](page)
+    page.on_press = press
+    app = make_app(tmp_path, monkeypatch, page)
+    ended, said = run_all(app, caplog)
+    assert isinstance(ended, pressing.Stop) and ended.list_unread, said
+    states = {r["date"]: r["state"] for r in app.progress.data.values()}
+    assert set(states.values()) == {docs.State.COMPLETED.value}
+    assert DOCS[1]["date"] not in states
+    assert "signed out" not in said and "Nothing was saved" not in said
+    assert page.presses[-1] == row_text(DOCS[1]) and page.presses.count(row_text(DOCS[1])) == 1
+    assert page.context.request.asked == [(pdf_url(D2), 0)]
 
 
 def test_discover_keeps_no_id_and_says_the_date_the_documents_go(tmp_path, monkeypatch):

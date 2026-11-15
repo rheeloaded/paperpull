@@ -58,7 +58,10 @@ stops the run once.
   Manual Review. The panel then offers a run that reads the list first.
 - **Signing out.** A redirect, a 401 or a 403 on Bill History stops the
   run and keeps what it saved. Sign in again and run Resume. A bill refused
-  that way is read for again in a fresh list, and refused right after a
+  that way is read for again in a fresh list. A list that does not answer,
+  shows no bill, or a page that stops answering while it is read, says
+  neither, so the run stops there with nothing recorded for that bill, and
+  the panel offers a run that reads the list first. Refused right after a
   list that answered, it fails that one bill, since the session plainly
   works. A 403 from the portal's bot protection (DataDome) stops the run
   too, or Login, saying so, so you can answer it in the browser. Any other

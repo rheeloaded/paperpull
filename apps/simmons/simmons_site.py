@@ -84,7 +84,13 @@ PRIVACY. The userId, every documentId and accountId, every documentFilename,
 
 SIGNED OUT. A sign-in address (LOGIN_PATHS), a password field, or a 401,
   403, redirect or HTML answer to the page's own list call raises
-  SessionExpired. The run saves, says so and stops.
+  SessionExpired. The run saves, says so and stops. A document whose PDF
+  address answers a 401, 403 or redirect has the list read again. A list
+  refused too stops the run as signed out, a list that still reads fails
+  that document alone, and the next run tries it again. A list that does
+  not answer, times out or holds nothing says nothing of the session, so
+  it stops the run with the list unread, nothing recorded against the
+  document, and a run that lists first takes it.
 
 KNOWN CEILINGS (what the first run was to confirm, and did unless noted)
   * One account. A list naming two accountIds, rows naming two accounts, or
@@ -118,6 +124,7 @@ from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core import pressing
 from paperpull_core import redirects
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.redact import private_words, redact, set_private_words  # noqa: F401  (re-exported)
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -401,7 +408,9 @@ RECORD_HASH_RE = re.compile(r"[0-9a-f]{64}")
 class SessionExpired(Exception):
     """Simmons Bank answered as a signed-out session: its sign-in page, a
     password field, or a 401, 403, redirect or HTML answer to the page's own
-    list call. The run stops for the account holder."""
+    list call. The run stops for the account holder. A document's PDF
+    address answered that way raises it only when the list, read again,
+    refuses too (download_document)."""
 
 
 class ListStopped(Exception):
@@ -1322,7 +1331,8 @@ def _fetch_asked(page, url: str, out_path: Path, trace) -> bool:
     """With no download come, the exact address the page asked for this
     document's PDF after the press (_own_request), asked once more with the
     browser's cookies and no redirect followed. Written only when it answers
-    200 with a PDF."""
+    200 with a PDF. A 401, a 403 or a redirect raises SessionExpired, which
+    download_document weighs against the list read again."""
     try:
         resp = redirects.get(page.context.request, url, _exactly(url), hops=0, timeout=60000)
     except Exception as e:
@@ -1639,8 +1649,18 @@ def download_document(page, run: Run, dl_dir, out_path, *, record_id: str, iso_d
     False, with nothing pressed, when it is not there. None when its button
     is turned off on the page. A list that stops on the way stops the run
     with pressing.Stop, since the next document would meet the same page.
-    SessionExpired propagates. Whether the PDF names its document is
-    pdf_names_document's to say, after."""
+    SessionExpired from reading the list propagates. Whether the PDF names
+    its document is pdf_names_document's to say, after.
+
+    A document whose PDF address, asked once more, answers a 401, a 403 or
+    a redirect has the list read again, with the same call that proves a
+    session. A session that has ended is refused the list too, and its
+    SessionExpired stops the run there. A list that does not answer, times
+    out or holds nothing stops it with the list unread (refused.list_again).
+    A list that still reads leaves the refusal this document's own, so it
+    fails alone (False), since a stop here would stop every run at this
+    document for good. Its row is not pressed and its PDF not asked a
+    second time."""
     out_path = Path(out_path)
     if not (isinstance(record_id, str) and RECORD_HASH_RE.fullmatch(record_id)
             and answer_date(iso_date) == iso_date and kind in KINDS):
@@ -1673,6 +1693,25 @@ def download_document(page, run: Run, dl_dir, out_path, *, record_id: str, iso_d
         log.info("the list stopped before the document dated %s was pressed: %s", iso_date, stop)
         _note(trace, note="the list stopped")
         raise _page_stopped(stop)
+    except SessionExpired:
+        # A refusal may be the session ending or this one document. The
+        # list is read again, and a session that ended shows there and
+        # stops the run. One that still reads leaves this document failed,
+        # so it never stops every later run at the same document. Its row
+        # is not pressed and its PDF not asked a second time. A list that
+        # times out or holds nothing says nothing of the session, so it
+        # stops the run with the list unread (refused.list_again).
+        try:
+            refused.list_again(lambda: read_listing(page, run).entries,
+                               SessionExpired, ListStopped)
+        except ListStopped as stop:
+            log.info("the list stopped when read again after the document dated %s was "
+                     "refused", iso_date)
+            _note(trace, note="the list stopped")
+            raise _page_stopped(stop)
+        log.info("the document dated %s was refused while the list still reads", iso_date)
+        _note(trace, note="refused, the list still reads")
+        return False
 
 
 def _page_stopped(stop: ListStopped) -> pressing.Stop:

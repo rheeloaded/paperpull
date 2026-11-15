@@ -161,7 +161,10 @@ ITS_OWN = {
         "ListStopped raised next, which reaches the run",
     ("portlandgeneral", "download_bill", ("_fetch",)):
         "a refusal of the authorization this run kept from an earlier read, which "
-        "reads the list again once. A refusal of a list just read reaches the run",
+        "reads the list again once, or of one right after a list that answered with "
+        "the same authorization, which is that bill's alone, so one bill Portland "
+        "General will not give never stops every later run at it. A sign-out or a list "
+        "that stops shows on the list and reaches the run",
     ("nwnatural", "download_bill", ("_fetch",)):
         "a refusal of a View address read earlier in this run, which reads the list "
         "again once, or of one right after a list that answered, which is that bill's "
@@ -180,6 +183,91 @@ ITS_OWN = {
         "or a list that stops shows there and reaches the run, and a list that still "
         "reads leaves the refusal that bill's alone, so one bill Ziply will not give "
         "never stops every later run at it",
+    ("mypay", "download_document", ("_fetch",)):
+        "a refusal of one document's PDF, after which its type's list is read again "
+        "with the call Discover reads it with. A page or a list holding nothing raises "
+        "SessionExpired there and reaches the run, and a list that still holds its "
+        "documents leaves the refusal that document's alone",
+    ("fedex", "download_bill", ("_fetch_file",)):
+        "a refusal of one invoice's PDF, after which the invoices page is opened and its "
+        "answers read again. A sign-in page or every call refused with a 401 or a 403 "
+        "raises SessionExpired there and reaches the run, a list that does not answer "
+        "or holds no invoice raises ListStopped, which reaches it with the list unread, "
+        "the connect form stops it as NotConnected, and a list that still shows "
+        "invoices leaves the refusal that invoice's alone",
+    ("sdge", "download_bill", ("_fetch",)):
+        "a refusal of one bill's PDF, after which Billing History is opened and read "
+        "again. A sign-out or a list that stops shows there and reaches the run, and a "
+        "list that still reads leaves the refusal that bill's alone, so one bill SDG&E "
+        "will not give never stops every later run at it",
+    ("tualatin", "download_bill", ("_fetch",)):
+        "a refusal of one bill's print page, after which Activity is opened and read "
+        "again. A sign-out or a list that stops shows there and reaches the run, and a "
+        "list that still reads leaves the refusal that bill's alone, so one bill "
+        "Tualatin Water will not give never stops every later run at it",
+    ("simmons", "download_document", ("_catch_document",)):
+        "a refusal of one document's PDF address, asked once more after its row was "
+        "pressed, after which the documents list is read again. A sign-out shows there "
+        "and reaches the run, a list that stops stops it with the list unread, and a list "
+        "that still reads leaves the refusal that document's alone, so one document "
+        "Simmons Bank will not give never stops every later run at it. The row is not "
+        "pressed again",
+    ("ing", "download_document", ("_fetch",)):
+        "a refusal of one document's link, a 401, a 403 or a sign-in page, after which "
+        "its list is opened by its own address and read again. A sign-out or a list that "
+        "stops shows there and reaches the run, and a list that still reads leaves the "
+        "refusal that document's alone, so one document ING will not give never stops "
+        "every later run at it",
+    ("irs", "download_bill", ("_fetch",)):
+        "a refusal of one transcript's PDF, after which the transcript page is opened and "
+        "its list read again. A sign-out or ID.me shows there and reaches the run, a list "
+        "that stops stops it with the list unread, and a list that still reads leaves the "
+        "refusal that transcript's alone, so one transcript the IRS will not give never "
+        "stops every later run at it",
+    ("firsthorizon", "download_statement", ("_catch_statement",)):
+        "a statement whose own address was refused once its Download PDF was pressed, a "
+        "401, a 403, a redirect, a page or the sign-in page, with every page the press "
+        "made closed, after which the statements page is opened afresh and the session "
+        "probe asked. What the run's page shows and the page's own answers stop the run "
+        "first, a sign-out shows there and reaches the run, a page that stops stops it "
+        "with the list unread, and a session that still reads leaves the refusal that "
+        "statement's alone. Download PDF is not pressed again",
+    ("amexbanking", "download_one", ("amexbanking_download",)):
+        "a refusal of one document's PDF, after which the list is loaded again and read "
+        "as Discover reads it. A refused list reaches the run, a page that looks signed "
+        "out stops it as signed out, a list that answers 500 or nothing stops it with the "
+        "list unread (listing.read_again_stopped), a list of another account stops it as "
+        "Discover does, and a list that still answers leaves the refusal that document's "
+        "alone",
+    ("stripe", "download_bill", ("_fetch_file", "row_link")):
+        "a refusal of one document's file, after which both lists are read again. A "
+        "sign-out shows there and reaches the run, and lists that still read leave the "
+        "refusal that document's alone, so one document Stripe will not give never stops "
+        "every later run at it. Lists that show nothing are no lists and reach the run",
+    ("ups", "download_bill", ("_post", "download_body")):
+        "a refusal of one invoice's PDF, after which My Invoices is read again. A sign-out "
+        "or a list that shows nothing reaches the run, and a list that still reads leaves "
+        "the refusal that invoice's alone, so one invoice UPS will not give never stops "
+        "every later run at it",
+    ("bilt", "download_statement", ("_catch_statement",)):
+        "a statement answered as signed out once its button was pressed, a refusal of its "
+        "details call, its tab on the sign-in page or a refusal at its PDF address, after "
+        "which the details refusal is forgotten and the wallet's list is read again. A "
+        "sign-out shows there and reaches the run, a list that stops stops "
+        "it with the list unread, and a list that still reads leaves the refusal that "
+        "statement's alone, so one statement Bilt will not give never stops every later "
+        "run at it. The button is not pressed again",
+    ("bofa", "document_bytes", ("_ask_link", "_ask_pdf")):
+        "a refusal of one statement's PDF, after which its account's list for the year "
+        "is read again. A sign-out shows there and reaches the run, a list that cannot be "
+        "read stops it with the list unread, and a list that still reads leaves the "
+        "refusal that statement's alone, so one statement Bank of America will not give "
+        "never stops every later run at it",
+    ("anthem", "download_document", ("_fetch_eob",)):
+        "a refusal of one EOB's PDF, after which its claim type's list is read again. A "
+        "sign-out shows there and reaches the run, and a list that still reads, or one "
+        "that did not come as resolve_eob_id fails it, leaves the refusal that EOB's "
+        "alone, so one EOB Anthem will not give never stops every later run at it",
 }
 
 # A handler in a download path that turns a list stop into a stop of the run

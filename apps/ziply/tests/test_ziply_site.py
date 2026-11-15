@@ -133,6 +133,36 @@ class SignsOutAtTheBill(Page):
         return got
 
 
+class ListFailsAfterTheBill(Page):
+    """The bill is refused, and the list read again after it answers 500,
+    holds no bill, or the page stops answering while it is waited for, so
+    the browser raises its own error. None of them says the session ended,
+    and none says it still holds."""
+
+    def __init__(self, how, **kw):
+        kw.setdefault("pdf_status", 403)
+        super().__init__(**kw)
+        self.how, self.gone = how, False
+
+    def evaluate(self, js, arg=None):
+        if self.gone and arg[0] == site.API_URL and self.how == "500":
+            self.asked.append(arg)
+            return {"status": 500}
+        got = super().evaluate(js, arg)
+        if arg[0] != site.API_URL:
+            self.gone = True
+            if self.how == "empty":
+                self.rows = []
+        return got
+
+    def wait_for_timeout(self, ms):
+        if self.gone and self.how == "timeout":
+            raise TimeoutError("Timeout 30000ms exceeded")
+
+
+UNREAD = ("500", "timeout", "empty")
+
+
 class Hosts(unittest.TestCase):
     def test_only_ziplyfiber_com_over_https(self):
         self.assertTrue(site.is_safe_url("https://ziplyfiber.com/myaccount/billing"))
@@ -377,6 +407,23 @@ class Download(unittest.TestCase):
         self.assertFalse(self.out.exists())
         self.assertEqual(len(page.bills_asked()), 1)
 
+    def test_a_list_read_again_after_a_refusal_that_does_not_answer_stops_unread(self):
+        """A list that answers 500, holds nothing, or a page that stops
+        answering while it is read again, is neither a sign-out nor this
+        bill's own failure. A page that stopped answering reached the run as
+        the bill's failure, so the run went on with no session shown."""
+        for how in UNREAD:
+            for kept in (False, True):
+                site._RUN.clear()
+                page = ListFailsAfterTheBill(how)
+                if kept:
+                    site.collect_download_docs(page)
+                with self.assertRaises(site.ListStopped, msg=(how, kept)) as stopped:
+                    self._take(page)
+                self.assertNotIsInstance(stopped.exception, site.SessionExpired)
+                self.assertFalse(self.out.exists(), (how, kept))
+                self.assertEqual(len(page.bills_asked()), 1, (how, kept))
+
     def test_a_json_answer_fails_that_bill_alone(self):
         """A JSON error for one bill was read as a sign-out, which stopped
         every run at that bill."""
@@ -488,6 +535,20 @@ class Orchestrator(unittest.TestCase):
         self.assertNotIn("Nothing was saved", said)
         self.assertEqual(app.progress.data, {})
         self.assertEqual(len(page.bills_asked()), 1)
+
+    def test_one_bill_refused_and_a_list_that_does_not_answer_stop_the_run_unread(self):
+        """Nothing is recorded against the bill, so the next run that lists
+        takes it again, and the run is not called signed out."""
+        for how in UNREAD:
+            site._RUN.clear()
+            page = ListFailsAfterTheBill(how)
+            app, ended, said = self._run_with(page)
+            self.assertIsInstance(ended, ListNotRead, (how, said))
+            self.assertEqual(app.progress.data, {}, how)
+            self.assertEqual(app.stats["failed"], 0, how)
+            self.assertNotIn("signed out", " ".join(said.split()), how)
+            self.assertEqual(len(page.bills_asked()), 1, how)
+            self.assertNotIn("Timeout 30000ms", said, how)
 
     def test_a_page_on_another_account_stops_the_run_once_and_names_it(self):
         page = Page(accounts=(OTHER_ACCOUNT,))

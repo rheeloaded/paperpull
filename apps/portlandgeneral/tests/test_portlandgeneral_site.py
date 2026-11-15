@@ -15,6 +15,8 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 import portlandgeneral_site as site  # noqa: E402
 import portlandgeneral_docs as docs  # noqa: E402
+from paperpull_core import testkit  # noqa: E402
+from paperpull_core.run_reporting import ListNotRead  # noqa: E402
 
 FAKE_ACCOUNT = "9876500012"
 OTHER_ACCOUNT = "9876500034"
@@ -107,8 +109,11 @@ class Page:
 
     def __init__(self, rows=ROWS, limit=2, settled=None, first=None, pdf=PDF, pdf_status=200,
                  pages=None, headers=None, accounts=None, number=FAKE_ACCOUNT, pdfs=None,
-                 info_late=0):
+                 info_late=0, pdf_answer=None, refused=()):
         self.rows, self.limit = rows, limit
+        # What every PDF ask is answered with, when it is not a status, and
+        # the bill ids whose PDF alone is refused with a 403.
+        self.pdf_answer, self.refused = pdf_answer, set(refused)
         self.accounts, self.number = accounts, number
         # getAccountInfo answered only after this many waits, past the list.
         self.info_late, self.waits = info_late, 0
@@ -163,6 +168,10 @@ class Page:
                 return self.pages.pop(0)
             return {"status": 200, "data": answer(self.rows[off:off + self.limit], total=len(self.rows),
                                                   number=self.number)}
+        if body.get("encryptedBillId") in self.refused:
+            return {"status": 403, "type": "application/json"}
+        if self.pdf_answer is not None:
+            return dict(self.pdf_answer)
         if self.pdfs:
             status, data = self.pdfs.pop(0)
             if status != 200:
@@ -171,6 +180,86 @@ class Page:
         if self.pdf_status != 200:
             return {"status": self.pdf_status, "type": "application/json"}
         return {"status": 200, "type": "application/pdf", "b64": base64.b64encode(self.pdf).decode()}
+
+    def pdfs_asked(self):
+        return [body for url, _, body in self.asked if url == site.PDF_URL]
+
+
+# What one bill's PDF can be answered with that reads as a sign-out, a 401,
+# a 403 and a redirect.
+REFUSALS = {
+    "401": {"pdf_status": 401},
+    "403": {"pdf_status": 403},
+    "redirect": {"pdf_answer": {"status": 0, "redirected": True}},
+}
+
+
+class SignsOutAtTheBill(Page):
+    """A session that ends as the bill is asked for. The bill is refused,
+    and so is the list read after it, by the sign-in page or by the API."""
+
+    def __init__(self, how="sign-in page", **kw):
+        super().__init__(**kw)
+        self.how = how
+
+    def evaluate(self, js, arg=None):
+        got = super().evaluate(js, arg)
+        if arg[0] == site.PDF_URL:
+            if self.how == "sign-in page":
+                self.settled = "https://portlandgeneral.com/auth/sign-in"
+            else:
+                self.first = Resp(answer(self.rows[:self.limit], total=len(self.rows)), status=401,
+                                  body=history_body(self.limit))
+        return got
+
+
+
+class ListFailsAfterTheBill(Page):
+    """A bill refused while the session still holds, after which the
+    billing history does not read. "500" is the API answering the page's
+    own list request with a 500, "timeout" a further page of the history
+    that times out, "dead" a tab whose address can no longer be read, and
+    "empty" a history with no bill. None of them says the session ended.
+    `failing` starts it failing before any bill is asked for."""
+
+    dead = False
+
+    def __init__(self, how, failing=False, **kw):
+        self.how, self.failing = how, False
+        super().__init__(**kw)
+        if failing:
+            self.fail()
+
+    @property
+    def url(self):
+        if self.dead:
+            raise RuntimeError("Target page, context or browser has been closed")
+        return self._url
+
+    @url.setter
+    def url(self, value):
+        self._url = value
+
+    def fail(self):
+        self.failing = True
+        if self.how == "500":
+            self.first = Resp(answer(self.rows[:self.limit], total=len(self.rows)), status=500,
+                              body=history_body(self.limit))
+        elif self.how == "dead":
+            self.dead = True
+        elif self.how == "empty":
+            self.rows = []
+
+    def evaluate(self, js, arg=None):
+        if self.failing and self.how == "timeout" and arg[0] == site.GRAPHQL_URL:
+            raise TimeoutError("Timeout 30000ms exceeded")
+        got = super().evaluate(js, arg)
+        if arg[0] == site.PDF_URL and got.get("status") == 403:
+            self.fail()
+        return got
+
+
+UNREAD = ("500", "timeout", "dead", "empty")
 
 
 class Hosts(unittest.TestCase):
@@ -401,8 +490,8 @@ class ListWhole(unittest.TestCase):
 AUG = "bill-0012-2026-08-31"
 
 
-def fetch(page, out, date="2026-08-31", doc_id=AUG, href=site.DOWNLOAD_PATH):
-    return site.download_bill(page, None, date, out, href=href, document_id=doc_id)
+def fetch(page, out, date="2026-08-31", doc_id=AUG, href=site.DOWNLOAD_PATH, trace=None):
+    return site.download_bill(page, None, date, out, href=href, document_id=doc_id, trace=trace)
 
 
 class Download(unittest.TestCase):
@@ -467,11 +556,50 @@ class Download(unittest.TestCase):
         self.assertFalse(self.out.exists())
         self.assertTrue(fetch(page, self.out, "2026-09-30", "bill-0012-2026-09-30"))
 
-    def test_a_refusal_on_a_list_just_read_ends_the_session(self):
-        for page in (Page(limit=10, pdf_status=401), Page(limit=10, pdf_status=403)):
-            with self.assertRaises(site.SessionExpired):
-                fetch(page, self.out)
-            self.assertFalse(self.out.exists())
+    def test_a_refusal_right_after_a_list_that_answered_fails_that_bill_alone(self):
+        """A 401, a 403 or a redirect for one bill right after the list
+        answered was read as a sign-out, so every run stopped at that bill
+        and Continue stopped there again (#124). The list had just answered
+        with the same authorization, so the refusal is that bill's own. A
+        kept list's refusal reads the list again first, since the API's bill
+        ids and authorization do not last."""
+        for how, kw in REFUSALS.items():
+            for kept in (False, True):
+                site._RUN.clear()
+                page = Page(limit=10, **kw)
+                if kept:
+                    site.collect_download_docs(page)
+                trace = []
+                self.assertFalse(fetch(page, self.out, trace=trace), (how, kept))
+                self.assertFalse(self.out.exists(), (how, kept))
+                # The bill is asked for once on each list, and never again
+                # once it was refused right after a list was read.
+                self.assertEqual(page.opened, 2 if kept else 1, (how, kept))
+                self.assertEqual(len(page.pdfs_asked()), 2 if kept else 1, (how, kept))
+                self.assertIn({"note": "not taken", "why": "the bill was refused right after the list was read"},
+                              trace, (how, kept))
+
+    def test_the_list_read_after_a_refusal_serves_the_next_bill(self):
+        page = Page(limit=10, pdf_status=403)
+        site.collect_download_docs(page)
+        self.assertFalse(fetch(page, self.out))
+        page.pdf_status = 200
+        self.assertTrue(fetch(page, self.out, "2026-09-30", "bill-0012-2026-09-30"))
+        self.assertEqual(self.out.read_bytes(), PDF)
+        self.assertEqual(page.opened, 2)
+
+    def test_a_bill_refused_and_a_list_refused_after_it_is_a_sign_out(self):
+        """A session that ended refuses the list too, and only that stops
+        the run as signed out."""
+        for how in ("sign-in page", "401"):
+            for kw in REFUSALS.values():
+                site._RUN.clear()
+                page = SignsOutAtTheBill(how, limit=10, **kw)
+                site.collect_download_docs(page)
+                with self.assertRaises(site.SessionExpired, msg=(how, kw)):
+                    fetch(page, self.out)
+                self.assertFalse(self.out.exists())
+                self.assertEqual(len(page.pdfs_asked()), 1, (how, kw))
 
     def test_a_list_that_cannot_be_read_again_stops(self):
         """The list read for a bill is the list every bill after it reads
@@ -485,6 +613,34 @@ class Download(unittest.TestCase):
                 fetch(page, self.out)
             self.assertFalse(any(u == site.PDF_URL for u, _, _ in page.asked))
             self.assertFalse(self.out.exists())
+
+    def test_a_list_that_does_not_read_after_a_refusal_is_unread_not_a_sign_out(self):
+        """A 500, a timeout, a tab that cannot be read or a history with no
+        bill, read again after one bill's refusal on a kept list, says
+        nothing of the session. Each stops the run with the list unread,
+        never as signed out and never as that bill's own failure, and the
+        bill is asked for once."""
+        for how in UNREAD:
+            site._RUN.clear()
+            page = ListFailsAfterTheBill(how, limit=2, refused=("ref/B2",))
+            site.collect_download_docs(page)
+            with self.assertRaises(site.ListStopped, msg=how):
+                fetch(page, self.out)
+            self.assertEqual([b["encryptedBillId"] for b in page.pdfs_asked()], ["ref/B2"], how)
+            self.assertEqual(page.opened, 2, how)
+            self.assertFalse(self.out.exists(), how)
+
+    def test_a_list_read_for_a_bill_that_does_not_read_is_unread(self):
+        """With no list kept, the list is read for the bill first. The bill
+        was listed, so a list that times out, cannot be read or holds no
+        bill is a list unread, and nothing is asked for."""
+        for how in UNREAD:
+            site._RUN.clear()
+            page = ListFailsAfterTheBill(how, failing=True, limit=2)
+            with self.assertRaises(site.ListStopped, msg=how):
+                fetch(page, self.out)
+            self.assertEqual(page.pdfs_asked(), [], how)
+            self.assertFalse(self.out.exists(), how)
 
     def test_other_non_pdfs_fail_that_bill_alone(self):
         for page in (Page(limit=10, pdf=b"GIF89a"), Page(limit=10, pdf_status=500),
@@ -557,6 +713,89 @@ class Orchestrator(unittest.TestCase):
         self.assertIn("signed out", said.getvalue())
         self.assertEqual(app.progress.data, {})
         self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0)
+
+    def _run_with(self, page):
+        """A Run All's downloads over the three bills Discover listed and
+        kept, with what it printed and logged."""
+        app = make_app(self.tmp, "--all")
+        for r in site.bills_of(ROWS, FAKE_ACCOUNT):
+            app._record_rawdoc(r, site.BILLING_URL)
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        app._delay = lambda *a, **k: None
+        site._RUN.clear()
+        site.collect_download_docs(page)
+        seen = io.StringIO()
+        handler = logging.StreamHandler(seen)
+        root = logging.getLogger()
+        root.addHandler(handler)
+        old = root.level
+        root.setLevel(logging.DEBUG)
+        ended = None
+        try:
+            with redirect_stdout(seen):
+                app.process(app._select())
+        except SystemExit as e:
+            ended = e
+        finally:
+            root.removeHandler(handler)
+            root.setLevel(old)
+        return app, ended, seen.getvalue()
+
+    def test_one_bill_refused_while_the_list_reads_fails_alone_and_the_rest_are_saved(self):
+        """The refused bill stopped the run before, so the bills after it
+        were never asked for, and every later run stopped at it again."""
+        page = Page(limit=10, pdf=testkit.text_pdf(["Portland General Electric made-up bill"]),
+                    refused=("ref/B2",))
+        app, ended, said = self._run_with(page)
+        self.assertIsNone(ended, said)
+        states = {k: v["state"] for k, v in app.progress.data.items()}
+        self.assertEqual(states, {"id:bill-0012-2026-09-30": "Completed",
+                                  "id:bill-0012-2026-08-31": "Failed",
+                                  "id:bill-0012-2026-07-31": "Completed"})
+        self.assertEqual((app.stats["failed"], len(app.stats["new_files"])), (1, 2))
+        self.assertEqual(said.count("Nothing was saved, and the next run tries it again"), 1)
+        self.assertNotIn("signed out", said)
+        # Asked on the list Discover kept and once more on the list read
+        # again for it, never after that.
+        self.assertEqual([b["encryptedBillId"] for b in page.pdfs_asked()].count("ref/B2"), 2)
+        written = "".join(p.read_text(errors="ignore") for p in app.paths.root.rglob("*")
+                          if p.is_file() and p.suffix in (".json", ".csv", ".txt", ".log"))
+        self.assertIn("the bill was refused right after the list was read", written)
+        for word in (FAKE_ACCOUNT, FAKE_NAME, FAKE_STREET, FAKE_TOKEN, "ref/B2"):
+            self.assertNotIn(word, said + written)
+
+    def test_one_bill_refused_and_the_list_after_it_stop_the_run_as_signed_out(self):
+        page = SignsOutAtTheBill(limit=10, pdf_status=403)
+        app, ended, said = self._run_with(page)
+        self.assertIsInstance(ended, SystemExit)
+        self.assertNotIsInstance(ended, ListNotRead)
+        self.assertIn("answered as signed out", " ".join(said.split()))
+        self.assertNotIn("Nothing was saved", said)
+        self.assertEqual(app.progress.data, {})
+        self.assertEqual(len(page.pdfs_asked()), 1)
+
+    def test_one_bill_refused_and_a_list_that_does_not_read_stop_the_run_unread(self):
+        """The list read again after a refusal answered 500, timed out,
+        could not be read or held no bill. That proves no session and no
+        sign-out, so the run stops with the list unread, nothing is
+        recorded against the refused bill, and a run that lists first takes
+        it again. A list that failed this way was recorded as that bill's
+        failure, and the run went on with no session shown."""
+        pdf = testkit.text_pdf(["Portland General Electric made-up bill"])
+        for how in UNREAD:
+            self.tmp = tempfile.mkdtemp()
+            page = ListFailsAfterTheBill(how, limit=2, pdf=pdf, refused=("ref/B2",))
+            app, ended, said = self._run_with(page)
+            self.assertIsInstance(ended, ListNotRead, (how, said))
+            states = {k: v["state"] for k, v in app.progress.data.items()}
+            self.assertEqual(states, {"id:bill-0012-2026-09-30": "Completed"}, how)
+            self.assertEqual(app.stats["manual_review"] + app.stats["failed"], 0, how)
+            text = " ".join(said.split())
+            self.assertIn("could not be read again", text, how)
+            self.assertNotIn("signed out", text, how)
+            self.assertNotIn("Nothing was saved, and the next run tries it again", text, how)
+            self.assertEqual([b["encryptedBillId"] for b in page.pdfs_asked()], ["ref+A1", "ref/B2"], how)
 
     def test_another_account_shown_stops_the_run_once_and_records_nothing(self):
         app = make_app(self.tmp, "--all")

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path as _Path
 
 sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+import base64
 import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -15,8 +16,9 @@ import pytest
 import amexbanking_docs
 import amexbanking_site as site
 from amexbanking_docs import App, Document
-from paperpull_core import testkit
+from paperpull_core import listing, testkit
 from paperpull_core.models import State
+from paperpull_core.run_reporting import ListNotRead
 from storage import SPEC
 
 
@@ -490,6 +492,221 @@ def test_a_document_that_would_not_come_fails_alone(app_env, monkeypatch):
     app.process(docs)
     assert asked == ["URN:DOC:TX:1", "URN:DOC:TX:2"]
     assert app.progress.get(docs[0].key)["state"] == State.FAILED.value
+
+
+# --- one document refused while the list still reads -------------------------
+
+# What one document's PDF can be answered with that reads as a sign-out, a
+# 401, a 403 and a redirect.
+REFUSALS = {
+    "401": {"status": 401, "redirected": False},
+    "403": {"status": 403, "redirected": False},
+    "redirect": {"status": 200, "redirected": True},
+}
+# A PDF that does not come for a reason of its own, not a refusal.
+ANSWERS = dict(REFUSALS, other={"status": 500, "redirected": False})
+
+
+def _times_out(*_a, **_k):
+    raise TimeoutError("Timeout 30000ms exceeded")
+
+
+class Answering(Page):
+    """Documents and Statements, whose document asks are answered by the
+    document's own id and whose every load answers the list with
+    `list_status` for `list_token`, holding `list_rows` (one statement when
+    None), or with nothing when the status is None. `after` makes a load
+    time out, or closes the tab once a document was refused, after which
+    the tab answers nothing at all."""
+
+    closed = False
+
+    @property
+    def url(self):
+        if self.closed:
+            raise RuntimeError("Target page, context or browser has been closed")
+        return self._url
+
+    @url.setter
+    def url(self, value):
+        self._url = value
+
+    def __init__(self, refused=(), how="403", list_status=200, list_token="tok-checking",
+                 list_rows=None, after=""):
+        super().__init__(name="Business Checking", number="•••• 1234")
+        self.refused, self.how = set(refused), how
+        self.list_status, self.list_token = list_status, list_token
+        self.list_rows, self.after = list_rows, after
+        self.asked, self.loads = [], 0
+
+    def title(self):
+        return ""
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def reload(self, **kw):
+        self._load()
+
+    def goto(self, url, **kw):
+        self.url = url
+        self._load()
+
+    def _load(self):
+        self.loads += 1
+        if self.after == "load times out":
+            _times_out()
+        if self.list_status is not None:
+            _answer(self, token=self.list_token, status=self.list_status,
+                    statements=self.list_rows)
+
+    def evaluate(self, js, arg):
+        doc_id = arg[1]["bankingDocument"]["identifier"]
+        self.asked.append(doc_id)
+        if doc_id in self.refused:
+            self.closed = self.after == "tab closes"
+            return dict(ANSWERS[self.how])
+        pdf = testkit.text_pdf(["made-up statement %s" % doc_id])
+        return {"status": 200, "redirected": False,
+                "data": {"documentContent": base64.b64encode(pdf).decode("ascii")}}
+
+
+def _run_over(app, monkeypatch, page, capsys):
+    """The loop over two statements of the account the records hold, the
+    first of them refused, with what it printed and how it ended."""
+    _held(app)
+    # The list Discover heard is still held when the run downloads.
+    _answer(_heard(page))
+    monkeypatch.setattr(app, "_on_its_site", lambda: page)
+    # Each failure file the run writes, by its step and its reason.
+    app.failures = []
+    monkeypatch.setattr(app, "write_failure",
+                        lambda step, reason, *a, **k: app.failures.append((step, reason)))
+    docs = [_doc(doc_id="URN:DOC:BS:1", date="2026-10-31", category="Statement"),
+            _doc(doc_id="URN:DOC:BS:2", date="2026-09-30", category="Statement")]
+    ended = None
+    try:
+        app.process(docs)
+    except SystemExit as e:
+        ended = e
+    return docs, ended, " ".join(capsys.readouterr().out.split())
+
+
+@pytest.mark.parametrize("how", sorted(REFUSALS))
+def test_a_document_refused_while_the_list_still_reads_fails_alone(app_env, monkeypatch,
+                                                                    capsys, how):
+    """A 401, a 403 or a redirect for one document was read as a sign-out,
+    so every run stopped at that document and Continue stopped there again
+    (#124). The list is read again the way Discover reads it, and a list
+    that still answers leaves the refusal that document's own."""
+    app, _ = app_env
+    page = Answering(refused={"URN:DOC:BS:1"}, how=how)
+    docs, ended, said = _run_over(app, monkeypatch, page, capsys)
+    assert ended is None, said
+    assert app.progress.get(docs[0].key)["state"] == State.FAILED.value
+    assert app.progress.get(docs[1].key)["state"] == State.COMPLETED.value
+    assert (app.stats["failed"], len(app.stats["new_files"])) == (1, 1)
+    assert not app.progress.get(docs[0].key).get("pdf_path")
+    # Each document is asked for once, never a second time, and the list
+    # is loaded once more, after the refusal.
+    assert page.asked == ["URN:DOC:BS:1", "URN:DOC:BS:2"]
+    assert page.loads == 1
+    assert said.count("Nothing was saved, and the next run tries it again") == 1
+    assert "signed out" not in said
+    # The failure file says it was refused, not that it would not render.
+    assert app.failures == [("capture the document",
+                             "the document was refused while its list still reads")]
+    # The next run tries it again.
+    assert not app._already_done(docs[0])
+
+
+def test_a_document_that_does_not_come_for_its_own_reason_reads_no_list(
+        app_env, monkeypatch, capsys):
+    app, _ = app_env
+    page = Answering(refused={"URN:DOC:BS:1"}, how="other")
+    docs, ended, said = _run_over(app, monkeypatch, page, capsys)
+    assert ended is None, said
+    assert app.progress.get(docs[0].key)["state"] == State.FAILED.value
+    assert page.loads == 0
+    assert app.failures == [("capture the document", "the document would not render")]
+
+
+@pytest.mark.parametrize("list_status", [401, 403])
+def test_a_document_refused_and_a_list_refused_after_it_stop_the_run_as_signed_out(
+        app_env, monkeypatch, capsys, list_status):
+    """A session that ended refuses the list too, and only that stops the
+    run as signed out, which Continue carries on from once signed in."""
+    app, _ = app_env
+    page = Answering(refused={"URN:DOC:BS:1"}, list_status=list_status)
+    docs, ended, said = _run_over(app, monkeypatch, page, capsys)
+    assert isinstance(ended, SystemExit) and not isinstance(ended, ListNotRead)
+    assert "answered as signed out" in said
+    assert page.asked == ["URN:DOC:BS:1"] and page.loads == 1
+    assert app.progress.get(docs[0].key) is None and app.progress.get(docs[1].key) is None
+    assert app.stats["failed"] == 0
+
+
+# What the list can do once a document was refused that says nothing of
+# the session, answer 500, answer nothing, hold no document, time out
+# loading, or not be read at all, the tab closed under it.
+UNREAD = {
+    "500": dict(list_status=500),
+    "nothing": dict(list_status=None),
+    "empty": dict(list_rows=[]),
+    "load times out": dict(after="load times out"),
+    "tab closes": dict(after="tab closes"),
+}
+
+
+@pytest.mark.parametrize("unread", sorted(UNREAD))
+def test_a_document_refused_and_a_list_that_does_not_answer_after_it_stop_the_run_unread(
+        app_env, monkeypatch, capsys, unread):
+    """A list that answers 500, nothing or no document, or times out,
+    proves no session, and Discover reads it as a list not read whole, not
+    as a sign-out. An empty one read as a list that still answers, and a
+    tab that closed reached the loop as the document's own failure, so the
+    run went on with no session shown. So the run stops with the list
+    unread, and the panel offers a run that lists first, not Continue,
+    which would read the same list for its first document and stop there
+    again (#124)."""
+    app, _ = app_env
+    page = Answering(refused={"URN:DOC:BS:1"}, **UNREAD[unread])
+    docs, ended, said = _run_over(app, monkeypatch, page, capsys)
+    assert isinstance(ended, ListNotRead), (type(ended), said)
+    assert "signed out" not in said
+    assert "documents list could not be read again" in said
+    assert listing.last(app) == listing.STOPPED
+    assert app.failures == [("read the documents list again",
+                             "the documents list could not be read again")]
+    # Each document is asked for once, and the list loaded once more, or
+    # not at all once the tab closed.
+    assert page.asked == ["URN:DOC:BS:1"]
+    assert page.loads == (0 if unread == "tab closes" else 1)
+    assert app.progress.get(docs[0].key) is None and app.progress.get(docs[1].key) is None
+    assert app.stats["failed"] == 0
+
+
+def test_a_document_refused_on_a_signed_out_page_stops_the_run(app_env, monkeypatch, capsys):
+    app, _ = app_env
+    page = Answering(refused={"URN:DOC:BS:1"})
+    page.evaluate = lambda js, arg, _was=page.evaluate: (
+        setattr(page, "url", site.URLS["login"]) or _was(js, arg))
+    docs, ended, said = _run_over(app, monkeypatch, page, capsys)
+    assert isinstance(ended, SystemExit) and not isinstance(ended, ListNotRead)
+    assert "answered as signed out" in said
+    assert page.asked == ["URN:DOC:BS:1"] and page.loads == 0
+    assert app.progress.get(docs[0].key) is None
+
+
+def test_a_document_refused_while_the_list_shows_another_account_stops_the_run(
+        app_env, monkeypatch, capsys):
+    app, _ = app_env
+    page = Answering(refused={"URN:DOC:BS:1"}, list_token="tok-other")
+    docs, ended, said = _run_over(app, monkeypatch, page, capsys)
+    assert isinstance(ended, SystemExit)
+    assert "shows another American Express Banking account" in said
+    assert page.asked == ["URN:DOC:BS:1"]
+    assert app.progress.get(docs[0].key) is None and app.progress.get(docs[1].key) is None
 
 
 def test_each_document_is_asked_for_with_its_own_id_and_token(app_env, monkeypatch):

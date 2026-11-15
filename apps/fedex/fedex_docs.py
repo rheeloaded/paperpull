@@ -394,10 +394,17 @@ class App:
             site.goto_documents(page)
         self.check_session(page)
         try:
-            docs = site.collect_download_docs(page)
+            docs = self._read_list(page)
         except site.SessionExpired:
-            self.check_session(page)
-            docs = site.collect_download_docs(page)
+            self.session_ended()
+        except site.ListStopped as stop:
+            # A tab fedex.com would not open in says nothing of the session,
+            # so the listing stays noted as one that stopped, and nothing is
+            # called signed out.
+            print(f"\n!! FedEx Billing Online's invoice list could not be read, since {stop}.")
+            print("   This run stops rather than call the list read. Run it again.")
+            self.write_failure("read the invoice list", "the invoice list could not be read")
+            raise SystemExit(1)
         except site.NeedsPerson as e:
             # The shipping account is not connected to Billing Online. The
             # form that connects it is the account holder's to fill in.
@@ -434,6 +441,26 @@ class App:
             if self.stats["skipped_out_of_scope"]:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
+
+    def _read_list(self, page):
+        """The invoices Billing Online lists. A sign-in page where the list
+        was, or a list Billing Online refused, goes to the session check,
+        which asks for a sign-in at a console, and the list is read once
+        more. Refused again, its SessionExpired reaches Discover."""
+        try:
+            return site.collect_download_docs(page)
+        except site.SessionExpired:
+            self.check_session(page)
+        return site.collect_download_docs(page)
+
+    def session_ended(self) -> None:
+        """Stop Discover because FedEx answered the invoice list as signed
+        out. Nothing is listed, and the listing stays noted as one that
+        stopped (tabs.stop)."""
+        tabs.stop(self, [
+            "FedEx answered the invoice list as signed out, so this run stops here.",
+            "Sign in again in the open browser window, then run it again.",
+        ])
 
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -517,6 +544,12 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.ListStopped as stop:
+                # The invoice list, read again after this invoice was
+                # refused, did not answer as a list. Every invoice after it
+                # reads the same list, so the run stops here, with nothing
+                # recorded against this one.
+                self.list_changed(stop)
             except site.NotConnected as e:
                 # Every invoice after this one would meet the same, so the
                 # run stops here rather than leave each one for review.
@@ -529,6 +562,18 @@ class App:
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the invoice list could not be read again
+        after an invoice was refused. Nothing is recorded against the
+        invoice, and the run leaves as one whose list did not end whole,
+        which only a run that lists carries on from
+        (listing.read_again_stopped)."""
+        log.info("the invoice list could not be read again after an invoice was refused")
+        self.write_failure("read the invoice list again", "the invoice list could not be read again")
+        listing.read_again_stopped(self, (
+            "FedEx Billing Online's invoice list could not be read again, so this "
+            "run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one statement. The site layer asks for the PDF from
@@ -563,10 +608,12 @@ class App:
             self.stats["manual_review"] += 1
             return
         except site.SessionExpired:
-            # Stop the whole run. Continuing would file every remaining
-            # statement as "manual review" and finish looking successful
-            # while having saved nothing.
-            print("\n  !! FedEx answered with a sign-in page instead of a document.")
+            # The invoice list, read for this invoice or read again after
+            # the invoice was refused, answered as signed out. Stop the
+            # whole run. Continuing would file every remaining statement as
+            # "manual review" and finish looking successful while having
+            # saved nothing.
+            print("\n  !! FedEx answered as signed out instead of with your invoices.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, then run:  paperpull fedex resume")
             self._record(doc, State.DISCOVERED, notes="Session expired before download")

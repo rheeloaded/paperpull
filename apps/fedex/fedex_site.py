@@ -50,6 +50,7 @@ from urllib.parse import urlparse
 from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import redirects
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 # Everything on its way into a diagnostic file goes through here. It
@@ -234,7 +235,25 @@ def is_safe_control(name: str) -> bool:
 
 
 class SessionExpired(RuntimeError):
-    """FedEx answered with a sign-in page instead of the thing asked for."""
+    """FedEx answered with a sign-in page instead of the thing asked for, or
+    Billing Online refused every call the invoices page made
+    (refused_everywhere). An invoice's PDF refused with a 401, a 403 or a
+    redirect off fedex.com raises it only when the invoice list, read
+    again, is refused or shows the sign-in page (download_bill)."""
+
+
+class ListStopped(Exception):
+    """The invoice list could not be read, and nothing said the session
+    ended. Read again after one invoice was refused, it did not answer,
+    answered with something else, or held no invoice. Or the tab was off
+    fedex.com and fedex.com would not open in it. Every invoice after it
+    would read the same list, so the run stops with the list unread. `docs`
+    holds what was read before it stopped. Its words are this module's own,
+    never the page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 class NeedsPerson(RuntimeError):
@@ -271,12 +290,29 @@ def is_billing_answer(url: str) -> bool:
 _captured = {"at": 0.0, "answers": []}
 
 
+def refused_everywhere(answers: List[dict]) -> bool:
+    """Whether Billing Online refused every call the invoices page made,
+    each with a 401 or a 403, so no invoice came. That is FedEx saying the
+    session has ended.
+
+    One call refused while another answered is not. FedEx answered a
+    signed-in login's first call with a 401 when its shipping account was
+    not connected (2026-09-25), and a call a sign-in may not make can be
+    refused while its session holds. Which answer is the invoice list has
+    never been seen, so the list is not told apart from the other calls."""
+    return bool(answers) and all(a.get("status") in (401, 403) for a in answers)
+
+
 def capture_answers(page, wait_ms: int = 25000, settle_ms: int = 4000) -> List[dict]:
     """Open the invoices page and keep every Billing Online answer the page
     receives, as {path, status, body}. Raises NeedsPerson when the page
-    goes to the connect-account form instead."""
+    goes to the connect-account form instead, SessionExpired for a sign-in
+    page, and ListStopped for a tab off fedex.com that fedex.com will not
+    open in, which says nothing of the session."""
     if not on_fedex(page) and not goto_documents(page):
-        raise SessionExpired("the FedEx tab is not on a signed-in fedex.com page")
+        if looks_signed_out(page):
+            raise SessionExpired("FedEx showed a sign-in page")
+        raise ListStopped("the FedEx tab would not open fedex.com")
     got = []
 
     def on_response(r):
@@ -297,7 +333,11 @@ def capture_answers(page, wait_ms: int = 25000, settle_ms: int = 4000) -> List[d
             page.wait_for_timeout(500)
             waited += 500
             quiet = quiet + 500 if len(got) == before else 0
-            if got and quiet >= settle_ms:
+            # Answers that all refuse are watched for the whole wait, since
+            # an unconnected login's first call was refused before the page
+            # went to the connect form, and a form that comes late is not a
+            # sign-out.
+            if got and quiet >= settle_ms and not refused_everywhere(got):
                 break
             if not_connected(page):
                 break
@@ -391,6 +431,18 @@ def invoices_in(answers: List[dict]) -> List[dict]:
     return out
 
 
+def read_answers(page) -> List[dict]:
+    """The answers the invoices page receives (capture_answers), as Discover
+    reads them and every read of the list after it. Billing Online refusing
+    every call with a 401 or a 403 raises SessionExpired, where it was read
+    as a list with no invoice in it (refused_everywhere)."""
+    answers = capture_answers(page)
+    if refused_everywhere(answers):
+        raise SessionExpired("FedEx Billing Online refused the invoice list, "
+                             "which means the session has ended")
+    return answers
+
+
 @dataclass
 class RawDoc:
     title: str
@@ -406,7 +458,7 @@ class RawDoc:
 def collect_download_docs(page) -> List[RawDoc]:
     return [RawDoc(title=d["title"], date_text=d["date"], href=d["link"],
                    document_id=d["id"], text=f"FedEx {d['title']}")
-            for d in invoices_in(capture_answers(page))]
+            for d in invoices_in(read_answers(page))]
 
 
 _FETCH_JS = r"""async (url) => {
@@ -422,7 +474,9 @@ _FETCH_JS = r"""async (url) => {
 
 def _fetch_file(page, link: str) -> dict:
     """A file from its own link, from inside the page, or through the
-    browser's own session when the page may not read that host."""
+    browser's own session when the page may not read that host. A 401, a
+    403 or an answer that ended off fedex.com raises SessionExpired, which
+    download_bill weighs against the list read again."""
     if not is_safe_url(link):
         raise ValueError("refusing to fetch off fedex.com: %r" % redact(link))
     try:
@@ -451,7 +505,7 @@ def _fresh_link(page, document_id: str) -> str:
     # start on Windows, so the age alone passes it for a fresh one on a
     # computer up less than _FRESH_SECONDS.
     if not _captured["at"] or time.monotonic() - _captured["at"] > _FRESH_SECONDS:
-        capture_answers(page)
+        read_answers(page)
     for d in invoices_in(_captured["answers"]):
         if d["id"] == document_id:
             return d["link"]
@@ -462,7 +516,19 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
                   title: str = "", document_id: str = "") -> bool:
     """Fetch one invoice's PDF from its own link and write it. A row with no
     link raises NeedsPerson, so it goes to manual review with a note to
-    download it by hand and send a Diagnose file. `dl_dir` is unused."""
+    download it by hand and send a Diagnose file. `dl_dir` is unused.
+
+    An invoice's PDF refused with a 401, a 403 or a redirect off fedex.com
+    has the list read again, with the call Discover reads it with
+    (refused.list_again). A session that has ended shows the sign-in page
+    there, or has every call refused with a 401 or a 403, and its
+    SessionExpired stops the run. A list that never came, answered with an
+    error, timed out or holds no invoice raises ListStopped, which stops the
+    run with the list unread, since Discover reads none of those as a
+    sign-out either. So does a tab that fedex.com no longer opens in. A
+    list that still shows invoices leaves the refusal this invoice's own,
+    so it fails alone, since a stop here would stop every run at this
+    invoice for good. The invoice is not asked for a second time."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
@@ -471,7 +537,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     link = link or (href if is_safe_url(href) else "")
     if not link:
         raise NeedsPerson("FedEx lists this invoice with no download link the app understands")
-    r = _fetch_file(page, link)
+    try:
+        r = _fetch_file(page, link)
+    except SessionExpired:
+        # A refusal may be the session ending or this one invoice. The list
+        # is read again, and a session that ended shows there and stops the
+        # run. One that does not answer stops it with the list unread. One
+        # that still reads leaves this invoice failed, so it never stops
+        # every later run at the same invoice.
+        refused.list_again(lambda: invoices_in(read_answers(page)),
+                           SessionExpired, ListStopped, stops=(NeedsPerson,))
+        log.info("the invoice dated %s was refused while the list still reads", iso_date)
+        return False
     if not r.get("b64"):
         log.info("no PDF for %s: status %s, %s", iso_date, r.get("status"), r.get("ct"))
         return False
