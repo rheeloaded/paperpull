@@ -922,7 +922,11 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            docs = site.collect_download_docs(page)
+            # The years a run asks for, so a report presses the year
+            # buttons a run presses and no others
+            # (test_every_diagnose_lists_as_its_discover_does).
+            docs = site.collect_download_docs(
+                page, keep=scope.period_filter(self.args, self.config))
             info["collected"] = len(docs)
             info["samples"] = []
             for d in docs[:8]:

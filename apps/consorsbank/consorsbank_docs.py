@@ -759,7 +759,12 @@ class App:
             # is followed or pressed (consorsbank_site.survey).
             info["survey"] = site.survey(page)
             try:
-                info["collected"] = len(site.collect_documents(page))
+                # The kinds and years a run asks for, from the same config and
+                # command line, so a report lists what a run lists
+                # (test_every_diagnose_lists_as_its_discover_does).
+                info["collected"] = len(site.collect_documents(
+                    page, keep=scope.period_filter(self.args, self.config),
+                    config=self.config))
             except Exception as e:
                 # A count of none, and the error under a key of its own, so a
                 # report made on a sign-in page reads as one that collected

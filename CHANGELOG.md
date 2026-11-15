@@ -71,6 +71,20 @@ support report keeps the error its listing met.
   report was saved where it should have said to sign in. The error now has
   a place of its own in the report in all seven, and a census holds every
   app to a count there.
+- **A support report asks for what a run asks for.** In thirteen apps the
+  report listed documents without the settings a run lists with, so it
+  could show nothing wrong where the run failed. NetBenefits made quarterly
+  statements for a run set to monthly ones. Invest529, Amazon Visa, DKB,
+  1822direkt and Renault Bank direkt listed every kind of document whatever
+  kinds you chose. Those six, with Affirm, Fairfax Water, Fidelity, ING,
+  Sparkasse Pforzheim Calw and Target RedCard, read every year where a run
+  reads the years you gave it or those from your start date on. The IRS
+  report opened the notices page when notices were left out. Each report
+  now asks for the kinds, periods and years its run asks for, so one made
+  with a start date or a year lists fewer documents than before. When
+  NetBenefits' plan list would not read, its report now keeps that error in
+  a place of its own, where the count of plans used to hold the error's
+  name. A census holds every app's report to its run's settings.
 
 ## [0.67.0] - 2026-11-15
 

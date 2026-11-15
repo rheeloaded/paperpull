@@ -1034,7 +1034,12 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            found_docs = site.collect_download_docs(page) if found else []
+            # The notices page only when notices are in scope, as a run
+            # reads it, so a notice there never stops a report where it
+            # would not stop the run
+            # (test_every_diagnose_lists_as_its_discover_does).
+            found_docs = (site.collect_download_docs(page, notices=self._reads_notices())
+                          if found else [])
             info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "id": b.document_id}
                                             for b in found_docs[:40]]
             docs = site.collect_documents(page)

@@ -933,11 +933,15 @@ class App:
             # are masked and JSON bodies are recorded as shape only.
             info["survey"] = site.survey(page)
             try:
-                # The kinds a run asks for, tax forms among them, from the
-                # same config. This asked for statements and trade
-                # confirmations only, so a run that stopped at a tax form
-                # call made a report that showed nothing wrong.
-                docs = site.collect_documents(page, config=self.config)
+                # The kinds a run asks for, tax forms among them, and the
+                # years, from the same config and command line. This asked
+                # for statements and trade confirmations only, so a run
+                # that stopped at a tax form call made a report that
+                # showed nothing wrong
+                # (test_every_diagnose_lists_as_its_discover_does).
+                docs = site.collect_documents(
+                    page, keep=scope.period_filter(self.args, self.config),
+                    config=self.config)
             except Exception as e:
                 # This read `except site.NotMapped`, a name no module in
                 # this repository defines. An except clause is evaluated

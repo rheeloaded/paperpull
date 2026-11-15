@@ -1014,7 +1014,12 @@ class App:
             # numbered buttons, as a run does, and downloads nothing.
             info["survey"] = site.survey(page)
             try:
-                docs = site.collect_documents(page, config=self.config)
+                # The kinds and years a run asks for, from the same config and
+                # command line, so a report lists what a run lists
+                # (test_every_diagnose_lists_as_its_discover_does).
+                docs = site.collect_documents(
+                    page, keep=scope.period_filter(self.args, self.config),
+                    config=self.config)
             except Exception as e:
                 # This read `except site.NotMapped`, a name no module in
                 # this repository defines. An except clause is evaluated
