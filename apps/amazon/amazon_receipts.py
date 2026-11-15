@@ -60,7 +60,9 @@ _PART = re.compile(r"(\d+) of (\d+)")
 # so 5,000 orders placed in one year. It was 60 pages, and a year of more
 # than 600 orders ended there with no word, the rest of that year never
 # found and the list noted as read whole. A year that still shows a next
-# page at this limit stops the run instead (cmd_discover).
+# page at this limit is not read to its end, so the run reads on, downloads
+# what it did read and then stops rather than finish (cmd_discover and
+# _stop_if_cut_short).
 YEAR_PAGES = 500
 
 
@@ -154,6 +156,11 @@ class App:
         self._browser = None
         self._work_page = None
         self._cdp_mode = False
+        # Set when a year's order list ran past YEAR_PAGES, with the years
+        # it was. The run goes on with what it read and stops at its end
+        # rather than finish (see _stop_if_cut_short).
+        self._list_cut_short = False
+        self._years_cut_short = []
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "online_discovered": 0,
@@ -448,8 +455,12 @@ class App:
                      scope.describe((first, last)), len(years))
         return years
 
-    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False) -> dict:
-        """Discovery pass. Amazon paginates by year + startIndex (10/page)."""
+    def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False,
+                     finish: bool = True) -> dict:
+        """Discovery pass. Amazon paginates by year + startIndex (10/page).
+
+        A run that downloads after it passes finish=False and stops on a
+        list cut short itself, once it has downloaded what was read."""
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, so Resume reads the list again (paperpull_core.listing).
         listing.started(self)
@@ -509,26 +520,22 @@ class App:
                 # year's list did not end. A run with a start date whose last
                 # page here holds only orders before that date has every order
                 # in its scope already, since the list runs newest first, and
-                # goes on as it always did. Otherwise the run stops rather than
-                # finish clean with the rest of the year never looked for.
-                # What was read is kept, and the list stays noted as one that
-                # stopped, so a Resume reads it again first.
+                # goes on as it always did. Otherwise the run is marked, the
+                # page is kept for whoever repairs this while it is still on
+                # screen, and the walk goes on to the older years. The run
+                # downloads what was read and then stops rather than finish
+                # clean with the rest of this year never looked for, and the
+                # list stays noted as one that stopped, so a Resume reads it
+                # again first.
                 if not (floor and before_floor == len(cards)):
-                    self.progress.save(backup=True)
-                    try:
-                        # Raised and caught here so the run leaves on a
-                        # SystemExit with the list stop as its cause, which
-                        # is how the core tells it apart from a sign-out.
-                        raise site.ListStopped("the order list ran past the page limit")
-                    except site.ListStopped:
-                        print(f"\n!! Your {year} order list ran past {YEAR_PAGES} pages, more")
-                        print("   than this app reads of one year, so it was not read to its end.")
-                        print("   What was read is kept, and this run stops here rather than")
-                        print("   finish with the rest of that year missed. Running it again")
-                        print("   stops at the same place, so please report it on GitHub.")
-                        self.write_failure("read the order list",
-                                           "the order list ran past the page limit")
-                        raise SystemExit(0)
+                    self._list_cut_short = True
+                    self._years_cut_short.append(year)
+                    print(f"\n!! Your {year} order list ran past {YEAR_PAGES} pages, more")
+                    print("   than this app reads of one year, so the rest of that year was")
+                    print("   not read. What was read is kept, and your list is not taken")
+                    print("   as read whole.")
+                    self.write_failure("read the order list",
+                                       "the order list ran past the page limit")
             # Amazon order history is contiguous; once we pass the account's
             # first year (an order-less year), all older years are empty too.
             if year_cards == 0 and found_any and not self.args.year:
@@ -539,14 +546,18 @@ class App:
             self._delay(0.5)
 
         # The whole list is in, and only now may a Resume carry on from it
-        # without reading it again (paperpull_core.listing).
-        listing.read_whole(self)
+        # without reading it again (paperpull_core.listing). A list cut
+        # short stays noted as one that stopped.
+        if not self._list_cut_short:
+            listing.read_whole(self)
 
         all_recs = list(self.discovery.data.values())
         self.stats["online_discovered"] = len(all_recs)
 
         if not quiet:
-            print(f"\nDiscovery complete. Purchases known: {len(all_recs)}")
+            said = ("Discovery read part of your order history." if self._list_cut_short
+                    else "Discovery complete.")
+            print(f"\n{said} Purchases known: {len(all_recs)}")
             by_year = {}
             for r in all_recs:
                 y = (r.get("purchase_date") or "?")[:4]
@@ -556,7 +567,36 @@ class App:
             dates = sorted(r.get("purchase_date") for r in all_recs if r.get("purchase_date"))
             if dates:
                 print(f"  Date range: {dates[0]} .. {dates[-1]}")
+        if finish:
+            self._stop_if_cut_short()
         return {ONLINE: n_new}
+
+    def _stop_if_cut_short(self) -> None:
+        """Stop a run whose order list was not read to its end, once it has
+        done what it can with what was read (cmd_discover marks it). It
+        leaves on a SystemExit raised while a site.ListStopped is handled, so
+        the core reports a stop at a page (paperpull_core.run_reporting) and
+        the panel offers a support report beside Continue or Check again."""
+        if self._list_cut_short:
+            try:
+                raise site.ListStopped("the order list ran past the page limit")
+            except site.ListStopped:
+                years = " and ".join(str(y) for y in self._years_cut_short)
+                print("\n!! Not all of your order history was read, since the order list")
+                print(f"   of {years} ran past {YEAR_PAGES} pages, more than this app reads")
+                print("   of one year, so this run stops rather than finish. What was")
+                print("   read is kept.")
+                # Only Run All and Resume, Get new included, take every order
+                # they read. Pilot takes a few, a dry run saves nothing, alone
+                # or with --all or --resume, and Discover downloads nothing.
+                if self.stats.get("mode") in ("all", "resume") and not self.args.dry_run:
+                    print("   Running it again reads the list again, downloads anything new")
+                    print("   and stops at the same place.")
+                else:
+                    print("   Running it again stops at the same place.")
+                print("   Please report it on GitHub with the failure file from the")
+                print("   Diagnostics folder, whose name starts with failure-.")
+                raise SystemExit(0)
 
     # -- selection ----------------------------------------------------------
 
@@ -1261,15 +1301,17 @@ class App:
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
         print("PILOT MODE - limited supervised test run.")
-        self.cmd_discover(types=[ONLINE], quiet=False)
+        self.cmd_discover(types=[ONLINE], quiet=False, finish=False)
         selected: List[Purchase] = self._select_purchases(
             ONLINE, limit=self.config["pilot_online"])
         if not selected:
             print("\nNo purchases discovered to pilot. Run --diagnose to inspect pages.")
+            self._stop_if_cut_short()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
         self._pilot_report(selected)
+        self._stop_if_cut_short()
 
     def _pilot_report(self, selected: List[Purchase]):
         print("\n" + "=" * 70)
@@ -1320,12 +1362,13 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
-        self.cmd_discover(types=types, quiet=False)
+        self.cmd_discover(types=types, quiet=False, finish=False)
         selected: List[Purchase] = []
         for t in types:
             selected += self._select_purchases(t)
         print(f"\nProcessing {len(selected)} purchase(s)...")
         self.process_purchases(selected, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
@@ -1335,7 +1378,7 @@ class App:
         # is read before anything else, and a listing that stops again stops
         # the run (paperpull_core.listing).
         if listing.read_again_first(self):
-            self.cmd_discover(quiet=True)
+            self.cmd_discover(quiet=True, finish=False)
         # Only the purchases inside the run's scope, chosen as Pilot and Run
         # All choose them, so a Resume with a year chosen takes that year
         # alone. The limit waits until the done ones are left out.
@@ -1349,9 +1392,11 @@ class App:
             print("Nothing to resume - everything in scope is complete."
                   if listing.scoped(self) else
                   "Nothing to resume - all discovered purchases are complete.")
+            self._stop_if_cut_short()
             return
         print(f"Resuming: {len(pend)} incomplete purchase(s).")
         self.process_purchases(pend, dry_run=self.args.dry_run)
+        self._stop_if_cut_short()
 
 
     def cmd_rename(self):
@@ -1586,7 +1631,9 @@ class App:
         words = words_for('Amazon', site)
         page = self.page()
         if not self.discovery.data:
-            self.cmd_discover(quiet=True)
+            # A support report never stops at a list cut short. Its own
+            # report is what is wanted then, and the failure file is written.
+            self.cmd_discover(quiet=True, finish=False)
         for ptype in (ONLINE,):
             candidates = self._select_purchases(ptype, limit=1)
             if self.args.order_number:
