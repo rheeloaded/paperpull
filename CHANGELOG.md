@@ -7,7 +7,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.68.0] - 2026-11-15
+
+Every provider now says which country it is for, in the control panel,
+in PROVIDERS.md and on paperpull.net, and the panel's list starts on your
+own country. Setting up Amazon asks which of its 14 stores you shop at.
+Amazon reads a year of more than 600 orders to its end, PayPal reads a
+business statement list whose fields each come held in an object, and a
+support report keeps the error its listing met.
 
 ### Added
 
@@ -17,9 +24,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   "United States, may work elsewhere" for a service with one site worldwide
   such as PayPal. The panel's list starts on your computer's country when
   PaperPull has a provider for that country alone, with All countries one
-  click away, and a search finds a provider of any country. Amazon Visa says
-  it is the German card, and that the US Amazon Prime Visa comes through
-  Chase.
+  click away, and a search finds a provider of any country. Amazon Visa,
+  the German card, says to choose Chase for the US Amazon Prime Visa.
 - **Setting up Amazon asks which store.** An Amazon order is only on the
   store it was placed on, and the panel set Amazon up on amazon.com wherever
   you were. It now asks, starting on your country's store, and writes the
