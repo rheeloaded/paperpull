@@ -1596,6 +1596,28 @@ def backup_file(path: Path, backups_dir: Path) -> Optional[Path]:
 # CSV files (UTF-8 with BOM for Excel)
 # ---------------------------------------------------------------------------
 
+# What the rows a ledger could not take are kept under, beside it, the
+# ledger's own name with this in place of ".csv". It is never a name the
+# panel or a spreadsheet tool finds a ledger by, "* Index.csv" or
+# "* Order History.csv", and never a CSV a person might open in Excel and so
+# hold in turn.
+WAITING_ENDING = " (rows waiting).json"
+
+# Every ledger made in this run, by its file, so the run's way out can write
+# in what is kept beside each one and say what still waits
+# (rows_left_waiting). One run is one process outside the tests.
+_LEDGERS = {}
+
+
+def _refused_while_held(e: OSError) -> bool:
+    """Whether a write was refused the way a file another program holds is
+    refused. Windows says PermissionError while Excel has the file open, and
+    a shared folder may say the file is busy while it is open on another
+    computer. Only such a refusal is waited for."""
+    import errno
+    return isinstance(e, PermissionError) or e.errno in (errno.EBUSY, errno.ETXTBSY)
+
+
 class CsvFile:
     """An app's order history, receipt index or document index. They hold
     names other people chose and open in Excel on a double click, so every
@@ -1603,7 +1625,26 @@ class CsvFile:
     of text a spreadsheet would take for a formula, and comes out through
     sheets.read_stored, which takes that quote off again. Whatever reads
     one of these files reads it here, or through read_stored_row as both
-    spreadsheet tools do."""
+    spreadsheet tools do.
+
+    Every app writes a saved document's row after it has recorded the
+    document done for good, and an append to a file Excel had open used to
+    give up at once with PermissionError. The app then recorded the saved
+    document Failed, no later run asked for it again, and its row never
+    reached the file, so Rename, Review Names, Verify and the move to a
+    documents folder never reached the document. A receipt app appends its
+    order history first, and a held order history cost the receipt index
+    its row as well.
+
+    Now a file another program holds is waited for once in a run, the
+    minute atomic_write_text waits, and tried once with no wait after that.
+    The rows it would not take are kept beside it, in the output folder and
+    never in a documents folder, and go in, each once and in order, at the
+    first chance the file is free, before any row after them. That is the
+    next append, read_all or rewrite, and the run's way out
+    (rows_left_waiting). So the next command of the app, whichever it is,
+    finds them in the file. An append never raises into the download whose
+    row it writes, unless the rows can be neither written nor kept."""
 
     def __init__(self, path: Path, columns: List[str], backups_dir: Optional[Path] = None,
                  once: bool = False):
@@ -1619,6 +1660,25 @@ class CsvFile:
         # of its own. An order history holds one row per item bought, and two
         # alike items are two rows, so it never holds its rows once.
         self.once = once
+        # The kept rows the last read_all gave back, by their marks. A
+        # rewrite of what it read holds them as the command that read them
+        # meant them, one it took out included, so they wait no longer once
+        # the file is written (rewrite).
+        self._read_waiting = set()
+        _LEDGERS[_held_key(self.path)] = self
+
+    @property
+    def waiting_path(self) -> Path:
+        """Where the rows this file could not take are kept, beside it."""
+        return self.path.with_name(self.path.stem + WAITING_ENDING)
+
+    def _stored(self, row: dict) -> dict:
+        return {c: store_value(row.get(c, "")) for c in self.columns}
+
+    def _as_read(self, stored: dict) -> tuple:
+        """A stored row as read_stored gives it back from the file, the way
+        _held reads the rows already there."""
+        return tuple(read_stored(stored.get(c, "")) or "" for c in self.columns)
 
     def _ensure_header(self) -> None:
         if not self.path.exists() or self.path.stat().st_size == 0:
@@ -1644,31 +1704,229 @@ class CsvFile:
             return None
 
     def append_rows(self, rows: Iterable[dict]) -> None:
+        """Append rows, after any kept beside the file that it can take now.
+        A file another program holds is waited for the first time in a run,
+        and the rows it will not take are kept beside it, said, and written
+        in later (the class's own words)."""
+        rows = list(rows)
+        kept = self._kept()
+        entries = self._not_written(kept) if kept else []
+        key = _held_key(self.path)
+        first = key not in _HELD
+        try:
+            self._write_in(entries, rows, _LOCKED_TRIES if first else 1)
+            return
+        except OSError as e:
+            refused = e
+        _HELD.add(key)
+        new = [self._stored(row) for row in rows]
+        if self.once:
+            # Kept as the file would hold them, each once.
+            have = (self._held() or set()) | {self._as_read(e["row"]) for e in entries}
+            fresh = []
+            for stored in new:
+                if self._as_read(stored) not in have:
+                    have.add(self._as_read(stored))
+                    fresh.append(stored)
+            new = fresh
+        if not new:
+            return
+        try:
+            self._keep(entries + [{"id": os.urandom(8).hex(), "row": stored} for stored in new],
+                       unread=bool(kept and kept.get("unread")))
+        except OSError:
+            # Neither written nor kept, which only a folder that takes no
+            # file at all does, and then nothing is saved anyway.
+            raise refused
+        self._said_kept(new, refused, first)
+
+    def _open_to_append(self, tries: int):
+        """The file opened to append to, tried `tries` times _LOCKED_PAUSE_S
+        apart while another program holds it, as atomic_write_text tries,
+        saying so once. OSError when it is not opened."""
+        error = None
+        for attempt in range(tries):
+            try:
+                return shared_folder.open_to_write(self.path, "a", encoding="utf-8-sig",
+                                                   newline="")
+            except OSError as e:
+                if not _refused_while_held(e):
+                    raise
+                error = e
+                if tries > 1:
+                    if attempt == 0:
+                        print(f"  ! {self.path.name} is open in another program, perhaps Excel. "
+                              f"Close it. Trying again for up to a minute.", flush=True)
+                    time.sleep(_LOCKED_PAUSE_S)
+        raise error
+
+    def _write_in(self, entries: list, rows: list, tries: int) -> None:
+        """Append the kept rows still to go in, in order, each kept as
+        store_value gave it, then `rows`. OSError when the file was not
+        opened, and then nothing of it was written."""
         self._ensure_header()
         held = self._held() if self.once else None
-        with shared_folder.open_to_write(self.path, "a", encoding="utf-8-sig", newline="") as f:
+        with self._open_to_append(tries) as f:
+            if entries:
+                # Where they begin is kept with them until they are taken
+                # away below, so a run stopped in between, by Ctrl+C say,
+                # finds them in the file and writes none of them twice. An
+                # order history holds no row once, and would hold them twice.
+                try:
+                    self._keep(entries, writing_from=os.fstat(f.fileno()).st_size)
+                except OSError:
+                    pass
             w = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore",
                                quoting=csv.QUOTE_MINIMAL)
-            for row in rows:
-                stored = {c: store_value(row.get(c, "")) for c in self.columns}
+            new = [{c: store_value(row.get(c, "")) for c in self.columns} for row in rows]
+            for stored in [e["row"] for e in entries] + new:
                 if held is not None:
-                    # As read_stored gives it back from the file, the way
-                    # _held reads the rows already there.
-                    written = tuple(read_stored(v) or "" for v in stored.values())
+                    written = self._as_read(stored)
                     if written in held:
                         continue
                     held.add(written)
                 w.writerow(stored)
+        _HELD.discard(_held_key(self.path))
+        if entries:
+            self._forget_kept()
+
+    def _write_waiting(self) -> list:
+        """Write the rows kept beside the file into it, with one try and no
+        wait, and give back the ones that still wait."""
+        kept = self._kept()
+        if not kept:
+            return []
+        entries = self._not_written(kept)
+        if not entries:
+            if not kept.get("unread"):
+                self._forget_kept()
+            return []
+        try:
+            self._write_in(entries, [], 1)
+        except OSError:
+            return entries
+        return []
+
+    def _kept(self) -> Optional[dict]:
+        """What is kept beside the file, its rows in order, each with a mark
+        of its own, and where in the file a write of them began, or None when
+        nothing is kept. Read as a plain file of its own, so on PaperPull
+        Server a link left at the name is never read through. A file there
+        that cannot be read as one holds no rows here and is left as it is
+        ("unread")."""
+        unread = {"rows": [], "from": None, "unread": True}
+        try:
+            data = json.loads(shared_folder.read_text(self.waiting_path))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return unread
+        rows = data.get("rows") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            return unread
+        entries = []
+        for entry in rows:
+            row = entry.get("row") if isinstance(entry, dict) else None
+            if isinstance(row, dict) and isinstance(entry.get("id"), str):
+                entries.append({"id": entry["id"], "row": {
+                    str(k): v if isinstance(v, str) else "" for k, v in row.items()}})
+        at = data.get("writing_from")
+        return {"rows": entries, "from": at if type(at) is int and at >= 0 else None}
+
+    def _keep(self, entries: list, writing_from: Optional[int] = None,
+              unread: bool = False) -> None:
+        """Write what is kept beside the file, whole or not at all, tried once.
+        A link left at the name is replaced and never written through
+        (atomic_write_text). A file there that could not be read is copied
+        into Backups first, when it is a plain file of its own."""
+        path = self.waiting_path
+        if unread and self.backups_dir is not None and not shared_folder.linked(path):
+            try:
+                backup_file(path, self.backups_dir)
+            except OSError:
+                pass
+        data = {"note": "Rows PaperPull could not write into %s while another program had it "
+                        "open. They go into it by themselves the next time the app runs with "
+                        "it closed. Leave this file where it is." % self.path.name,
+                "ledger": self.path.name, "rows": entries}
+        if writing_from is not None:
+            data["writing_from"] = writing_from
+        atomic_write_text(path, json_text(data) + "\n", tries=1)
+
+    def _forget_kept(self) -> None:
+        """Take away what was kept beside the file, once its rows are in. A
+        file that will not go keeps the place its rows were written from, so
+        a later look finds them in the file and writes none again."""
+        try:
+            os.unlink(self.waiting_path)
+        except OSError:
+            pass
+
+    def _not_written(self, kept: dict) -> list:
+        """The kept rows the file does not hold yet. A write of them stopped
+        after it wrote them and before it took them away left the place it
+        began at, and the rows found there, in order, are in already."""
+        entries, at = kept["rows"], kept["from"]
+        if not entries or at is None:
+            return entries
+        import io
+        done = 0
+        try:
+            with shared_folder.open_to_read(self.path, "rb") as f:
+                f.seek(at)
+                tail = f.read()
+            for line, entry in zip(csv.reader(io.StringIO(tail.decode("utf-8"), newline="")),
+                                   entries):
+                if [read_stored(v) for v in line] != [read_stored(entry["row"].get(c, ""))
+                                                      for c in self.columns]:
+                    break
+                done += 1
+        except (OSError, UnicodeError, csv.Error):
+            return entries
+        return entries[done:]
+
+    def _said_kept(self, rows: list, error: OSError, first: bool) -> None:
+        """What a run says when rows are kept, in full the first time in a
+        run, and in a line of its own for each document after that."""
+        name, one = self.path.name, len(rows) == 1
+        saved = " What was downloaded is saved." if any(
+            r.get("PDF Full Path") or r.get("PDF Filename") for r in rows) else ""
+        if not first:
+            print("  %s kept beside %s as well, since it is still not free.%s"
+                  % ("Its row is" if one else "Its %d rows are" % len(rows), name, saved),
+                  flush=True)
+            return
+        why = ("was still held by another program after a minute" if _refused_while_held(error)
+               else "could not be written (%s)" % type(error).__name__)
+        print("  ! %s %s, so %s kept beside it, in %s.%s %s into %s once that file is closed."
+              % (name, why, "the new row is" if one else "the %d new rows are" % len(rows),
+                 self.waiting_path.name, saved, "The row goes" if one else "They go", name),
+              flush=True)
 
     def read_all(self) -> List[dict]:
-        if not self.path.exists():
-            return []
-        with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig", newline="") as f:
-            return [read_stored_row(r) for r in csv.DictReader(f)]
+        """Every row of the file, then the rows kept beside it that it has not
+        taken yet, as it will hold them. Those are written in first when the
+        file is free, with one try and no wait, so a command that reads the
+        ledger finds them in it."""
+        waiting = self._write_waiting()
+        self._read_waiting = {e["id"] for e in waiting}
+        rows = []
+        if self.path.exists():
+            with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig",
+                                            newline="") as f:
+                rows = [read_stored_row(r) for r in csv.DictReader(f)]
+        return rows + [{c: read_stored(e["row"].get(c, "")) for c in self.columns}
+                       for e in waiting]
 
     def rewrite(self, rows: List[dict], backup: bool = True) -> None:
         """Backup then atomically rewrite the whole file. A command that
-        writes the same file again and again backs it up the first time."""
+        writes the same file again and again backs it up the first time.
+
+        The kept rows the last read_all gave back are in `rows` as the
+        command that read them meant them, so once the file is written they
+        wait no longer, and Meijer's taking out the rows of a purchase no
+        longer listed takes out those kept as well. Any kept since go in
+        after."""
         if backup and self.backups_dir is not None:
             backup_file(self.path, self.backups_dir)
         import io
@@ -1680,6 +1938,34 @@ class CsvFile:
             w.writerow({c: store_value(row.get(c, "")) for c in self.columns})
         # utf-8-sig: prepend BOM manually since we write text atomically
         atomic_write_text(self.path, "﻿" + buf.getvalue())
+        read, self._read_waiting = self._read_waiting, set()
+        kept = self._kept()
+        if not kept or not kept["rows"]:
+            return
+        left = [e for e in kept["rows"] if e["id"] not in read]
+        try:
+            if not left:
+                self._forget_kept()
+                return
+            if len(left) < len(kept["rows"]) or kept["from"] is not None:
+                # The place a stopped write began is no place in the file
+                # written now.
+                self._keep(left)
+        except OSError:
+            return
+        self._write_waiting()
+
+
+def rows_left_waiting() -> list:
+    """For a run's way out. Each ledger made in this run that has rows kept
+    beside it tries once more, with no wait, to take them, and each that
+    still has some is given as (its name, how many, where they are kept)."""
+    left = []
+    for ledger in list(_LEDGERS.values()):
+        waiting = ledger._write_waiting()
+        if waiting:
+            left.append((ledger.path.name, len(waiting), ledger.waiting_path.name))
+    return left
 
 
 # ---------------------------------------------------------------------------

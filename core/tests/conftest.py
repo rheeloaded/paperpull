@@ -73,11 +73,14 @@ def bound_spec(request, _project_dirs):
     storage.bind(make_spec(project_dir))
     storage.set_filename_owner("")
     # What one run's saves remember, the files it waited for and could not
-    # write and the ones its save on the way out left unwritten, lasts the
-    # process, which is one run outside the tests. Here each test is one.
+    # write, the ones its save on the way out left unwritten and the ledgers
+    # it made, lasts the process, which is one run outside the tests. Here
+    # each test is one.
     storage._HELD.clear()
     del storage._UNSAVED[:]
+    storage._LEDGERS.clear()
     yield storage.spec()
     storage.set_filename_owner("")
     storage._HELD.clear()
     del storage._UNSAVED[:]
+    storage._LEDGERS.clear()

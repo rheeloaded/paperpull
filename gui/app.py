@@ -2699,6 +2699,13 @@ _PERSONAL_RUNTIME_FILES = ("config.json", "progress.json", "discovery.json",
                            "new-this-run.txt", "run-summary.txt")
 
 
+# The rows a ledger open in another program could not take, kept beside it
+# under its own name with this ending (core storage WAITING_ENDING). They are
+# that account's rows, so they never travel to another install, and a copy
+# in a template would be written into the ledger of every install made.
+WAITING_ENDING = " (rows waiting).json"
+
+
 def _is_someones_own(name: str) -> bool:
     """A file that belongs to whoever set that folder up, not to the code.
 
@@ -2712,7 +2719,7 @@ def _is_someones_own(name: str) -> bool:
     return (any(low == item or low.startswith(item + ".") for item in _PERSONAL_RUNTIME_FILES)
             or (low.startswith("config.") and low.endswith(".json"))
             or low.endswith((".pdf", ".zip", ".csv", ".log", ".json.bak",
-                             ".json.orig", ".csv.bak")))
+                             ".json.orig", ".csv.bak", WAITING_ENDING)))
 
 
 def _skip_template_part(name: str) -> bool:
