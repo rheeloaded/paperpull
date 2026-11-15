@@ -113,6 +113,9 @@ class FakeAmazon:
         self.front = DECIDING
         self.years = {}
         self.other_years = DECIDING
+        # A year whose list runs over several pages, by year, each page as
+        # Amazon draws it, chosen by the startIndex it is asked for.
+        self.paged = {}
         self.decided = threading.Event()
         self.seen = []
 
@@ -120,7 +123,13 @@ class FakeAmazon:
         spec = (query.get("timeFilter") or [""])[0]
         if not spec.startswith("year-"):
             return self.front
-        return self.years.get(int(spec[5:]), self.other_years)
+        year = int(spec[5:])
+        if year in self.paged:
+            pages = self.paged[year]
+            at = int((query.get("startIndex") or ["0"])[0]) // 10
+            # Past the end, Amazon keeps serving the last page.
+            return pages[min(at, len(pages) - 1)]
+        return self.years.get(year, self.other_years)
 
 
 SITE = FakeAmazon()
@@ -448,3 +457,107 @@ def test_with_somebody_there_it_asks_them_to_look_and_then_goes_on(attached, tmp
 
     assert len(asked) == 1 and "shows your orders" in asked[0], asked
     assert sorted(known(tmp_path)) == ["Online:" + FIRST_ORDER, "Online:" + SECOND_ORDER]
+
+
+# -- a year of many orders -------------------------------------------------------------
+
+NEXT = """<ul class="a-pagination"><li class="a-last"><a href="%s">Next</a></li></ul>"""
+
+
+def a_long_year(year: int, pages: int, dated=lambda p: "January 2"):
+    """This year's order list, ten orders a page over `pages` pages, each
+    page but the last with Amazon's Next under it, and no year before it.
+    Order numbers are invented, one per order, in the order they are listed.
+    `dated` gives the day each page's orders were placed, by page."""
+    total = pages * 10
+    drawn = []
+    for p in range(pages):
+        card = CARD.replace("January 2", dated(p))
+        cards = "".join(card % (year, "12.34", oid, oid) for oid in (
+            "111-0000000-%07d" % n for n in range(p * 10 + 1, p * 10 + 11)))
+        if p < pages - 1:
+            cards += NEXT % (HISTORY + "?timeFilter=year-%d&startIndex=%d" % (year, (p + 1) * 10))
+        drawn.append(orders_page(total, cards))
+    SITE.front = drawn[0]
+    SITE.paged = {year: drawn}
+    SITE.other_years = EMPTY
+    return total
+
+
+def listing_note(tmp_path):
+    return json.loads((tmp_path / "out" / "last-listing.json").read_text(encoding="utf-8"))
+
+
+def test_a_year_of_more_than_six_hundred_orders_is_read_to_its_end(attached, tmp_path, capsys):
+    """A year's list was read sixty pages at most, six hundred orders, and
+    then left with no word, and the list was noted as read whole. A year past
+    that had its later orders never found, and the run finished clean. Here
+    the year has sixty one pages, and every order on them is found."""
+    total = a_long_year(THIS_YEAR, 61)
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    assert len(known(tmp_path)) == total, printed(capsys)
+    assert "Online:111-0000000-%07d" % total in known(tmp_path), "the last page's orders are found"
+    assert listing_note(tmp_path)["complete"] is True
+
+
+def test_a_year_that_runs_past_the_page_limit_stops_the_run(attached, tmp_path, capsys,
+                                                            monkeypatch):
+    """Past the limit the year still shows a next page, so the list is not
+    whole. The run keeps what it read and stops rather than finish clean, with
+    the page as it was kept for whoever repairs this, and the list noted as
+    one that stopped, so a Resume reads it again first."""
+    monkeypatch.setattr(app_mod, "YEAR_PAGES", 3)
+    a_long_year(THIS_YEAR, 4)
+    out = stopped_run(tmp_path, attached, capsys, "--discover")
+
+    assert "ran past 3 pages" in out and "stops at the same place" in out, out
+    assert len(known(tmp_path)) == 30, "what was read before the limit is kept"
+    assert listing_note(tmp_path)["complete"] is False
+    assert list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    # A page that was not what it expected, which the panel answers with a
+    # support report, not a sign-in and Continue, which would stop here again.
+    assert '"stopped": 1' in out and '"stop": "page"' in out, out
+
+
+def test_a_start_date_whose_orders_all_came_before_the_limit_is_not_a_stop(attached, tmp_path,
+                                                                           capsys, monkeypatch):
+    """The list runs newest first. With a start date, a last page whose
+    orders are all older than it says every order in scope was read, so the
+    run goes on as it always did, whatever pages come after."""
+    monkeypatch.setattr(app_mod, "YEAR_PAGES", 3)
+    a_long_year(THIS_YEAR, 4, dated=lambda p: "June 3" if p == 0 else "January 2")
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--start-date", "%d-03-01" % THIS_YEAR,
+                         "--config", str(cfg)]) == 0
+
+    out = printed(capsys)
+    assert len(known(tmp_path)) == 10 and "ran past" not in out, out
+
+
+def test_a_start_date_with_orders_in_scope_at_the_limit_still_stops(attached, tmp_path, capsys,
+                                                                    monkeypatch):
+    """A start date does not excuse a last page that still holds orders it
+    asks for, since the pages after it may hold more."""
+    monkeypatch.setattr(app_mod, "YEAR_PAGES", 3)
+    a_long_year(THIS_YEAR, 4, dated=lambda p: "June 3" if p < 3 else "January 2")
+    out = stopped_run(tmp_path, attached, capsys, "--discover",
+                      "--start-date", "%d-03-01" % THIS_YEAR)
+
+    assert "ran past 3 pages" in out, out
+    assert len(known(tmp_path)) == 30
+
+
+def test_a_year_that_ends_on_the_last_page_the_limit_allows_is_whole(attached, tmp_path,
+                                                                     capsys, monkeypatch):
+    """A year whose last page is the last one the limit reads has no next
+    page under it, so it ended, and the run finishes as it always did."""
+    monkeypatch.setattr(app_mod, "YEAR_PAGES", 3)
+    total = a_long_year(THIS_YEAR, 3)
+    cfg = config_for(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    out = printed(capsys)
+    assert len(known(tmp_path)) == total and "ran past" not in out, out
+    assert listing_note(tmp_path)["complete"] is True

@@ -256,7 +256,7 @@ malformed print without stamp fill submit click select check value redacted at
 waits winner elapsed strategy strategies attempts already late satisfied while
 waiting phase phases operation ordinal chose collection selector precondition
 attached result route change same unnamed wait sign documents rows recognized
-collected samples category period error timestamp signed out challenge row table
+collect collected samples category period error timestamp signed out challenge row table
 pdf links download attrs found title survey pages responses opened from off
 followed bill controls safe headings url status type method post keys query shape
 control tab role text href category summary period date kind has link landed

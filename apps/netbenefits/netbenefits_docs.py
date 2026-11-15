@@ -609,8 +609,8 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
-                print("Could not reach NetBenefits. Sign in in the browser (the tab")
-                print("should be on api.rk.fidelity.com), then try again.")
+                print("Could not reach NetBenefits. Sign in to NetBenefits in the")
+                print("browser window and leave it open, then try again.")
                 # Nothing was listed, so this run stops here rather than finish
                 # clean, as a Resume after it does (paperpull_core.listing).
                 raise SystemExit(0)
@@ -1443,8 +1443,10 @@ class App:
                 # this repository defines. An except clause is evaluated
                 # only when something is raised, so it cost nothing until
                 # collection failed, and then it replaced the real error
-                # with an AttributeError about the handler itself.
-                info["collected"] = "%s: %s" % (type(e).__name__, e)
+                # with an AttributeError about the handler itself. The error
+                # has a key of its own, since the count below was written
+                # over it (test_diagnose_counts_what_it_collected).
+                info["collect_error"] = "%s: %s" % (type(e).__name__, e)
                 docs = []
             info["collected"] = len(docs)
             try:

@@ -598,6 +598,15 @@ YEAR_SETTLE_MS = 1500
 CHALLENGE_WAIT_MS = 15000
 
 
+class ListStopped(Exception):
+    """The order list did not come to its end, a year that still showed a
+    next page at the most Discover reads of one year. The core knows a stop
+    by this name and reports the run as stopped at a page that was not what
+    it expected (paperpull_core.run_reporting.stop_reason), so the panel
+    offers a support report, not a sign-in and Continue, which would read
+    the same pages and stop at the same place."""
+
+
 def goto_orders(page) -> bool:
     """Open the order list. True when it appeared, its orders or Amazon's
     own count saying the period has none.

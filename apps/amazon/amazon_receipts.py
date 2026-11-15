@@ -56,6 +56,13 @@ log = logging.getLogger("amazon_receipts")
 # An invoice's place among its order's, "2 of 3", as the record keeps it.
 _PART = re.compile(r"(\d+) of (\d+)")
 
+# How many pages of one year's order list Discover reads, ten orders a page,
+# so 5,000 orders placed in one year. It was 60 pages, and a year of more
+# than 600 orders ended there with no word, the rest of that year never
+# found and the list noted as read whole. A year that still shows a next
+# page at this limit stops the run instead (cmd_discover).
+YEAR_PAGES = 500
+
 
 def _place(part) -> Optional[tuple]:
     """(2, 3) for "2 of 3", or None for anything a run did not write there."""
@@ -455,7 +462,7 @@ class App:
             start_index = 0
             seen_ids_this_year = set()
             year_cards = 0
-            for _ in range(60):  # generous page cap per year
+            for _ in range(YEAR_PAGES):
                 self._open_orders(page, year, start_index)
                 cards = site.collect_cards(page, ONLINE)
                 log.info("Year %s startIndex=%s: %d order cards",
@@ -470,11 +477,14 @@ class App:
                     break
                 seen_ids_this_year |= page_ids
                 year_cards += len(cards)
+                # How many of this page's orders are dated before the cutoff.
+                before_floor = 0
                 for card in cards:
                     purchase = site.card_to_purchase(card, ONLINE)
                     if not purchase:
                         continue
                     if floor and purchase.purchase_date and purchase.purchase_date < floor:
+                        before_floor += 1
                         continue  # before the cutoff: never record or download
                     key = purchase.key
                     if self.discovery.get(key) is None:
@@ -494,6 +504,31 @@ class App:
                     break
                 start_index += 10
                 self._delay(0.5)
+            else:
+                # Every page up to the limit still showed a next one, so this
+                # year's list did not end. A run with a start date whose last
+                # page here holds only orders before that date has every order
+                # in its scope already, since the list runs newest first, and
+                # goes on as it always did. Otherwise the run stops rather than
+                # finish clean with the rest of the year never looked for.
+                # What was read is kept, and the list stays noted as one that
+                # stopped, so a Resume reads it again first.
+                if not (floor and before_floor == len(cards)):
+                    self.progress.save(backup=True)
+                    try:
+                        # Raised and caught here so the run leaves on a
+                        # SystemExit with the list stop as its cause, which
+                        # is how the core tells it apart from a sign-out.
+                        raise site.ListStopped("the order list ran past the page limit")
+                    except site.ListStopped:
+                        print(f"\n!! Your {year} order list ran past {YEAR_PAGES} pages, more")
+                        print("   than this app reads of one year, so it was not read to its end.")
+                        print("   What was read is kept, and this run stops here rather than")
+                        print("   finish with the rest of that year missed. Running it again")
+                        print("   stops at the same place, so please report it on GitHub.")
+                        self.write_failure("read the order list",
+                                           "the order list ran past the page limit")
+                        raise SystemExit(0)
             # Amazon order history is contiguous; once we pass the account's
             # first year (an order-less year), all older years are empty too.
             if year_cards == 0 and found_any and not self.args.year:

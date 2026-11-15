@@ -442,8 +442,8 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
-                print("Could not reach the Document Access Hub. Sign in in the browser (the tab")
-                print("should be on api.rk.fidelity.com), then try again.")
+                print("Could not reach the Document Access Hub. Sign in to Fidelity in the")
+                print("browser window and leave it open, then try again.")
                 # Nothing was listed, so this run stops here rather than finish
                 # clean, as a Resume after it does (paperpull_core.listing).
                 raise SystemExit(0)
@@ -933,14 +933,23 @@ class App:
             # are masked and JSON bodies are recorded as shape only.
             info["survey"] = site.survey(page)
             try:
-                docs = site.collect_documents(page)
+                # The kinds a run asks for, tax forms among them, from the
+                # same config. This asked for statements and trade
+                # confirmations only, so a run that stopped at a tax form
+                # call made a report that showed nothing wrong.
+                docs = site.collect_documents(page, config=self.config)
             except Exception as e:
                 # This read `except site.NotMapped`, a name no module in
                 # this repository defines. An except clause is evaluated
                 # only when something is raised, so it cost nothing until
                 # collection failed, and then it replaced the real error
-                # with an AttributeError about the handler itself.
-                info["collected"] = "%s: %s" % (type(e).__name__, e)
+                # with an AttributeError about the handler itself. The
+                # error has a key of its own. It was written into
+                # "collected" and the count of no rows written over it, as
+                # though the account had none, and "collected" stays a
+                # count, which is how the core tells a report that read
+                # nothing on a sign-in page (words._note_what_was_read).
+                info["collect_error"] = "%s: %s" % (type(e).__name__, e)
                 docs = []
             info["collected"] = len(docs)
             info["samples"] = []

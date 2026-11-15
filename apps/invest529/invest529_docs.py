@@ -877,8 +877,10 @@ class App:
                 # this repository defines. An except clause is evaluated
                 # only when something is raised, so it cost nothing until
                 # collection failed, and then it replaced the real error
-                # with an AttributeError about the handler itself.
-                info["collected"] = "%s: %s" % (type(e).__name__, e)
+                # with an AttributeError about the handler itself. The error
+                # has a key of its own, since the count below was written
+                # over it (test_diagnose_counts_what_it_collected).
+                info["collect_error"] = "%s: %s" % (type(e).__name__, e)
                 docs = []
             info["collected"] = len(docs)
             info["samples"] = []
