@@ -7,7 +7,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.67.0] - 2026-11-15
+
+1822direkt, Amazon Visa and Sparkasse Pforzheim Calw are new, all three
+contributed by @MelleD. One document a provider refuses no
+longer stops every run in sixteen more apps, a document saved while a
+spreadsheet has its index open stays saved, and an Amazon order or a
+Wealthfront form of several files is done only once every file has come.
+A named pipe or a folder a run may not search no longer holds or ends a
+run, and file names fit every system PaperPull runs on. PaperPull Server
+refuses a request that does not say where it came from, and five more
+findings reported privately are fixed.
 
 ### Added
 - **1822direkt, the Postbox, its sent items and its trash (#174).** It
@@ -142,6 +152,12 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and Windows refused a long name of emoji. A name is now cut to fit
   between two characters, keeping a part such as "(2 of 3)" at its end
   that Rename reads. Every name that fit before is unchanged.
+- **A download another program holds open is never saved twice.** When a
+  sync client or a backup tool had a freshly downloaded file open as the
+  app moved it into place, the move copied it to its name and could not
+  take the original away, so the app counted it not saved and the next run
+  saved a second copy. A move on one drive is now a rename that either
+  happens or leaves nothing behind, and only a move to another drive copies.
 - **One document a provider refuses no longer stops every run in sixteen
   more apps.** Affirm, American Express Banking, Anthem, Bank of America,
   Bilt, FedEx, First Horizon, ING, the IRS, myPay, Portland General
@@ -181,6 +197,54 @@ All notable changes to PaperPull are recorded here. Versioning follows
   refused while another answers. A FedEx tab that fedex.com will not open
   in now stops the run with the list unread, where it was called a
   sign-out.
+
+### Security
+- **PaperPull Server refuses a request that does not say where it came
+  from.** Over plain HTTP a browser sends no Sec-Fetch-Site, Origin or
+  Referer to an address on a home network, and the Server took such a
+  request as one from its own page. So a link opened from an email or a
+  chat, in a browser signed in to the panel, could start a run, a Rename
+  or a Move. A request with none of the three is now refused there, and
+  the panel's own requests, which carry their Referer, work as before.
+  The Browser Screen's time is renewed only from the panel's own page, where
+  any request for one of its pages renewed it. A Server set up with HTTPS
+  was not affected, and the desktop still takes a tool that sends no
+  headers at all. Reported privately by @JasperDale420.
+- **A sign-in window never reads its address as a browser switch.** The
+  address a sign-in window opens went last on the browser's command line,
+  so a value starting with two hyphens was read as a switch, one that turns
+  the browser's sandbox off say, and UKG's `base_url`, which an imported
+  history carries over, could hold one. The address now comes after the
+  mark that ends the switches, and one that is not an http or https
+  address with a host is refused. An imported history keeps UKG's
+  `base_url` only when it is an https address on ultipro.com or saashr.com,
+  and the import says when it left one out. Reported privately by
+  @JasperDale420.
+- **PaperPull Server never writes through a link or waits on a pipe in its
+  shared folder.** A link or a named pipe that someone able to write into
+  the shared folder put at a name the panel or an app uses could send a
+  write to a file outside it, or hold a read for good. On the Server a file
+  there is now read only when it is a plain file of its own, never through
+  a link, and written as a new file under a name nobody can guess, then
+  moved into place, by the panel, every app, both spreadsheets, the history
+  import, adding a person, the Paperless plug-in and the backup recovery.
+  On the desktop a link you made is still followed. Reported privately by
+  @JasperDale420.
+- **A record's path that leads out of an account's folders is never
+  moved.** An imported history kept paths with `..` in them, and AT&T's
+  repair of a copy filed under the wrong year, American Family's move of a
+  second copy of one PDF and NetBenefits' move of a statement it held back
+  moved the file a record named, wherever it was. Each now moves a file only
+  when it is in one of the account's filing folders once links and `..` are
+  followed, and the import keeps a relative path only when it leads into
+  your own folder, so a second person's `../` folders still work. Reported
+  privately by @JasperDale420.
+- **Anthem draws its letters and ID cards where nothing can run.** A
+  letter's own HTML was drawn into its PDF in a tab of the signed-in
+  browser with JavaScript on, so a message could open a connection or a
+  window from there. It is now drawn where scripts are off and nothing
+  reaches out, and the PDFs come out the same. Reported privately by
+  @JasperDale420.
 
 ## [0.66.0] - 2026-11-13
 
