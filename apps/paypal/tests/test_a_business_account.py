@@ -297,7 +297,7 @@ def test_diagnose_on_a_personal_account_still_reads_the_list(paypal, tmp_path,
     info = json.loads((app.paths.diagnostics / "diagnose-documents.json")
                       .read_text(encoding="utf-8"))
     assert info["documents_page_found"] is True
-    assert len(info["documents_recognized"]) == 3 and info["rows_collected"] == 3
+    assert len(info["documents_recognized"]) == 3 and info["collected"] == 3
     assert fake.loads <= 2, "the statements address was loaded %d times" % fake.loads
 
 
@@ -328,7 +328,7 @@ def test_diagnose_keeps_no_word_off_the_list(paypal, tmp_path, monkeypatch, caps
     for canary in ("Zorvexquill", "QZXKRWPTKMVNB", "QZ4XKRWPT7MVN"):
         assert canary.lower() not in text.lower(), "%s came out" % canary
     info = json.loads(text)
-    assert info["documents_page_found"] is True and info["rows_collected"] == 1
+    assert info["documents_page_found"] is True and info["collected"] == 1
     assert "February" in text, "a word on the list should still come through"
     assert fake.nothing_got_past_the_router()
 

@@ -1034,7 +1034,7 @@ class App:
             docs = site.collect_documents(page)
             info["documents_recognized"] = [{"date": d.date_text, "kind": d.kind, "row": d.text}
                                             for d in docs[:40]]
-            info["rows_collected"] = len(docs)
+            info["collected"] = len(docs)
         except pressing.Stop as stop:
             # A press past the documents page it would not make ends the
             # look there, and the file still says what was seen and why it
@@ -1056,7 +1056,7 @@ class App:
         print("  too. Read it through first.")
         print(f"Documents page found: {shape_tree(info.get('documents_page_found', '?'), words)}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
-              f"rows: {shape_tree(info.get('rows_collected', '?'), words)}")
+              f"rows: {shape_tree(info.get('collected', '?'), words)}")
         print("Look through that file for anything you would not want public,")
         print("then attach it to the Chase Business issue on GitHub. No screenshot was taken.")
 
