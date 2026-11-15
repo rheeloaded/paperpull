@@ -41,6 +41,7 @@ REVIEWED = {
     "gui/app.py:ensure_core:shutil.copy2": "a desktop checkout's own .venv",
     "gui/app.py:favicon:icon.read_bytes": "the app's own icon",
     "gui/app.py:list_providers:(d / 'storage.py').read_text": "PaperPull's own templates",
+    "gui/app.py:_where:(template / 'config.example.json').read_text": "PaperPull's own templates",
     "gui/app.py:read:(STATIC / name).read_text": "the app's own page",
     "gui/app.py:refresh_install_code:item.read_bytes": "PaperPull's own templates",
     "gui/server_mode.py:_read:_secrets_file().read_text": "/config, never the share",
