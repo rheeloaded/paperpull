@@ -45,6 +45,9 @@ config.json.*
 *.csv.bak
 *.log
 *.csv
+# The rows a ledger open in another program could not take, kept beside it
+# until it can, with the same account data as the ledger itself.
+* (rows waiting).json
 
 # Output / working folders created by the tools
 **/Statements/

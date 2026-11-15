@@ -259,9 +259,25 @@ def report_run_result(stats):
     # A run state the save on the way out could not write holds none of
     # what this run did, so the next run may fetch it all again. Such a run
     # is not one that finished, whatever else it did.
-    from .storage import unsaved_on_leaving
+    from .storage import rows_left_waiting, unsaved_on_leaving
     unsaved = unsaved_on_leaving()
     result["stopped"] = int(stopped_early() or bool(unsaved))
+    # Rows a ledger another program had open would not take, kept beside it
+    # (storage.CsvFile), tried once more here. Every document they are for
+    # is saved and recorded, so the next run downloads none of them again,
+    # and the run is not one that stopped. The panel is told how many still
+    # wait, which makes it one to look at. Sent only when some do, as an app
+    # from before sends nothing.
+    waiting = rows_left_waiting()
+    if waiting:
+        result["rows_waiting"] = sum(n for _name, n, _kept in waiting)
+    for name, n, kept in waiting:
+        print("\n%s to go into %s, which another program had open. %s kept beside it, "
+              "in %s, and %s into it by %s the next time this app runs with it closed. "
+              "Nothing is lost."
+              % ("1 row waits" if n == 1 else "%d rows wait" % n, name,
+                 "It is" if n == 1 else "They are", kept, "goes" if n == 1 else "go",
+                 "itself" if n == 1 else "themselves"), flush=True)
     # Sent only when it is known, as an app from before it sends nothing.
     why = stop_reason()
     if why:

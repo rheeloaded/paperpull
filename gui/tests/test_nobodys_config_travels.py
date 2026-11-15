@@ -51,7 +51,8 @@ def test_the_example_is_the_one_config_that_does_ship(tmp_path):
 def test_the_rule_itself():
     own = app_module._is_someones_own
     for name in ("config.json", "config.robin.json", "config.Robin.JSON",
-                 "config.second-person.json", "config.2.json"):
+                 "config.second-person.json", "config.2.json",
+                 "Chase Document Index (rows waiting).json"):
         assert own(name), name
     for name in ("config.example.json", "CONFIG.EXAMPLE.JSON",
                  "chase_site.py", "document_rules.json", "requirements.txt"):
@@ -89,3 +90,15 @@ def test_the_packager_ships_no_config_but_the_example():
     for p in ("apps/chase/config.json", "apps/chase/config.robin.json",
               "apps/chase/progress.json", "apps/chase/discovery.json"):
         assert not bw.wanted(p), p
+
+
+def test_rows_kept_beside_a_ledger_are_someones_own_under_the_cores_own_ending():
+    """The rows a ledger held open in another program could not take are
+    one person's rows, kept beside the ledger until it takes them. A copy in
+    a template would be written into the ledger of every install made from
+    it, so the panel knows them by the very ending the core keeps them under."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "core"))
+    from paperpull_core import storage
+    assert app_module.WAITING_ENDING == storage.WAITING_ENDING
+    kept = storage.CsvFile(Path("Chase Document Index.csv"), ["Notes"]).waiting_path.name
+    assert app_module._is_someones_own(kept), kept

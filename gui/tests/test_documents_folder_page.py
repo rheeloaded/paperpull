@@ -226,6 +226,41 @@ def test_a_file_left_behind_keeps_the_move_on_offer(apps, tmp_path):
     assert save({"app": "Chase Statements", "folder": str(docs)})["left"] == 1
 
 
+def test_a_statement_whose_row_waits_is_counted_once_its_row_is_in(apps, tmp_path,
+                                                                  monkeypatch):
+    """A statement saved while its index was open in another program has its
+    row kept beside the index until the index takes it (core storage
+    CsvFile). The Move takes what an index row names, so the page counts the
+    statement once its row is in, and not while it waits, as it counts any
+    file no row names."""
+    from paperpull_core import shared_folder, storage
+    chase = apps["Chase Statements"]
+    (chase / "Statements").mkdir()
+    pdf = chase / "Statements" / "2026-09-12 Chase Monthly Statement.pdf"
+    pdf.write_bytes(b"%PDF- a statement")
+    (chase / "progress.json").write_text(json.dumps({"Statement 2026-09-12": {
+        "state": "Completed", "downloaded_ok": True, "pdf_path": str(pdf)}}), encoding="utf-8")
+    save({"app": "Chase Statements", "folder": str(tmp_path / "Documents")})
+    index = storage.CsvFile(chase / "Chase Document Index.csv", ["PDF Filename", "PDF Full Path"],
+                            once=True)
+    index._ensure_header()
+    real = shared_folder.open_to_write
+    held = [True]
+
+    def open_to_write(p, mode="w", encoding=None, newline=None):
+        if held[0] and Path(p) == index.path:
+            raise PermissionError(13, "The file is open in another program", str(p))
+        return real(p, mode, encoding=encoding, newline=newline)
+
+    monkeypatch.setattr(shared_folder, "open_to_write", open_to_write)
+    monkeypatch.setattr("time.sleep", lambda *_a, **_kw: None)
+    index.append_rows([{"PDF Filename": pdf.name, "PDF Full Path": str(pdf)}])
+    assert app_module.api_documents("Chase Statements")["left"] == 0
+    held[0] = False
+    assert len(index.read_all()) == 1
+    assert app_module.api_documents("Chase Statements")["left"] == 1
+
+
 def test_the_panel_counts_what_the_move_takes():
     assert app_module.DOCUMENT_ENDINGS == renaming.VALID_DOC_EXTS
 

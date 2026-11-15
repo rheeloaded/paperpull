@@ -47,7 +47,8 @@ KNOWN = {"test_no_app_forces_a_press.sources",
          "test_every_host_check_goes_through_urls._source_files",
          "test_no_app_draws_html_itself._sources",
          "test_no_app_moves_a_file_a_record_names._sources",
-         "test_no_app_writes_through_a_link._sources"}
+         "test_no_app_writes_through_a_link._sources",
+         "test_a_saved_document_stays_saved_while_its_ledger_is_open._app_sources"}
 
 
 def _walks_for_python(fn: ast.FunctionDef) -> bool:
