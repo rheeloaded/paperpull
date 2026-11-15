@@ -1046,8 +1046,8 @@ class App:
                 info["account"] = site.account_name(page)
                 info["statements_read"] = len(site.read_rows(page))
             except Exception as e:
-                # Not under statements_read, where the core would read an
-                # error as statements read.
+                # statements_read is the count the core reads of what was
+                # read, and holds only a count, as every such key does.
                 info["collect_error"] = f"ERR {e}"
             info["samples"] = []
             for d in docs[:8]:

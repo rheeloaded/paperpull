@@ -15,10 +15,12 @@ and a listing that failed read as an account with nothing to list. An error
 goes under a key of its own, "collect_error", as several apps already did.
 
 The core reads every key of paperpull_core.words.COUNT_KEYS for that count,
-not "collected" alone, since most apps count under another name, so each of
-those keys is held to a count here the same way. U.S. Bank wrote the error
-its statement reader met under "statements_read", one of them, and now
-writes it under "collect_error" too.
+not "collected" alone, since some apps count under another name, so each of
+those keys is held to a count here the same way. The core takes only a
+whole number there, so an error is not read as a count, and still a key
+that says how much was read holds how much was read. U.S. Bank wrote the
+error its statement reader met under "statements_read", one of them, and
+now writes it under "collect_error" too.
 
 This reads the shape of the code. Every write of "collected" in an app's
 own script is a len() of something, a whole number such as the 0 a failed
@@ -118,16 +120,16 @@ def _writes(path: Path):
 
 def test_the_census_finds_apps_to_read():
     assert len(ENTRIES) > 80
-    assert sum(1 for p in ENTRIES for _ in _writes(p)) >= 55, "the census found the writes"
+    assert sum(1 for p in ENTRIES for _ in _writes(p)) >= 40, "the census found the writes"
 
 
 @pytest.mark.parametrize("path", ENTRIES, ids=lambda p: p.parent.name)
 def test_collected_is_only_ever_a_count(path):
     wrong = ["%s:%d %s" % (path.relative_to(REPO), line, key)
              for line, value, key in _writes(path) if not _is_count(value)]
-    assert not wrong, ("an error is written where the count of what a Diagnose read goes, "
-                       "where a signed-out report then reads as one that collected something. "
-                       "Put it under collect_error. " + ", ".join(wrong))
+    assert not wrong, ("something other than a count is written where the core reads how "
+                       "much a Diagnose read. Put an error under collect_error. "
+                       + ", ".join(wrong))
 
 
 @pytest.mark.parametrize("key", COUNT_KEYS)

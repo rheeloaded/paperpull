@@ -1090,7 +1090,7 @@ class App:
                     info["row_counts"][name] = f"ERR {type(e).__name__}"
             # Only the buttons the page drew by itself: diagnose presses nothing.
             docs = site.collect_documents(page)
-            info["collected"] = len(docs)
+            info["rows_collected"] = len(docs)
             info["documents_recognized"] = [{"date": d.date_text, "kind": d.kind} for d in docs[:40]]
         except pressing.Stop as stop:
             # A press past the documents page it would not make ends the
@@ -1113,7 +1113,7 @@ class App:
         print("  too. Read it through first.")
         print(f"Documents page found: {shape_tree(info.get('documents_page_found', '?'), words)}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
-              f"rows: {shape_tree(info.get('collected', '?'), words)}")
+              f"rows: {shape_tree(info.get('rows_collected', '?'), words)}")
         print("Look through that file for anything you would not want public,")
         print("then attach it to the Simmons Bank issue on GitHub. No screenshot was taken.")
 

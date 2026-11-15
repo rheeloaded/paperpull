@@ -3,41 +3,43 @@
 The core reads a Diagnose's finding, the dict an app writes through
 write_shaped with "signed_out" in it, for whether it read anything
 (paperpull_core.words, _note_what_was_read). A finding whose app's own
-checks said it was signed out or met a security check, and that counted
+checks said it was signed out or met a security check, and that read
 nothing, ends as a report that read nothing, and the person is told to sign
 in and make it again.
 
-The core read only "collected", while 43 apps counted under another key.
-Some of those counts are what a reader of the provider's own list read,
-"documents_total" in four apps whose list is an API answer, two of U.S.
-Bank's and one of Discover Card's, and "rows_collected" in thirteen apps
-whose Diagnose reads the list their runs read. A report of theirs that read
-rows where a check also tripped told the person to sign in, when it held
-what a repair needs. The core reads words.COUNT_KEYS, and those thirteen
-write "collected" now.
+The core read only "collected". Most apps keep what the provider's own list
+gave another way. Four count it as "documents_total", U.S. Bank its own
+reader's count as "statements_read", Discover Card its statement links as
+"statement_links", and 37 apps built from one template keep the documents
+their run's own reader recognized as a list, "documents_recognized" or
+"bills_recognized". A report of theirs that read the list where a check also
+tripped told the person to sign in, when it held what a repair needs. The
+core reads words.COUNT_KEYS and words.LIST_KEYS now.
 
-The rest are a loose scrape made only for Diagnose, "rows_collected" of
-every row a page has and "links_collected" of every link, which a sign-in
-page's own lists of links fill. Read as rows read, a report made signed
-out would say it was saved. So the core does not read them, and T-Mobile,
-whose "collected" was such a scrape, writes it as "rows_collected" now.
+It does not read "rows_collected", "links_collected" or "collected_generic",
+a Diagnose's own reading of every row or link on the page, in most apps a
+loose scrape, which a sign-in page's own lists of links fill. Read as rows
+read, a report made signed out would say it was saved. T-Mobile's
+"collected" was such a scrape, and it writes it as "rows_collected" now.
 test_every_count_the_core_reads_finds_nothing_on_a_sign_in_page.py runs
-each count the core reads against a made-up sign-in page.
+each reader the core reads the work of against made-up sign-in pages.
 
 - Every count written into a finding, a len(), a sum() or a whole number,
-  goes under a key the core reads, a scrape's key or one named here as a
+  goes under a key the core reads, one it reads past or one named here as a
   count of something other than documents. A new name fails until it is
   put in one of them.
-- Every finding counts under a key the core reads, or its app is named here
-  as one whose Diagnose counts only a scrape, or as one that counts no
-  documents at the top of its finding. Both lists are exact, so a name that
-  no longer belongs fails too.
+- Every finding counts under a key the core reads or keeps a list there, or
+  its app is named here as one whose Diagnose counts only what the core
+  does not read, or as one that counts no documents at the top of its
+  finding. Both lists are exact, so a name that no longer belongs fails too.
+- Every list under a key of LIST_KEYS is built in place, a list or a
+  comprehension, never an error or a dict, or the app is named.
 - Every key a Diagnose reads back from its finding is one it writes. U.S.
   Bank printed "Rows collected" from a key it never wrote, so the line read
   "Rows collected: ?", and its year picker line read another such key.
 
-That each write of those keys is a count, never an error, is held by
-test_diagnose_counts_what_it_collected.py.
+That each write of a key of COUNT_KEYS is a count, never an error, is held
+by test_diagnose_counts_what_it_collected.py.
 
 A finding is found by what it does. In each function of an app's own
 script, a name passed to write_shaped as what to write is a finding when
@@ -55,17 +57,17 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "core"))
 
-from paperpull_core.words import COUNT_KEYS  # noqa: E402
+from paperpull_core.words import COUNT_KEYS, LIST_KEYS  # noqa: E402
 
 ENTRIES = sorted(p for p in REPO.glob("apps/*/*.py")
                  if p.name.endswith(("_docs.py", "_receipts.py")) and not p.name.startswith("."))
 
-# The keys a loose scrape made only for Diagnose is counted under, which the
-# core does not read.
-SCRAPE_KEYS = {
-    "rows_collected": "every row a page has that holds a link, a date or a word, a sign-in "
-                      "page's lists of links among them",
+# Counts the core reads past, a Diagnose's own reading of the page.
+NOT_READ = {
+    "rows_collected": "every row a page has that holds a link, a date or a word in most apps, "
+                      "a sign-in page's lists of links among them",
     "links_collected": "every link on the tab, a sign-in page's among them",
+    "collected_generic": "every row holding a date, a sign-in page's dated notices among them",
 }
 
 # Counts a finding holds that are not of documents read, so the core does
@@ -76,22 +78,12 @@ NOT_DOCUMENTS = {
     "pay_assignments": "Paylocity's pay assignments, the jobs a person is paid for",
 }
 
-_LI = "keeps every table row, [role=row] or li holding a link, a date or the word download"
-_TABLE = "keeps every table row or [role=row] holding a link, a date or the word download"
-
-# The apps whose Diagnose counts only a loose scrape, read from each one's
-# collect_documents. A check that tripped there still reads as nothing read,
-# since nothing it counts tells a sign-in page from its list. An app whose
-# count is the list its runs read writes it as "collected" instead.
-SCRAPE_ONLY = {
-    "adp": _LI, "amfam": _LI, "applecard": _LI, "att": _LI, "coinbase": _LI, "etrade": _LI,
-    "golden1": _LI, "irs": _LI, "nelnet": _LI, "newrez": _LI, "optum": _LI, "sba": _LI,
-    "smud": _LI, "statefarm": _LI, "tmobile": _LI, "verizonmobile": _LI, "wellsfargo": _LI,
-    "cetera": _TABLE, "nwnatural": _TABLE, "portlandgeneral": _TABLE, "sdge": _TABLE,
-    "tualatin": _TABLE, "ziply": _TABLE,
-    "shelbycounty": "keeps every table body row",
-    "venmo": "counts what an input shows that reads as a month",
+# The apps whose Diagnose counts only what the core reads past, so a check
+# that tripped there still reads as nothing read.
+UNREAD_ONLY = {
+    "tmobile": "counts a loose scrape of every table row, [role=row] or li holding a link",
     "treasurydirect": "counts every link on the tab",
+    "applecard": "keeps what each section's reader recognized as a dict of counts by kind",
 }
 
 # The apps whose Diagnose finding counts no documents at its top, so a check
@@ -112,6 +104,12 @@ COUNTS_NO_DOCUMENTS = {
     "apple": "says whether each of its two stores was signed in",
     "uber": "says whether rides and Uber Eats were each signed in",
     "bofa": "surveys the page and counts nothing",
+}
+
+# The apps whose finding holds something other than a list built in place
+# under a key of LIST_KEYS, which the core then reads past.
+NOT_A_LIST = {
+    "applecard": "a dict of counts by kind",
 }
 
 
@@ -257,16 +255,30 @@ def _app(path: Path) -> str:
 
 def _unknown_counts(findings):
     return sorted({key for _f, _n, writes, _r in findings for key, value in writes
-                   if _is_count(value) and key not in COUNT_KEYS and key not in SCRAPE_KEYS
+                   if _is_count(value) and key not in COUNT_KEYS and key not in NOT_READ
                    and key not in NOT_DOCUMENTS})
 
 
-def _counts_documents(findings) -> bool:
-    return all(any(key in COUNT_KEYS for key, _ in writes) for _f, _n, writes, _r in findings)
+def _is_list(node) -> bool:
+    return isinstance(node, (ast.List, ast.ListComp))
 
 
-def _counts_a_scrape(findings) -> bool:
-    return all(any(key in SCRAPE_KEYS for key, _ in writes) for _f, _n, writes, _r in findings)
+def _reads_something(findings) -> bool:
+    """Whether every finding writes a count the core reads, or a list built
+    in place under a key of LIST_KEYS."""
+    return all(any(key in COUNT_KEYS or (key in LIST_KEYS and _is_list(value))
+                   for key, value in writes)
+               for _f, _n, writes, _r in findings)
+
+
+def _counts_unread(findings) -> bool:
+    return all(any(key in NOT_READ or key in LIST_KEYS for key, _ in writes)
+               for _f, _n, writes, _r in findings)
+
+
+def _not_lists(findings):
+    return ["%s at line %d" % (key, value.lineno) for _f, _n, writes, _r in findings
+            for key, value in writes if key in LIST_KEYS and not _is_list(value)]
 
 
 def _read_unwritten(findings):
@@ -294,7 +306,7 @@ def test_every_count_is_one_the_core_reads_or_is_not_of_documents(path):
     assert not unknown, (
         "%s counts under %s, which the core does not read for whether a Diagnose read "
         "anything. Count what a reader of the provider's list read under a key of "
-        "paperpull_core.words.COUNT_KEYS, a loose scrape under rows_collected, or name a "
+        "paperpull_core.words.COUNT_KEYS, the page's own rows under rows_collected, or name a "
         "count of something other than documents in NOT_DOCUMENTS here."
         % (path.relative_to(REPO), ", ".join(unknown)))
 
@@ -305,29 +317,40 @@ def test_every_diagnose_counts_its_documents_where_the_core_reads(path):
     if not findings:
         return
     app = _app(path)
-    counts, scrape = _counts_documents(findings), _counts_a_scrape(findings)
-    if app in SCRAPE_ONLY:
-        assert scrape and not counts, (
-            "%s is named in SCRAPE_ONLY, as counting only a loose scrape, and it %s, so "
-            "take it off" % (app, "counts under a key the core reads" if counts
-                             else "counts no scrape"))
+    reads, unread = _reads_something(findings), _counts_unread(findings)
+    if app in UNREAD_ONLY:
+        assert unread and not reads, (
+            "%s is named in UNREAD_ONLY, as counting only what the core reads past, and it %s, "
+            "so take it off" % (app, "counts where the core reads" if reads else "counts nothing"))
     elif app in COUNTS_NO_DOCUMENTS:
-        assert not counts and not scrape, ("%s now counts something, so take it off "
-                                           "COUNTS_NO_DOCUMENTS" % app)
+        assert not reads and not unread, ("%s now counts something, so take it off "
+                                          "COUNTS_NO_DOCUMENTS" % app)
     else:
-        assert counts, (
-            "%s's Diagnose counts nothing under a key of paperpull_core.words.COUNT_KEYS, so "
-            "a report that read rows where a sign-in check tripped tells the person to sign "
-            "in. Count the list its runs read under collected. If what it counts is a loose "
-            "scrape of the page, name the app in SCRAPE_ONLY with what the scrape keeps."
+        assert reads, (
+            "%s's Diagnose counts nothing the core reads, under paperpull_core.words.COUNT_KEYS "
+            "or as a list under LIST_KEYS, so a report that read the list where a sign-in check "
+            "tripped tells the person to sign in. Count what its run's own reader read under "
+            "collected. If all it counts is the page's own rows, name the app in UNREAD_ONLY."
             % path.relative_to(REPO))
+
+
+@pytest.mark.parametrize("path", ENTRIES, ids=_app)
+def test_a_list_the_core_reads_is_a_list(path):
+    wrong = _not_lists(_findings(path))
+    app = _app(path)
+    if app in NOT_A_LIST:
+        assert wrong, "%s now writes a list, so take it off NOT_A_LIST" % app
+    else:
+        assert not wrong, ("%s writes something other than a list built in place under a key "
+                           "the core reads as a list of documents recognized: %s"
+                           % (path.relative_to(REPO), ", ".join(wrong)))
 
 
 def test_every_app_named_here_is_an_app_with_a_finding():
     apps = {_app(path) for path in ENTRIES if _findings(path)}
-    named = set(COUNTS_NO_DOCUMENTS) | set(SCRAPE_ONLY)
+    named = set(COUNTS_NO_DOCUMENTS) | set(UNREAD_ONLY) | set(NOT_A_LIST)
     assert named <= apps, named - apps
-    assert not set(COUNTS_NO_DOCUMENTS) & set(SCRAPE_ONLY)
+    assert not set(COUNTS_NO_DOCUMENTS) & set(UNREAD_ONLY)
 
 
 @pytest.mark.parametrize("path", ENTRIES, ids=_app)
@@ -338,15 +361,16 @@ def test_what_diagnose_reads_back_it_wrote(path):
                            % (path.relative_to(REPO), ", ".join(unwritten)))
 
 
-def test_the_core_reads_no_key_named_here_as_not_documents():
-    assert not (set(NOT_DOCUMENTS) | set(SCRAPE_KEYS)) & set(COUNT_KEYS)
+def test_the_core_reads_no_key_named_here_as_not_read():
+    named = set(NOT_DOCUMENTS) | set(NOT_READ)
+    assert not named & (set(COUNT_KEYS) | set(LIST_KEYS))
 
 
 def test_every_key_named_here_is_written_by_an_app():
     """A key no app writes any more is taken off, so the lists only say
     what is so."""
     written = {key for path in ENTRIES for _f, _n, writes, _r in _findings(path) for key, _ in writes}
-    stale = (set(COUNT_KEYS) | set(SCRAPE_KEYS) | set(NOT_DOCUMENTS)) - written
+    stale = (set(COUNT_KEYS) | set(LIST_KEYS) | set(NOT_READ) | set(NOT_DOCUMENTS)) - written
     assert not stale, stale
 
 
@@ -369,7 +393,7 @@ def cmd_diagnose(self):
 def test_a_count_under_a_new_key_is_found():
     findings = _one(FINDING % ('info["statements_found"] = len(rows)', ""))
     assert _unknown_counts(findings) == ["statements_found"]
-    assert not _counts_documents(findings)
+    assert not _reads_something(findings)
 
 
 @pytest.mark.parametrize("write", [
@@ -384,7 +408,7 @@ def test_a_count_under_a_new_key_is_found():
 ])
 def test_a_count_the_core_reads_is_found_however_it_is_written(write):
     findings = _one(FINDING % (write, ""))
-    assert _counts_documents(findings), write
+    assert _reads_something(findings), write
     assert not _unknown_counts(findings), write
 
 
@@ -394,12 +418,38 @@ def cmd_diagnose(self):
     info = {"signed_out": site.looks_signed_out(page), "documents_total": len(docs)}
     write_shaped(out, info, words)
 '''
-    assert _counts_documents(_one(src))
+    assert _reads_something(_one(src))
 
 
 def test_a_finding_that_counts_nothing_is_found():
     findings = _one(FINDING % ('info["rows"] = rows', ""))
-    assert findings and not _counts_documents(findings)
+    assert findings and not _reads_something(findings)
+
+
+@pytest.mark.parametrize("write", [
+    'info["documents_recognized"] = [{"date": d.date_text} for d in found_docs[:40]]',
+    'info["bills_recognized"] = [{"date": b.date_text} for b in bills]',
+    'info["documents_recognized"] = []',
+])
+def test_a_list_the_core_reads_is_found(write):
+    findings = _one(FINDING % (write, ""))
+    assert _reads_something(findings) and not _not_lists(findings), write
+
+
+@pytest.mark.parametrize("write", [
+    'info["documents_recognized"] = _recognized(found_docs)',
+    'info["documents_recognized"] = "ERR %s" % e',
+    'info["documents_recognized"] = len(found_docs)',
+])
+def test_something_other_than_a_list_under_a_list_key_is_found(write):
+    findings = _one(FINDING % (write, ""))
+    assert _not_lists(findings) and not _reads_something(findings), write
+
+
+def test_a_scrape_the_core_reads_past_is_no_count_it_reads():
+    findings = _one(FINDING % ('info["rows_collected"] = len(docs)', ""))
+    assert not _reads_something(findings) and _counts_unread(findings)
+    assert not _unknown_counts(findings)
 
 
 def test_a_file_without_signed_out_is_no_finding():

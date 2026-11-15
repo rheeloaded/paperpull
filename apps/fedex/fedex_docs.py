@@ -949,7 +949,7 @@ class App:
                                              "account": site.redact(b.account)}
                                             for b in found_docs[:40]]
             docs = site.collect_documents(page)
-            info["collected"] = len(docs)
+            info["rows_collected"] = len(docs)
             info["samples"] = []
             for d in docs[:12]:
                 cat, summ, conf = doc_types.classify_document(d.title, self.rules)
@@ -969,7 +969,7 @@ class App:
         print("  too. Read it through first.")
         print(f"Documents page found: {shape_tree(info.get('documents_page_found', '?'), words)}, "
               f"documents recognized: {len(info.get('documents_recognized', []))}, "
-              f"rows: {shape_tree(info.get('collected', '?'), words)}")
+              f"rows: {shape_tree(info.get('rows_collected', '?'), words)}")
         print("Look through that file for anything you would not want public,")
         print("then attach it to the FedEx issue on GitHub. No screenshot was taken.")
 

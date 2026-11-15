@@ -879,23 +879,28 @@ def write_shaped(path, value, words: Iterable = (), *, full_list: bool = False) 
 # here and the exit is made there, in one place rather than in 81 apps.
 _READ_NOTHING = set()
 
-# Every key an app's Diagnose writes the count of what a reader of the
-# provider's own list read under. Most write "collected", the four whose list
-# is an API answer "documents_total", and U.S. Bank and Discover Card count
-# two readers. "rows_collected" and "links_collected" are not here. They hold
-# a loose scrape made only for Diagnose, of every row or link a page has,
-# which a sign-in page's own lists of links fill, so a report made signed
-# out would read as one that read rows. A count is a whole number, so an
-# error written where one goes, a yes or a list is not one. The censuses
+# What a Diagnose read of the provider's own list, as its finding says it.
+# COUNT_KEYS hold a count of it. Most apps write "collected", four
+# "documents_total" (an API's answer, or IBKR's months), U.S. Bank its own
+# reader's "statements_read" and Discover Card its "statement_links". A count
+# is a whole number, so an error written where one goes, a yes or a list is
+# not one. LIST_KEYS hold the documents the run's own reader recognized,
+# which the apps built from one template keep as a list rather than count.
+#
+# "rows_collected", "links_collected" and "collected_generic" are not read.
+# They count the Diagnose's own reading of every row or link on the page, a
+# loose scrape in most apps, which a sign-in page's own lists of links fill,
+# so a report made signed out would read as one that read rows. The censuses
 # core/tests/test_every_diagnose_counts_under_a_key_the_core_reads.py and
 # test_every_count_the_core_reads_finds_nothing_on_a_sign_in_page.py hold
-# every app to this list.
-COUNT_KEYS = ("collected", "documents_total", "collected_generic", "statements_read",
-              "statement_links")
+# every app to these.
+COUNT_KEYS = ("collected", "documents_total", "statements_read", "statement_links")
+LIST_KEYS = ("documents_recognized", "bills_recognized")
 
 
 def _read_something(value: dict) -> bool:
-    return any(type(value.get(key)) is int and value.get(key) > 0 for key in COUNT_KEYS)
+    return (any(type(value.get(key)) is int and value.get(key) > 0 for key in COUNT_KEYS)
+            or any(type(value.get(key)) is list and len(value.get(key)) > 0 for key in LIST_KEYS))
 
 
 def _note_what_was_read(path, value) -> None:

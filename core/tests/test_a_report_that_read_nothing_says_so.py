@@ -54,13 +54,13 @@ def test_rows_read_are_not_nothing_read_whatever_a_check_said(tmp_path):
 
 
 # Every key an app's Diagnose writes the count of what a reader of the
-# provider's own list read under, as the apps write them. Most write
-# "collected", four whose list is an API answer "documents_total", and U.S.
-# Bank and Discover Card a count from each of two readers. The census in
+# provider's own list read under, as the apps write them, and the keys of
+# the list of documents the run's own reader recognized. The census in
 # test_every_diagnose_counts_under_a_key_the_core_reads.py holds the apps
-# to the core's own list, and this to what the core does with each.
-COUNT_KEYS = ("collected", "documents_total", "collected_generic", "statements_read",
-              "statement_links")
+# to the core's own lists, and this to what the core does with each.
+COUNT_KEYS = ("collected", "documents_total", "statements_read", "statement_links")
+LIST_KEYS = ("documents_recognized", "bills_recognized")
+RECOGNIZED = [{"date": "9999-99-99", "kind": "statement"}]
 
 
 @pytest.mark.parametrize("key", COUNT_KEYS)
@@ -97,15 +97,42 @@ def test_one_count_above_none_is_enough(tmp_path):
 
 
 def test_counts_of_none_and_an_error_are_nothing_read(tmp_path):
-    _diagnose(tmp_path, {"signed_out": True, "collected_generic": 0, "statements_read": "ERR x"})
+    _diagnose(tmp_path, {"signed_out": True, "collected_generic": 3, "statements_read": "ERR x"})
     with pytest.raises(SystemExit) as out:
         failure.write_survey(tmp_path, provider="Testco", say=lambda *_a: None)
     assert out.value.code == run_reporting.NOTHING_READ
 
 
-@pytest.mark.parametrize("key", ["rows_collected", "links_collected", "print_receipt_controls",
-                                 "invoice_controls", "pay_assignments", "rows", "row_counts",
-                                 "cards_collected", "collect_error"])
+@pytest.mark.parametrize("key", LIST_KEYS)
+@pytest.mark.parametrize("found", [{"signed_out": True}, {"signed_out": False, "challenge": "A check"}])
+def test_documents_the_runs_reader_recognized_are_something_read(tmp_path, key, found):
+    """The apps built from one template keep what the run's own reader
+    recognized as a list, beside a count of a loose scrape, and that list
+    is what they read."""
+    _diagnose(tmp_path, dict(found, **{key: list(RECOGNIZED), "rows_collected": 0}))
+    assert _saved(tmp_path)
+
+
+@pytest.mark.parametrize("value", [[], None, "ERR the list would not answer", 3, True,
+                                   {"by_kind": {"statement": 2}, "with_pdf_link": 2}, ("a",)])
+@pytest.mark.parametrize("key", LIST_KEYS)
+def test_only_a_list_with_something_in_it_is_something_read(tmp_path, key, value):
+    """An empty list, an error, a count or a dict of counts under a list's
+    key is not documents recognized."""
+    _diagnose(tmp_path, {"signed_out": True, key: value})
+    assert not _saved(tmp_path)
+
+
+def test_a_loose_scrape_beside_an_empty_list_is_nothing_read(tmp_path):
+    """A template app on a sign-in page, whose scrape counted the page's
+    links and whose reader recognized nothing there."""
+    _diagnose(tmp_path, {"signed_out": True, "rows_collected": 9, "documents_recognized": []})
+    assert not _saved(tmp_path)
+
+
+@pytest.mark.parametrize("key", ["rows_collected", "links_collected", "collected_generic",
+                                 "print_receipt_controls", "invoice_controls", "pay_assignments",
+                                 "rows", "row_counts", "cards_collected", "collect_error"])
 def test_a_count_that_is_not_of_documents_is_not_something_read(tmp_path, key):
     """A loose scrape's count of every row or link on the page, which a
     sign-in page's own lists fill, a count of a receipt page's buttons, of
@@ -119,6 +146,7 @@ def test_a_count_that_is_not_of_documents_is_not_something_read(tmp_path, key):
 
 def test_the_list_here_is_the_cores(tmp_path):
     assert tuple(words.COUNT_KEYS) == COUNT_KEYS
+    assert tuple(words.LIST_KEYS) == LIST_KEYS
 
 
 def _saved(folder) -> bool:

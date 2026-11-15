@@ -10,6 +10,10 @@ where a sign-in check also tripped ended as one that read nothing, telling
 the person to sign in. Its reader's error went under "statements_read" too,
 where a count goes.
 
+The core reads "statements_read", what the reader its runs use read. It does
+not read "collected_generic", a scrape of every row on the page holding a
+date, which a sign-in page's dated notices fill.
+
 Here Diagnose runs whole against a made-up page, the site's reading of it
 stood in for. No real account, no network, every value invented.
 """
@@ -119,6 +123,17 @@ def test_rows_its_own_reader_read_count_when_the_generic_read_found_none(tmp_pat
     app = _app(tmp_path)
     _diagnose(app, rows=[], read=list(ROWS[:2]))
     assert not words.read_nothing_in(app.paths.diagnostics)
+
+
+def test_rows_only_the_generic_read_found_on_a_sign_in_page_are_nothing_read(tmp_path):
+    """A sign-in page's dated notices are rows to the generic read, and its
+    own reader finds no statements list there."""
+    app = _app(tmp_path)
+    info = _diagnose(app, read=[])
+    assert info["collected_generic"] == 3 and info["statements_read"] == 0
+    with pytest.raises(SystemExit) as out:
+        app.write_survey()
+    assert out.value.code == run_reporting.NOTHING_READ
 
 
 def test_what_it_prints_is_what_it_read(tmp_path, capsys):
