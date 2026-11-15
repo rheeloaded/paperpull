@@ -21,6 +21,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import delivery
 from paperpull_core import identity
 from paperpull_core import failure
@@ -551,9 +552,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
-            return bool(pdf_path and Path(pdf_path).exists()
-                        and receipt_pdf.validate_pdf(
-                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(pdf_path, self.config["min_pdf_bytes"])
         return False
 
     # -- processing core ----------------------------------------------------
@@ -1111,7 +1110,7 @@ class App:
             print(f"    PDF:        {fn or '(none)'}")
             if fn:
                 path = Path(rec.get("pdf_path", ""))
-                exists = path.exists()
+                exists = shared_folder.file_there(path)
                 print(f"    PDF exists: {exists}  "
                       f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
                 if not exists:

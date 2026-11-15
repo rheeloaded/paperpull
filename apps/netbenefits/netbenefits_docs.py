@@ -23,6 +23,7 @@ auth, and the one side effect (a downloaded message is marked read).
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import renaming
@@ -698,8 +699,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -1063,7 +1063,7 @@ class App:
             if site.employer_of(self._plans_by_digest[rec["plan"]]) != rec["employer"]:
                 continue
             path = Path(str(rec.get("pdf_path") or ""))
-            if path.is_file():
+            if shared_folder.file_there(path):
                 site.note_combined(receipt_pdf.pdf_text(path), rec["plan"], plans)
 
     def _judge_held(self) -> None:
@@ -1182,8 +1182,8 @@ class App:
                 continue
             if (rec.get("text_sha256") or "") in ours:
                 return key
-            own = (rec.get("pdf_path") or "").strip()
-            if own and Path(own).is_file():
+            own = str(rec.get("pdf_path") or "").strip()
+            if own and shared_folder.file_there(own):
                 text = receipt_pdf.pdf_text(Path(own))
                 if text.strip() and site.statement_digest(text) == digest:
                     return key

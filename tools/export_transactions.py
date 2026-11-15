@@ -894,7 +894,7 @@ def providers(root: Path) -> List[dict]:
     out: "OrderedDict[str, dict]" = OrderedDict()
     for prov, f in find_indexes(root):
         rows = _index_rows(f)
-        on_disk = sum(1 for r in rows if pdf_path(f, r).is_file())
+        on_disk = sum(1 for r in rows if shared_folder.file_there(pdf_path(f, r)))
         if not on_disk:
             continue
         e = out.setdefault(prov, {"provider": prov, "folders": [], "pdfs": 0})
@@ -975,7 +975,7 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
     for prov, index in indexes:
         for row in _index_rows(index):
             p = pdf_path(index, row)
-            if not p.is_file():
+            if not shared_folder.file_there(p):
                 missing += 1
                 continue
             parsed = cache.get(p)

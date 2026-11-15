@@ -447,8 +447,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------

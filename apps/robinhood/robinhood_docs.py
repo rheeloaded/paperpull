@@ -946,8 +946,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     def _date_saved_forms(self, listed_now: Optional[set] = None) -> int:
@@ -1035,8 +1034,8 @@ class App:
         listed or saved says nothing about which year's form it is, since a
         form comes out in the year after its own, so a file that is gone or
         prints no clear year moves nowhere."""
-        path = (rec.get("pdf_path") or "").strip()
-        if not listed or not path or not Path(path).exists():
+        path = str(rec.get("pdf_path") or "").strip()
+        if not listed or not path or not shared_folder.file_there(path):
             return None
         year = site.printed_tax_year(receipt_pdf.pdf_text(Path(path)))
         same = [x for x in listed if year and x[1]["date"] == f"{year}-12-31"]
@@ -1321,8 +1320,8 @@ class App:
                     or (rec.get("title") or "") != doc.title
                     or (rec.get("account") or "") != (doc.account or "")):
                 continue
-            own = (rec.get("pdf_path") or "").strip()
-            if own and Path(own).exists():
+            own = str(rec.get("pdf_path") or "").strip()
+            if own and shared_folder.file_there(own):
                 printed = site.printed_tax_year(receipt_pdf.pdf_text(Path(own)))
                 if printed and printed != year:
                     continue
@@ -1403,8 +1402,8 @@ class App:
                 continue
             theirs = rec.get("pdf_sha256") or ""
             their_text = rec.get("text_sha256") or ""
-            own = (rec.get("pdf_path") or "").strip()
-            if own and Path(own).is_file():
+            own = str(rec.get("pdf_path") or "").strip()
+            if own and shared_folder.file_there(own):
                 theirs = theirs or _sha256(own)
                 their_text = _text_sha256(own) or their_text
             if (digest and theirs == digest) or (their_text and their_text in texts):

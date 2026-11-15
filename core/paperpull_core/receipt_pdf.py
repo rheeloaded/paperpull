@@ -13,6 +13,7 @@ Validation uses pypdf locally.
 from __future__ import annotations
 
 import base64
+import errno
 import html as _html
 import logging
 import os
@@ -1372,6 +1373,26 @@ class Together(tuple):
     this way, a date and a total."""
 
 
+# The errors Python 3.12's Path.exists() answers False for rather than raises.
+_NOT_THERE = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
+
+
+def copy_still_valid(path, min_bytes: int = 3000) -> bool:
+    """Whether a record's path names a PDF still there that validates, the
+    question every app's _already_done asks of a copy set aside for review.
+    Never raises. A path that is not text, a number or a list a hand edit or
+    a damaged file left, names nothing. One that cannot be asked about, in a
+    folder the run may not search, counts as not there, so the document is
+    fetched again, as a deleted copy is. Each app asked Path(p).exists()
+    outside any try, which Python 3.12 lets raise for such a folder, so the
+    run ended at that document on every run (a bug hunt of 2026-11-14)."""
+    if isinstance(path, os.PathLike):
+        path = os.fspath(path)
+    if not isinstance(path, str) or not path:
+        return False
+    return validate_pdf(Path(path), min_bytes).ok
+
+
 def validate_pdf(path: Path, min_bytes: int = 3000,
                  expect_tokens: Optional[Iterable[str]] = None) -> ValidationResult:
     """Verify a saved PDF, that it exists, is not trivially small, carries
@@ -1391,9 +1412,19 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
     the caller's to keep where it keeps those, and it is never deleted
     here."""
     path = Path(path)
-    if not path.exists():
-        return ValidationResult(False, "File does not exist")
-    size = path.stat().st_size
+    # One stat, inside a try. Python 3.12's exists() and stat() raise for a
+    # file in a folder the run may not search, which ended Verify and every
+    # app's check of a review copy at that document on every run (a bug hunt
+    # of 2026-11-14). "Not there" is what exists() answered False for, and
+    # anything else is a file that could not be read.
+    try:
+        size = path.stat().st_size
+    except OSError as e:
+        if e.errno in _NOT_THERE:
+            return ValidationResult(False, "File does not exist")
+        return ValidationResult(False, f"Cannot read file: {e}")
+    except ValueError as e:
+        return ValidationResult(False, f"Cannot read file: {e}")
     if size == 0:
         return ValidationResult(False, "File is zero bytes", size_bytes=0)
     if size < min_bytes:

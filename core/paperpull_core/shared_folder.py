@@ -223,6 +223,22 @@ def read_plain(path, limit: int = READ_LIMIT) -> bytes:
         os.close(fd)
 
 
+def file_there(path) -> bool:
+    """Whether path names a file that is there, asked so it never raises.
+    Python 3.12's Path.is_file() and exists() raise for a file in a folder
+    the run may not search, and a run asking about a path a record, an
+    index row or a listing named ended there (a bug hunt of 2026-11-14).
+    Such a file, and a path that is not text, count as not there."""
+    if isinstance(path, os.PathLike):
+        path = os.fspath(path)
+    if not isinstance(path, str) or not path:
+        return False
+    try:
+        return Path(path).is_file()
+    except (OSError, ValueError):
+        return False
+
+
 def read_text(path, encoding: str = "utf-8", errors: str = "strict",
               limit: int = READ_LIMIT) -> str:
     """read_plain, as text."""

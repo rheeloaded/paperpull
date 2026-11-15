@@ -775,9 +775,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
-            return bool(pdf_path and Path(pdf_path).exists()
-                        and receipt_pdf.validate_pdf(
-                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(pdf_path, self.config["min_pdf_bytes"])
         return False
 
     # -- processing core ----------------------------------------------------
@@ -1543,7 +1541,7 @@ class App:
                         and receipt_pdf.validate_pdf(Path(e["file"]),
                                                      self.config["min_pdf_bytes"]).ok
                         if not e.get("kept", True)
-                        else not again or (Path(e["file"]).exists()
+                        else not again or (shared_folder.file_there(e["file"])
                                            and not _among(e, lost)))]
         return self._indexed_invoices(purchase)
 
@@ -1863,7 +1861,7 @@ class App:
             print(f"    PDF:        {fn or '(none)'}")
             if fn:
                 path = Path(rec.get("pdf_path", ""))
-                exists = path.exists()
+                exists = shared_folder.file_there(path)
                 print(f"    PDF exists: {exists}  "
                       f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
                 if not exists:

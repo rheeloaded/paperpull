@@ -540,9 +540,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
-            return bool(pdf_path and Path(pdf_path).exists()
-                        and receipt_pdf.validate_pdf(
-                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(pdf_path, self.config["min_pdf_bytes"])
         return False
 
     # -- processing core ----------------------------------------------------
@@ -1013,7 +1011,7 @@ class App:
             print(f"    PDF:        {fn or '(none)'}")
             if fn:
                 path = Path(rec.get("pdf_path", ""))
-                exists = path.exists()
+                exists = shared_folder.file_there(path)
                 print(f"    PDF exists: {exists}  "
                       f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
                 if not exists:
@@ -1141,7 +1139,7 @@ class App:
             if self.args.order_number and row.get("Order or Receipt Number") != self.args.order_number:
                 continue
             path = Path(row.get("PDF Full Path") or "")
-            if not path.is_file():
+            if not shared_folder.file_there(path):
                 missing += 1
                 continue
             rec = self.progress.data.get(key)

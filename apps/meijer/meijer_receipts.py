@@ -730,9 +730,7 @@ class App:
         # (reviews of 0.41.0).
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
-            return bool(pdf_path and Path(pdf_path).exists()
-                        and receipt_pdf.validate_pdf(
-                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(pdf_path, self.config["min_pdf_bytes"])
         return False
 
     # -- processing core ----------------------------------------------------
@@ -1505,7 +1503,7 @@ class App:
             print(f"    PDF:        {fn or '(none)'}")
             if fn:
                 path = Path(rec.get("pdf_path", ""))
-                exists = path.exists()
+                exists = shared_folder.file_there(path)
                 size, pages = rec.get("pdf_size"), rec.get("pdf_pages")
                 # Only a receipt that passed its check has its size and pages
                 # written down, so one put aside in Manual Review read "? bytes,
