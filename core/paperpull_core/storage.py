@@ -935,6 +935,88 @@ def sanitize_component(name: str, max_len: int = 120) -> str:
 
 
 # ---------------------------------------------------------------------------
+# How long a name and a path are
+# ---------------------------------------------------------------------------
+
+# The most bytes of UTF-8 a file's name may take. ext4 and btrfs, the file
+# systems PaperPull Server runs on, and APFS on a Mac hold a name in 255
+# bytes, and NTFS in 255 UTF-16 units, which a name of 255 bytes never
+# passes. The 120 characters sanitize_component keeps are 360 bytes in
+# Japanese, and such a name could not be saved on the Server at all.
+NAME_BYTES = 255
+
+# Whether max_path_length is measured as Windows measures a path, the whole
+# of it from the drive, in UTF-16 units. Windows with long paths turned off
+# refuses a path past 260 of them. Every install's output_dir is ".", so a
+# path measured as written, from the install, passed at 240 and was far
+# longer in full. A Mac and PaperPull Server have no such limit, and there a
+# path is measured as written, as it always was, so no name changes there.
+_WINDOWS_MEASURE = sys.platform == "win32"
+
+# The part "(2 of 3)" at the end of a name, which a cut keeps, since Rename
+# reads it only from there (renaming._part_of), and a file that lost it is
+# renamed as though it were the whole order.
+_PART_AT_END = re.compile(r" ?\(\d+ of \d+\)$", re.IGNORECASE)
+
+
+def name_length(text: str) -> int:
+    """How long max_path_length counts `text`. In UTF-16 units on Windows,
+    where a character past the first 65536, an emoji say, is two, and in
+    characters elsewhere."""
+    if _WINDOWS_MEASURE:
+        return len(text) + sum(1 for ch in text if ord(ch) > 0xFFFF)
+    return len(text)
+
+
+def path_length(path) -> int:
+    """How long max_path_length counts a folder's or a file's path. On
+    Windows that is the whole path, normalized as Windows reads it, so a
+    second person's "../<install> - Robin" counts as the folder it names,
+    and never followed through a link, since Windows counts the path it is
+    handed and not where a link leads. Elsewhere the path as written."""
+    text = str(path)
+    if _WINDOWS_MEASURE:
+        try:
+            text = os.path.abspath(text)
+        except (OSError, ValueError):
+            pass
+    return name_length(text)
+
+
+def _size(text: str) -> int:
+    """A name's bytes in UTF-8. Half of a character counts the three bytes
+    a file system would be handed for it rather than stopping the count."""
+    return len(text.encode("utf-8", "surrogatepass"))
+
+
+def _cut(text: str, most: int, length) -> str:
+    """The longest start of `text` that `length` counts at most `most`,
+    made of whole characters."""
+    if length(text) <= most:
+        return text
+    used = 0
+    for i, ch in enumerate(text):
+        used += length(ch)
+        if used > most:
+            return text[:i]
+    return text
+
+
+def _in_bytes(text: str, most: int) -> str:
+    """`text` cut to `most` bytes of UTF-8 between two characters, never
+    ending in a space or a dot, which Windows takes off. A part "(2 of 3)"
+    at its end stays, the text before it giving way."""
+    if _size(text) <= most:
+        return text
+    part = _PART_AT_END.search(text)
+    if part and _size(part.group(0)) < most:
+        head = _cut(text[:part.start()], most - _size(part.group(0)), _size).rstrip(" .")
+        if head:
+            return head + part.group(0)
+    return _cut(text, most, _size).rstrip(" .")
+
+
+# ---------------------------------------------------------------------------
 # Folders from a naming pattern (#101)
 # ---------------------------------------------------------------------------
 
@@ -986,10 +1068,25 @@ def file_name_of(parts: List[str]) -> FileName:
     """A file's name and folders from the text naming.render_path gives,
     the folders first and the name last, each made safe. A folder that
     comes to nothing is left out, so a document a folder's fields say
-    nothing about is filed one folder up."""
+    nothing about is filed one folder up.
+
+    The name never starts with a dot or a space, as no folder does. A
+    pattern can start with a field whose value does, American Family's
+    masked account "...1234" say, and a Mac, Linux and PaperPull Server's
+    share hide a file so named, and the panel's zip of what was set aside
+    leaves it out. And the name fits NAME_BYTES, its part "(2 of 3)" kept.
+    The File names page, a download and Rename all build a name here, so
+    they give the same one."""
     *folders, name = parts or [""]
     kept = [f for f in (_folder_name(text) for text in folders) if f]
-    return FileName(sanitize_component(name) + ".pdf", "/".join(kept))
+    name = sanitize_component(name)
+    if name.startswith("."):
+        # Taken off here and never in sanitize_component, which builds the
+        # keys of most apps' records, so a key stays what it was. Made safe
+        # again, since what is left can be a name Windows keeps for a
+        # device, CON say.
+        name = sanitize_component(name.lstrip(" ."))
+    return FileName(_in_bytes(name, NAME_BYTES - len(".pdf")) + ".pdf", "/".join(kept))
 
 
 def _put_aside_in(directory: Path) -> bool:
@@ -1041,7 +1138,9 @@ def filing_folder(directory: Path, filename, max_path_length: int = 240) -> Path
         return directory
     target = directory.joinpath(*parts)
     ext = os.path.splitext(filename)[1] or ".pdf"
-    if max_path_length - len(str(target)) - 1 < len(ext) + 8:
+    # Measured as the name's own room is (_free_name), so a folder kept
+    # here always leaves the name room under max_path_length.
+    if max_path_length - path_length(target) - 1 < len(ext) + 8:
         return directory
     at = directory
     for part in parts:
@@ -1268,7 +1367,13 @@ def fitted_name(directory: Path, filename: str, max_path_length: int = 240) -> s
 def _free_name(directory: Path, filename: str, max_path_length: int,
                existing: set, distinguisher: str) -> str:
     """The name unique_path gives *filename* in *directory*, where `existing`
-    is every name held there, in lower case."""
+    is every name held there, in lower case.
+
+    It fits two limits. The room the path leaves under max_path_length,
+    measured as the system measures it (path_length), takes off the end of
+    the name, as it always did. And NAME_BYTES takes off the end of the
+    name's own stem, a part "(2 of 3)" there kept, with what tells it apart
+    and a " (2)" after it whole, so such an ending still reads as itself."""
     stem, ext = os.path.splitext(filename)
 
     # An empty stem used to return the DIRECTORY itself, because "dir / ''" is
@@ -1283,7 +1388,7 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
     # A folder deep enough to leave nothing is not something a shorter filename
     # can rescue, and returning an over-long path anyway only moved the failure
     # to the write, where it surfaced as an unexplained OS error.
-    room = max_path_length - len(str(directory)) - 1
+    room = max_path_length - path_length(directory) - 1
     if room < len(ext) + 8:
         raise ValueError(
             "%s is too deep to file into. The full path would exceed the %d "
@@ -1292,12 +1397,23 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
             % (directory, max_path_length))
 
     def shorten(base: str, suffix: str) -> str:
-        keep = room - len(ext) - len(suffix)
-        return base[:max(1, keep)].rstrip(" .") + suffix + ext
+        keep = room - name_length(ext) - name_length(suffix)
+        return (_cut(base, keep, name_length) or base[:1]).rstrip(" .") + suffix + ext
 
-    candidate = stem + ext
-    if len(candidate) > room:
-        candidate = shorten(stem, "")
+    def named(told: str, suffix: str = "") -> str:
+        """The stem with `told` and `suffix` after it and the ending, cut
+        to fit both limits."""
+        most = NAME_BYTES - _size(suffix + ext)
+        base = _in_bytes(stem, most - _size(told)) + told
+        if _size(base) > most:
+            # What tells it apart is too long to be kept whole.
+            base = _in_bytes(stem + told, most)
+        candidate = base + suffix + ext
+        if name_length(candidate) > room:
+            candidate = shorten(base, suffix)
+        return candidate
+
+    candidate = named("")
 
     # What tells this one from the other, when the caller knows. It is
     # sanitized like any other part of a name, and it is not used when the
@@ -1307,22 +1423,17 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
     # distinguisher would tell two files apart by telling you nothing.
     raw_token = str(distinguisher or "").strip()
     token = sanitize_component(raw_token).strip(" .") if raw_token else ""
+    told = ""
     if candidate.lower() in existing and token and token.lower() not in stem.lower():
-        with_token = "%s %s" % (stem, token)
-        candidate = with_token + ext
-        if len(candidate) > room:
-            candidate = shorten(with_token, "")
+        candidate = named(" " + token)
         if candidate.lower() not in existing:
             return candidate
-        stem = with_token
+        told = " " + token
 
     n = 1
     while candidate.lower() in existing:
         n += 1
-        suffix = " (%d)" % n
-        candidate = stem + suffix + ext
-        if len(candidate) > room:
-            candidate = shorten(stem, suffix)
+        candidate = named(told, " (%d)" % n)
     return candidate
 
 
