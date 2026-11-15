@@ -986,10 +986,24 @@ def file_name_of(parts: List[str]) -> FileName:
     """A file's name and folders from the text naming.render_path gives,
     the folders first and the name last, each made safe. A folder that
     comes to nothing is left out, so a document a folder's fields say
-    nothing about is filed one folder up."""
+    nothing about is filed one folder up.
+
+    The name never starts with a dot or a space, as no folder does. A
+    pattern can start with a field whose value does, American Family's
+    masked account "...1234" say, and a Mac, Linux and PaperPull Server's
+    share hide a file so named, and the panel's zip of what was set aside
+    leaves it out. The File names page, a download and Rename all build a
+    name here, so they give the same one."""
     *folders, name = parts or [""]
     kept = [f for f in (_folder_name(text) for text in folders) if f]
-    return FileName(sanitize_component(name) + ".pdf", "/".join(kept))
+    name = sanitize_component(name)
+    if name.startswith("."):
+        # Taken off here and never in sanitize_component, which builds the
+        # keys of most apps' records, so a key stays what it was. Made safe
+        # again, since what is left can be a name Windows keeps for a
+        # device, CON say.
+        name = sanitize_component(name.lstrip(" ."))
+    return FileName(name + ".pdf", "/".join(kept))
 
 
 def _put_aside_in(directory: Path) -> bool:

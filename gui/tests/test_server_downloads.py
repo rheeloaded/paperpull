@@ -177,6 +177,33 @@ def test_what_was_set_aside_comes_as_one_zip(shop, tmp_path, monkeypatch):
     assert list((tmp_path / "temp").iterdir()) == []
 
 
+def test_a_statement_named_from_a_masked_account_comes_in_the_zip(shop, tmp_path, monkeypatch):
+    """American Family's account is its masked number, "...1234", and a
+    naming pattern can start with it. The name the core gives a statement
+    put aside under such a pattern is in the zip. At 40491dd7 it started
+    with the dots, the zip left it out as a hidden file, and nothing was
+    said to be set aside."""
+    from paperpull_core import storage
+    from paperpull_core.spec import AppSpec, DOCUMENT, Folder, INFRASTRUCTURE_FOLDERS
+    for name in ("_SPEC", "_FILENAME_PATTERN", "_PATTERN_OWNER", "_FILENAME_OWNER"):
+        monkeypatch.setattr(storage, name, getattr(storage, name))
+    storage.bind(AppSpec(provider="American Family", project_dir=tmp_path, kind=DOCUMENT,
+                         folders=[Folder("statements", "Statements"), *INFRASTRUCTURE_FOLDERS],
+                         default_route="statements"))
+    name = storage.build_pdf_filename("2026-01-15", "Statement ...1234", "",
+                                      record={"account": "...1234", "category": "Statement"},
+                                      pattern="{account} {date:yyyy-mm-dd} {kind}")
+    aside = shop / "Manual Review"
+    aside.mkdir()
+    storage.unique_path(aside, name, 240).write_bytes(PDF)
+    monkeypatch.setattr(app_module.tempfile, "tempdir", str(tmp_path / "temp"))
+    (tmp_path / "temp").mkdir()
+    status, got = asked(app_module.api_aside_download, app="Shop Receipts")
+    assert status == 200, got
+    with zipfile.ZipFile(io.BytesIO(body_of(got))) as z:
+        assert z.namelist() == ["Manual Review/1234 2026-01-15 Statement.pdf"]
+
+
 def test_nothing_set_aside_is_said(shop):
     (shop / "Manual Review").mkdir()
     status, detail = asked(app_module.api_aside_download, app="Shop Receipts")
