@@ -426,8 +426,8 @@ def written_down(holders, name: str) -> bool:
     is the app's own Document or Purchase, which its callers hold and every
     app writes down whole, and never a row or a dict handed in. A function
     inside another names from the enclosing one's record, as Amazon's
-    target() names each invoice of an order from the order its function
-    writes down."""
+    target() named each invoice of an order from the order its function
+    wrote down."""
     for fn in reversed(holders):
         params = {a.arg: a for a in fn.args.args + fn.args.kwonlyargs}
         if name in params:
@@ -453,7 +453,7 @@ def test_there_are_namings_to_check():
     found = [(p, holders[-1].name) for p in entries() for holders, _call, _rec in namings(p)]
     assert len({p.parent.name for p, _fn in found}) >= 61, found
     assert "_save_collected" in {fn for p, fn in found if p.parent.name == "anthem"}
-    assert "target" in {fn for p, fn in found if p.parent.name == "amazon"}
+    assert "_place_invoice" in {fn for p, fn in found if p.parent.name == "amazon"}
 
 
 CANARY = '''
@@ -483,14 +483,19 @@ class App:
         record = {"title": r["label"], "document_id": r["doc_id"]}
         name = build_pdf_filename("2026-01-01", "x", "", record=record)
         self.progress.update(r["key"], dict(record, state="Completed", pdf_path=name))
+
+    def several_parts(self, doc: Document):
+        def named_inside(i):
+            return build_pdf_filename(doc.date, doc.summary, "", part=(i, 2), record=doc)
+        return [named_inside(1), named_inside(2)]
 '''
 
 
 def test_the_census_tells_each_shape_apart(tmp_path):
     """The census refuses a row handed to a helper, an id written over the
     record a file was named from, and a file written down apart from it,
-    and passes an app's own Document and a record written from the one the
-    file was named from."""
+    and passes an app's own Document, named inside a function of its own
+    or not, and a record written from the one the file was named from."""
     source = tmp_path / "canary_docs.py"
     source.write_text(CANARY, encoding="utf-8")
     verdict = {}
@@ -499,7 +504,7 @@ def test_the_census_tells_each_shape_apart(tmp_path):
                                      and not written_apart(holders, record.id))
     assert verdict == {"save_row": False, "id_written_over": False,
                        "put_aside_apart": False, "whole_record": True,
-                       "written_from_it": True}, verdict
+                       "written_from_it": True, "named_inside": True}, verdict
 
 
 def test_every_app_names_a_file_from_the_record_it_writes_down():
