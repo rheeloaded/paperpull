@@ -894,12 +894,24 @@ def status_of(row: dict) -> str:
     return ""
 
 
+def _plain(value):
+    """What an object whose only key is "value" holds, which is how a
+    tester's PayPal sent every field of a report (#224), and any other value
+    as it is. Only that one key is opened, and only one level, so an object
+    saying anything more is read as it always was."""
+    if isinstance(value, dict) and list(value) == ["value"]:
+        inner = value["value"]
+        return inner if not isinstance(inner, (dict, list, tuple)) else value
+    return value
+
+
 def period_of(row: dict) -> Optional[Period]:
     """The days a report covers, by its duration. When the duration names no
     day at all, the day PayPal made it, by its createdOn. None when either
     holds something this app cannot read, which is refused rather than
-    guessed past."""
-    duration = row.get("duration")
+    guessed past. Each is read the same whether it came as itself or held
+    in an object of its value (_plain)."""
+    duration = _plain(row.get("duration"))
     if _holds_digits(duration):
         days = _days_of(duration)
         if len(days) == 2 and days[0] <= days[1]:
@@ -909,7 +921,7 @@ def period_of(row: dict) -> Optional[Period]:
             if got:
                 return Period(start="%04d-%02d-01" % got, end=month_end(*got))
         return None
-    made = _days_of(row.get("createdOn"))
+    made = _days_of(_plain(row.get("createdOn")))
     return Period(created=made[0]) if len(made) == 1 else None
 
 

@@ -53,6 +53,43 @@ def test_a_duration_naming_no_day_at_all_leaves_the_day_it_was_made():
     assert site.period_of({"duration": None}) is None
 
 
+def wrapped(row: dict) -> dict:
+    """A report as a tester's PayPal answered for it, every field an object
+    whose only key is "value" (#224)."""
+    return {k: {"value": v} for k, v in row.items()}
+
+
+@pytest.mark.parametrize("written", [
+    "Aug 1, 2031 - Aug 31, 2031", "2031-08-01 to 2031-08-31", "08/01/2031 - 08/31/2031",
+    "August 2031",
+])
+def test_a_duration_held_in_an_object_of_its_value_is_read_as_one_written_plainly(written):
+    """Every one of a tester's ready PDF statements was refused as a period
+    it could not read, since the period came inside such an object and only
+    a string or an object naming a start and an end were read."""
+    assert site.period_of(wrapped({"duration": written})) == site.Period(*AUGUST)
+
+
+def test_a_report_held_in_objects_of_their_values_is_read_whole():
+    row = wrapped({"fileFormat": "PDF", "reportStatus": "AVAILABLE",
+                   "duration": "Aug 1, 2031 - Aug 31, 2031"})
+    assert site.read_row(row) == (site.READY, site.Period(*AUGUST))
+    made = site.Period(created="2031-09-02")
+    assert site.period_of(wrapped({"duration": "MONTHLY",
+                                   "createdOn": "2031-09-02T10:15:00Z"})) == made
+
+
+@pytest.mark.parametrize("written", [
+    {"value": "Aug 31, 2031"}, {"value": 1785542400000},
+    {"value": "Aug 1, 2031 - Aug 31, 2031", "note": "Aug 2031"},
+    {"value": {"value": "Aug 1, 2031 - Aug 31, 2031"}},
+])
+def test_an_object_of_a_value_is_read_no_further_than_a_plain_one(written):
+    """What the object holds is read by the same rules, and an object with
+    any other key, or one inside another, is refused as before."""
+    assert site.period_of({"duration": written, "createdOn": "2031-09-02"}) is None
+
+
 def test_a_statement_known_only_by_the_day_it_was_made_is_never_checked_against_it():
     made = site.Period(created="2031-09-02")
     assert made.identity() is None, "nothing says a statement prints the day it was made"

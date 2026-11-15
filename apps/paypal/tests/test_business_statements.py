@@ -195,6 +195,24 @@ def test_a_business_accounts_ready_statements_are_pressed_for_and_saved(
     assert fake.nothing_got_past_the_router()
 
 
+def test_a_list_whose_fields_each_come_in_an_object_of_their_value_is_saved_the_same(
+        business, tmp_path, monkeypatch, capsys):
+    """A tester's PayPal answered with every field of a report but its id as
+    an object whose only key is "value" (#224). Each ready PDF statement was
+    refused as a period it could not read and the run saved nothing. Read
+    through those objects, the run saves what the plain answer gives."""
+    fake, context = business
+    fake.pages = [[{k: (v if k == "id" else {"value": v}) for k, v in row.items()}
+                   for row in B.ROWS]]
+    said, result, stopped = _run(monkeypatch, context, tmp_path, "--all", "--yes",
+                                 capsys=capsys)
+    assert B.statements(tmp_path) == B.FILED, said
+    assert sorted(fake.pressed) == sorted([B.ACCOUNT_ID + "1", B.ACCOUNT_ID + "4"])
+    assert fake.flags == []
+    assert result and result["new_files"] == 2 and not result["stopped"], said
+    assert "1 in another kind of file" in said and "1 not ready yet" in said
+
+
 def test_a_second_run_takes_nothing_twice(business, tmp_path, monkeypatch, capsys):
     fake, context = business
     _run(monkeypatch, context, tmp_path, "--all", "--yes", capsys=capsys)

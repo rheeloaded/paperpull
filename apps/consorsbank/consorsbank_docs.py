@@ -761,7 +761,11 @@ class App:
             try:
                 info["collected"] = len(site.collect_documents(page))
             except Exception as e:
-                info["collected"] = type(e).__name__
+                # A count of none, and the error under a key of its own, so a
+                # report made on a sign-in page reads as one that collected
+                # nothing (test_diagnose_counts_what_it_collected).
+                info["collected"] = 0
+                info["collect_error"] = type(e).__name__
             # No screenshot. Its pages show balances, and a PNG of one
             # would sit in Diagnostics where it is easy to attach to a bug
             # report by accident.

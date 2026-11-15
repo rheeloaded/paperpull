@@ -7,6 +7,42 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Amazon reads a year of more than 600 orders to its end.** Every run
+  that reads the order list, Pilot, Get new documents and Resume included,
+  read sixty pages of one year's list at most, ten orders a page, and then
+  went on to the year before with no word, the rest of that year never
+  looked for and the list noted as read whole, so the run finished clean
+  with those orders missed. It now reads up to 500 pages of a year, and a
+  year that still shows a next page there stops the run with a failure file,
+  keeping what it read, rather than call the list whole. A run with a start
+  date goes on when the last page it read holds only orders older than that
+  date, since every order in its scope is already read.
+- **PayPal reads a business statement list whose fields each come held in
+  an object (#224).** A tester's PayPal answered with every field of a
+  report as an object holding only its value. The period was read only as
+  plain text or as a start and an end, so every ready PDF statement was
+  refused as a period this app could not read and the run saved none. A
+  single value held that way, a date or a word, is now read as that value
+  written plainly, and an object saying anything more is refused as before.
+- **Fidelity's support report asks for the kinds of document a run asks for
+  (#223).** It asked for statements and trade confirmations only, where a
+  run asks for tax forms too, so a run that stopped at a tax form call made
+  a report that showed nothing wrong. Fidelity and NetBenefits also no
+  longer say the browser tab should be on a host neither of them uses.
+- **A support report keeps the error its listing met, and one made while
+  signed out still says it read nothing.** Fidelity, NetBenefits and
+  Invest529 wrote that error where the count of what was collected goes and
+  then wrote a count of none over it, so a listing that failed read as an
+  account with nothing to list. CIBC, Consorsbank, MBNA and Scalable
+  Capital wrote the error's kind there and kept it, so a report made on a
+  sign-in page read as one that collected something, and the panel said a
+  report was saved where it should have said to sign in. The error now has
+  a place of its own in the report in all seven, and a census holds every
+  app to a count there.
+
 ## [0.67.0] - 2026-11-15
 
 1822direkt, Amazon Visa and Sparkasse Pforzheim Calw are new, all three

@@ -28,7 +28,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import fidelity_docs as docs
 import fidelity_site as site
 from paperpull_core import storage as core_storage
-from paperpull_core.run_reporting import ListNotRead
+from paperpull_core.run_reporting import NOTHING_READ, ListNotRead
 
 APP = Path(__file__).resolve().parents[1]
 
@@ -793,3 +793,74 @@ def test_a_rerun_downloads_nothing(home):
     home.run_all()
     assert home.fetched_ids() == []
     assert home.on_disk() == ["A1", "B1", "B2", "C1", "S1"]
+
+
+# -- the support report reads the list the way a run does ----------------------
+
+def diagnosed(home, monkeypatch):
+    """A support report on the made-up hub, and what its detailed file says.
+    The page survey reads a real page, which this one is not, so it says it
+    found none, and the survey file beside it is left out."""
+    monkeypatch.setattr(site, "survey", lambda page, *a, **kw: {"pages": [], "responses": [],
+                                                                "notes": []})
+    monkeypatch.setattr(docs.App, "write_survey", lambda app: None)
+    home.run("--diagnose")
+    return json.loads((home.out / "Diagnostics" / "diagnose-documents.json")
+                      .read_text(encoding="utf-8"))
+
+
+def test_a_support_report_asks_for_the_tax_forms_a_run_asks_for(home, monkeypatch):
+    """A support report listed statements and trade confirmations only, and
+    a run asks for tax forms as well, so a run that stopped at a tax form call
+    made a report that showed nothing wrong."""
+    home.hub.forms = [form("F30", ONE)]
+    home.hub.statements = [statement("S1", ONE)]
+    info = diagnosed(home, monkeypatch)
+
+    assert home.hub.tax_years_asked, "the tax years are asked, as a run asks them"
+    assert info["collected"] == 2, info
+
+
+def test_a_support_report_keeps_the_error_its_listing_met(home, monkeypatch):
+    """The error a listing met was written down and then written over with
+    the number of rows it listed, none, so the report read as an account
+    with nothing to list."""
+    home.hub.statements = [statement("S1", ONE)]
+    home.hub.refuse_year = {("statements", "2031"): 500}
+    info = diagnosed(home, monkeypatch)
+
+    # Written through PaperPull's word list, which keeps "Error" and the
+    # name of the call that failed and writes the rest as its shape. What
+    # was collected stays a count, of none.
+    said = info["collect_error"]
+    assert "Error" in said and "statements" in said, info
+    assert info["collected"] == 0, info
+
+
+def test_a_support_report_made_signed_out_still_says_it_read_nothing(home, monkeypatch):
+    """Signed out, every call answers 401. The report is one made on a
+    sign-in page that collected nothing, and the run ends saying so, so the
+    panel says to sign in rather than that a report was saved. An error
+    written where the count goes read as something collected."""
+    monkeypatch.setattr(site.intake, "evaluate",
+                        lambda page, js, arg=None, limit=None: {"status": 401, "json": None})
+    monkeypatch.setattr(site, "looks_signed_out", lambda page: True)
+    monkeypatch.setattr(site, "survey", lambda page, *a, **kw: {"pages": [], "responses": [],
+                                                                "notes": []})
+    with pytest.raises(SystemExit) as stopped:
+        home.run("--diagnose")
+    assert stopped.value.code == NOTHING_READ
+    info = json.loads((home.out / "Diagnostics" / "diagnose-documents.json")
+                      .read_text(encoding="utf-8"))
+    assert info["collected"] == 0 and "SessionExpired" in info["collect_error"], info
+
+
+def test_a_list_that_will_not_open_names_where_to_sign_in(home, monkeypatch):
+    """It said the tab should be on a host no Fidelity page uses, words
+    copied from another app."""
+    monkeypatch.setattr(site, "ensure_statements", lambda page: False)
+    with pytest.raises(SystemExit):
+        home.run("--discover")
+    said = " ".join(home.capsys.readouterr().out.split())
+    assert "Could not reach the Document Access Hub" in said, said
+    assert "api.rk" not in said and "Sign in to Fidelity" in said, said
