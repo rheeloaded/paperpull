@@ -935,6 +935,56 @@ def sanitize_component(name: str, max_len: int = 120) -> str:
 
 
 # ---------------------------------------------------------------------------
+# How long a name and a path are
+# ---------------------------------------------------------------------------
+
+# Whether max_path_length is measured as Windows measures a path, the whole
+# of it from the drive, in UTF-16 units. Windows with long paths turned off
+# refuses a path past 260 of them. Every install's output_dir is ".", so a
+# path measured as written, from the install, passed at 240 and was far
+# longer in full. A Mac and PaperPull Server have no such limit, and there a
+# path is measured as written, as it always was, so no name changes there.
+_WINDOWS_MEASURE = sys.platform == "win32"
+
+
+def name_length(text: str) -> int:
+    """How long max_path_length counts `text`. In UTF-16 units on Windows,
+    where a character past the first 65536, an emoji say, is two, and in
+    characters elsewhere."""
+    if _WINDOWS_MEASURE:
+        return len(text) + sum(1 for ch in text if ord(ch) > 0xFFFF)
+    return len(text)
+
+
+def path_length(path) -> int:
+    """How long max_path_length counts a folder's or a file's path. On
+    Windows that is the whole path, normalized as Windows reads it, so a
+    second person's "../<install> - Robin" counts as the folder it names,
+    and never followed through a link, since Windows counts the path it is
+    handed and not where a link leads. Elsewhere the path as written."""
+    text = str(path)
+    if _WINDOWS_MEASURE:
+        try:
+            text = os.path.abspath(text)
+        except (OSError, ValueError):
+            pass
+    return name_length(text)
+
+
+def _cut(text: str, most: int, length) -> str:
+    """The longest start of `text` that `length` counts at most `most`,
+    made of whole characters."""
+    if length(text) <= most:
+        return text
+    used = 0
+    for i, ch in enumerate(text):
+        used += length(ch)
+        if used > most:
+            return text[:i]
+    return text
+
+
+# ---------------------------------------------------------------------------
 # Folders from a naming pattern (#101)
 # ---------------------------------------------------------------------------
 
@@ -1055,7 +1105,9 @@ def filing_folder(directory: Path, filename, max_path_length: int = 240) -> Path
         return directory
     target = directory.joinpath(*parts)
     ext = os.path.splitext(filename)[1] or ".pdf"
-    if max_path_length - len(str(target)) - 1 < len(ext) + 8:
+    # Measured as the name's own room is (_free_name), so a folder kept
+    # here always leaves the name room under max_path_length.
+    if max_path_length - path_length(target) - 1 < len(ext) + 8:
         return directory
     at = directory
     for part in parts:
@@ -1297,7 +1349,7 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
     # A folder deep enough to leave nothing is not something a shorter filename
     # can rescue, and returning an over-long path anyway only moved the failure
     # to the write, where it surfaced as an unexplained OS error.
-    room = max_path_length - len(str(directory)) - 1
+    room = max_path_length - path_length(directory) - 1
     if room < len(ext) + 8:
         raise ValueError(
             "%s is too deep to file into. The full path would exceed the %d "
@@ -1306,11 +1358,11 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
             % (directory, max_path_length))
 
     def shorten(base: str, suffix: str) -> str:
-        keep = room - len(ext) - len(suffix)
-        return base[:max(1, keep)].rstrip(" .") + suffix + ext
+        keep = room - name_length(ext) - name_length(suffix)
+        return (_cut(base, keep, name_length) or base[:1]).rstrip(" .") + suffix + ext
 
     candidate = stem + ext
-    if len(candidate) > room:
+    if name_length(candidate) > room:
         candidate = shorten(stem, "")
 
     # What tells this one from the other, when the caller knows. It is
@@ -1324,7 +1376,7 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
     if candidate.lower() in existing and token and token.lower() not in stem.lower():
         with_token = "%s %s" % (stem, token)
         candidate = with_token + ext
-        if len(candidate) > room:
+        if name_length(candidate) > room:
             candidate = shorten(with_token, "")
         if candidate.lower() not in existing:
             return candidate
@@ -1335,7 +1387,7 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
         n += 1
         suffix = " (%d)" % n
         candidate = stem + suffix + ext
-        if len(candidate) > room:
+        if name_length(candidate) > room:
             candidate = shorten(stem, suffix)
     return candidate
 

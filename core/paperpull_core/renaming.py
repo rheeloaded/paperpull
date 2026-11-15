@@ -72,8 +72,8 @@ from . import shared_folder
 from .characters import whole_json
 from .models import State
 from .storage import (FileName, build_pdf_filename, filing_folder, fitted_name,
-                      free_to_write, remove_empty, sanitize_component, title_case,
-                      unique_path)
+                      free_to_write, name_length, path_length, remove_empty,
+                      sanitize_component, title_case, unique_path)
 
 
 @dataclass
@@ -1750,9 +1750,12 @@ def _fits_whole(folder: Path, name: str, token: str, max_path_length: int) -> bo
     """Whether `name` with `token` after it and a count after that, as
     unique_path writes the second file told apart by one ending, fits
     max_path_length whole in `folder`, the one the row's file is filed in
-    under that name."""
+    under that name. Measured as a download measures the room a name has
+    (storage.path_length), the whole path on Windows, so Rename and a
+    download agree on what fits."""
     stem, ext = os.path.splitext(name)
-    return len(str(folder)) + len("/%s %s (99)%s" % (stem, token, ext)) <= max_path_length
+    return (path_length(folder) + name_length("/%s %s (99)%s" % (stem, token, ext))
+            <= max_path_length)
 
 
 def _say_stranded(result: Result, say) -> None:
