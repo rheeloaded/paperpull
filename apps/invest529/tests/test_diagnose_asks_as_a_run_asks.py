@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import storage  # noqa: F401  (binds this provider's AppSpec)
 import invest529_site as site
 import invest529_docs as docs
+from paperpull_core.words import shape_tree, words_for
 
 OWNERS = [{"ownerPidm": "1001", "beneficiaries": [{
     "beneficiaryPidm": "2002", "beneficiaryName": "Sam Example",
@@ -93,5 +94,7 @@ def test_a_start_date_in_the_config_counts_from_that_year(tmp_path, monkeypatch)
 def test_a_listing_that_fails_keeps_its_error_and_a_count(tmp_path, monkeypatch):
     code, info, asked = _diagnose(tmp_path, monkeypatch,
                                   statements_raise=site.SessionExpired("made up"))
-    assert info["collect_error"].split(":")[0] and info["collected"] == 0
-    assert isinstance(info["collected"], int)
+    # Written as every value of the file is, a word off the list as its shape.
+    said = shape_tree("SessionExpired: made up", words_for("Invest529", site))
+    assert info["collect_error"] == said, info
+    assert info["collected"] == 0 and isinstance(info["collected"], int)

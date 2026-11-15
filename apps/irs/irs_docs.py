@@ -982,8 +982,11 @@ class App:
             stopped=stopped or getattr(self, "_diagnose_stopped", None))
 
     def cmd_diagnose(self):
-        """Survey the transcript and notice lists and write a file a tester
-        can attach to the GitHub issue. False, having read nothing on the
+        """Survey the transcript list, and the notice list when notices are
+        in scope as a run reads it, and write a file a tester can attach
+        to the GitHub issue. The rows sampled are those of the list the
+        tab ends on, the notice list or, with notices out of scope, the
+        transcript list. False, having read nothing on the
         page, when the tab is on a sign-in page or another site. No screenshot, digit runs masked, JSON bodies as
         shape only. Nothing is downloaded and nothing but a documents link is
         followed."""
@@ -991,7 +994,8 @@ class App:
         words = words_for('IRS', site)
         page = self.page()
         info = {"timestamp": now_iso(),
-                "note": Fixed("A survey of the IRS Online Account transcript and notice lists. "
+                "note": Fixed("A survey of the IRS Online Account transcript list, and of the "
+                              "notice list when notices are in scope. "
                               "It is what the site layer's assumptions are checked against.")}
         stopped = None
         try:

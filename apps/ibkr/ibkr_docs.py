@@ -893,7 +893,11 @@ class App:
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
             why: List[str] = []
-            stmts = site.collect_statement_periods(page, why=why)
+            # The months of the years a run asks for, from the same config
+            # and command line, as its listing reads them
+            # (test_every_diagnose_lists_as_its_discover_does).
+            stmts = site.collect_statement_periods(
+                page, keep=scope.period_filter(self.args, self.config), why=why)
             info["months_read"] = stmts is not None
             info["why_not_read"] = why
             # Whether an account number reads, and when none does, the shape

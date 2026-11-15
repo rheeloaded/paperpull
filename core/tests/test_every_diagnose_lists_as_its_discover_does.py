@@ -33,10 +33,22 @@ does not leave out, and so is the page. A value the script keeps on itself,
 self.floor say, is not followed, since most of those are lists a listing
 fills.
 
-What it cannot see. An app whose Diagnose lists through a function its
-Discover never calls is compared with nothing, Bank of America's, Chase's,
-U.S. Bank's, Interactive Brokers', Vanguard's, Alpaca's, Ally's, Target's
-and Walmart's among them.
+A report can list through a function its run reaches only inside the site
+module, as Interactive Brokers' reads the months and Vanguard's the
+statements its run's listing reads through. So every site function the
+report alone calls is read by its signature too. One that takes keep or
+config has to be handed the value every app hands it,
+scope.period_filter(self.args, self.config) or self.config, and one that
+takes floor, limit_date or notices has to be handed a value that carries
+settings.
+
+What it cannot see. A report that lists through a function taking none of
+those names, whose run calls another, is compared with nothing, Bank of
+America's, Chase's, U.S. Bank's, Alpaca's, Ally's, Target's and Walmart's
+among them. Nor does it follow settings handed to a helper both sides
+share as its arguments, a loop over values of the config, or a method that
+reads the settings only through another method. The page is the one place
+it knows of, and none of these happens in an app today.
 
 That reading is held to what the app does as well. Each app the census
 compares has its Diagnose run here through main(), with no browser, a page
@@ -60,7 +72,9 @@ from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
+from paperpull_core import scope as run_scope
+
+REPO =Path(__file__).resolve().parents[2]
 ENTRIES = sorted(p for p in REPO.glob("apps/*/*.py")
                  if p.name.endswith(("_docs.py", "_receipts.py")) and not p.name.startswith("."))
 
@@ -70,6 +84,10 @@ SETTINGS = ("config", "args")
 # what it is asked for.
 PLACES = ("page",)
 SPREAD = "**"
+# The names a site function takes the run's settings by, with how a run
+# writes the value where every app writes it alike.
+TAKEN = {"keep": "scope.period_filter(self.args, self.config)", "config": "self.config",
+         "floor": None, "limit_date": None, "notices": None}
 
 
 # ---------------------------------------------------------------------------
@@ -333,8 +351,73 @@ def gaps_in(source: str, entry: Path = None, site_source: str = None):
     return sorted(set(gaps)), compared
 
 
+def _site_signature(site_tree, name):
+    """(positional parameter names, every parameter name) of the site
+    module's function, or None when it is not defined there."""
+    for node in site_tree.body if site_tree else []:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            positional = [a.arg for a in node.args.posonlyargs + node.args.args]
+            return positional, positional + [a.arg for a in node.args.kwonlyargs]
+    return None
+
+
+def taken_in(source: str, entry: Path = None, site_source: str = None):
+    """Each setting a site function takes by the name the run hands it
+    under, called on the Diagnose side only, as (Diagnose call, its
+    function, listing, setting name, place), with the functions of the
+    script by name. This reaches a report that lists through another
+    function than its run does, as Interactive Brokers' reads the months
+    its run's listing reads through."""
+    tree = ast.parse(source)
+    functions = _functions(tree)
+    names = _site_names(tree)
+    if site_source is not None:
+        site_tree = ast.parse(site_source)
+    else:
+        site_tree = _site_tree(entry, tree) if entry else None
+    diagnose = _reach(functions, "cmd_diagnose") - _reach(functions, "cmd_discover")
+    found = []
+    for dname in sorted(diagnose):
+        for dfn in functions[dname]:
+            for dcall, listing in _site_calls(dfn, names):
+                signature = _site_signature(site_tree, listing)
+                if not signature:
+                    continue
+                positional, every = signature
+                for name in TAKEN:
+                    if name in every:
+                        pos = positional.index(name) if name in positional else None
+                        found.append((dcall, dfn, listing, name, pos))
+    return found, functions
+
+
+def _taken_given(dcall, dfn, name, pos, functions) -> bool:
+    dexpr = _handed(dcall, name, pos)
+    if dexpr is None or not carries_settings(dexpr, dfn, functions):
+        return False
+    if TAKEN[name] is None:
+        return True
+    got = _resolved(dexpr, dfn)
+    return got is not None and ast.dump(got) == ast.dump(ast.parse(TAKEN[name], mode="eval").body)
+
+
+def taken_gaps_in(source: str, entry: Path = None, site_source: str = None):
+    """Each (listing, argument, Diagnose line) where a site function the
+    report alone calls takes a setting it is not handed as a run hands it."""
+    found, functions = taken_in(source, entry, site_source)
+    return sorted({(listing, name, dcall.lineno) for dcall, dfn, listing, name, pos in found
+                   if not _taken_given(dcall, dfn, name, pos, functions)})
+
+
 def gaps_of(entry: Path):
     return gaps_in(entry.read_text(encoding="utf-8"), entry)
+
+
+def all_gaps_of(entry: Path):
+    """Every (listing, argument, Diagnose line) either reading finds."""
+    source = entry.read_text(encoding="utf-8")
+    shared = {(listing, name, d) for listing, name, d, _ in gaps_in(source, entry)[0]}
+    return sorted(shared | set(taken_gaps_in(source, entry)))
 
 
 def shared_listings(entry: Path):
@@ -366,9 +449,21 @@ def _shell_unbuilt(app: str) -> bool:
             and "NotBuilt" in ast.unparse(body[0]))
 
 
+def _is_a_number(node, tree) -> bool:
+    """A whole number written out, or a module name set once to one."""
+    if isinstance(node, ast.Constant):
+        return type(node.value) is int and node.value > 0
+    if isinstance(node, ast.Name):
+        values = [n.value for n in tree.body if isinstance(n, ast.Assign)
+                  for t in n.targets if isinstance(t, ast.Name) and t.id == node.id]
+        return len(values) == 1 and _is_a_number(values[0], tree)
+    return False
+
+
 def _diagnose_caps(app: str, listing: str, cap: str):
     """A check that the app's Diagnose still reads its listing with a set
-    number of the newest pages, `cap`, so it looks rather than walks."""
+    number of the newest pages, `cap` written as a whole number, so it
+    looks rather than walks."""
     def holds():
         (entry,) = [p for p in ENTRIES if p.parent.name == app]
         tree = ast.parse(entry.read_text(encoding="utf-8"))
@@ -376,7 +471,8 @@ def _diagnose_caps(app: str, listing: str, cap: str):
         reached = _reach(functions, "cmd_diagnose") - _reach(functions, "cmd_discover")
         calls = [c for n in reached for fn in functions[n]
                  for c, name in _site_calls(fn, names) if name == listing]
-        return bool(calls) and all(any(k.arg == cap for k in c.keywords) for c in calls)
+        return bool(calls) and all(any(k.arg == cap and _is_a_number(k.value, tree)
+                                       for k in c.keywords) for c in calls)
     return holds
 
 
@@ -384,11 +480,14 @@ SHELL = ("a first shell another session is changing on this release. Its listing
          "raises NotBuilt whatever it is given, so the report says the same either way. "
          "Hand it the settings when it is built.")
 # The run's walk goes back from the newest page, and its date only ends the
-# walk at an older one. These Diagnoses read a set number of the newest
-# pages on purpose, so the pages they read are the first the run reads.
+# walk sooner. These Diagnoses read a set number of the newest pages on
+# purpose, so they read the pages the run reads first, as many as their cap
+# holds, and with a recent date that can be more than the run reads, never
+# other pages. Venmo's Discover sets its floor in two steps, so handing it
+# would take a helper both share.
 LOOK = ("its Diagnose reads a set number of the newest pages on purpose, and the run's "
-        "date only ends the walk at an older page, so the pages it reads are the first "
-        "the run reads")
+        "date only ends the walk sooner, so it reads the pages the run reads first, as "
+        "many as its cap holds, and no other")
 EXEMPT = {
     ("cibc", "collect_documents", "keep"): (SHELL, lambda: _shell_unbuilt("cibc")),
     ("cibc", "collect_documents", "config"): (SHELL, lambda: _shell_unbuilt("cibc")),
@@ -409,6 +508,9 @@ EXEMPT = {
 NAMED = {"netbenefits", "invest529", "amazonvisa", "dkb", "direkt1822", "renaultbank",
          "affirm", "fairfaxwater", "consorsbank", "fidelity", "sparkassepc", "ing",
          "redcard", "irs", "venmo", "apple", "uber", "cibc", "mbna", "scalable"}
+# The apps whose report lists through a function its run reaches only
+# inside the site module, read by the setting that function takes.
+NAMED_TAKEN = {"ibkr", "vanguard"}
 # Apps whose Discover hands the listing something that is no setting, a list
 # it fills or a trace, which the census reads and lets through.
 NOT_SETTINGS = {"amfam": "collect_download_docs", "golden1": "collect_download_docs",
@@ -418,9 +520,8 @@ NOT_SETTINGS = {"amfam": "collect_download_docs", "golden1": "collect_download_d
 @pytest.mark.parametrize("entry", ENTRIES, ids=lambda p: p.parent.name)
 def test_diagnose_lists_with_the_settings_its_discover_uses(entry):
     app = entry.parent.name
-    gaps, _ = gaps_of(entry)
-    left = ["%s(%s=) at line %d, where Discover passes it at line %d" % (listing, name, d, r)
-            for listing, name, d, r in gaps if (app, listing, name) not in EXEMPT]
+    left = ["%s(%s=) at line %d" % (listing, name, d)
+            for listing, name, d in all_gaps_of(entry) if (app, listing, name) not in EXEMPT]
     assert not left, (
         "%s's Diagnose lists without settings its Discover lists with, so a support report "
         "can show nothing wrong where a run fails. Pass them as Discover writes them: %s"
@@ -429,11 +530,15 @@ def test_diagnose_lists_with_the_settings_its_discover_uses(entry):
 
 def test_the_census_compares_every_app_it_names():
     compared = {p.parent.name: gaps_of(p)[1] for p in ENTRIES}
+    taken = {p.parent.name for p in ENTRIES
+             if taken_in(p.read_text(encoding="utf-8"), p)[0]}
     assert len(ENTRIES) > 80
     missing = sorted(a for a in NAMED if not compared.get(a))
     assert not missing, ("compared nothing in", missing)
     # NetBenefits lists on two ways of Discover, one plan and several.
     assert compared["netbenefits"] >= 2
+    missing = sorted(a for a in NAMED_TAKEN if a not in taken)
+    assert not missing, ("read no setting a listing takes in", missing)
 
 
 @pytest.mark.parametrize("app", sorted(NOT_SETTINGS))
@@ -448,7 +553,7 @@ def test_an_exemption_holds_only_while_its_reason_does(key):
     app, listing, name = key
     reason, holds = EXEMPT[key]
     (entry,) = [p for p in ENTRIES if p.parent.name == app]
-    assert any(g[:2] == (listing, name) for g in gaps_of(entry)[0]), (
+    assert any(g[:2] == (listing, name) for g in all_gaps_of(entry)), (
         "%s's Diagnose now passes %s to %s. Take it off the exemptions." % (app, name, listing))
     assert holds(), "%s's exemption no longer holds: %s" % (app, reason)
 
@@ -457,7 +562,22 @@ def test_an_exemption_holds_only_while_its_reason_does(key):
 # What each Diagnose hands its listing when it runs
 # ---------------------------------------------------------------------------
 
-COMPARED = [p for p in ENTRIES if gaps_of(p)[1]]
+def checks_of(entry: Path):
+    """Each setting to see handed when the app's Diagnose runs, by (listing,
+    name), with each expression the run's value is made by and the function
+    its locals are read in, None for the way every app writes it."""
+    source, app = entry.read_text(encoding="utf-8"), entry.parent.name
+    out = {}
+    for _, _, listing, name, _, rexpr, _, rfn in wanted_in(source, entry)[0]:
+        if (app, listing, name) not in EXEMPT:
+            out.setdefault((listing, name), []).append((rexpr, rfn))
+    for _, _, listing, name, _ in taken_in(source, entry)[0]:
+        if (app, listing, name) not in EXEMPT and TAKEN[name] and (listing, name) not in out:
+            out[(listing, name)] = [(ast.parse(TAKEN[name], mode="eval").body, None)]
+    return out
+
+
+COMPARED = [p for p in ENTRIES if gaps_of(p)[1] or taken_in(p.read_text(encoding="utf-8"), p)[0]]
 
 # The command line, the start date in the config and the kinds it keeps.
 SCOPES = {
@@ -534,10 +654,13 @@ def _empty_answer(name: str):
 def _discover_value(expr, fn, mod, app):
     """What Discover's own expression for a setting makes of this app's
     config and command line."""
-    expr = _resolved(expr, fn)
+    if fn is not None:
+        expr = _resolved(expr, fn)
     assert expr is not None, "Discover's setting is set more than once, so it is not read here"
     code = compile(ast.fix_missing_locations(ast.Expression(body=expr)), "<discover>", "eval")
-    return eval(code, vars(mod), {"self": app})
+    env = dict(vars(mod))
+    env.setdefault("scope", run_scope)
+    return eval(code, env, {"self": app})
 
 
 def _same(handed, expected) -> bool:
@@ -553,10 +676,10 @@ def _same(handed, expected) -> bool:
 def test_diagnose_hands_its_listing_what_discover_would(entry, scope_name, tmp_path,
                                                        monkeypatch, capsys):
     app_name = entry.parent.name
-    found, functions = wanted_in(entry.read_text(encoding="utf-8"), entry)
-    found = [f for f in found if (app_name, f[2], f[3]) not in EXEMPT]
-    if not found:
+    checks = checks_of(entry)
+    if not checks:
         pytest.skip("every setting this app's Diagnose leaves out is exempt")
+    functions = _functions(ast.parse(entry.read_text(encoding="utf-8")))
     flags, start, kinds = SCOPES[scope_name]
     mod = _load(entry)
     site = mod.site
@@ -586,7 +709,7 @@ def test_diagnose_hands_its_listing_what_discover_would(entry, scope_name, tmp_p
         return page
     monkeypatch.setattr(mod.App, "page", the_page)
 
-    listings = {f[2] for f in found}
+    listings = {listing for listing, _ in checks}
     handed = {name: [] for name in listings}
     tree = ast.parse(entry.read_text(encoding="utf-8"))
     names = _site_names(tree)
@@ -616,12 +739,14 @@ def test_diagnose_hands_its_listing_what_discover_would(entry, scope_name, tmp_p
     said = capsys.readouterr().out
     assert apps, "Diagnose never asked for the page"
     app = apps[0]
-    for dcall, dfn, listing, name, pos, rexpr, rcall, rfn in found:
+    for (listing, name), ways in sorted(checks.items(), key=lambda kv: kv[0]):
         assert handed[listing], ("Diagnose never listed through %s" % listing, said[-1500:])
-        expected = _discover_value(rexpr, rfn, mod, app)
-        for arguments in handed[listing]:
-            assert name in arguments, "%s's Diagnose handed %s no %s" % (app_name, listing, name)
-            assert _same(arguments[name], expected), (app_name, listing, name, scope_name)
+        for rexpr, rfn in ways:
+            expected = _discover_value(rexpr, rfn, mod, app)
+            for arguments in handed[listing]:
+                assert name in arguments, (
+                    "%s's Diagnose handed %s no %s" % (app_name, listing, name))
+                assert _same(arguments[name], expected), (app_name, listing, name, scope_name)
 
 
 # ---------------------------------------------------------------------------
@@ -829,6 +954,60 @@ class App:
         site.collect_download_docs(self.page())
 '''
     assert gaps_in(src) == ([], 0)
+
+
+TAKES = '''
+def collect_months(page, keep=None, why=None):
+    return []
+
+def walk(page, limit_date="", max_pages=None):
+    return []
+
+def survey(page, *, config=None):
+    return {}
+'''
+
+
+@pytest.mark.parametrize("body, missing", [
+    ("site.collect_months(page)", {("collect_months", "keep")}),
+    ("site.collect_months(page, keep=None)", {("collect_months", "keep")}),
+    ("site.collect_months(page, keep=scope.period_filter(self.args, None))",
+     {("collect_months", "keep")}),
+    ("site.collect_months(page, scope.period_filter(self.args, self.config))", set()),
+    ("site.collect_months(page, keep=scope.period_filter(self.args, self.config), why=[])", set()),
+    ("site.walk(page, max_pages=2)", {("walk", "limit_date")}),
+    ("site.walk(page, limit_date=self._floor(), max_pages=2)", set()),
+    ("site.survey(page)", {("survey", "config")}),
+    ("site.survey(page, config=self.config)", set()),
+])
+def test_the_census_reads_a_setting_a_listing_takes(body, missing):
+    """A report that lists through a function its run never calls itself is
+    read by the settings that function takes, as Interactive Brokers' and
+    Vanguard's are."""
+    src = '''
+import x_site as site
+from paperpull_core import scope
+
+class App:
+    def cmd_discover(self):
+        return site.collect_documents(self.page(), keep=scope.period_filter(self.args, self.config))
+
+    def _floor(self):
+        return self.args.start_date or ""
+
+    def cmd_diagnose(self):
+        page = self.page()
+        %s
+''' % body
+    assert {g[:2] for g in taken_gaps_in(src, site_source=TAKES)} == missing, body
+
+
+def test_a_cap_is_a_whole_number():
+    tree = ast.parse("DIAGNOSE_PAGES = 3\nNONE = None\nTWICE = 2\nTWICE = 4\n")
+    number = lambda src: _is_a_number(ast.parse(src, mode="eval").body, tree)  # noqa: E731
+    assert number("2") and number("DIAGNOSE_PAGES")
+    assert not number("None") and not number("NONE") and not number("missing")
+    assert not number("0") and not number("TWICE") and not number("self.cap")
 
 
 def test_a_place_in_a_walk_is_not_a_setting():
