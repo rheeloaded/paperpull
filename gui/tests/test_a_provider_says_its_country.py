@@ -141,6 +141,42 @@ def test_stores_that_are_not_an_object_are_refused(templates, settings, tmp_path
     assert e.value.status_code == 400
 
 
+def test_a_store_the_page_sends_another_way_is_read_as_the_app_reads_it(templates, settings, tmp_path):
+    home = tmp_path / "home"
+    got = _create({"root": str(home), "providers": ["mart"], "stores": {"mart": "https://www.Mart.de/"}})
+    assert got["created"] == ["mart"]
+    assert config(home / "Mart Receipts (mart.de)")["site"] == "mart.de"
+
+
+def test_a_folder_of_the_stores_name_reading_another_store_is_refused_by_name(
+        templates, settings, tmp_path):
+    """It was answered as set up, and the store stayed on offer, so the page
+    went round in a loop (a review of 2026-11-15)."""
+    home = tmp_path / "home"
+    _create({"root": str(home), "providers": ["mart"], "stores": {"mart": "mart.de"}})
+    folder = home / "Mart Receipts (mart.de)"
+    cfg = config(folder)
+    cfg["site"] = "mart.co.uk"
+    (folder / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    before = (folder / "config.json").read_bytes()
+    with pytest.raises(fastapi.HTTPException) as e:
+        _create({"root": str(home), "providers": ["mart"], "stores": {"mart": "mart.de"}})
+    assert e.value.status_code == 409
+    assert "Mart Receipts (mart.de)" in e.value.detail and "mart.co.uk" in e.value.detail
+    assert (folder / "config.json").read_bytes() == before
+
+
+def test_a_folder_that_could_not_be_taken_away_is_said(templates, settings, tmp_path, monkeypatch):
+    """Windows keeps a file another program holds, and its folder with it."""
+    monkeypatch.setattr(app_module, "_set_setting", lambda *a: False)
+    monkeypatch.setattr(app_module.shutil, "rmtree", lambda *a, **k: None)
+    home = tmp_path / "home"
+    with pytest.raises(fastapi.HTTPException) as e:
+        _create({"root": str(home), "providers": ["mart"], "stores": {"mart": "mart.de"}})
+    assert "could not be taken away whole" in e.value.detail
+    assert "Nothing was left" not in e.value.detail
+
+
 def test_a_provider_with_no_stores_takes_no_store(templates, settings, tmp_path):
     home = tmp_path / "home"
     _create({"root": str(home), "providers": ["bank"], "stores": {"bank": "mart.de"}})

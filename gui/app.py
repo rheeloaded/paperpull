@@ -2959,13 +2959,19 @@ def _folder_for_store(root: Path, info: dict, store: str) -> str:
     hand in a folder of the old name, when the store goes beside the name,
     "Amazon Receipts (amazon.com)"."""
     name = store_folder(info, store)
-    there = root / name
-    if store and os.path.lexists(there):
-        cfg = _read_json(there / "config.json")
-        theirs = _store_named(info, cfg.get(info["store_setting"]) if isinstance(cfg, dict) else None)
+    if store and os.path.lexists(root / name):
+        theirs = _folder_store(root / name, info)
         if theirs and theirs != store:
             return "%s (%s)" % (info["folder"], store)
     return name
+
+
+def _folder_store(folder: Path, info: dict) -> str:
+    """The store an install folder's own config reads, the default one when
+    it names none, "" when it cannot be read or names a store the provider
+    does not have."""
+    cfg = _read_json(folder / "config.json")
+    return _store_named(info, cfg.get(info["store_setting"]) if isinstance(cfg, dict) else None)
 
 
 def _stores_set_up(info: dict, apps: dict) -> list:
@@ -3012,6 +3018,14 @@ def create_install(root: Path, slug: str, owner: str = "", store: str = "") -> s
         if store in _stores_in(root, info):
             return "exists"
         dst = root / _folder_for_store(root, info, store)
+        # A folder of this store's name that reads another store is not
+        # this store set up, and saying it was would offer it again forever.
+        theirs = _folder_store(dst, info) if os.path.lexists(dst) else ""
+        if theirs and theirs != store:
+            raise HTTPException(409, "A folder named %s is already in %s and reads %s, so %s's %s "
+                                     "store was not set up. Rename that folder, or point its "
+                                     "config.json at %s, then try again."
+                                     % (dst.name, root, theirs, info["provider"], store, store))
     else:
         store = ""
         dst = root / info["folder"]
@@ -3059,9 +3073,11 @@ def create_install(root: Path, slug: str, owner: str = "", store: str = "") -> s
     # store.
     if store and not _set_setting(dst / "config.json", info["store_setting"], store):
         shutil.rmtree(dst, ignore_errors=True)
+        # Windows leaves a file another program holds, and the folder with it.
+        left = (" Its folder %s could not be taken away whole, so delete it before trying again."
+                % dst if os.path.lexists(dst) else " Nothing was left in %s. Try again." % root)
         raise HTTPException(500, "%s could not be set up, since its store could not be saved in "
-                                 "its config.json. Nothing was left in %s. Try again."
-                                 % (info["provider"], root))
+                                 "its config.json.%s" % (info["provider"], left))
     if server_mode.enabled():
         _set_profile(dst / "config.json", server_mode.profile_for(dst.name))
     return "created"
@@ -4084,8 +4100,10 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
         store = _store_named(tmpl, raw)
         if raw and not store:
             return None, "PaperPull has no %s store %s" % (tmpl["provider"], str(raw)[:40])
+    # A place whose store could not be read is taken as before stores were
+    # told apart, as match() takes it.
     first = next((p for p in places if p["provider"].lower() == want and p["account"] == "primary"
-                  and (not store or p.get("store", tmpl.get("store_default")) == store)), None)
+                  and (not store or p.get("store", tmpl.get("store_default")) in ("", store))), None)
     if first is None:
         folder = _folder_for_store(root, tmpl, store) if store else tmpl["folder"]
         install = root / folder
@@ -4110,7 +4128,8 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
         first = {"folder": where.name, "install": install.name, "account": "primary",
                  "provider": tmpl["provider"], "kind": tmpl["kind"], "path": where,
                  "records": have, "settings": {}, "config": install / "config.json",
-                 "store": store, "store_setting": tmpl.get("store_setting") or "", "made": True}
+                 "store": store, "store_setting": tmpl.get("store_setting") or "",
+                 "store_default": tmpl.get("store_default") or "", "made": True}
         places.append(first)
         if account == "primary":
             first["note"] = _left_out_note(left_out)

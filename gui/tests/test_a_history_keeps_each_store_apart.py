@@ -123,19 +123,70 @@ def test_a_computer_with_both_stores_adds_each_history_to_its_own(panel, tmp_pat
     assert set(_records(new / "Mart Receipts (mart.de)")) == set(_done("de", 2))
 
 
-def test_a_file_from_before_stores_were_named_keeps_them_apart_by_its_settings(panel, tmp_path):
-    """A file 0.67.0 wrote names no store of its own, and carries the
-    install's site setting, which says the same."""
-    old_computer(tmp_path)
-    data = exported()
+def without(data: bytes, *keys) -> bytes:
+    """The file as an older version wrote it, each entry without keys."""
     m = manifest(data)
     for a in m["apps"]:
-        a.pop("store", None)
+        for key in keys:
+            a.pop(key, None)
     buf = io.BytesIO()
     with zipfile.ZipFile(io.BytesIO(data)) as src, zipfile.ZipFile(buf, "w") as out:
         for name in src.namelist():
             out.writestr(name, json.dumps(m) if name == "manifest.json" else src.read(name))
+    return buf.getvalue()
+
+
+def test_a_file_from_before_stores_were_named_keeps_them_apart_by_its_settings(panel, tmp_path):
+    """A file 0.67.0 wrote names no store of its own, and carries the
+    install's site setting, which says the same."""
+    old_computer(tmp_path)
     new = tmp_path / "new"
-    bring(buf.getvalue(), new)
+    bring(without(exported(), "store"), new)
     assert set(_records(new / "Mart Receipts")) == set(_done("com", 3))
     assert set(_records(new / "Mart Receipts (mart.de)")) == set(_done("de", 2))
+
+
+def test_a_file_that_names_no_store_at_all_goes_to_the_default_store(panel, tmp_path):
+    """A --minimal file of 0.67.0 carries no settings either, so its history
+    is the default store's, as the app reads a config naming none. It went
+    to the first place by name, here the one set to mart.de by hand (a
+    review of 2026-11-15)."""
+    old = tmp_path / "old"
+    app_module.create_install(old, "mart")
+    (old / "Mart Receipts" / "progress.json").write_text(json.dumps(_done("com", 3)), encoding="utf-8")
+    app_module._write_settings({"apps_root": str(old)})
+    data = without(exported(), "store", "settings")
+    new = tmp_path / "new"
+    app_module.create_install(new, "mart")
+    cfg = json.loads((new / "Mart Receipts" / "config.json").read_text(encoding="utf-8"))
+    cfg["site"] = "mart.de"
+    (new / "Mart Receipts" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    assert app_module.create_install(new, "mart", store="mart.com") == "created"
+    bring(data, new)
+    assert set(_records(new / "Mart Receipts (mart.com)")) == set(_done("com", 3))
+    assert not (new / "Mart Receipts" / "progress.json").exists() or not _records(new / "Mart Receipts")
+
+
+def test_a_person_joins_an_install_whose_store_could_not_be_read(panel, tmp_path):
+    """A first person's config naming a store the provider does not have
+    left the second person refused, where 0.67.0 added them (a review of
+    2026-11-15)."""
+    old = tmp_path / "old"
+    app_module.create_install(old, "mart")
+    app_module._write_settings({"apps_root": str(old)})
+
+    class Req:
+        async def json(self):
+            return {"app": "Mart Receipts", "label": "pat", "owner": "Pat Example"}
+    asyncio.run(app_module.api_account(Req()))
+    (old / "Mart Receipts - pat" / "progress.json").write_text(json.dumps(_done("pat", 2)),
+                                                               encoding="utf-8")
+    data = exported()
+    new = tmp_path / "new"
+    app_module.create_install(new, "mart")
+    cfg = json.loads((new / "Mart Receipts" / "config.json").read_text(encoding="utf-8"))
+    cfg["site"] = "mart.example"
+    (new / "Mart Receipts" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+    bring(data, new)
+    assert (new / "Mart Receipts" / "config.pat.json").is_file()
+    assert set(_records(new / "Mart Receipts - pat")) == set(_done("pat", 2))

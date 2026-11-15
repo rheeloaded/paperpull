@@ -614,7 +614,8 @@ def scan(root: Path, keep=None) -> list:
                           "records": recs, "settings": settings_of(install, cfg),
                           "config": cfg_path if cfg_path.is_file() else None,
                           "store": store_in(stores, cfg),
-                          "store_setting": stores[0] if stores else ""})
+                          "store_setting": stores[0] if stores else "",
+                          "store_default": stores[2] if stores else ""})
     for child in children:
         if os.path.normcase(str(child)) in claimed or _entry_script(child) is not None:
             continue
@@ -912,9 +913,9 @@ def match(entry: dict, places: list):
     provider = entry["provider"].lower()
     same = [p for p in places
             if p["provider"].lower() == provider and p["account"] == entry["account"]]
-    # Amazon's amazon.de history is never another store's, so with a store
-    # on both sides only the same store is the same place. A file from
-    # before 0.68.0, or a place of no store, matches as it always did.
+    # Amazon's amazon.de history is never another store's, so where the
+    # places here read stores only the same store is the same place. A
+    # provider of one site matches as it always did.
     store = entry.get("store") or ""
     settings = entry.get("settings") or {}
     for p in same:
@@ -922,8 +923,16 @@ def match(entry: dict, places: list):
             # A file from before 0.68.0 that was not made with --minimal
             # carries the store in the install's own setting.
             store = countries.store_site(settings[p["store_setting"]])
-    if store and any(p.get("store") for p in same):
-        return next((p for p in same if p.get("store") == store), None)
+    if any(p.get("store") for p in same):
+        # A file that names no store at all, one made with --minimal before
+        # 0.68.0 or from an install whose config never named one, read the
+        # default store, as the app reads a config that names none.
+        store = store or next((p["store_default"] for p in same if p.get("store_default")), "")
+        if store:
+            # The same store, or else a place whose store could not be read,
+            # taken as before stores were told apart.
+            return (next((p for p in same if p.get("store") == store), None)
+                    or next((p for p in same if not p.get("store")), None))
     if same:
         return same[0]
     folder = (entry.get("folder") or "").lower()
