@@ -509,6 +509,22 @@ def test_a_move_onto_a_link_to_a_folder_never_moves_into_that_folder(server):
     assert not dst.is_symlink() and dst.read_bytes() == b"%PDF-1.4 moved"
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="a junction is Windows' own")
+def test_a_move_onto_a_junction_to_a_folder_never_moves_into_that_folder(server):
+    """Windows refuses a rename onto a link to a folder, which Linux replaces
+    as it would a file, so the move was refused there (CI of 2026-11-15). A
+    junction, which any Windows user may make, stands in for such a link
+    where a test may not make a symbolic one."""
+    import _winapi
+    src = server.install / "statement.pdf"
+    src.write_bytes(b"%PDF-1.4 moved")
+    dst = server.install / "2026-05-14 Testco Statement.pdf"
+    _winapi.CreateJunction(str(server.outside), str(dst))
+    shared_folder.move(src, dst)
+    assert sorted(p.name for p in server.outside.iterdir()) == ["server.json"] and untouched(server)
+    assert not shared_folder.linked(dst) and dst.read_bytes() == b"%PDF-1.4 moved"
+
+
 def test_a_link_is_never_moved_into_place_as_a_link(server):
     src = server.install / "statement.pdf"
     symlink_or_skip(server.canary, src)

@@ -86,6 +86,14 @@ def _is_link(path, st) -> bool:
     return bool(junction and junction(path))
 
 
+def _a_link_at(path) -> bool:
+    """Whether a name is a link or a junction, never what it leads to."""
+    try:
+        return _is_link(path, os.lstat(path))
+    except OSError:
+        return False
+
+
 def linked(path) -> bool:
     """Whether a name is a link, a junction or a second name of another
     file, a hard link. A name with nothing there is none of them."""
@@ -339,7 +347,14 @@ def move(src, dst) -> None:
         return
     except OSError as e:
         if e.errno != errno.EXDEV:
-            raise
+            if not _a_link_at(dst):
+                raise
+            # Windows refuses a rename onto a link to a folder, which Linux
+            # replaces as it would a file, so there the link goes first. Only
+            # the link goes, never what it leads to (CI of 2026-11-15).
+            os.unlink(dst)
+            os.replace(src, dst)
+            return
     try:
         data = read_plain(src)
     except ValueError as e:

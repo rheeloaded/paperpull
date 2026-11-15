@@ -237,17 +237,23 @@ def test_a_pipe_in_the_shared_folder_never_holds_the_panel(server, name):
 
 
 def test_a_person_left_as_a_link_with_nothing_at_its_end_is_never_written_through(server):
+    """The new config is written beside the link as a file of its own and
+    put in the link's place, on Linux and Windows alike, so the link goes
+    and nothing is written where it led. The test asked for a refusal,
+    which the move into place never gave (CI of 2026-11-15)."""
     install = server.data / "Bank Statements"
     install.mkdir()
     (install / "config.json").write_text(json.dumps(EXAMPLE), encoding="utf-8")
     dangling = server.canary.parent / "new.json"
+    made = install / "config.spouse.json"
     try:
-        (install / "config.spouse.json").symlink_to(dangling)
+        made.symlink_to(dangling)
     except (OSError, NotImplementedError):
         pytest.skip("this system does not let a test make a symbolic link")
-    with pytest.raises(Exception):
-        app_module._make_account(install, "spouse", "Jamie Example")
-    assert not dangling.exists() or MARKER not in dangling.read_text(encoding="utf-8")
+    app_module._make_account(install, "spouse", "Jamie Example")
+    assert not os.path.lexists(dangling), "the new config was written where the link led"
+    assert not made.is_symlink()
+    assert json.loads(made.read_text(encoding="utf-8"))["owner"] == "Jamie Example"
 
 
 def test_a_removed_install_never_moves_into_a_link_at_its_dated_name(server):
