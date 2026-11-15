@@ -708,7 +708,7 @@ def test_a_new_install_without_a_name_still_works(tmp_path):
 def test_the_panel_asks_for_the_name_before_it_makes_anything():
     js = app_module.HTML
     assert "Whose documents are these?" in js
-    assert "body: JSON.stringify({root, providers: picked, owner})" in js
+    assert "body: JSON.stringify({root, providers: picked, owner, stores})" in js
 
 
 def test_a_name_long_enough_to_be_an_attack_is_cut(tmp_path):
