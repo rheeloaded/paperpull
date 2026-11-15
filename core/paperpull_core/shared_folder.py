@@ -225,6 +225,9 @@ def read_plain(path, limit: int = READ_LIMIT) -> bytes:
 
 # The errors Python 3.12's Path.exists() answers False for rather than raises.
 _NOT_THERE = (errno.ENOENT, errno.ENOTDIR, errno.EBADF, errno.ELOOP)
+# Windows' "cannot move the file to a different disk drive", which Python
+# reads as EXDEV too, named here should a version not.
+_NOT_SAME_DEVICE = 17
 # Not ready, an invalid name, a name that cannot be resolved, which 3.12's
 # pathlib answers False for on Windows as well (_IGNORED_WINERRORS).
 _NOT_THERE_ON_WINDOWS = (21, 123, 1921)
@@ -310,6 +313,18 @@ def move(src, dst) -> None:
     whole (write_whole). LeadsOut when dst's folder leads out of the data
     folder, OSError when it cannot be moved."""
     if not on_server():
+        # A rename first. shutil.move copies and then deletes whenever its
+        # rename fails, and a file another program held open, a sync client
+        # say, was then copied into place and could not be taken away, so
+        # the caller counted it not moved and the next run saved it a second
+        # time (a release review of 2026-11-15). The copy is for another
+        # drive alone, which a rename cannot reach.
+        try:
+            os.replace(src, dst)
+            return
+        except OSError as e:
+            if e.errno != errno.EXDEV and getattr(e, "winerror", None) != _NOT_SAME_DEVICE:
+                raise
         shutil.move(str(src), str(dst))
         return
     dst = Path(dst)
