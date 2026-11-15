@@ -276,7 +276,7 @@ def test_a_huge_older_individual_file_never_fails_the_new_statement(tmp_path, mo
 # -- a tax form whose file is a pipe ------------------------------------------------------
 
 def test_a_saved_form_that_is_a_pipe_moves_nowhere(pipe):
-    listed = [("Tax:1099:2025", {"date": "2025-12-31"})]
+    listed = [("Tax:1099:2031", {"date": "2031-12-31"})]
     got = within(5, robinhood_docs.App._which_listed_form, {"pdf_path": str(pipe)}, listed)
     assert got == {"value": None}, got
 
@@ -284,9 +284,9 @@ def test_a_saved_form_that_is_a_pipe_moves_nowhere(pipe):
 def test_a_saved_form_of_the_year_that_is_a_pipe_is_answered_at_once(pipe, tmp_path):
     app = harness._app(tmp_path)
     doc = robinhood_docs.Document(title="Form 1099", category="Tax Document",
-                                  summary="1099", date="2025-12-31")
+                                  summary="1099", date="2031-12-31")
     rec = dict(doc.to_dict(), pdf_path=str(pipe), downloaded_ok=True,
                state=State.COMPLETED.value)
     app.progress.update("Tax:other", rec)
-    got = within(5, app._saved_form_of_year, doc, "2025")
+    got = within(5, app._saved_form_of_year, doc, "2031")
     assert got.get("value") == ("Tax:other", app.progress.get("Tax:other")), got

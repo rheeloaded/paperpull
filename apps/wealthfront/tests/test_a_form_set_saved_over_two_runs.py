@@ -42,7 +42,7 @@ def reset_patterns():
 
 def link(n: int) -> str:
     """A file of the form's set, as its dialog gives it."""
-    return "/documents/inv-0001/2031/FORM_1099_PDF?idx=%d" % (n - 1)
+    return "/documents/inv-0001/2031/TAX_FORM_PDF?idx=%d" % (n - 1)
 
 
 FILES = {link(1): ("1099.pdf", PDF_START + b"the form"),

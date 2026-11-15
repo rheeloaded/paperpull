@@ -56,7 +56,7 @@ def invoice(name: str, order: str = ORDER, item: str = ITEM) -> bytes:
 
 BODIES = {url: invoice(url) for url in LINKS + [link("a1b2-credit-note")]}
 # An invoice of another order, which names nothing of this one.
-ANOTHERS = testkit.text_pdf(["Invoice", "Order # 999-8887776-6655544", "2026-01-31",
+ANOTHERS = testkit.text_pdf(["Invoice", "Order # 999-8887776-6655544", "2031-01-17",
                              "Invented Folding Chair", "Invented seller of somebody else"])
 
 

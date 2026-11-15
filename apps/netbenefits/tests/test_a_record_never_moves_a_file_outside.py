@@ -26,7 +26,7 @@ def judged(tmp_path, monkeypatch, named):
     review = folder / "Manual Review"
     review.mkdir(parents=True, exist_ok=True)
     rec = {"held": True, "plan": "d1", "pdf_path": named, "state": "Needs Manual Review",
-           "downloaded_ok": False, "date": "2026-03-31", "title": "Quarterly Statement",
+           "downloaded_ok": False, "date": "2031-03-31", "title": "Quarterly Statement",
            "category": "Statement", "notes": docs.HELD}
     recorded = []
     app = SimpleNamespace(
@@ -55,7 +55,7 @@ def test_a_file_outside_the_accounts_folders_stays_where_it_is(tmp_path, monkeyp
 
 
 def test_a_held_statement_in_manual_review_is_still_judged(tmp_path, monkeypatch):
-    held = tmp_path / "acct" / "Manual Review" / "2026-03-31 Quarterly Statement.pdf"
+    held = tmp_path / "acct" / "Manual Review" / "2031-03-31 Quarterly Statement.pdf"
     held.parent.mkdir(parents=True)
     held.write_bytes(b"%PDF-1.4 held")
     review, recorded = judged(tmp_path, monkeypatch, str(held))
