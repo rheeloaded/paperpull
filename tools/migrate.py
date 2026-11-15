@@ -140,6 +140,7 @@ from pathlib import Path
 _CORE = Path(__file__).resolve().parents[1] / "core"
 if (_CORE / "paperpull_core").is_dir():
     sys.path.insert(0, str(_CORE))
+from paperpull_core import countries  # noqa: E402
 from paperpull_core.keys import account_component  # noqa: E402
 from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
 from paperpull_core.ports import is_example  # noqa: E402
@@ -416,6 +417,37 @@ def _provider_kind(folder: Path):
     return (p.group(1) if p else folder.name), (k.group(1) if k else None)
 
 
+def stores_of(install: Path):
+    """(setting, stores, default store) for an install of a provider with a
+    store per country, Amazon's ("marketplace", {"amazon.com": "US", ...},
+    "amazon.com"), read from its storage.py without running it, or None for
+    any other provider."""
+    try:
+        src = read_plain(install / "storage.py", 4 * 1024 * 1024).decode("utf-8", "ignore")
+    except (OSError, ValueError):
+        return None
+    d = countries.declared(src)
+    if not (d["stores"] and d["store_setting"]):
+        return None
+    example = _read_json(install / "config.example.json")
+    default = countries.store_site(example.get(d["store_setting"]) if isinstance(example, dict) else "")
+    if default not in d["stores"]:
+        default = next(iter(d["stores"]))
+    return d["store_setting"], d["stores"], default
+
+
+def store_in(stores, cfg) -> str:
+    """The store a person's config reads, as the app reads it, the default
+    one when it names none, "" for a provider of one site or a store the
+    provider does not have."""
+    if not stores:
+        return ""
+    setting, sites, default = stores
+    value = countries.store_site(cfg.get(setting)) if isinstance(cfg, dict) else ""
+    value = value or default
+    return value if value in sites else ""
+
+
 def identify(install: Path):
     """(provider, kind) for an install folder, or (None, None) if it is not one."""
     if not (install / "progress.json").is_file():
@@ -552,6 +584,7 @@ def scan(root: Path, keep=None) -> list:
         if script is None:
             continue
         provider, kind = _provider_kind(install)
+        stores = stores_of(install)
         for label, cfg_path in account_configs(install):
             if cfg_path.is_file():
                 cfg = _read_json(cfg_path)
@@ -579,7 +612,9 @@ def scan(root: Path, keep=None) -> list:
             found.append({"folder": where.name, "install": install.name, "account": label,
                           "provider": provider, "kind": kind, "path": where,
                           "records": recs, "settings": settings_of(install, cfg),
-                          "config": cfg_path if cfg_path.is_file() else None})
+                          "config": cfg_path if cfg_path.is_file() else None,
+                          "store": store_in(stores, cfg),
+                          "store_setting": stores[0] if stores else ""})
     for child in children:
         if os.path.normcase(str(child)) in claimed or _entry_script(child) is not None:
             continue
@@ -712,6 +747,10 @@ def build(root: Path, minimal: bool = False, keep=None):
                      "file": member}
             if not minimal:
                 entry["settings"] = place["settings"]
+            # The store of a provider with a store per country, a site name
+            # and nothing personal, so a --minimal file carries it too.
+            if place.get("store"):
+                entry["store"] = place["store"]
             manifest["apps"].append(entry)
             z.writestr(member, json_text(recs))
         z.writestr("manifest.json", json_text(manifest))
@@ -797,6 +836,7 @@ def _entry(raw: dict, schema: int):
             "kind": raw.get("kind") if raw.get("kind") in ("DOCUMENT", "RECEIPT") else None,
             "account": account or "primary",
             "source_dir": str(raw.get("source_dir") or "") if schema >= 2 else "",
+            "store": countries.store_site(raw.get("store")) if schema >= 2 else "",
             "settings": settings if isinstance(settings, dict) else {},
             "file": member or "apps/%s/progress.json" % folder,
             "incoming": None}
@@ -870,9 +910,22 @@ def match(entry: dict, places: list):
     name says nothing more, since two people's output folders can share one
     and a folder can hold another provider's history."""
     provider = entry["provider"].lower()
-    for place in places:
-        if place["provider"].lower() == provider and place["account"] == entry["account"]:
-            return place
+    same = [p for p in places
+            if p["provider"].lower() == provider and p["account"] == entry["account"]]
+    # Amazon's amazon.de history is never another store's, so with a store
+    # on both sides only the same store is the same place. A file from
+    # before 0.68.0, or a place of no store, matches as it always did.
+    store = entry.get("store") or ""
+    settings = entry.get("settings") or {}
+    for p in same:
+        if not store and p.get("store_setting") and settings.get(p["store_setting"]):
+            # A file from before 0.68.0 that was not made with --minimal
+            # carries the store in the install's own setting.
+            store = countries.store_site(settings[p["store_setting"]])
+    if store and any(p.get("store") for p in same):
+        return next((p for p in same if p.get("store") == store), None)
+    if same:
+        return same[0]
     folder = (entry.get("folder") or "").lower()
     if folder and entry.get("schema", 1) < 2:
         for place in places:

@@ -157,11 +157,55 @@ def test_a_second_store_is_an_install_of_its_own_on_its_own_port(templates, sett
     assert b["site"] == "mart.co.uk" and a["cdp_url"] != b["cdp_url"]
 
 
-def test_a_store_that_could_not_be_saved_is_said(templates, settings, tmp_path, monkeypatch):
+def test_a_store_that_could_not_be_saved_leaves_nothing_and_a_retry_works(
+        templates, settings, tmp_path, monkeypatch):
+    """A folder left reading the default store, under another store's name,
+    would file one country's orders as another's, and a retry found it
+    there and changed nothing (a review of 2026-11-15)."""
+    home = tmp_path / "home"
+    real = app_module._set_setting
     monkeypatch.setattr(app_module, "_set_setting", lambda *a: False)
     with pytest.raises(fastapi.HTTPException) as e:
-        _create({"root": str(tmp_path / "home"), "providers": ["mart"], "stores": {"mart": "mart.de"}})
-    assert e.value.status_code == 500 and '"site": "mart.de"' in e.value.detail
+        _create({"root": str(home), "providers": ["mart"], "stores": {"mart": "mart.de"}})
+    assert e.value.status_code == 500 and "could not be set up" in e.value.detail
+    assert not (home / "Mart Receipts (mart.de)").exists()
+    monkeypatch.setattr(app_module, "_set_setting", real)
+    got = _create({"root": str(home), "providers": ["mart"], "stores": {"mart": "mart.de"}})
+    assert got["created"] == ["mart"] and config(home / "Mart Receipts (mart.de)")["site"] == "mart.de"
+
+
+def hand_set(home: Path, value: str) -> None:
+    """The first install pointed at another store by hand, as Amazon's
+    README says to."""
+    _create({"root": str(home), "providers": ["mart"]})
+    cfg = config(home / "Mart Receipts")
+    cfg["site"] = value
+    (home / "Mart Receipts" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+
+
+def test_the_default_store_beside_a_folder_set_by_hand_gets_a_folder_of_its_own(
+        templates, settings, tmp_path):
+    """Its plain name was taken by the folder reading mart.de, so the setup
+    found it there, made nothing and said it had (a review of 2026-11-15)."""
+    home = tmp_path / "home"
+    hand_set(home, "mart.de")
+    before = (home / "Mart Receipts" / "config.json").read_bytes()
+    got = _create({"root": str(home), "providers": ["mart"], "stores": {"mart": "mart.com"}})
+    assert got["created"] == ["mart"]
+    assert config(home / "Mart Receipts (mart.com)")["site"] == "mart.com"
+    assert (home / "Mart Receipts" / "config.json").read_bytes() == before
+
+
+@pytest.mark.parametrize("value", ["https://www.Mart.de/", "www.mart.de", "MART.DE"])
+def test_a_store_written_another_way_is_still_that_store(templates, settings, tmp_path, value):
+    """The app reads "www.mart.de" as mart.de, so the list does too, and a
+    second install of it, with an empty history, is never made."""
+    home = tmp_path / "home"
+    hand_set(home, value)
+    assert providers_now()["mart"]["stores_set_up"] == ["mart.de"]
+    got = _create({"root": str(home), "providers": ["mart"], "stores": {"mart": "mart.de"}})
+    assert got["created"] == [] and got["existed"] == ["mart"]
+    assert not (home / "Mart Receipts (mart.de)").exists()
 
 
 # -- what is already set up --------------------------------------------------

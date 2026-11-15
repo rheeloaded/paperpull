@@ -26,6 +26,16 @@ def test_a_store_says_its_country():
     assert countries.store_label("amazon.de", "DE") == "amazon.de (Germany)"
 
 
+@pytest.mark.parametrize("value", ["amazon.de", "https://www.Amazon.de/", "www.amazon.de",
+                                   " AMAZON.DE ", "http://amazon.de"])
+def test_a_store_is_read_as_the_app_reads_it(value):
+    assert countries.store_site(value) == "amazon.de"
+
+
+def test_a_store_that_is_not_a_word_is_none():
+    assert countries.store_site(None) == "" and countries.store_site(3) == ""
+
+
 def test_a_country_inside_a_sentence():
     assert countries.in_sentence("US") == "the United States"
     assert countries.in_sentence("DE") == "Germany"

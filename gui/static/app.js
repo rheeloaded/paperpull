@@ -59,6 +59,7 @@ const PAUSE = svFill('<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="1
 let META = null;        // /api/apps
 let ROWS = null;        // /api/accounts, one per provider and person
 let PROVIDERS = null;   // /api/providers, for choosing providers
+let PROVIDERS_BEFORE = [];   // the list a setup was chosen from, to name what it found already there
 let VIEW = '';
 // The wait for a sign-in to finish, waitForSignIn below.
 let SIGNIN_WAIT = null;
@@ -2070,11 +2071,18 @@ async function wCreate() {
   try { d = await r.json(); } catch (e) { /* not JSON */ }
   if (!r.ok) { $('newmsg').textContent = d.detail || 'That did not work, and PaperPull gave no reason. Reload the page and try again.'; return; }
   W.picked = new Set(); W.stores = {}; W.step = 1; $('owner').value = ''; $('newmsg').textContent = '';
+  PROVIDERS_BEFORE = (PROVIDERS || {}).providers || [];
   PROVIDERS = null;
   await load();
   location.hash = '#/';
   const n = d.created.length;
-  notice('Set up ' + many(n, 'provider') + ' in ' + d.root + '. ' +
+  // A provider already set up, a store already read by a folder here say,
+  // is said by name, never counted as set up.
+  const nameOf = slug => ((PROVIDERS_BEFORE || []).find(p => p.slug === slug) || {provider: slug}).provider;
+  const had = (d.existed || []).map(nameOf);
+  const already = had.length ? had.join(', ') + (had.length === 1 ? ' was' : ' were') + ' already set up, so nothing was changed there. ' : '';
+  if (!n) { notice(already || 'Nothing was set up.', 'ok'); return; }
+  notice('Set up ' + many(n, 'provider') + ' in ' + d.root + '. ' + already +
     (d.owner ? 'Documents will be filed under ' + d.owner + '. ' : '') +
     'Next, press Sign in beside ' + (n === 1 ? 'it' : 'one of them') + '. A sign-in window opens for you to sign in there.', 'ok');
 }

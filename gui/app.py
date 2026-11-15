@@ -2921,9 +2921,51 @@ def _store_of(meta: dict, account: str) -> str:
     info = _store_providers().get(meta.get("script_name"))
     if not info:
         return ""
-    value = _config_of(meta, account).get(info["store_setting"])
-    store = value if isinstance(value, str) and value else info["store_default"]
+    return _store_named(info, _config_of(meta, account).get(info["store_setting"]))
+
+
+def _store_named(info: dict, value) -> str:
+    """The store a config's setting names, read as the app reads it, so
+    "www.amazon.de" is amazon.de, the default store when it names none, and
+    "" for a store the provider does not have."""
+    mod = _countries()
+    store = mod.store_site(value) if mod else (value if isinstance(value, str) else "")
+    store = store or info["store_default"]
     return store if store in {s["site"] for s in info["stores"]} else ""
+
+
+def _stores_in(root: Path, info: dict) -> dict:
+    """{store: folder name} for the installs of a store provider in root,
+    each read from its own config, the first person's, as a run reads it.
+    A store set by hand in a folder of any name counts."""
+    found: dict = {}
+    script = _entry_script(_templates_root() / info["slug"]) if _templates_root() else None
+    if not script or not root.is_dir():
+        return found
+    for d in sorted(root.iterdir()):
+        own = _entry_script(d) if d.is_dir() else None
+        if own is None or own.name != script.name:
+            continue
+        cfg = _read_json(d / "config.json")
+        store = _store_named(info, cfg.get(info["store_setting"]) if isinstance(cfg, dict) else None)
+        if store:
+            found.setdefault(store, d.name)
+    return found
+
+
+def _folder_for_store(root: Path, info: dict, store: str) -> str:
+    """The folder a new install of this store gets, store_folder's name,
+    unless a folder of that name is there and reads another store, set by
+    hand in a folder of the old name, when the store goes beside the name,
+    "Amazon Receipts (amazon.com)"."""
+    name = store_folder(info, store)
+    there = root / name
+    if store and os.path.lexists(there):
+        cfg = _read_json(there / "config.json")
+        theirs = _store_named(info, cfg.get(info["store_setting"]) if isinstance(cfg, dict) else None)
+        if theirs and theirs != store:
+            return "%s (%s)" % (info["folder"], store)
+    return name
 
 
 def _stores_set_up(info: dict, apps: dict) -> list:
@@ -2958,13 +3000,21 @@ def create_install(root: Path, slug: str, owner: str = "", store: str = "") -> s
         raise HTTPException(400, "PaperPull has no provider called %r. Reload the page." % slug)
     info = next(p for p in list_providers() if p["slug"] == slug)
     if info.get("stores"):
-        store = store or info["store_default"]
+        mod = _countries()
+        asked = mod.store_site(store) if mod else store
+        store = asked or info["store_default"]
         if store not in {s["site"] for s in info["stores"]}:
             raise HTTPException(400, "%s has no store called %r. Reload the page."
                                      % (info["provider"], str(store)[:60]))
+        # A store an install here already reads is set up, whatever its
+        # folder is called, and a second install of it would download every
+        # order again into an empty history.
+        if store in _stores_in(root, info):
+            return "exists"
+        dst = root / _folder_for_store(root, info, store)
     else:
         store = ""
-    dst = root / store_folder(info, store)
+        dst = root / info["folder"]
     if os.path.lexists(dst):
         return "exists"
     # Most double-click launchers call .venv\Scripts\python.exe, which the
@@ -3004,10 +3054,14 @@ def create_install(root: Path, slug: str, owner: str = "", store: str = "") -> s
     # The store goes in whatever else happens, since an install that read
     # another store than the one its folder names would file one country's
     # orders as another's.
+    # The folder this call made goes again when it cannot be, so a second
+    # try sets it up whole rather than finding it there reading the default
+    # store.
     if store and not _set_setting(dst / "config.json", info["store_setting"], store):
-        raise HTTPException(500, "%s was set up in %s, but its store could not be saved in its "
-                                 "config.json. Write \"%s\": \"%s\" there before its first run."
-                                 % (info["provider"], dst, info["store_setting"], store))
+        shutil.rmtree(dst, ignore_errors=True)
+        raise HTTPException(500, "%s could not be set up, since its store could not be saved in "
+                                 "its config.json. Nothing was left in %s. Try again."
+                                 % (info["provider"], root))
     if server_mode.enabled():
         _set_profile(dst / "config.json", server_mode.profile_for(dst.name))
     return "created"
@@ -3498,7 +3552,7 @@ def api_providers():
             # with the stores already set up left out of its store list.
             p["stores_set_up"] = _stores_set_up(p, apps)
             p["installed"] = len(p["stores_set_up"]) == len(p["stores"])
-    suggested =(server_mode.data_root() if server_mode.enabled()
+    suggested = (server_mode.data_root() if server_mode.enabled()
                  else Path.home() / "Documents" / "PaperPull")
     return {"providers": out, "templates": _templates_root() is not None,
             "suggested_root": str(suggested), "server": server_mode.enabled()}
@@ -4019,18 +4073,30 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
     if account != "primary" and (not _LABEL_RE.match(account) or account == "example"):
         return None, "its person's label cannot be used here"
     want = tmpl["provider"].lower()
-    first = next((p for p in places if p["provider"].lower() == want
-                  and p["account"] == "primary"), None)
+    # A provider with a store per country keeps each store's history in an
+    # install of that store, never another's, so Amazon's amazon.de orders
+    # never join its amazon.com history.
+    # A file from before 0.68.0 names no store of its own, and its settings
+    # carry the one the install read, when it was not made with --minimal.
+    store = ""
+    if tmpl.get("stores"):
+        raw = entry.get("store") or (entry.get("settings") or {}).get(tmpl["store_setting"])
+        store = _store_named(tmpl, raw)
+        if raw and not store:
+            return None, "PaperPull has no %s store %s" % (tmpl["provider"], str(raw)[:40])
+    first = next((p for p in places if p["provider"].lower() == want and p["account"] == "primary"
+                  and (not store or p.get("store", tmpl.get("store_default")) == store)), None)
     if first is None:
-        install = root / tmpl["folder"]
+        folder = _folder_for_store(root, tmpl, store) if store else tmpl["folder"]
+        install = root / folder
         if install.exists():
-            return None, "a folder named %s is already there" % tmpl["folder"]
+            return None, "a folder named %s is already there" % folder
         where = install
         if apply:
             root.mkdir(parents=True, exist_ok=True)
             owner = entry["settings"].get("owner") if account == "primary" else ""
-            if create_install(root, tmpl["slug"], owner=str(owner or "")[:80]) != "created":
-                return None, "a folder named %s is already there" % tmpl["folder"]
+            if create_install(root, tmpl["slug"], owner=str(owner or "")[:80], store=store) != "created":
+                return None, "a folder named %s is already there" % folder
             if account == "primary":
                 left_out = _apply_settings(mod, install / "config.json", install,
                                            entry["settings"], tmpl["slug"])
@@ -4044,7 +4110,7 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
         first = {"folder": where.name, "install": install.name, "account": "primary",
                  "provider": tmpl["provider"], "kind": tmpl["kind"], "path": where,
                  "records": have, "settings": {}, "config": install / "config.json",
-                 "made": True}
+                 "store": store, "store_setting": tmpl.get("store_setting") or "", "made": True}
         places.append(first)
         if account == "primary":
             first["note"] = _left_out_note(left_out)

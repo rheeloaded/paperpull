@@ -11,6 +11,7 @@ so declared() reads the literal values from its source. A census holds
 that reading to the imported spec for every app.
 """
 import ast
+import re
 from typing import Dict, Optional, Tuple
 
 # ISO 3166 codes and the names a person reads. A provider in a country
@@ -63,6 +64,15 @@ def label(countries, may_work_elsewhere: bool = False) -> str:
 def store_label(site: str, code: str) -> str:
     """"amazon.de (Germany)", how a store is offered in a list."""
     return "%s (%s)" % (site, name(code))
+
+
+def store_site(value) -> str:
+    """A store as a config may name it, "https://www.Amazon.de/" say, read
+    as the app reads it (amazon_site.set_marketplace), "amazon.de". "" for
+    anything that is not a string."""
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"^(https?://)?(www\.)?", "", value.strip().lower()).rstrip("/")
 
 
 def check(countries, may_work_elsewhere=False, stores=None, store_setting=None) -> None:

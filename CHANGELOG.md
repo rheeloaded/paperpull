@@ -26,7 +26,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   store into the new account's settings. amazon.com keeps the folder Amazon
   Receipts, and any other store gets one of its own, such as Amazon Receipts
   (amazon.de), so a second store is a second account. An account's line on
-  the home page says its store.
+  the home page says its store, Export history carries it, and Import
+  history keeps each store's history in an account of that store. With two
+  stores set up, a run from a terminal names the folder, as in `paperpull
+  "Amazon Receipts (amazon.de)" all`.
 
 ## [0.67.0] - 2026-11-15
 

@@ -187,5 +187,28 @@ def test_a_store_already_set_up_is_not_offered_again(browser, base, apps):
         options = page.eval_on_selector_all("#w-store-mart option", "os => os.map(o => o.value)")
         assert options == ["mart.com", "mart.co.uk"]
         assert page.eval_on_selector("#w-store-mart", "s => s.value") == "mart.com"
+        # Its plain name is the folder reading mart.de, so mart.com gets one
+        # of its own, and the page says it was set up.
+        page.click("#w-create")
+        page.wait_for_function("() => !location.hash.startsWith('#/add')", timeout=15000)
+        cfg = json.loads((apps / "Mart Receipts (mart.com)" / "config.json").read_text(encoding="utf-8"))
+        assert cfg["site"] == "mart.com"
+        assert "Set up 1 provider" in page.inner_text("body")
     finally:
         context.close()
+
+
+def test_a_provider_already_set_up_is_said_by_name(browser, base, apps):
+    """A setup that found its provider already there made nothing, and the
+    page said "Set up 0 providers", then to press Sign in beside one."""
+    page_context, page = opened(browser, base, "de-DE")
+    try:
+        page.click("#providers .ptile:has(b:text-is('Bank'))")
+        page.click("#w-next2")
+        (apps / "Bank Statements").mkdir()
+        page.click("#w-create")
+        page.wait_for_function("() => !location.hash.startsWith('#/add')", timeout=15000)
+        text = page.inner_text("body")
+        assert "Bank was already set up" in text and "Set up 0" not in text
+    finally:
+        page_context.close()
