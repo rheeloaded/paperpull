@@ -114,7 +114,8 @@ def test_a_german_browser_starts_on_germany(browser, base, apps):
     context, page = opened(browser, base, "de-DE")
     try:
         assert pressed(page).startswith("Germany")
-        assert sorted(tiles(page)) == ["Bank", "Mart", "Pay"], "Usb is for the United States alone"
+        assert tiles(page) == ["Bank", "Mart", "Pay"], \
+            "Germany's own first, then Mart's several countries, then Pay's one site worldwide, never Usb"
         assert page.inner_text("#providers .ptile:has(b:text-is('Bank')) .where") == "Germany"
         assert page.inner_text("#providers .ptile:has(b:text-is('Mart')) .where") == "3 countries"
         assert page.inner_text("#providers .ptile:has(b:text-is('Pay')) .where") == \
@@ -138,7 +139,8 @@ def test_an_american_browser_starts_on_the_united_states(browser, base, apps):
     context, page = opened(browser, base, "en-US")
     try:
         assert pressed(page).startswith("United States")
-        assert sorted(tiles(page)) == ["Mart", "Pay", "Usb"]
+        assert tiles(page) == ["Pay", "Usb", "Mart"], \
+            "the United States' own first, Pay among them since it was built there, then Mart"
     finally:
         context.close()
 

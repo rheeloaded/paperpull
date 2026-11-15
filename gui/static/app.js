@@ -2023,6 +2023,12 @@ function renderTiles() {
   // the country chosen.
   const shown = (q ? all : inCountry).filter(p => (W.group === 'all' || p.group === W.group) &&
     (!q || [p.provider, p.slug, p.documents, p.category, ...(p.country_names || [])].some(t => String(t || '').toLowerCase().includes(q))));
+  // Under one country, its own providers first, then those of several
+  // countries, Amazon, then the services of one site worldwide built in
+  // another country, each kept in the list's own order.
+  const rank = p => p.may_work_elsewhere && !(p.countries || []).includes(W.country) ? 2
+    : (p.countries || []).length > 1 ? 1 : 0;
+  if (W.country !== 'all' && !q) shown.sort((a, b) => rank(a) - rank(b));
   box.innerHTML = shown.map(p => '<label class="ptile"><input type="checkbox" value="' + esc(p.slug) + '"' +
     (p.installed ? ' disabled checked' : W.picked.has(p.slug) ? ' checked' : '') + '>' +
     glyph(p.group) + '<span><b>' + esc(p.provider) + '</b>' +
