@@ -40,6 +40,8 @@ CORE_REVIEWED = {
     "pdf_reader.py:_serve:os.open(write)": "os.devnull",
     "shared_folder.py:_open_plain:os.open(?)": "the link-safe open itself, O_NOFOLLOW and fstat",
     "shared_folder.py:read_plain:os.open(?)": "the link-safe reader itself, O_RDONLY",
+    "intake.py:_opener:os.open(?)": "the opener of plain_sha256's open(path, 'rb'), whose "
+                                    "flags are open()'s for a read, O_NONBLOCK added",
     "shared_folder.py:copy_whole:shutil.copyfileobj": "into its own new file, O_EXCL and O_NOFOLLOW",
     "shared_folder.py:open_to_read:open('?')": "the desktop branch, read or rb only",
     "browser.py:_remember_declined:marker.write_text": "Playwright's browsers folder, never the share",

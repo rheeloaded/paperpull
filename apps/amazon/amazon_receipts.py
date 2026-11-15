@@ -923,7 +923,7 @@ class App:
                                            % (k, n))
             except Exception as e:
                 log.warning("Invoice %d of %d of %s could not be saved: %s", k, n,
-                            purchase.key, e)
+                            purchase.key, failure.error_kind(e))
                 walk["lacking"].append("invoice %d of %d (%s)" % (k, n, type(e).__name__))
             finally:
                 _discard(staged)
@@ -960,7 +960,7 @@ class App:
             staged.replace(out)
         except OSError as e:
             log.warning("Invoice %d of %d of %s could not be put in place: %s",
-                        part[0], part[1], purchase.key, e)
+                        part[0], part[1], purchase.key, failure.error_kind(e))
             if not kept:
                 print("  !! Invoice %d of %d did not pass its check (%s), and Manual Review "
                       "would not take it. It is fetched again next run." % (part + (result.reason,)))

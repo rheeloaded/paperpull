@@ -1897,7 +1897,9 @@ class CsvFile:
         ("unread")."""
         unread = {"rows": [], "from": None, "unread": True}
         try:
-            data = json.loads(shared_folder.read_text(self.waiting_path))
+            # Made whole as read, since its rows hold a provider's text and
+            # are written into the ledger as they come back.
+            data = whole_json(json.loads(shared_folder.read_text(self.waiting_path)))
         except FileNotFoundError:
             return None
         except (OSError, ValueError):
