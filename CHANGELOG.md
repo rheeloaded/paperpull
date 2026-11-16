@@ -75,6 +75,18 @@ support report keeps the error its listing met.
   report was saved where it should have said to sign in. The error now has
   a place of its own in the report in all seven, and a census holds every
   app to a count there.
+- **A support report that read the statement list no longer says it read
+  nothing.** Where a provider's sign-in or security check tripped while the
+  report still read the statement list, the panel said the report read
+  nothing useful and to sign in and make it again. For 41 providers, PayPal,
+  Citi, Wells Fargo, Capital One and Vanguard among them, the report kept
+  what it read in a place PaperPull did not look, and PaperPull now looks
+  there. A count of every row or link on the page is still not taken as
+  something read, since a sign-in page's own links count the same way.
+  T-Mobile's report counted only that, so it was called saved when made on
+  a sign-in page, and now says to sign in. U.S. Bank's report also printed
+  a question mark for the rows it collected whatever it read, and never
+  showed the years its picker offered. It now shows both.
 
 ## [0.67.0] - 2026-11-15
 

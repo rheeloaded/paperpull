@@ -1046,7 +1046,9 @@ class App:
                 info["account"] = site.account_name(page)
                 info["statements_read"] = len(site.read_rows(page))
             except Exception as e:
-                info["statements_read"] = f"ERR {e}"
+                # statements_read is the count the core reads of what was
+                # read, and holds only a count, as every such key does.
+                info["collect_error"] = f"ERR {e}"
             info["samples"] = []
             for d in docs[:8]:
                 cat, summ, conf = doc_types.classify_document(d.title, self.rules)
@@ -1108,7 +1110,7 @@ class App:
         print("  too. Read it through first.")
         print("  The screenshot beside it shows the page as it is, so it stays")
         print("  on this machine.")
-        print(f"Rows collected: {shape_tree(info.get('collected', '?'), words)}")
+        print(f"Rows collected: {shape_tree(info.get('collected_generic', '?'), words)}")
         refused = [s for s in info.get("selects", [])
                    if s.get("refused_as_money_control")]
         if refused:
@@ -1119,8 +1121,8 @@ class App:
             print(f"Account picker:  {len(info['account_options'])} options")
         if info.get("cards"):
             print(f"Cards seen:      {len(info['cards'])}")
-        if info.get("year_options"):
-            print(f"Year picker:     {', '.join(shape_label(o, words) for o in info['year_options'])}")
+        if info.get("period_options"):
+            print(f"Year picker:     {', '.join(shape_label(o, words) for o in info['period_options'])}")
         api = info.get("api_candidates")
         if isinstance(api, list) and api:
             print(f"JSON endpoints seen ({len(api)}):")

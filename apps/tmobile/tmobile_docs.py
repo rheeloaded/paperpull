@@ -901,7 +901,7 @@ class App:
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
             docs = site.collect_documents(page)
-            info["collected"] = len(docs)
+            info["rows_collected"] = len(docs)
             info["samples"] = []
             for d in docs[:8]:
                 cat, summ, conf = doc_types.classify_document(d.title, self.rules)
@@ -934,7 +934,7 @@ class App:
         print("  too. Read it through first.")
         print("  The screenshot beside it shows the page as it is, so it stays")
         print("  on this machine.")
-        print(f"Rows collected: {shape_tree(info.get('collected', '?'), words)}")
+        print(f"Rows collected: {shape_tree(info.get('rows_collected', '?'), words)}")
         for s in info.get("samples", [])[:5]:
             print(shape_label(f"  [{s['category']}] {s['date']}  {s['summary']}  <- {s['title'][:50]}",
                               words, collapse=False))

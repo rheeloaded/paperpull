@@ -879,6 +879,29 @@ def write_shaped(path, value, words: Iterable = (), *, full_list: bool = False) 
 # here and the exit is made there, in one place rather than in 81 apps.
 _READ_NOTHING = set()
 
+# What a Diagnose read of the provider's own list, as its finding says it.
+# COUNT_KEYS hold a count of it. Most apps write "collected", four
+# "documents_total" (an API's answer, or IBKR's months), U.S. Bank its own
+# reader's "statements_read" and Discover Card its "statement_links". A count
+# is a whole number, so an error written where one goes, a yes or a list is
+# not one. LIST_KEYS hold the documents the run's own reader recognized,
+# which the apps built from one template keep as a list rather than count.
+#
+# "rows_collected", "links_collected" and "collected_generic" are not read.
+# They count the Diagnose's own reading of every row or link on the page, a
+# loose scrape in most apps, which a sign-in page's own lists of links fill,
+# so a report made signed out would read as one that read rows. The censuses
+# core/tests/test_every_diagnose_counts_under_a_key_the_core_reads.py and
+# test_every_count_the_core_reads_finds_nothing_on_a_sign_in_page.py hold
+# every app to these.
+COUNT_KEYS = ("collected", "documents_total", "statements_read", "statement_links")
+LIST_KEYS = ("documents_recognized", "bills_recognized")
+
+
+def _read_something(value: dict) -> bool:
+    return (any(type(value.get(key)) is int and value.get(key) > 0 for key in COUNT_KEYS)
+            or any(type(value.get(key)) is list and len(value.get(key)) > 0 for key in LIST_KEYS))
+
 
 def _note_what_was_read(path, value) -> None:
     if not (isinstance(value, dict) and "signed_out" in value):
@@ -887,8 +910,9 @@ def _note_what_was_read(path, value) -> None:
     _READ_NOTHING.discard(folder)
     # The app's own checks, the ones that stop a run for a sign-out or a
     # check, so a page it cannot make sense of while signed in is not this.
-    # That report is the one a repair needs.
-    if (value.get("signed_out") or value.get("challenge")) and not value.get("collected"):
+    # That report is the one a repair needs, and so is one that read rows
+    # whatever a check said.
+    if (value.get("signed_out") or value.get("challenge")) and not _read_something(value):
         _READ_NOTHING.add(folder)
 
 

@@ -53,6 +53,167 @@ def test_rows_read_are_not_nothing_read_whatever_a_check_said(tmp_path):
     assert failure.write_survey(tmp_path, provider="Testco", say=lambda *_a: None)
 
 
+# Every key an app's Diagnose writes the count of what a reader of the
+# provider's own list read under, as the apps write them, and the keys of
+# the list of documents the run's own reader recognized. The census in
+# test_every_diagnose_counts_under_a_key_the_core_reads.py holds the apps
+# to the core's own lists, and this to what the core does with each.
+COUNT_KEYS = ("collected", "documents_total", "statements_read", "statement_links")
+LIST_KEYS = ("documents_recognized", "bills_recognized")
+RECOGNIZED = [{"date": "9999-99-99", "kind": "statement"}]
+
+
+@pytest.mark.parametrize("key", COUNT_KEYS)
+def test_rows_read_under_any_count_key_are_not_nothing_read(tmp_path, key):
+    """A report that read rows, made where a sign-in check also tripped, is
+    a report saved, whichever key the app counted them under."""
+    _diagnose(tmp_path, {"signed_out": True, key: 12})
+    assert failure.write_survey(tmp_path, provider="Testco", say=lambda *_a: None)
+
+
+@pytest.mark.parametrize("key", COUNT_KEYS)
+def test_rows_read_past_a_check_are_not_nothing_read(tmp_path, key):
+    _diagnose(tmp_path, {"signed_out": False, "challenge": "A check", key: 3})
+    assert failure.write_survey(tmp_path, provider="Testco", say=lambda *_a: None)
+
+
+@pytest.mark.parametrize("value", ["ERR the list would not answer", "12", True, [1, 2], {"rows": 2},
+                                   1.0, 0, None, -1])
+@pytest.mark.parametrize("key", COUNT_KEYS)
+def test_only_a_count_above_none_is_something_read(tmp_path, key, value):
+    """An error an app wrote where its count goes, a yes, a list or a
+    number that is not a whole one is not rows read. A signed-out report
+    holding one still says it read nothing."""
+    _diagnose(tmp_path, {"signed_out": True, key: value})
+    with pytest.raises(SystemExit) as out:
+        failure.write_survey(tmp_path, provider="Testco", say=lambda *_a: None)
+    assert out.value.code == run_reporting.NOTHING_READ
+
+
+def test_one_count_above_none_is_enough(tmp_path):
+    _diagnose(tmp_path, {"signed_out": True, "collected": 0, "statements_read": "ERR x",
+                         "statement_links": 4})
+    assert failure.write_survey(tmp_path, provider="Testco", say=lambda *_a: None)
+
+
+def test_counts_of_none_and_an_error_are_nothing_read(tmp_path):
+    _diagnose(tmp_path, {"signed_out": True, "collected_generic": 3, "statements_read": "ERR x"})
+    with pytest.raises(SystemExit) as out:
+        failure.write_survey(tmp_path, provider="Testco", say=lambda *_a: None)
+    assert out.value.code == run_reporting.NOTHING_READ
+
+
+@pytest.mark.parametrize("key", LIST_KEYS)
+@pytest.mark.parametrize("found", [{"signed_out": True}, {"signed_out": False, "challenge": "A check"}])
+def test_documents_the_runs_reader_recognized_are_something_read(tmp_path, key, found):
+    """The apps built from one template keep what the run's own reader
+    recognized as a list, beside a count of a loose scrape, and that list
+    is what they read."""
+    _diagnose(tmp_path, dict(found, **{key: list(RECOGNIZED), "rows_collected": 0}))
+    assert _saved(tmp_path)
+
+
+@pytest.mark.parametrize("value", [[], None, "ERR the list would not answer", 3, True,
+                                   {"by_kind": {"statement": 2}, "with_pdf_link": 2}, ("a",)])
+@pytest.mark.parametrize("key", LIST_KEYS)
+def test_only_a_list_with_something_in_it_is_something_read(tmp_path, key, value):
+    """An empty list, an error, a count or a dict of counts under a list's
+    key is not documents recognized."""
+    _diagnose(tmp_path, {"signed_out": True, key: value})
+    assert not _saved(tmp_path)
+
+
+def test_a_loose_scrape_beside_an_empty_list_is_nothing_read(tmp_path):
+    """A template app on a sign-in page, whose scrape counted the page's
+    links and whose reader recognized nothing there."""
+    _diagnose(tmp_path, {"signed_out": True, "rows_collected": 9, "documents_recognized": []})
+    assert not _saved(tmp_path)
+
+
+@pytest.mark.parametrize("key", ["rows_collected", "links_collected", "collected_generic",
+                                 "print_receipt_controls", "invoice_controls", "pay_assignments",
+                                 "rows", "row_counts", "cards_collected", "collect_error"])
+def test_a_count_that_is_not_of_documents_is_not_something_read(tmp_path, key):
+    """A loose scrape's count of every row or link on the page, which a
+    sign-in page's own lists fill, a count of a receipt page's buttons, of
+    pay assignments or a key no app counts its documents under is not read
+    as documents."""
+    _diagnose(tmp_path, {"signed_out": True, key: 5})
+    with pytest.raises(SystemExit) as out:
+        failure.write_survey(tmp_path, provider="Testco", say=lambda *_a: None)
+    assert out.value.code == run_reporting.NOTHING_READ
+
+
+def test_the_list_here_is_the_cores(tmp_path):
+    assert tuple(words.COUNT_KEYS) == COUNT_KEYS
+    assert tuple(words.LIST_KEYS) == LIST_KEYS
+
+
+def _saved(folder) -> bool:
+    try:
+        failure.write_survey(folder, provider="Testco", say=lambda *_a: None)
+    except SystemExit as out:
+        assert out.code == run_reporting.NOTHING_READ
+        return False
+    return True
+
+
+def test_a_count_past_what_the_file_holds_still_counts(tmp_path):
+    _diagnose(tmp_path, {"signed_out": True, "collected": 250000})
+    assert _saved(tmp_path)
+
+
+@pytest.mark.parametrize("key", COUNT_KEYS)
+def test_keys_written_through_fixed_are_read(tmp_path, key):
+    """ING writes its keys as Fixed strings."""
+    _diagnose(tmp_path, {words.Fixed("signed_out"): True, words.Fixed(key): 3})
+    assert _saved(tmp_path)
+
+
+def test_none_beside_a_count_past_a_check_is_something_read(tmp_path):
+    _diagnose(tmp_path, {"challenge": "A check", "signed_out": False, "collected": None,
+                         "documents_total": 2})
+    assert _saved(tmp_path)
+
+
+@pytest.mark.parametrize("key", COUNT_KEYS)
+def test_a_signed_in_page_with_an_error_where_a_count_goes_is_a_report_saved(tmp_path, key):
+    _diagnose(tmp_path, {"signed_out": False, "challenge": None, key: "ERR x"})
+    assert _saved(tmp_path)
+
+
+@pytest.mark.parametrize("found", [{"signed_out": None}, {"signed_out": ""}, {"signed_out": 0},
+                                   {"signed_out": False, "challenge": ""},
+                                   {"signed_out": False, "challenge": None}])
+def test_a_check_that_said_nothing_is_no_check(tmp_path, found):
+    _diagnose(tmp_path, dict(found))
+    assert _saved(tmp_path)
+
+
+@pytest.mark.parametrize("first, then, saved", [(0, 3, True), (3, 0, False)])
+def test_a_later_count_replaces_an_earlier_one(tmp_path, first, then, saved):
+    _diagnose(tmp_path, {"signed_out": True, "collected": first})
+    _diagnose(tmp_path, {"signed_out": True, "collected": then})
+    assert _saved(tmp_path) is saved
+
+
+def test_a_count_in_a_file_that_is_not_a_diagnose_changes_nothing(tmp_path):
+    """eBay, Best Buy, Home Depot and Lowe's write a history file beside
+    their finding, with counts and no signed_out."""
+    _diagnose(tmp_path, {"signed_out": True, "collected": 0})
+    words.write_shaped(tmp_path / "diagnose-history.json", {"collected": 5, "cards_collected": 9},
+                       words.words_for("Testco"))
+    assert not _saved(tmp_path)
+
+
+def test_the_file_written_is_the_same_whatever_it_counted(tmp_path):
+    found = {"signed_out": True, "collected": 5, "rows_collected": 7, "error": "x"}
+    _diagnose(tmp_path, dict(found))
+    written = json.loads((tmp_path / "diagnose-documents.json").read_text(encoding="utf-8"))
+    assert written == words.shape_tree(found, words.words_for("Testco"))
+    assert written["collected"] == 5 and written["rows_collected"] == 7
+
+
 def test_it_counts_for_the_run_that_found_it_only(tmp_path):
     other = tmp_path / "other"
     _diagnose(tmp_path, {"signed_out": True})

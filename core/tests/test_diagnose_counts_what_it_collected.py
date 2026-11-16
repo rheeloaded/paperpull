@@ -14,6 +14,14 @@ wrote the count over the error a moment later anyway, so the error was lost
 and a listing that failed read as an account with nothing to list. An error
 goes under a key of its own, "collect_error", as several apps already did.
 
+The core reads every key of paperpull_core.words.COUNT_KEYS for that count,
+not "collected" alone, since some apps count under another name, so each of
+those keys is held to a count here the same way. The core takes only a
+whole number there, so an error is not read as a count, and still a key
+that says how much was read holds how much was read. U.S. Bank wrote the
+error its statement reader met under "statements_read", one of them, and
+now writes it under "collect_error" too.
+
 This reads the shape of the code. Every write of "collected" in an app's
 own script is a len() of something, a whole number such as the 0 a failed
 listing collected, or, as two apps write it, a len() or None. A write is an
@@ -26,6 +34,8 @@ import ast
 from pathlib import Path
 
 import pytest
+
+from paperpull_core.words import COUNT_KEYS
 
 REPO = Path(__file__).resolve().parents[2]
 ENTRIES = sorted(p for p in REPO.glob("apps/*/*.py")
@@ -70,37 +80,38 @@ def _pairs(target, value):
 
 
 def _writes_in(tree):
-    """Each value written to "collected" in this tree, with its line."""
+    """Each value written to a key of COUNT_KEYS in this tree, with its line
+    and the key."""
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 for part, value in _pairs(target, node.value):
-                    if _key(part) == "collected":
-                        yield value.lineno, value
+                    if _key(part) in COUNT_KEYS:
+                        yield value.lineno, value, _key(part)
         elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
-            if _key(node.target) == "collected" and node.value is not None:
-                yield node.value.lineno, node.value
+            if _key(node.target) in COUNT_KEYS and node.value is not None:
+                yield node.value.lineno, node.value, _key(node.target)
         elif isinstance(node, ast.Dict):
             for key, value in zip(node.keys, node.values):
-                if key is not None and _const_key(key) == "collected":
-                    yield value.lineno, value
+                if key is not None and _const_key(key) in COUNT_KEYS:
+                    yield value.lineno, value, _const_key(key)
         elif isinstance(node, ast.Call):
             for keyword in node.keywords:
-                if keyword.arg == "collected":
-                    yield keyword.value.lineno, keyword.value
+                if keyword.arg in COUNT_KEYS:
+                    yield keyword.value.lineno, keyword.value, keyword.arg
             name = (node.func.attr if isinstance(node.func, ast.Attribute)
                     else getattr(node.func, "id", ""))
             args = node.args
             if (name in ("setdefault", "__setitem__") and len(args) == 2
-                    and _const_key(args[0]) == "collected"):
-                yield args[1].lineno, args[1]
-            if name == "setitem" and len(args) == 3 and _const_key(args[1]) == "collected":
-                yield args[2].lineno, args[2]
+                    and _const_key(args[0]) in COUNT_KEYS):
+                yield args[1].lineno, args[1], _const_key(args[0])
+            if name == "setitem" and len(args) == 3 and _const_key(args[1]) in COUNT_KEYS:
+                yield args[2].lineno, args[2], _const_key(args[1])
             if name in ("update", "dict") and args and isinstance(args[0], (ast.List, ast.Tuple)):
                 for pair in args[0].elts:
                     if (isinstance(pair, (ast.Tuple, ast.List)) and len(pair.elts) == 2
-                            and _const_key(pair.elts[0]) == "collected"):
-                        yield pair.elts[1].lineno, pair.elts[1]
+                            and _const_key(pair.elts[0]) in COUNT_KEYS):
+                        yield pair.elts[1].lineno, pair.elts[1], _const_key(pair.elts[0])
 
 
 def _writes(path: Path):
@@ -114,11 +125,17 @@ def test_the_census_finds_apps_to_read():
 
 @pytest.mark.parametrize("path", ENTRIES, ids=lambda p: p.parent.name)
 def test_collected_is_only_ever_a_count(path):
-    wrong = ["%s:%d" % (path.relative_to(REPO), line)
-             for line, value in _writes(path) if not _is_count(value)]
-    assert not wrong, ("an error is written into collected, where a signed-out report then "
-                       "reads as one that collected something. Put it under collect_error. "
+    wrong = ["%s:%d %s" % (path.relative_to(REPO), line, key)
+             for line, value, key in _writes(path) if not _is_count(value)]
+    assert not wrong, ("something other than a count is written where the core reads how "
+                       "much a Diagnose read. Put an error under collect_error. "
                        + ", ".join(wrong))
+
+
+@pytest.mark.parametrize("key", COUNT_KEYS)
+def test_the_census_reads_every_key_the_core_reads(key):
+    found = list(_writes_in(ast.parse('info["%s"] = "ERR %%s" %% e' % key)))
+    assert len(found) == 1 and found[0][2] == key and not _is_count(found[0][1])
 
 
 def test_the_census_tells_an_error_from_a_count():
