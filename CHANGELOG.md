@@ -40,6 +40,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   asked for on every run. Purchases an earlier version set aside stay set
   aside.
 
+- **Wells Fargo presses the documents link once a passing cover has gone
+  (#221).** A tester's runs opened the Accounts menu, found View Statements
+  & Documents, and stopped at once, the page's Account Summary band read
+  as on top of the link, most likely while the menu was still opening. The
+  run read the link's point once, where Playwright's own press tries again.
+  Now a cover that came before anything was pressed is read again every
+  quarter of a second for up to three seconds. Before each try the link is
+  found again by its whole name, its own words are read again, and the
+  button that opened its menu has to still say the menu is open. Nothing
+  else is pressed meanwhile, Escape included, and the button is never
+  pressed again. A cover that came as the link was pressed stops the run at
+  once as before, and a cover that stays stops it a few seconds later, its
+  failure file saying how long it waited and whether the cover held the
+  link, whether the link took the pointer, whether anything around it cut
+  its middle away, and whether the cover sat in the menu itself.
+
 ## [0.68.0] - 2026-11-16
 
 Every provider now says which country it is for, in the control panel, in

@@ -623,7 +623,7 @@ def test_a_guard_an_app_defines_is_asked_in_its_run(app):
 
 # Playwright's presses, the core's, and a press run inside the page.
 _PRESS_CALLS = {"click", "dblclick", "tap", "check", "set_checked", "select_option",
-                "dispatch_event", "press", "press_once"}
+                "dispatch_event", "press", "press_once", "click_when_clear"}
 
 
 def presses_in_a_run(app) -> list:

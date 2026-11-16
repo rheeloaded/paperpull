@@ -726,22 +726,31 @@ def _menu_button(page):
     return _first_visible(page.get_by_role("button", name=MENU_BUTTON_RE))
 
 
-def _open_menu(page) -> bool:
+def _open_menu(page):
     """Open the page's menu to show the Statements & Documents link it
-    holds, whether it was pressed. Only a button whose whole name is Menu,
-    read again before the press, and only while it does not say it is
+    holds, the button pressed or None. Only a button whose whole name is
+    Menu, read again before the press, and only while it does not say it is
     open, since pressing an open menu closes it."""
     menu = _menu_button(page)
     if menu is None or not is_menu_button(_label_of(menu)):
-        return False
+        return None
     try:
         if (menu.get_attribute("aria-expanded", timeout=_READ_MS) or "").lower() == "true":
-            return False
+            return None
     except Exception:
-        return False
+        return None
     pressing.click(page, menu, css=pressing.BUTTONS, what="the page's Menu button",
                    words=_words(), step="open the menu")
-    return True
+    return menu
+
+
+def _says_open(button) -> bool:
+    """Whether a button that opened a menu still says its menu is open, no
+    when that cannot be read."""
+    try:
+        return (button.get_attribute("aria-expanded", timeout=_READ_MS) or "").lower() == "true"
+    except Exception:
+        return False
 
 
 def is_accounts_button(name: str) -> bool:
@@ -849,6 +858,36 @@ def _what_the_menu_showed(page, button, way: dict) -> None:
         way["documents_controls_shown"] = after["documents"]
 
 
+class _SignedOut(Exception):
+    """The tab was sent to sign in again while a cover over the link
+    passed. goto_documents says so as it always did, with nothing pressed."""
+
+
+def _documents_link_again(page, way: dict):
+    """The Statements & Documents link found again by its role and whole
+    name, before a press tried again once a cover has passed, or None. A
+    tab sent to sign in again meanwhile raises _SignedOut."""
+    if looks_signed_out(page):
+        raise _SignedOut()
+    link = _documents_control(page)
+    way["documents_link_shown"] = link is not None
+    return link
+
+
+def _still_the_link(link, opener, way: dict) -> bool:
+    """Whether the link found again may be pressed. The button that opened
+    its menu, when one did, still says the menu is open, and the link's own
+    words read again are the link's (_reads_as_documents_link). A button
+    that says nothing of its menu is not taken for one that says it is
+    open. `way` is told what was read, for the stop."""
+    if opener is not None and not _says_open(opener):
+        way["menu_still_open"] = False
+        return False
+    words = _own_words(link)
+    way["documents_link_read"] = _how_the_link_read(words)
+    return _reads_as_documents_link(words)
+
+
 def goto_documents(page, way: Optional[dict] = None) -> bool:
     """Open Statements & Documents in this tab, False when Wells Fargo
     shows a signed-out page.
@@ -865,7 +904,15 @@ def goto_documents(page, way: Optional[dict] = None) -> bool:
 
     `way` is told which menu was opened, whether the link showed and how
     its own words read, the facts a stop here carries, for Diagnose to
-    write down."""
+    write down.
+
+    A link that something covers before it is pressed, a menu still
+    opening say, is waited for a few seconds (pressing.click_when_clear,
+    #221). Before each later try it is found again by its role and whole
+    name and its own words are read again, and the button that opened its
+    menu has to still say the menu is open. Nothing else is pressed
+    meanwhile, Escape included, and the button is never pressed again. A
+    tab sent to sign in again meanwhile is said to be signed out."""
     way = {} if way is None else way
     dismiss_overlay(page)
     if _signed_in_area(page.url or "") and _shows_a_pdf(page):
@@ -886,22 +933,23 @@ def goto_documents(page, way: Optional[dict] = None) -> bool:
     if _shows_dated_documents(page):
         return True
     link = _documents_control(page)
-    menu_pressed = False
+    menu = None
     accounts = None
     if link is None:
-        menu_pressed = _open_menu(page)
+        menu = _open_menu(page)
         # A Menu button that shows and was not pressed, one that says it
         # is open say, is a page this app does not know, so the Accounts
         # menu is tried only on a page with no Menu button at all.
-        if not menu_pressed and _menu_button(page) is None:
+        if menu is None and _menu_button(page) is None:
             accounts = _open_accounts_menu(page, way)
         # No control of the link's whole name showed before the press, so
         # one that shows now came with the menu that was opened.
-        for _ in range(_MENU_SHOW_MS // 250 if menu_pressed or accounts is not None else 0):
+        for _ in range(_MENU_SHOW_MS // 250 if menu is not None or accounts is not None else 0):
             page.wait_for_timeout(250)
             link = _documents_control(page)
             if link is not None:
                 break
+    menu_pressed = menu is not None
     way["menu_pressed"] = menu_pressed
     way["documents_link_shown"] = link is not None
     # The link's own words are read again, and one reading of them must be
@@ -924,10 +972,20 @@ def goto_documents(page, way: Optional[dict] = None) -> bool:
              "hidden_documents_links": _documents_controls_hidden(page), **way})
     tabs_before = len(page.context.pages)
     address_before = page.url or ""
+    # The button that opened the menu holding the link, None for a link
+    # that showed already, which no menu has to say is open.
+    opener = accounts if accounts is not None else menu
     try:
-        pressing.click(page, link, css="%s, %s, [role=menuitem]" % (pressing.LINKS, pressing.BUTTONS),
-                       what="the Statements & Documents link", words=_words(),
-                       step="open the statements page")
+        # What the wait for a cover found is kept when the link is pressed
+        # too, for Diagnose and a stop after the press.
+        way.update(pressing.click_when_clear(
+            page, link, lambda: _documents_link_again(page, way),
+            check=lambda found: _still_the_link(found, opener, way), opener=opener,
+            css="%s, %s, [role=menuitem]" % (pressing.LINKS, pressing.BUTTONS),
+            what="the Statements & Documents link", words=_words(),
+            step="open the statements page"))
+    except _SignedOut:
+        return False
     except pressing.Stop as stop:
         # The stop says how the link was reached and read as well as why
         # the press did not go through.

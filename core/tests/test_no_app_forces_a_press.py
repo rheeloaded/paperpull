@@ -193,7 +193,7 @@ def _presses_through_pressing(app: Path) -> bool:
         for node in ast.walk(tree):
             if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
                     and node.value.id == "pressing"
-                    and node.attr in ("click", "check", "press_once")):
+                    and node.attr in ("click", "check", "press_once", "click_when_clear")):
                 return True
     return False
 

@@ -47,7 +47,8 @@ import pytest
 from paperpull_core import pressing, testkit
 
 REPO = Path(__file__).resolve().parents[2]
-HELPERS = {"press_once", "click", "check"}
+# click_when_clear presses as click does, a cover before any press waited for.
+HELPERS = {"press_once", "click", "check", "click_when_clear"}
 
 # Presses a document's download reaches that stop the run when their control
 # is turned off, as every press did before. None of them is a document's own
@@ -126,7 +127,7 @@ STOPS = {
         "the 1099 or Return, each a plain server-drawn link that is never turned off. One "
         "that is would be a page this app does not know, and every later document is "
         "reached through the same tabs"),
-    ("wellsfargo", "goto_documents", "click", "open the statements page"): (1,
+    ("wellsfargo", "goto_documents", "click_when_clear", "open the statements page"): (1,
         "the page's own Statements & Documents link reaches the page every document is "
         "taken from, so a turned off link there would leave every document"),
     ("wellsfargo", "_open_menu", "click", "open the menu"): (1,

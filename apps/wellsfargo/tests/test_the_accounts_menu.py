@@ -65,6 +65,12 @@ document.addEventListener('click', (e) => {
   sessionStorage.setItem('pressed', JSON.stringify(window.pressed));
   if (el.dataset.go) location.href = el.dataset.go;
 }, true);
+// Every key that goes down, as how many presses came before it.
+window.keys = JSON.parse(sessionStorage.getItem('keys') || '[]');
+document.addEventListener('keydown', () => {
+  window.keys.push(window.pressed.length);
+  sessionStorage.setItem('keys', JSON.stringify(window.keys));
+}, true);
 </script>"""
 
 
@@ -213,14 +219,50 @@ def open_site(browser):
         ctx.close()
 
 
+class Waits:
+    """The clock a press waits by for a cover to pass, which moves only
+    while it waits, and that wait, which does what the page does meanwhile,
+    one step a wait, and never sleeps. Past 100 waits it fails, so a press
+    that never stops trying fails rather than hangs."""
+
+    def __init__(self):
+        self.t = 0.0
+        self.calls = 0
+        self.during = []
+
+    def clock(self):
+        return self.t
+
+    def wait(self, page, ms):
+        self.calls += 1
+        assert self.calls <= 100, "the press never stopped trying"
+        self.t += ms / 1000.0
+        if self.during:
+            step = self.during.pop(0)
+            step(page) if callable(step) else page.evaluate(step)
+
+
 @pytest.fixture(autouse=True)
 def quick(monkeypatch):
     monkeypatch.setattr(site, "_SHOW_MS", 2000)
     monkeypatch.setattr(site, "_MENU_SHOW_MS", 2000)
+    waits = Waits()
+    monkeypatch.setattr(pressing, "_now", waits.clock)
+    monkeypatch.setattr(pressing, "_wait", waits.wait)
+    return waits
+
+
+@pytest.fixture
+def waits(quick):
+    return quick
 
 
 def _pressed(pg):
     return pg.evaluate("JSON.parse(sessionStorage.getItem('pressed') || '[]')")
+
+
+def _keys(pg):
+    return pg.evaluate("JSON.parse(sessionStorage.getItem('keys') || '[]')")
 
 
 def _stops(pg):
@@ -794,3 +836,302 @@ def test_diagnose_says_the_accounts_menu_opened_the_documents(open_site, tmp_pat
     assert report["extra"]["way"]["documents_link_read"]["taken"] is True
     assert "stopped" not in report["extra"]
     assert _pressed(pg) == ["accounts", "documents"] and fake.navigations == [EDOCS]
+
+
+# -- a cover that passes before the press (#221) ------------------------------------
+
+# A tester's three runs of 0.66.0 opened the Accounts menu, found View
+# Statements & Documents by its whole name and read it as the link, and all
+# three stopped at once, Covered. The topmost element at the link's middle
+# was a div whose whole label is Account Summary, not fixed, both what was
+# over the link and its topmost part, so its parent holds the link too. The
+# press read the point once, where Playwright's own press tries again while
+# its check fails.
+#
+# The page here is that shape. The menu's panel is drawn over a band of the
+# page's own that reads Account Summary, and while it opens it takes no
+# pointer, so the link's point finds the band under it. The band is a child
+# of the header that holds the panel, so it is both what is over the link and
+# its topmost part. A panel cut away while it grows does not give those facts
+# (the test plan's probe), so this one takes no pointer.
+OPENING = ("<style>header { position: relative; } "
+           "#accounts-panel { position: absolute; left: 0; top: 60px; width: 900px; "
+           "background: #fff; z-index: 2; } "
+           "#accounts-panel.opening { pointer-events: none; } "
+           "#band { position: absolute; left: 0; top: 60px; width: 1000px; height: 2000px; "
+           "background: #eef; z-index: 1; }</style>")
+BAND = '<div id="band">Account Summary</div>'
+# The link as the tester's files read it, 55 characters of text, 27 of them
+# its name and what it shows, and one part hidden from a screen reader.
+TESTER_LINK = _link(NAME + '<span aria-hidden="true" style="%s"> and your tax forms are here'
+                           '</span>' % SR_ONLY)
+# How each of the tester's three files read the link, the same in all three.
+TESTER_READ = {
+    "words_read": True, "label_given": False, "labelled_by": False,
+    "labelled_by_itself": False, "style_given": False, "label_is_whole": False,
+    "text_is_whole": False, "said_is_whole": True, "labelled_is_whole": False,
+    "seen_names_both": True, "words_refused": False, "hidden_elements": 1,
+    "text_length": 55, "said_length": 27, "seen_length": 27, "taken": True}
+# What lets the link through, the panel done opening.
+PANEL_OPENED = "document.getElementById('accounts-panel').classList.remove('opening')"
+# The facts a stop of a cover that stayed adds, each a word the failure
+# file keeps.
+CLEAR_FACTS = ("attempts", "covered_ms", "cleared", "over_it_holds_control",
+               "control_clickable", "clip_at_point", "over_it_in_menu")
+
+
+def _opening(menu=None):
+    html = _page(menu=_menu(TESTER_LINK if menu is None else menu))
+    return (html.replace("<header>", OPENING + "<header>", 1)
+            .replace('<div id="accounts-panel"></div>',
+                     BAND + '<div id="accounts-panel" class="opening"></div>', 1))
+
+
+def _then(*steps):
+    """One step of the page's for one wait, the steps run in order."""
+    return "() => { %s; }" % "; ".join(steps)
+
+
+def _covered(pg):
+    with pytest.raises(pressing.Covered) as stopped:
+        site.goto_documents(pg)
+    return stopped.value
+
+
+def test_the_testers_cover_is_the_one_made_here(open_site):
+    """The cover staying, the stop says what the tester's three files said
+    of it and of the link."""
+    fake = Site(_opening())
+    pg = open_site(fake)
+    stop = _covered(pg)
+    assert stop.step == "open the statements page"
+    assert stop.reason == "something on the page is over the control"
+    assert stop.after_a_press is False
+    band = {"tag": "div", "role": "", "label": "Account Summary"}
+    assert stop.facts["over_it"] == band and stop.facts["topmost"] == band, stop.facts
+    assert stop.facts["fixed"] is False
+    assert stop.facts["documents_link_read"] == TESTER_READ, stop.facts["documents_link_read"]
+    assert stop.facts["accounts_buttons_shown"] == 1
+    assert stop.facts["accounts_menu_pressed"] is True and stop.facts["menu_pressed"] is False
+    assert stop.facts["documents_link_shown"] is True
+    assert _pressed(pg) == ["accounts"] and fake.navigations == []
+
+
+def test_the_link_is_pressed_once_the_menu_takes_the_pointer(open_site, waits):
+    """The tester's page, the panel done opening by the first wait. The
+    link is pressed once, the Accounts button only the once before it."""
+    waits.during.append(_then(PANEL_OPENED))
+    fake = Site(_opening())
+    pg = open_site(fake)
+    way = {}
+    assert site.goto_documents(pg, way=way) is True
+    assert fake.navigations == [EDOCS], fake.navigations
+    assert _pressed(pg) == ["accounts", "documents"], _pressed(pg)
+    assert waits.calls == 1
+    assert way["attempts"] == 2 and way["cleared"] is True and way["covered_ms"] == 250, way
+    # What the cover was, which settles the tester's cause either way.
+    assert way["control_clickable"] is False and way["over_it_holds_control"] is False, way
+    assert way["over_it_in_menu"] is False and way["clip_at_point"] is False, way
+    # No key went down while the cover passed. Escape closes a menu.
+    assert 1 not in _keys(pg), _keys(pg)
+
+
+def test_a_cover_that_stays_stops_the_run_once_the_time_is_up(open_site, waits):
+    fake = Site(_opening())
+    pg = open_site(fake)
+    stop = _covered(pg)
+    facts = stop.facts
+    assert stop.after_a_press is False
+    assert stop.lines[0] == ("Something on the page covers the Statements & Documents link, "
+                             "so nothing was pressed.")
+    assert facts["attempts"] >= 2 and facts["covered_ms"] >= pressing.CLEAR_MS, facts
+    assert facts["cleared"] is False and "checked_again" not in facts
+    assert facts["control_clickable"] is False and facts["over_it_holds_control"] is False
+    assert facts["over_it_in_menu"] is False and facts["clip_at_point"] is False
+    assert waits.calls == pressing.CLEAR_MS // pressing.CLEAR_EVERY_MS
+    assert _pressed(pg) == ["accounts"] and fake.navigations == []
+    assert 1 not in _keys(pg), _keys(pg)
+
+
+def _as_the_file_keeps(value):
+    """Facts as a failure file keeps them, where an empty word is null."""
+    if isinstance(value, dict):
+        return {k: _as_the_file_keeps(v) for k, v in value.items()}
+    return None if value == "" else value
+
+
+@pytest.mark.parametrize("during", [[], [_then(
+    "document.querySelector('[data-name=accounts]').setAttribute('aria-expanded', 'false')",
+    PANEL_OPENED)]], ids=["the cover stays", "the menu says it closed"])
+def test_the_failure_file_keeps_every_fact_of_a_cover_that_stayed(open_site, waits, tmp_path,
+                                                                    during):
+    waits.during.extend(during)
+    fake = Site(_opening())
+    pg = open_site(fake)
+    stop = _covered(pg)
+    out = failure.write_failure(tmp_path, "run", stop.step, stop.reason, page=pg,
+                                provider="Wells Fargo", extra=stop.facts, say=lambda *a: None)
+    report = json.loads(Path(out).read_text(encoding="utf-8"))
+    # Every fact is kept, the file keeps twenty of them at most, and each
+    # new one is a word on the list.
+    assert len(stop.facts) <= 20, len(stop.facts)
+    assert report["extra"] == _as_the_file_keeps(stop.facts), (report["extra"], stop.facts)
+    for key in CLEAR_FACTS:
+        assert key in report["extra"], key
+    assert report["extra"]["cleared"] is False
+    assert report["extra"]["over_it"]["label"] == "Account Summary"
+    assert _pressed(pg) == ["accounts"] and fake.navigations == []
+
+
+def test_a_link_whose_words_change_while_the_cover_passes_is_never_pressed(open_site, waits):
+    """Its label still names it, so it is found again by its name, and it
+    shows Close an Account."""
+    waits.during.append(_then(
+        "document.querySelector('[data-name=documents]').textContent = 'Close an Account'",
+        PANEL_OPENED))
+    link = _link(NAME, ' aria-label="View Statements &amp; Documents"')
+    fake = Site(_opening(menu=link))
+    pg = open_site(fake)
+    assert pg.get_by_role("link", name=site.DOCUMENTS_LINK_RE).count() == 0
+    stop = _covered(pg)
+    assert stop.facts["checked_again"] is False and stop.facts["cleared"] is False
+    assert stop.facts["documents_link_read"]["words_refused"] is True
+    assert pg.get_by_role("link", name=site.DOCUMENTS_LINK_RE).count() == 1
+    assert _pressed(pg) == ["accounts"] and fake.navigations == []
+
+
+def test_a_link_of_its_name_that_does_not_show_put_before_it_is_passed_over(open_site, waits):
+    """The link is found again before the press, not pressed by where it
+    was first found, which is now another that does not show."""
+    waits.during.append(_then(
+        "const doc = document.querySelector('[data-name=documents]')",
+        "const other = document.createElement('a')",
+        "other.setAttribute('role', 'link')",
+        "other.dataset.name = 'wrong'",
+        "other.dataset.go = '/elsewhere/wrong?_x=T0K3N'",
+        "other.style.cssText = 'display: inline-block; width: 0; height: 0; overflow: hidden'",
+        "other.textContent = 'View Statements & Documents'",
+        "doc.parentNode.insertBefore(other, doc)",
+        PANEL_OPENED))
+    fake = Site(_opening())
+    pg = open_site(fake)
+    assert site.goto_documents(pg) is True
+    assert _pressed(pg) == ["accounts", "documents"], _pressed(pg)
+    assert fake.navigations == [EDOCS]
+
+
+def test_a_link_drawn_again_while_the_cover_passes_is_pressed_once(open_site, waits):
+    waits.during.append(_then(
+        "const doc = document.querySelector('[data-name=documents]')",
+        "doc.replaceWith(doc.cloneNode(true))",
+        PANEL_OPENED))
+    fake = Site(_opening())
+    pg = open_site(fake)
+    assert site.goto_documents(pg) is True
+    assert _pressed(pg) == ["accounts", "documents"], _pressed(pg)
+    assert fake.navigations == [EDOCS]
+
+
+def test_a_menu_that_says_it_closed_while_the_cover_passed_is_not_pressed_through(
+        open_site, waits):
+    """The link is left showing. The Accounts button is pressed once only,
+    and the link not at all."""
+    waits.during.append(_then(
+        "document.querySelector('[data-name=accounts]').setAttribute('aria-expanded', 'false')",
+        PANEL_OPENED))
+    fake = Site(_opening())
+    pg = open_site(fake)
+    stop = _covered(pg)
+    assert pg.locator("[data-name=documents]").is_visible()
+    assert stop.facts["checked_again"] is False and stop.facts["menu_still_open"] is False
+    assert _pressed(pg) == ["accounts"] and fake.navigations == []
+
+
+def test_a_menu_that_closes_as_the_page_scrolls_is_not_opened_again(open_site, waits):
+    """Each look brings the link to the middle of the window, which
+    scrolls the page here, and the page closes its menu on a scroll."""
+    closes = ("<script>addEventListener('scroll', () => {"
+              " const b = document.querySelector('[data-name=accounts]');"
+              " if (b.getAttribute('aria-expanded') !== 'true') return;"
+              " b.setAttribute('aria-expanded', 'false');"
+              " document.getElementById('accounts-panel').innerHTML = '';"
+              " window.closedOnScroll = true; });</script>")
+    waits.during.append(lambda page: (page.wait_for_function("() => window.closedOnScroll === true"),
+                                      page.evaluate(_then(PANEL_OPENED))))
+    fake = Site(_opening() + closes)
+    pg = open_site(fake)
+    stop = _covered(pg)
+    assert stop.facts["checked_again"] is False
+    assert pg.get_attribute("[data-name=accounts]", "aria-expanded") == "false"
+    assert _pressed(pg) == ["accounts"] and fake.navigations == []
+
+
+def test_a_tab_signed_out_while_the_cover_passes_says_so(open_site, waits):
+    waits.during.append(lambda page: page.goto(SIGNED_IN + "/session_timeout?_x=T0K3N"))
+    fake = Site(_opening())
+    pg = open_site(fake)
+    assert site.goto_documents(pg) is False
+    assert _pressed(pg) == ["accounts"], _pressed(pg)
+    assert EDOCS not in fake.navigations
+
+
+def test_a_link_that_shows_already_is_pressed_once_its_cover_passes(open_site, waits):
+    """No menu was opened, so none has to say it is still open."""
+    link = _link(NAME)
+    loading = ('<div id="loading" style="position: fixed; left: 0; top: 0; width: 100%; '
+               'height: 100%; background: #fff; z-index: 5">Loading</div>')
+    waits.during.append("() => document.getElementById('loading').remove()")
+    fake = Site(_page().replace("<main>", "<main>" + link) + loading)
+    pg = open_site(fake)
+    way = {}
+    assert site.goto_documents(pg, way=way) is True
+    assert _pressed(pg) == ["documents"], _pressed(pg)
+    assert fake.navigations == [EDOCS]
+    assert way["attempts"] == 2 and way["cleared"] is True
+    assert way["over_it_in_menu"] is None
+
+
+# A narrow window's Menu button, opening a drawer that holds the link, and
+# a box over the drawer while it opens.
+MENU_DRAWER = (
+    '<button data-name="menu" aria-expanded="false" onclick="this.setAttribute('
+    '\'aria-expanded\', \'true\'); document.getElementById(\'drawer\').hidden = false; '
+    'document.getElementById(\'drawer-cover\').hidden = false;">Menu</button>'
+    '<div id="drawer" hidden style="position: absolute; left: 0; top: 100px">%s</div>'
+    '<div id="drawer-cover" hidden style="position: absolute; left: 0; top: 90px; '
+    'width: 600px; height: 80px; background: #fff; z-index: 5"></div>' % _link(NAME))
+DRAWER_OPENED = "document.getElementById('drawer-cover').remove()"
+
+
+def test_the_link_a_menu_button_shows_is_pressed_once_its_cover_passes(open_site, waits):
+    waits.during.append(_then(DRAWER_OPENED))
+    fake = Site(_page(extra=MENU_DRAWER))
+    pg = open_site(fake)
+    assert site.goto_documents(pg) is True
+    assert _pressed(pg) == ["menu", "documents"], _pressed(pg)
+    assert fake.navigations == [EDOCS]
+
+
+def test_a_menu_button_that_says_it_closed_while_the_cover_passed_is_not_pressed_through(
+        open_site, waits):
+    waits.during.append(_then(
+        "document.querySelector('[data-name=menu]').setAttribute('aria-expanded', 'false')",
+        DRAWER_OPENED))
+    fake = Site(_page(extra=MENU_DRAWER))
+    pg = open_site(fake)
+    stop = _covered(pg)
+    assert pg.locator("[data-name=documents]").is_visible()
+    assert stop.facts["checked_again"] is False and stop.facts["menu_still_open"] is False
+    assert _pressed(pg) == ["menu"] and fake.navigations == []
+
+
+def test_a_covered_accounts_button_is_not_waited_for(open_site, waits):
+    """Only the link is waited for. The Accounts button under a cover stops
+    the run at once, as it always did."""
+    cover = ('<div data-name="cover" style="position:fixed;top:0;left:0;width:100%;'
+             'height:300px;background:#fff"></div>')
+    fake = Site(_page(extra=cover))
+    pg = open_site(fake)
+    stop = _covered(pg)
+    assert waits.calls == 0 and "attempts" not in stop.facts
+    assert _pressed(pg) == [] and fake.navigations == []
