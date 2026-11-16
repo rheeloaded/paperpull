@@ -69,6 +69,13 @@ SPEC = AppSpec(
     ],
     config_defaults={
         "pilot_online": 5,
+        # How hard a run leans on Amazon (#229, amazon_receipts DAY). The
+        # wait between orders is delay_min_seconds and delay_max_seconds,
+        # which the core sets for every app.
+        "orders_per_day": 200,
+        "break_every_orders": 25,
+        "break_min_minutes": 2,
+        "break_max_minutes": 5,
     },
     base_url="https://www.amazon.com/",
     rules_filename="category_rules.json",

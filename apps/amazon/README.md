@@ -110,12 +110,42 @@ All Amazon selectors/URLs live in **`amazon_site.py`** only. Run
 `python amazon_receipts.py --diagnose` to capture the current page structure
 into `Diagnostics\`, then repair that one file.
 
+## How hard it leans on Amazon
+
+A tester with more than 2,500 orders was locked out of their Amazon account
+partway through a first full run (#229), which opened every order one after
+another. So the app goes easier on Amazon now, though it cannot promise that
+Amazon will never mind.
+
+- **At most 200 orders a day** (`orders_per_day`, 0 for no limit). The count
+  covers every run of this account that opens orders, Continue, Pilot (Try
+  the newest few) and dry runs included, and is kept in `daily-limit.json`
+  in its folder. An order already downloaded costs nothing, and so does the
+  one order a Support report looks at. A day starts with the first order
+  opened and lasts 24 hours. At the limit a run stops before the next order
+  and says when it can carry on, and until then every run that opens
+  orders, and Check what's there, stops at once. Sign in and Support report
+  are never held. A first full run of 2,500 orders takes about two weeks of
+  daily runs.
+- **5 to 10 seconds between orders** (`delay_min_seconds` and
+  `delay_max_seconds`), half that between pages of the order list. An
+  install still on the old 2 to 4.5 seconds is read as 5 to 10.
+- **A break of 2 to 5 minutes every 25 orders** (`break_every_orders`,
+  `break_min_minutes` and `break_max_minutes`).
+- **A rest after a robot check.** A check met once that day has opened an
+  order stops a run that opens orders, or Check what's there, with no
+  prompt. Answer it in the browser window yourself, and the app rests the
+  account for 24 hours from the check. A check before the day's first order
+  is handled as it always was, and a Support report is never stopped this
+  way.
+
 ## Safety
 
 - Read-only on Amazon: never reorders, returns, cancels, reviews, or changes
   account settings. Forbidden controls are blocked by an explicit regex.
 - Stops and hands control to you on CAPTCHA/OTP, sign-out, or rate limiting.
-- Sequential processing with polite randomized delays.
+- Sequential processing, at most 200 orders a day with breaks between them
+  (see above).
 - Progress written atomically after every order; CSV/JSON backed up before
   rewrites; interrupted runs continue with `paperpull amazon resume`.
 - Existing PDFs are never overwritten (collisions get ` (2)`, ` (3)`, …).

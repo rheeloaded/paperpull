@@ -12,7 +12,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
 Every provider now says which country it is for, in the control panel,
 in PROVIDERS.md and on paperpull.net, and the panel's list starts on your
 own country. Setting up Amazon asks which of its 14 stores you shop at.
-Amazon reads a year of more than 600 orders to its end, PayPal reads a
+Amazon reads a year of more than 600 orders to its end and opens at most
+200 orders a day, PayPal reads a
 business statement list whose fields each come held in an object, and a
 support report keeps the error its listing met.
 
@@ -47,12 +48,28 @@ support report keeps the error its listing met.
   with those orders missed. It now reads up to 500 pages of a year. A year
   that still shows a next page there is not called whole. The run reads on
   through the older years, does what it was run to do with the orders it
-  did read, Run All and Get new documents downloading every one, and then
-  stops with a failure file rather than finish clean. The next run reads the
-  list again, takes anything new and stops at the same place. A support
+  did read, Run All and Get new documents downloading every one the day's
+  limit allows, and then stops with a failure file rather than finish
+  clean. The next run reads the list again, takes anything new and stops at
+  the same place. A support
   report is still written. A run with a start date goes on when the last
   page it read holds only orders older than that date, since every order in
   its scope is already read.
+- **Amazon opens at most 200 orders a day, and goes slower (#229).** A
+  tester with more than 2,500 orders was locked out of their Amazon account
+  partway through a first full run, which opened every order one after
+  another, two to four and a half seconds apart, about 5,000 order pages in
+  one sitting. A run now opens at most 200 orders a day, counted across
+  runs, stops before the next one and says when it can carry on, and until
+  then Get new documents, Continue, Try the newest few and Check what's
+  there stop at once, while Sign in and Support report still work. It
+  waits 5 to 10 seconds between orders and takes a break of a few minutes
+  every 25. After a robot check met once that day has opened an order, a
+  run that opens orders, or Check what's there, stops with no prompt and
+  rests the account for 24 hours. A Support report is never stopped this
+  way. The limit, the wait and the breaks are settings in the account's
+  config.json. An install made before keeps its own values, except that the
+  old 2 to 4.5 second wait is read as the new one.
 - **PayPal reads a business statement list whose fields each come held in
   an object (#224).** A tester's PayPal answered with every field of a
   report as an object holding only its value. The period was read only as
