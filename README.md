@@ -1100,10 +1100,11 @@ which the control panel shows the first time it opens. They say what
 PaperPull does and does not promise and limit liability, and take away
 nothing the license gives you.
 
-**Name.** PaperPull is a trade name of TNE Enterprises LLC, which publishes
-this project. The name is not part of the license. A modified version needs
-its own name, so that anything called PaperPull is this project. What that
-allows and what it doesn't is in [TRADEMARK.md](TRADEMARK.md).
+**Name.** TNE Labs publishes this project. PaperPull and TNE Labs are trade
+names of TNE Enterprises LLC. The PaperPull name is not part of the
+license. A modified version needs its own name, so that anything called
+PaperPull is this project. What that allows and what it doesn't is in
+[TRADEMARK.md](TRADEMARK.md).
 
 Copyright (c) 2026 PaperPull, a trade name of TNE Enterprises LLC, and the
 PaperPull contributors.

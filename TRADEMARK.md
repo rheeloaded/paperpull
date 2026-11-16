@@ -1,12 +1,12 @@
 # The PaperPull name
 
-PaperPull is a trade name of TNE Enterprises LLC, which publishes this
-project. The PaperPull name and logo identify this project, the one at
-github.com/rheeloaded/paperpull, and the releases published from it. The
-code is free software under the AGPL. The name is not part of that grant.
-The point is that when someone downloads something called PaperPull, it
-is this project, read-only and reviewed, and not a copy with a payment
-step added.
+TNE Labs publishes this project. PaperPull and TNE Labs are trade names
+of TNE Enterprises LLC. The PaperPull name and logo identify this
+project, the one at github.com/rheeloaded/paperpull, and the releases
+published from it. The code is free software under the AGPL. The name is
+not part of that grant. The point is that when someone downloads
+something called PaperPull, it is this project, read-only and reviewed,
+and not a copy with a payment step added.
 
 ## What you can do without asking
 
