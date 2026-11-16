@@ -24,9 +24,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   the start, the end or a part of an attribute.
 
 - **A receipt is set aside only on a run that saved one of its kind first
-  (#225).** Kroger stopped showing a tester's receipts, every one of his
-  244 purchases, and on the third separate day of runs each of them was set
-  aside as No Receipt Available for good and written into both CSVs, on
+  (#225).** Kroger stopped showing a tester's receipts, all 244 of their
+  purchases, and a third separate day of runs would have set each of them
+  aside as No Receipt Available for good and written it into both CSVs, on
   PaperPull Server, which has no Download again. The eleven receipt apps
   that set aside a purchase whose receipt page shows nothing (Amazon, Best
   Buy, Costco, eBay, Gap, GitHub, Home Depot, Kroger, Lowe's, Meijer and
