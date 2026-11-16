@@ -26,7 +26,7 @@ import storage  # noqa: F401  binds this provider's AppSpec
 import target_receipts
 from paperpull_core import receipt_pdf
 from paperpull_core.models import ONLINE, Item, Purchase, State
-from paperpull_core.testkit import text_pdf
+from paperpull_core.testkit import file_a_receipt, text_pdf
 
 APP_DIR = Path(__file__).resolve().parents[1]
 
@@ -87,6 +87,19 @@ def said(capsys):
     return " ".join(capsys.readouterr().out.split())
 
 
+def save_another(app):
+    """The run saves another order's receipt, through the app's own
+    _finish_pdf."""
+    other = Purchase(purchase_type=ONLINE, purchase_date="2026-09-03", order_number="102000333",
+                     total="$23.45", status="Delivered", store_info="Target",
+                     details_url="https://www.target.com/orders/102000333",
+                     items=[Item(name="Invented other thing", quantity="1", line_total="$23.45")])
+    filed = file_a_receipt(app, other, ["Order #102000333", "Placed Sep 3, 2026",
+                                        "Invented other thing  1  $23.45", "Total $23.45"],
+                           listed=other.to_dict())
+    assert filed.kept and filed.path.exists(), filed
+
+
 def test_a_page_that_showed_nothing_is_asked_for_again(page, tmp_path, capsys):
     page.set_content(NOTHING)
     p = purchase()
@@ -102,7 +115,10 @@ def test_a_page_that_showed_nothing_is_asked_for_again(page, tmp_path, capsys):
         assert rows(app) == 0, "nothing is written down for an order not saved"
         assert not a_run(tmp_path)._already_done(p), "the next run asks for it again"
 
+    # The third day's run saved another order's receipt first, as a run
+    # must before it sets one aside (#225).
     app = a_run(tmp_path)
+    save_another(app)
     app._handle_no_receipt(page, p)
     out = said(capsys)
     assert "on 3 of 3 separate days. It is set aside for review" in out, out

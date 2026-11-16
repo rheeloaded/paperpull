@@ -44,6 +44,9 @@ STORE_KEY = "705~00331~2026-05-22~014~6620"
 OTHER_KEY = "705~00331~2026-05-18~011~2087"
 STORE = "In-Store:" + STORE_KEY
 OTHER = "In-Store:" + OTHER_KEY
+# A purchase made after both, listed only once a test lists it.
+NEWER_KEY = "705~00331~2026-05-25~016~3104"
+NEWER = "In-Store:" + NEWER_KEY
 
 
 def record(key, when, total):
@@ -58,6 +61,7 @@ RECORDS = [record(STORE_KEY, "2026-05-22T15:20:00Z", "USD 31.62"),
 RECEIPTS = {
     STORE_KEY: ("May 22, 2026", "$31.62", "Invented Rolled Oats, 42 oz"),
     OTHER_KEY: ("May 18, 2026", "$12.09", "Invented Honeycrisp Apples"),
+    NEWER_KEY: ("May 25, 2026", "$8.47", "Invented Baby Spinach"),
 }
 
 
@@ -116,6 +120,7 @@ class FakeKroger:
     def reset(self):
         self.failing = {}           # key -> the page shown in place of its receipt
         self.seen = []
+        self.newer = []             # purchases listed besides RECORDS
 
 
 SITE = FakeKroger()
@@ -134,7 +139,7 @@ class _Handler(BaseHTTPRequestHandler):
             body, kind = LISTED, "text/html; charset=utf-8"
         elif url.path == site.SEARCH_API:
             body = json.dumps({"data": {"postOrderSearch": {
-                "data": RECORDS, "pageNo": 1, "pageSize": site.PAGE_SIZE, "isLastPage": True}}})
+                "data": RECORDS + SITE.newer, "pageNo": 1, "pageSize": site.PAGE_SIZE, "isLastPage": True}}})
             kind = "application/json"
         elif key in SITE.failing:
             body, kind = SITE.failing[key], "text/html; charset=utf-8"
@@ -297,25 +302,29 @@ def test_a_receipt_that_never_shows_is_set_aside_after_three_days(attached, tmp_
                                                                     monkeypatch):
     """Each run asks for it, and on the third day that finds nothing it is
     set aside, written down once and counted for review. The next run skips
-    it and says why, rather than calling it completed."""
+    it and says why, rather than calling it completed. That third day's run
+    saved a newer purchase's receipt before it, as a run must before it
+    sets one aside (#225)."""
     SITE.failing = {OTHER_KEY: COULD_NOT_LOAD}
     for n in (1, 2):
         said, panel = run_all(tmp_path, attached, capsys, day=n, monkeypatch=monkeypatch)
         assert "on %d of 3 separate days. It is tried again next run." % n in said, said
         assert receipts_opened() == ([OTHER_KEY, STORE_KEY] if n == 1 else [OTHER_KEY])
+    SITE.newer = [record(NEWER_KEY, "2026-05-25T09:05:00Z", "USD 8.47")]
     said, panel = run_all(tmp_path, attached, capsys, day=3, monkeypatch=monkeypatch)
     assert ("on 3 of 3 separate days. It is set aside for review and not asked for "
             "again.") in said, said
     assert panel["failed"] == 0 and panel["manual_review"] >= 1, panel
     assert progress(tmp_path)[OTHER]["state"] == "No Receipt Available"
     assert rows_naming(tmp_path, OTHER) == {"receipt_index_csv": 1, "order_history_csv": 1}
+    assert receipts_opened() == sorted([NEWER_KEY, OTHER_KEY]), said
 
     said, panel = run_all(tmp_path, attached, capsys, day=4, monkeypatch=monkeypatch)
     assert receipts_opened() == [], said
     assert ("Its receipt did not show on 3 separate days, so it is set aside for review "
             "and skipped.") in said, said
     assert rows_naming(tmp_path, OTHER) == {"receipt_index_csv": 1, "order_history_csv": 1}
-    assert downloaded(tmp_path) == [STORE]
+    assert downloaded(tmp_path) == sorted([STORE, NEWER])
 
 
 NOT_SET_ASIDE = ("Kroger could not load this receipt, on 3 separate days. It is not set aside, "
@@ -345,7 +354,9 @@ def test_a_run_that_saved_no_receipt_sets_none_aside(attached, tmp_path, capsys,
     assert "set aside for review" not in said, said
     assert said.count(NOT_SET_ASIDE) == 2, said
     assert panel["failed"] == 2 and panel["manual_review"] == 0, panel
-    assert "Failed: 2" in said and "No printable receipt: 0" in said, said
+    summary = " ".join(storage.Paths(tmp_path / "out").run_summary.read_text(
+        encoding="utf-8").split())
+    assert "Failed: 2" in summary and "No printable receipt: 0" in summary, summary
 
     said, panel = run_all(tmp_path, attached, capsys, day=4, monkeypatch=monkeypatch)
     assert receipts_opened() == sorted([OTHER_KEY, STORE_KEY]), said

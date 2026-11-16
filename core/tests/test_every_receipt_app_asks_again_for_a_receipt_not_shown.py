@@ -360,8 +360,9 @@ def test_a_page_that_did_not_show_the_receipt_is_asked_for_again(app, method, tm
         # the end, so rows written now would stand beside those, once per try.
         assert not written_down(inst), app.name
 
-    # The third run that finds nothing sets it aside, and writes it down once.
-    inst = look(mod, tmp_path, method)
+    # The third run that finds nothing, after it saved another purchase's
+    # receipt, sets it aside, and writes it down once (#225).
+    inst = look(mod, tmp_path, method, first=save_another)
     said = " ".join(capsys.readouterr().out.split())
     assert "on 3 of 3 separate days. It is set aside for review" in said, said
     assert (inst.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
@@ -462,8 +463,9 @@ def test_a_purchase_written_down_before_is_not_written_down_again(app, method, t
     assert before >= 2
     rec = {"state": State.NO_RECEIPT_AVAILABLE.value, "notes": sorted(OLDER_VERSIONS_WROTE)[0]}
     look(mod, tmp_path, method, rec=rec)
-    for _ in range(2):
-        inst = look(mod, tmp_path, method)
+    # The third run saved another purchase's receipt first (#225).
+    for first in (None, save_another):
+        inst = look(mod, tmp_path, method, first=first)
     capsys.readouterr()
     assert (inst.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
     assert written_down(inst) == before, app.name
@@ -481,20 +483,28 @@ def test_a_history_that_cannot_be_written_leaves_it_to_the_next_run(app, method,
     for _ in range(2):
         look(mod, tmp_path, method)
     real = mod.App._write_csv_rows
+    asked = []
 
     def locked(self, *a, **k):
+        asked.append(a)
         raise PermissionError("the file is open in another program")
 
-    monkeypatch.setattr(mod.App, "_write_csv_rows", locked)
+    def saved_then_locked(inst):
+        # Each of the two runs saved another purchase's receipt first, so
+        # each sets the purchase aside if it can write it down (#225).
+        save_another(inst)
+        monkeypatch.setattr(mod.App, "_write_csv_rows", locked)
+
     # Raised to the run, which records a failure, or caught by the app's own
     # step, which does the same (GitHub, Meijer).
     try:
-        look(mod, tmp_path, method)
+        look(mod, tmp_path, method, first=saved_then_locked)
     except PermissionError:
         pass
+    assert asked, "the third run tried to write it down"
     assert not done_already(mod, tmp_path, p), app.name
     monkeypatch.setattr(mod.App, "_write_csv_rows", real)
-    inst = look(mod, tmp_path, method)
+    inst = look(mod, tmp_path, method, first=save_another)
     capsys.readouterr()
     assert (inst.progress.get(p.key) or {}).get("state") == State.NO_RECEIPT_AVAILABLE.value
     assert written_down(inst) >= 2
