@@ -200,6 +200,18 @@ RATE_LIMIT_MARKERS = [
     "temporarily blocked", "http error 429", "request was throttled",
 ]
 
+# The SECURITY_CHALLENGE_MARKERS that are a sign-in asking for a code, not a
+# check that this is a person. Meeting one is a sign-in, so it rests nothing
+# (App._rest_after_a_check, #229).
+SIGN_IN_MARKERS = ("authentication required", "two-step verification",
+                   "enter the one time password", "enter the otp")
+
+
+def is_robot_check(said: str) -> bool:
+    """Whether what detect_security_challenge said is a robot check or a
+    rate limit page, rather than a sign-in asking for a code."""
+    return bool(said) and not any(m in said.lower() for m in SIGN_IN_MARKERS)
+
 # ---------------------------------------------------------------------------
 # Fallback CSS selectors (repair here after --diagnose)
 # ---------------------------------------------------------------------------

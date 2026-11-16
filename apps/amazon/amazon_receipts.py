@@ -26,18 +26,22 @@ from paperpull_core import listing
 from paperpull_core import not_shown
 from paperpull_core import renaming
 from paperpull_core import saved_copy
+from paperpull_core.characters import whole_json
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
-                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
+                                          after_sign_in, lists_what_it_saved, not_signed_in, report_run_result,
+                                          under_panel)
 
 import argparse
+import functools
+import json
 import logging
 import random
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -48,7 +52,8 @@ from paperpull_core.models import (ONLINE, Item, Purchase, State)
 from paperpull_core.page_check import NAMES_NONE
 from paperpull_core.words import shape_label, shape_tree, words_for, write_shaped
 from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
-                     RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, unique_path)
+                     RECEIPT_INDEX_COLUMNS, atomic_write_json, atomic_write_text, build_pdf_filename,
+                     load_config, now_iso, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("amazon_receipts")
@@ -64,6 +69,95 @@ _PART = re.compile(r"(\d+) of (\d+)")
 # what it did read and then stops rather than finish (cmd_discover and
 # _stop_if_cut_short).
 YEAR_PAGES = 500
+
+# How hard a run leans on Amazon (#229). A tester with more than 2,500
+# orders was locked out of their Amazon account partway through a first full
+# run, which opened every order one after another, two to four and a half
+# seconds apart, with no limit on a run or a day. So a run opens at most
+# orders_per_day orders a day, counted in the account's own folder
+# (DAY_FILE), waits longer between orders, takes a break every
+# break_every_orders orders, and after a robot check met once that day has
+# opened an order, rests the account for DAY (App._count_an_order,
+# _hold_while_the_day_is_spent, _rest_after_a_check). A day starts at the
+# first order opened when none is open, and lasts DAY.
+DAY = timedelta(hours=24)
+DAY_FILE = "daily-limit.json"
+ORDERS_PER_DAY = 200
+BREAK_EVERY = 25
+BREAK_MINUTES = (2.0, 5.0)
+# The wait between orders every install had until now, 2.0 to 4.5 seconds
+# in its config.json, or 2.0 to 4.0 from the core when the keys are not
+# there. Either is read as the new wait, which the template now says. Any
+# other value is the person's own and is used as set, so 0 and 0 never wait.
+OLD_WAITS = ((2.0, 4.5), (2.0, 4.0))
+NEW_WAIT = (5.0, 10.0)
+# How often a break says how long it has left. A run under the panel is
+# read line by line, and on PaperPull Server a proxy may close a stream
+# that stays quiet much longer, which ends the run.
+BREAK_TICK_SECONDS = 30
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December")
+
+# Every wait of the pace sleeps through this one name.
+_sleep = time.sleep
+
+
+def _now() -> datetime:
+    """Now, as an aware time, so a day is always 24 hours of real time."""
+    return datetime.now(timezone.utc)
+
+
+def _moment(text) -> Optional[datetime]:
+    """A time as DAY_FILE holds it, or None for anything else. One written
+    with no zone is taken as UTC, as this writes them in UTC."""
+    if not isinstance(text, str):
+        return None
+    try:
+        at = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _clock(at: datetime) -> str:
+    """A moment as this computer's clock shows it, 9:04 PM, rounded up to
+    the minute, so the time said is never before the moment itself."""
+    local = (at + timedelta(seconds=59, microseconds=999999)).astimezone()
+    return "%d:%02d %s" % (local.hour % 12 or 12, local.minute, "AM" if local.hour < 12 else "PM")
+
+
+def _when(at: datetime) -> str:
+    """A moment as this computer's clock and calendar show it, 9:04 PM on
+    Monday, November 16."""
+    local = (at + timedelta(seconds=59, microseconds=999999)).astimezone()
+    return "%s on %s, %s %d" % (_clock(at), _WEEKDAYS[local.weekday()],
+                                _MONTHS[local.month - 1], local.day)
+
+
+def _orders(n: int) -> str:
+    return "%d Amazon order%s" % (n, "" if n == 1 else "s")
+
+
+def _number(x: float) -> str:
+    return "%g" % x
+
+
+def _held_when_run_alone(cmd_discover):
+    """Check what's there, run on its own, is held while the account's day
+    is spent or it rests (#229), before its listing begins, so a held run
+    leaves the listing's note as it was. It is wrapped around cmd_discover
+    because a listing notes that it began before it does anything else
+    (core test_no_receipt_resume_is_clean_after_a_list_it_did_not_read), and
+    a held run has begun nothing. The runs that list first and then
+    download are held where they begin, and a Support report, which lists
+    too, is never held."""
+    @functools.wraps(cmd_discover)
+    def held(self, *args, **kwargs):
+        if self.stats.get("mode") == "discover":
+            self._hold_while_the_day_is_spent()
+        return cmd_discover(self, *args, **kwargs)
+    return held
 
 
 def _place(part) -> Optional[tuple]:
@@ -180,10 +274,273 @@ class App:
                                       logging.StreamHandler(sys.stdout)])
         logging.getLogger("pypdf").setLevel(logging.ERROR)
 
+    # -- how hard a run leans on Amazon (#229) --------------------------------
+
+    def _setting(self, key: str, default: float) -> float:
+        """A count or a length of time from the config, never below 0, or its
+        default when it is not a number."""
+        value = self.config.get(key, default)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value != value:
+            return default
+        return max(value, 0)
+
+    def _limit(self) -> int:
+        """How many orders a day this account opens at most, 0 for no limit."""
+        return int(self._setting("orders_per_day", ORDERS_PER_DAY))
+
+    def _break_minutes(self) -> tuple:
+        lo = self._setting("break_min_minutes", BREAK_MINUTES[0])
+        hi = self._setting("break_max_minutes", BREAK_MINUTES[1])
+        return (lo, hi) if lo <= hi else (hi, lo)
+
+    def _wait_between_orders(self) -> tuple:
+        """The seconds between orders, low and high, as set, with the old
+        defaults read as the new (OLD_WAITS)."""
+        lo = float(self.config["delay_min_seconds"])
+        hi = float(self.config["delay_max_seconds"])
+        return NEW_WAIT if (lo, hi) in OLD_WAITS else (lo, hi)
+
     def _delay(self, factor: float = 1.0):
-        lo = float(self.config["delay_min_seconds"]) * factor
-        hi = float(self.config["delay_max_seconds"]) * factor
-        time.sleep(random.uniform(lo, hi))
+        lo, hi = self._wait_between_orders()
+        _sleep(random.uniform(lo * factor, hi * factor))
+
+    def _day_file(self) -> Path:
+        return self.paths.root / DAY_FILE
+
+    def _read_day(self) -> dict:
+        """This account's day as DAY_FILE holds it, when it started, how many
+        orders it has opened and when a rest after a check ends. A file that
+        is not there is no day open. One this cannot read is said, and is no
+        day open either, rather than a hold nobody can clear."""
+        day = {"started": None, "opened": 0, "rest_until": None}
+        try:
+            got = whole_json(json.loads(self._day_file().read_text(encoding="utf-8")))
+        except FileNotFoundError:
+            return day
+        except (OSError, ValueError):
+            got = None
+        if isinstance(got, dict):
+            started, opened, rest = (_moment(got.get("day_started")), got.get("orders_opened"),
+                                     got.get("rest_until"))
+            counted = isinstance(opened, int) and not isinstance(opened, bool) and opened >= 0
+            # A day open with its count, or no day open (after one ended
+            # while a rest goes on), and a rest that is a time or none.
+            if ((started is not None and counted)
+                    or (got.get("day_started") is None and opened == 0)) \
+                    and (rest is None or _moment(rest) is not None):
+                day.update(started=started, opened=opened if started else 0,
+                           rest_until=_moment(rest))
+                return day
+        print(f"The file counting this account's Amazon orders, {DAY_FILE}, could not be "
+              "read, so a new day starts.")
+        return day
+
+    def _write_day(self, day: dict) -> None:
+        atomic_write_json(self._day_file(), {
+            "day_started": day["started"].isoformat() if day["started"] else None,
+            "orders_opened": day["opened"],
+            "rest_until": day["rest_until"].isoformat() if day["rest_until"] else None,
+        })
+
+    def _day_now(self):
+        """Now, and this account's day as of now. A day DAY old is over, and
+        so is a rest that has ended. A day that began after now, or a rest
+        that ends more than DAY from now, is a clock that went back, and is
+        taken as beginning now, or ending DAY from now, so no hold outlasts
+        a day. What changed is written back."""
+        now = _now()
+        day = self._read_day()
+        was = dict(day)
+        if day["started"] and day["started"] > now:
+            day["started"] = now
+        if day["started"] and now - day["started"] >= DAY:
+            day.update(started=None, opened=0)
+        if day["rest_until"] and day["rest_until"] - now > DAY:
+            day["rest_until"] = now + DAY
+        if day["rest_until"] and day["rest_until"] <= now:
+            day["rest_until"] = None
+        if day != was and self._day_file().exists():
+            # Only a tidying, which the next write makes anyway, so a write
+            # that fails here stops nothing. It is called from inside the
+            # check of a page, whose callers take an exception as a page
+            # that would not open (#229).
+            try:
+                self._write_day(day)
+            except OSError as e:
+                log.warning("%s could not be written (%s)", DAY_FILE, type(e).__name__)
+        return now, day
+
+    def _held_until(self, day: dict) -> Optional[datetime]:
+        """When this account may open an order again, or None when it may
+        now. The later of a rest after a check and the end of a spent day."""
+        times = [day["rest_until"]] if day["rest_until"] else []
+        limit = self._limit()
+        if limit and day["started"] and day["opened"] >= limit:
+            times.append(day["started"] + DAY)
+        return max(times) if times else None
+
+    def _again(self) -> str:
+        """What carries on after a stop for the day, in the words the core's
+        own last line uses for this run (run_reporting.report_run_result)
+        and the panel's button. Check what's there downloads nothing, so it
+        is run again rather than continued. Every other run is continued."""
+        if self.stats.get("mode") == "discover":
+            return "Check what's there" if under_panel() else "Discover"
+        return "Continue" if under_panel() else "Resume"
+
+    @staticmethod
+    def _resting(day: dict, until: datetime) -> bool:
+        """Whether what holds the account until `until` is a rest after a
+        check, rather than the day's limit."""
+        return bool(day["rest_until"] and day["rest_until"] >= until)
+
+    def _say_why_held(self, day: dict, until: datetime) -> None:
+        """Why the account may open no order until `until`, a rest after a
+        check or the day's limit, whichever ends later."""
+        if self._resting(day, until):
+            print("\n!! Amazon asked for a check after this account's orders were opened,")
+            print(f"   so this app rests the account until after {_when(until)}.")
+        else:
+            print(f"\n!! This app opens at most {_orders(self._limit())} a day, to go easy on")
+            print(f"   your account, and {day['opened']} {'has' if day['opened'] == 1 else 'have'} "
+                  f"been opened since {_when(day['started'])}.")
+
+    @staticmethod
+    def _say_which_runs_wait() -> None:
+        """Which runs a spent day or a rest holds, by the names of where the
+        run was started, the panel's buttons or the flags."""
+        if under_panel():
+            print("   Get new documents, Continue, Try the newest few and Check what's")
+            print("   there stop at once until then, while Sign in and Support report")
+            print("   still work.")
+        else:
+            print("   --all, --resume, --pilot, --dry-run and --discover stop at once")
+            print("   until then, while --login and --diagnose still work.")
+
+    def _saved_progress(self) -> bool:
+        """Save the run's progress as a stop does, and whether that worked.
+        A stop says its progress is saved only when it is, and goes on as a
+        stop either way."""
+        try:
+            self.progress.save(backup=True)
+            return True
+        except OSError:
+            return False
+
+    def _hold_while_the_day_is_spent(self) -> None:
+        """Stop a run that lists or opens orders, before it asks the browser
+        for anything, while this account's day has opened all it may or it
+        rests after a check. The run's summary keeps the list of new files
+        as the last download run wrote it."""
+        now, day = self._day_now()
+        until = self._held_until(day)
+        if until is None:
+            return
+        self._say_why_held(day, until)
+        print("   Nothing was asked of Amazon.")
+        self._say_which_runs_wait()
+        print(f"   {self._again()} after {_when(until)} carries on.")
+        self.stats["held"] = 1
+        raise SystemExit(0)
+
+    def _count_an_order(self, remaining: List[Purchase]) -> None:
+        """Count the order about to be opened in this account's day, saved
+        before its page opens, so a run that stops or fails on it has used
+        it. Or stop the run here, with the order unopened, when the day has
+        opened all it may or the account rests after a check. `remaining` is
+        this order and those after it in the run."""
+        now, day = self._day_now()
+        until = self._held_until(day)
+        if until is not None:
+            waiting = sum(1 for p in remaining if not self._already_done(p))
+            saved = self._saved_progress()
+            self._say_why_held(day, until)
+            print(f"   So this run stops here. {waiting} {'order waits' if waiting == 1 else 'orders wait'}, "
+                  f"and {self._again()} after")
+            print(f"   {_when(until)} carries on with {'it' if waiting == 1 else 'them'}. "
+                  "Before then it stops at once.")
+            if saved:
+                print("   Progress is saved.")
+            if not self._resting(day, until):
+                print("   The limit is orders_per_day in this account's config.json, 0 for none.")
+            raise SystemExit(0)
+        if day["started"] is None:
+            day["started"] = now
+        day["opened"] += 1
+        try:
+            self._write_day(day)
+        except OSError as e:
+            saved = self._saved_progress()
+            print(f"\n!! This account's count of Amazon orders could not be saved in {DAY_FILE}")
+            print(f"   ({type(e).__name__}), so this run stops rather than open an order it")
+            print("   cannot count." + (" Progress is saved." if saved else ""))
+            raise SystemExit(0)
+
+    def _rest_after_a_check(self) -> None:
+        """After a robot check or a rate limit page met once this account's
+        day has opened an order, stop with no prompt and rest the account for
+        DAY from now. Going on right after one is how an account gets locked
+        (#229). A check before the day's first order, or in a run that opens
+        no order at all, is answered as it always was."""
+        if self.stats.get("mode") not in ("discover", "pilot", "all", "resume", "dry-run"):
+            return
+        now, day = self._day_now()
+        if not day["opened"]:
+            return
+        day["rest_until"] = now + DAY
+        # The stop never waits on a save. A write that fails here would
+        # otherwise reach process_one as a page that would not open, and
+        # the run would go on to the next orders.
+        try:
+            self._write_day(day)
+            kept = True
+        except OSError:
+            kept = False
+        saved = self._saved_progress()
+        print(f"   Amazon asked for this with {_orders(day['opened'])} opened since")
+        print(f"   {_when(day['started'])}. Answer it in the browser window yourself,")
+        print("   as this app will NOT attempt to bypass it. Then give Amazon a rest.")
+        print("   Going on right after a check is how an account gets locked, so this")
+        print(f"   app rests this account until after {_when(day['rest_until'])}.")
+        if kept:
+            self._say_which_runs_wait()
+        else:
+            print(f"   That could not be saved in {DAY_FILE}, so this app cannot hold the")
+            print("   next run. Please leave Amazon alone until then yourself.")
+        print(f"   {self._again()} after that carries on." + (" Progress is saved." if saved else ""))
+        raise SystemExit(0)
+
+    def _say_the_pace(self) -> None:
+        lo, hi = self._wait_between_orders()
+        every = int(self._setting("break_every_orders", BREAK_EVERY))
+        blo, bhi = self._break_minutes()
+        limit = self._limit()
+        wait = ("%s to %s seconds between orders" % (_number(lo), _number(hi))
+                if hi > 0 else "no wait between orders")
+        rest = ("a %s to %s minute break every %d orders" % (_number(blo), _number(bhi), every)
+                if every and bhi > 0 else "no breaks")
+        cap = "at most %s a day" % _orders(limit) if limit else "no daily limit"
+        print(f"\nThis run's pace is {wait}, {rest}, and {cap}.")
+
+    def _take_a_break(self, opened: int) -> None:
+        """A break of break_min_minutes to break_max_minutes, saying how long
+        it has left every BREAK_TICK_SECONDS."""
+        lo, hi = self._break_minutes()
+        seconds = random.uniform(lo, hi) * 60
+        if seconds <= 0:
+            return
+        back = _now() + timedelta(seconds=seconds)
+        minutes = max(1, round(seconds / 60))
+        print(f"\nA break of about {minutes} minute{'s' if minutes != 1 else ''} after "
+              f"{opened} orders, to go easy on Amazon. It carries on by itself at "
+              f"{_clock(back)}.", flush=True)
+        left = seconds
+        while left > 0:
+            step = min(BREAK_TICK_SECONDS, left)
+            _sleep(step)
+            left -= step
+            if left > 0:
+                print(f"  On a break, {int(left // 60)}:{int(left % 60):02d} left.", flush=True)
 
     def browser(self):
         """Return the supervised browser context.
@@ -288,8 +645,14 @@ class App:
         # about it. Progress is already saved either way (#48).
         challenge = site.detect_security_challenge(page)
         if challenge:
-            self.progress.save(backup=True)
             print(f"\n!! {challenge}")
+            # Once the day has opened an order, a robot check stops the run
+            # with no prompt and rests the account (#229). Before the save
+            # below, which may fail, since this runs inside process_one,
+            # which takes an exception as a page that would not open.
+            if site.is_robot_check(challenge):
+                self._rest_after_a_check()
+            self.progress.save(backup=True)
             print("Processing stopped. Please resolve the challenge yourself in the")
             print("browser window. I will NOT attempt to bypass it.")
             if browser_launcher.ask_or_none(
@@ -455,6 +818,7 @@ class App:
                      scope.describe((first, last)), len(years))
         return years
 
+    @_held_when_run_alone
     def cmd_discover(self, types: Optional[List[str]] = None, quiet: bool = False,
                      finish: bool = True) -> dict:
         """Discovery pass. Amazon paginates by year + startIndex (10/page).
@@ -663,6 +1027,10 @@ class App:
 
     def process_purchases(self, purchases: List[Purchase], dry_run: bool = False):
         page = self.page()
+        every = int(self._setting("break_every_orders", BREAK_EVERY))
+        opened = 0
+        if any(not self._already_done(p) for p in purchases):
+            self._say_the_pace()
         for i, purchase in enumerate(purchases, 1):
             print(f"\n[{i}/{len(purchases)}] {purchase.purchase_type} "
                   f"{purchase.purchase_date or '(date unknown)'} "
@@ -672,6 +1040,9 @@ class App:
                                         "  Already completed and PDF verified - skipping."))
                 self.stats["skipped_completed"] += 1
                 continue
+            # Counted before its page opens, or the run stops here (#229).
+            self._count_an_order(purchases[i - 1:])
+            opened += 1
             # Which document the run is on, so a failure file says how far
             # it got and whether it ever reached a second one.
             try:
@@ -689,6 +1060,12 @@ class App:
                 self._record_state(purchase, State.FAILED, notes=f"Unhandled error: {e}")
                 self.stats["failed"] += 1
             self._delay()
+            # A break every so many orders this run opened, none after the
+            # last and none just before the day's limit stops the run.
+            if every and opened % every == 0 \
+                    and any(not self._already_done(p) for p in purchases[i:]) \
+                    and self._held_until(self._day_now()[1]) is None:
+                self._take_a_break(opened)
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
         self._note_done_before(purchase)
@@ -1300,6 +1677,7 @@ class App:
 
     def cmd_pilot(self):
         self.stats["mode"] = "pilot"
+        self._hold_while_the_day_is_spent()
         print("PILOT MODE - limited supervised test run.")
         self.cmd_discover(types=[ONLINE], quiet=False, finish=False)
         selected: List[Purchase] = self._select_purchases(
@@ -1356,6 +1734,7 @@ class App:
 
     def cmd_run(self, types: List[str], mode_name: str):
         self.stats["mode"] = mode_name
+        self._hold_while_the_day_is_spent()
         if mode_name == "all" and not self.args.yes:
             print("This will download your FULL available Amazon purchase history")
             print(f"({', '.join(types)}). Type YES to continue:")
@@ -1372,6 +1751,7 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        self._hold_while_the_day_is_spent()
         # Resume works from the purchases a Discover found. After one that
         # stopped before the list was read whole, that is some of them or none,
         # and Resume finished clean with the rest never looked for. So the list
@@ -1731,7 +2111,8 @@ class App:
         # import into paperless-ngx, and safe to ignore/delete afterward.
         # Not for Verify or a dry run, which save nothing and leave the
         # list as the last download run wrote it (lists_what_it_saved).
-        if lists_what_it_saved(s, self.args):
+        # Nor for a run held for the day before it opened anything (#229).
+        if lists_what_it_saved(s, self.args) and not s.get("held"):
             atomic_write_text(
                 self.paths.root / "new-this-run.txt",
                 f"# {len(new_files)} file(s) downloaded on this run "

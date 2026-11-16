@@ -9,7 +9,11 @@
   "cdp_url": "http://127.0.0.1:9223",
   "min_pdf_bytes": 3000,
   "max_path_length": 240,
-  "delay_min_seconds": 2.0,
-  "delay_max_seconds": 4.5,
+  "delay_min_seconds": 5.0,
+  "delay_max_seconds": 10.0,
+  "orders_per_day": 200,
+  "break_every_orders": 25,
+  "break_min_minutes": 2,
+  "break_max_minutes": 5,
   "pilot_online": 5
 }
