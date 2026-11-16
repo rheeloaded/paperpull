@@ -19,6 +19,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
@@ -587,9 +588,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
-            return bool(pdf_path and Path(pdf_path).exists()
-                        and receipt_pdf.validate_pdf(
-                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(pdf_path, self.config["min_pdf_bytes"])
         return False
 
     # -- processing core ----------------------------------------------------
@@ -955,8 +954,8 @@ class App:
                   f"[confidence: {rec.get('confidence','')}]")
             print(f"    PDF:        {fn or '(none)'}")
             if fn:
-                path = Path(rec.get("pdf_path", ""))
-                exists = path.exists()
+                path = Path(shared_folder.path_text(rec.get("pdf_path")))
+                exists = shared_folder.file_there(path)
                 print(f"    PDF exists: {exists}  "
                       f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
                 if not exists:
@@ -1236,7 +1235,7 @@ class App:
                     page.locator("body").inner_text(timeout=8000))][:20]
                 info["number_matches"] = site.details_number(page) == p.order_number
                 shot = self.paths.diagnostics / f"diagnose-{ptype}.png"
-                page.screenshot(path=str(shot), full_page=True)
+                shared_folder.write_bytes(str(shot), page.screenshot(full_page=True))
                 info["screenshot"] = str(shot)
             except Exception as e:
                 info["error"] = str(e)

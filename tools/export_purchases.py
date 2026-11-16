@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import re
 import sys
 from collections import OrderedDict
@@ -38,6 +39,7 @@ _CORE = Path(__file__).resolve().parents[1] / "core"
 if (_CORE / "paperpull_core").is_dir() and str(_CORE) not in sys.path:
     sys.path.insert(0, str(_CORE))
 try:
+    from paperpull_core import shared_folder  # noqa: E402
     from paperpull_core.sheets import csv_value, keep_text, read_stored, xlsx_value  # noqa: E402
 except ImportError as e:
     raise ImportError("export_purchases.py needs PaperPull's core folder beside its tools folder") from e
@@ -124,7 +126,9 @@ def providers(root: Path) -> List[dict]:
 def load_purchases(provider: str, path: Path) -> List[dict]:
     """One dict per line item, keyed by the output column names."""
     rows = []
-    with open(path, encoding="utf-8-sig", newline="") as fh:
+    # A plain file of its own, never a pipe, which held the panel, where this
+    # export runs, for good, and on PaperPull Server never through a link.
+    with io.StringIO(shared_folder.read_text(path, "utf-8-sig"), newline="") as fh:
         for raw in csv.DictReader(fh):
             row = {}
             for out, src in COLUMNS:
@@ -194,7 +198,8 @@ def sort_newest_first(rows: List[dict]) -> List[dict]:
 def write_csv(path: Path, purchases: List[dict]) -> None:
     """Item names, notes and the rest are written as text a spreadsheet will
     not take for a formula (paperpull_core.sheets). Amounts are numbers."""
-    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+    # On PaperPull Server never written through a link left at its name.
+    with shared_folder.open_to_write(path, "w", encoding="utf-8-sig", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=[c for c, _ in COLUMNS])
         w.writeheader()
         for p in purchases:
@@ -234,7 +239,8 @@ def write_xlsx(path: Path, purchases: List[dict], orders: List[dict], summary: L
     sheet(wb.create_sheet("Orders"), ORDER_COLUMNS, orders,
           {"Order Number": 22, "Category": 26, "Receipt PDF": 44, "Provider": 11, "Date": 11})
     sheet(wb.create_sheet("Summary"), ["Provider", "Year", "Orders", "Total"], summary, {})
-    wb.save(path)
+    with shared_folder.open_to_write(path, "wb") as fh:
+        wb.save(fh)
 
 
 def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = None,

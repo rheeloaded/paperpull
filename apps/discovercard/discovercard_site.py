@@ -94,6 +94,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.urls import host_matches, host_of
 from paperpull_core import controls as _controls
@@ -937,7 +938,7 @@ def discovercard_collect(page) -> Listed:
 def _write_if_pdf(data: bytes, out_path: Path) -> bool:
     if not data or b"%PDF-" not in data[:1024]:
         return False
-    out_path.write_bytes(data)
+    shared_folder.write_bytes(out_path, data)
     return True
 
 

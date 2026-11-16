@@ -82,6 +82,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.urls import host_matches, host_of
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
@@ -1634,7 +1635,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             if _take_download(downloads[0], dl_dir, seen, out_path, zip_ok=True):
                 return True
         if got.get("body"):
-            out_path.write_bytes(got["body"])
+            shared_folder.write_bytes(out_path, got["body"])
             return True
         if got.get("refetch"):
             try:
@@ -1645,7 +1646,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                                                 timeout=60000)
                 body = intake.body(resp) if resp.ok else b""
                 if _is_document(body, zip_ok=True):
-                    out_path.write_bytes(body)
+                    shared_folder.write_bytes(out_path, body)
                     return True
             except Exception:
                 pass
@@ -1657,7 +1658,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             data, name = made
             if name and not named_right(name):
                 return False
-            out_path.write_bytes(data)
+            shared_folder.write_bytes(out_path, data)
             if trace is not None:
                 trace.append({"note": "the page made the document itself", "named": bool(name)})
             return True
@@ -1859,7 +1860,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         if is_safe_url(target):
             body = _fetch_pdf(page, target, zip_ok=True)
             if body:
-                out_path.write_bytes(body)
+                shared_folder.write_bytes(out_path, body)
                 return True
             if trace is not None:
                 trace.append({"note": "the control's own link did not answer with a PDF",

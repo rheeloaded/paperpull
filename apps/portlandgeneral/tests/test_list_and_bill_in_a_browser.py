@@ -94,8 +94,11 @@ class FakePge:
         # Whether the page asks getAccountInfo before its list.
         self.info_first = True
         # What the API answers with a redirect to the sign-in page: "list"
-        # for a page of the list the app asks, "pdf" for a bill.
+        # for a page of the list the app asks, "pdf" for a bill, and "pdf,
+        # then list" for a bill and every page of the list asked after it,
+        # a session that ends as a bill is asked for.
         self.redirect = ""
+        self.ended = False
 
 
 SITE = FakePge()
@@ -173,7 +176,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "totalAccounts": SITE.accounts, "hasInactiveAccounts": False}}}})
         if path == "/pge-graphql" and body.get("operationName") == "getAccountDetails":
             paging = body["variables"]["paymentHistoryParams"]["pagingParams"]
-            if SITE.redirect == "list" and paging["offset"] > 0:
+            if (SITE.redirect == "list" or SITE.ended) and paging["offset"] > 0:
                 return self._to_sign_in()
             history = HISTORY + ([(SITE.extra_type, "2026-07-15")] if SITE.extra_type else [])
             SITE.answers += 1
@@ -184,7 +187,8 @@ class _Handler(BaseHTTPRequestHandler):
                 "paymentHistory": {"paymentHistoryDetails": rows,
                                    "totalDetailsRecords": len(history)}}]}})
         if path == "/pge-bill-api/pdf/bills":
-            if SITE.redirect == "pdf":
+            if SITE.redirect in ("pdf", "pdf, then list"):
+                SITE.ended = SITE.redirect == "pdf, then list"
                 return self._to_sign_in()
             day = SITE.issued.get(body.get("encryptedBillId"))
             if not day or body.get("isSummary") is not False or body.get("isNonDetailed") is not False:
@@ -364,11 +368,11 @@ def test_account_info_asked_after_the_list_is_still_heard(attached, server, tmp_
     assert "holds 2 other account(s)" in folded(out), folded(out)
 
 
-@pytest.mark.parametrize("where", ["list", "pdf"])
+@pytest.mark.parametrize("where", ["list", "pdf, then list"])
 def test_a_redirect_to_sign_in_stops_the_run_as_signed_out(attached, server, tmp_path, capsys, where):
-    """The API answers a page of the list, or a bill, with a redirect to
-    the sign-in page. The run stops as signed out, saving nothing and
-    sending nothing to Manual Review."""
+    """The API answers a page of the list, or a bill and then the list read
+    again after it, with a redirect to the sign-in page. The run stops as
+    signed out, saving nothing and sending nothing to Manual Review."""
     SITE.redirect = where
     their_tab(attached, server)
 
@@ -377,4 +381,26 @@ def test_a_redirect_to_sign_in_stops_the_run_as_signed_out(attached, server, tmp
     assert "answered as signed out" in folded(out), folded(out)
     assert "stopped partway" not in out and "manual review" not in out.lower(), folded(out)
     assert not list((tmp_path / "out").rglob("*.pdf")), folded(out)
+    assert not any(s == ("GET", PAGE_HOST, "/auth/sign-in") for s in SITE.seen), SITE.seen
+    if where != "list":
+        assert sum(1 for s in SITE.seen if s == ("POST", API_HOST, "/pge-bill-api/pdf/bills")) == 1, SITE.seen
+
+
+def test_bills_refused_while_the_list_still_reads_fail_alone(attached, server, tmp_path, capsys):
+    """Every bill is answered with a redirect to the sign-in page while the
+    list still reads, so the session works. Each bill fails alone and the
+    run goes on, where it used to stop at the first bill, every run and
+    every Continue (#124)."""
+    SITE.redirect = "pdf"
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert "signed out" not in out, folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == len(BILL_DATES), folded(out)
+    assert not list((tmp_path / "out").rglob("*.pdf")), folded(out)
+    # Each bill once on the list kept from before it, once more on the list
+    # read again for it, and never after that.
+    assert sum(1 for s in SITE.seen if s == ("POST", API_HOST, "/pge-bill-api/pdf/bills")) \
+        == 2 * len(BILL_DATES), SITE.seen
     assert not any(s == ("GET", PAGE_HOST, "/auth/sign-in") for s in SITE.seen), SITE.seen

@@ -120,7 +120,15 @@ tab, is never pressed. The notices page is opened and read as described
 above, and only when `"Other Document"` is in `document_types`. A list
 the app cannot read whole stops rather than being called complete. If the
 account answers as signed out, or the tab is on ID.me, the run stops and
-keeps what it saved. Sign in again and run Resume.
+keeps what it saved. Sign in again and run Resume. A transcript answered
+with a redirect, a 401, a 403 or a page where its PDF should be has the
+list read again. A list refused too means you are signed out, and the run
+stops. A list that does not answer, whose answer is cut off, or that comes
+back empty says neither, so the run stops without calling you signed out,
+nothing is recorded against that transcript, and the run it names, which
+reads the list first, asks for it again. A list that still reads leaves
+that transcript failed with nothing saved, the run goes on to the others,
+and the next run tries it again. The transcript is never asked for twice.
 
 ## Tests
 

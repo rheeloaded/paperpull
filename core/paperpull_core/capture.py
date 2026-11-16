@@ -17,7 +17,6 @@ import filecmp
 import logging
 import os
 import re
-import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -319,7 +318,7 @@ def take_new_pdf(dl_dir, before: set, out_path: Path, *, zip_ok: bool = False) -
         try:
             if out_path.exists():
                 out_path.unlink()
-            shutil.move(str(src), str(out_path))
+            shared_folder.move(src, out_path)
             return True
         except OSError:
             continue
@@ -414,7 +413,7 @@ def take_download(download, dl_dir, before, out_path, *, zip_ok: bool = False) -
     try:
         if out_path.exists():
             out_path.unlink()
-        shutil.move(str(src), str(out_path))
+        shared_folder.move(src, out_path)
     except OSError as e:
         log.info("could not move the downloaded file: %s", type(e).__name__)
         return ""

@@ -1321,11 +1321,49 @@ def _port_taken(port: str) -> bool:
 _SLOW_START_SECONDS = 5.0
 
 
+def signin_address_ok(url) -> bool:
+    """Whether an address may be handed to a browser to open, an http or
+    https address with a name after the //, or about:blank, written with
+    nothing before it and no space or control character in it.
+
+    The address is the last thing on the browser's command line, and
+    Chromium reads anything there that begins with - or / as a switch of
+    its own. An account's settings can hold an address (UKG's base_url),
+    and a history file from another computer can carry one into them, so a
+    value naming the switch that turns the browser's sandbox off was obeyed
+    (a private report of 2026-11-10). A javascript:, file: or chrome: address opens
+    something other than a sign-in page, so none of those is taken either.
+    Every address the apps open is https (the census in
+    core/tests/test_every_sign_in_address_is_a_web_address.py)."""
+    if url == "about:blank":
+        return True
+    if not isinstance(url, str) or not url:
+        return False
+    if any(c.isspace() or ord(c) < 0x20 or ord(c) == 0x7F for c in url):
+        return False
+    from urllib.parse import urlsplit
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return False
+    scheme = parts.scheme.lower()
+    return (scheme in ("http", "https") and url[:len(scheme) + 3].lower() == scheme + "://"
+            and bool(host))
+
+
+NOT_AN_ADDRESS = ("The sign-in address in this account's settings is not a web address that "
+                  "begins with https://, so no sign-in window was opened. Set it back to the "
+                  "address you sign in at.")
+
+
 def _open_tab_in(port: str, url: str) -> bool:
     """Ask the browser already on the port to open `url` in a new tab,
     through its own debugging endpoint. False when it would not."""
     import urllib.parse
     import urllib.request
+    if not signin_address_ok(url):
+        return False
     try:
         req = urllib.request.Request(
             "http://127.0.0.1:%d/json/new?%s" % (int(port), urllib.parse.quote(url, safe=":/?=&%")),
@@ -1503,6 +1541,13 @@ def open_signin_browser(profile_dir, port: str, url: str,
     first, since a sign-in there joins whichever browser holds the port,
     the other person's included (ports.say_at_sign_in).
     """
+    # Space around an address typed into a config is taken off, as a
+    # browser would, never anything else.
+    if isinstance(url, str):
+        url = url.strip()
+    if not signin_address_ok(url):
+        print(NOT_AN_ADDRESS)
+        return None
     _say_shared_port(port)
     held = debug_port_holder(port)
     if not held and _port_taken(port):
@@ -1733,7 +1778,12 @@ def server_graphics() -> str:
 
 def _launch(exe: str, name: str, profile_dir, port: str,
             url: str, explain_failure: bool = True, mode: str = AUTO) -> Optional[str]:
-    """One attempt. Returns the browser name if its debugging port answered."""
+    """One attempt. Returns the browser name if its debugging port answered.
+    The address goes after "--", which ends Chromium's switches, so nothing
+    in it is ever read as one (signin_address_ok)."""
+    if not signin_address_ok(url):
+        print(NOT_AN_ADDRESS)
+        return None
     # Resolved to an ABSOLUTE path before the browser ever sees it. A config
     # carries this as "./x-browser-profile", and a relative --user-data-dir is
     # resolved by the BROWSER, from wherever the browser thinks it is, which is
@@ -1782,7 +1832,7 @@ def _launch(exe: str, name: str, profile_dir, port: str,
     try:
         proc = subprocess.Popen([exe, f"--user-data-dir={profile_path}",
                                  f"--remote-debugging-port={port}", "--no-first-run",
-                                 "--no-default-browser-check", *gpu, url],
+                                 "--no-default-browser-check", *gpu, "--", url],
                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                 stderr=_handed(said), start_new_session=True,
                                 env=gpu_env, **detach)

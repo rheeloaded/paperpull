@@ -596,6 +596,12 @@ def test_an_invoice_that_did_not_open_is_asked_for_on_the_next_run(attached, tmp
     assert invoice_numbers(saved) == sorted(inv for inv, _, _ in SPLIT.invoices), saved
     assert len(saved) == 2, "the first invoice is on file once, %s" % saved
     assert record(tmp_path, SPLIT)["downloaded_ok"] is True
+    # The run that completed the order lists both, the first an earlier run
+    # saved too, so the panel's Move after it takes the order whole. It
+    # listed the second alone, and the Move left the first behind (a review
+    # of 2026-11-15).
+    assert [n for n in new_this_run(tmp_path) if n.startswith(SPLIT.iso + " ")] == \
+        sorted(p.name for p in saved)
 
 
 def test_another_orders_invoice_page_is_never_printed_for_this_order(attached, tmp_path):
@@ -755,6 +761,12 @@ def test_a_redownload_saves_the_missing_invoice_and_not_the_first_again(
         ("No printable receipt available", "Review Needed"), ("Downloaded", "Completed"),
         ("Downloaded", "Completed")], index
     assert same_file(index[-1]["PDF Full Path"], item[0]), index
+    # An order done before lists only what the Download again fetched, as
+    # before. The run that completes an order lists every invoice of it,
+    # and a Download again over a done one listed those it never fetched
+    # (a review of 2026-11-15).
+    assert [n for n in new_this_run(tmp_path) if n.startswith(TIPPED.iso + " ")] == \
+        [item[0].name]
 
 
 def test_a_deleted_copy_of_an_invoice_put_aside_is_fetched_again_once(attached, tmp_path):

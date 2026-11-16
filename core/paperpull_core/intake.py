@@ -20,8 +20,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import errno
+import hashlib
 import logging
 import os
+import shutil
+import stat
+import tempfile
 import weakref
 from pathlib import Path
 from typing import Optional
@@ -250,6 +255,95 @@ def check_file(path, what: str = "The downloaded file", limit: Optional[int] = N
     size = size_of(path)
     if size > limit:
         raise refuse(what, size=size, limit=limit)
+
+
+# -- a file a record, a row or a listing names --------------------------------
+#
+# A run reads files it did not write, the one a record or an index row names
+# and the ones a folder lists, and any of them can be a named pipe, a device
+# or a link to one, which someone on PaperPull Server's share can leave at a
+# name. The open of a named pipe waits for a writer, a read of a Windows
+# named pipe waits for data and /dev/zero reads for ever, and each one's
+# size is 0, so no limit taken from its size stops it (the bug hunt of
+# 2026-11-14). Read whole, a file larger than free memory ended the read
+# with MemoryError instead.
+
+class NotPlainFile(OSError):
+    """A path that is not a plain file, a named pipe, a device or a folder,
+    found before it was opened."""
+
+
+_BLOCK = 1 << 20
+
+
+def _kind_of(mode: int) -> str:
+    if stat.S_ISFIFO(mode):
+        return "a named pipe"
+    if stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
+        return "a device"
+    if stat.S_ISDIR(mode):
+        return "a folder"
+    return "not a plain file"
+
+
+def _not_plain(path, mode: int) -> NotPlainFile:
+    return NotPlainFile(errno.EINVAL, "not a file to read but %s" % _kind_of(mode), str(path))
+
+
+def _opener(path, flags: int) -> int:
+    """os.open for open(), with O_NONBLOCK on PaperPull Server alone, so a
+    named pipe left at the name after the look before it cannot hold the
+    open. The desktop's files can be cloud placeholders a non-blocking open
+    has not been tried on (shared_folder.read_plain), and its folders are
+    the person's own."""
+    from . import shared_folder
+    if shared_folder.on_server():
+        flags |= getattr(os, "O_NONBLOCK", 0)
+    return os.open(path, flags)
+
+
+def plain_sha256(path, limit: Optional[int] = None) -> Optional[str]:
+    """The SHA-256 of the plain file at path, as hex, read a block at a time.
+    None when it holds more than `limit` (DOCUMENT_BYTES), unread when the
+    file opened says so, and otherwise read never past the limit and one
+    byte, so a file that grew after its size was looked at is held to it
+    all the same.
+
+    Anything but a plain file raises NotPlainFile before it is opened, and
+    the file opened is looked at again, for one put at the name in between.
+    A link is followed, as the desktop has always followed one, to a synced
+    folder say. OSError when the file cannot be read."""
+    limit = DOCUMENT_BYTES if limit is None else limit
+    mode = os.stat(path).st_mode
+    if not stat.S_ISREG(mode):
+        raise _not_plain(path, mode)
+    with open(path, "rb", opener=_opener) as f:
+        opened = os.fstat(f.fileno())
+        if not stat.S_ISREG(opened.st_mode):
+            raise _not_plain(path, opened.st_mode)
+        if opened.st_size > limit:
+            return None
+        digest, got = hashlib.sha256(), 0
+        while True:
+            block = f.read(min(_BLOCK, limit + 1 - got))
+            if not block:
+                return digest.hexdigest()
+            got += len(block)
+            if got > limit:
+                return None
+            digest.update(block)
+
+
+def sha256_of(path, limit: Optional[int] = None) -> str:
+    """plain_sha256, or "" when the file holds more than `limit`, is not a
+    plain file, cannot be read or could not be held in memory. For a file
+    another record names, compared with a document just taken, which is
+    never larger than a document may be. One larger cannot hold its bytes,
+    and no failure to read it says anything of the document in hand."""
+    try:
+        return plain_sha256(path, limit) or ""
+    except (OSError, ValueError, TypeError, MemoryError):
+        return ""
 
 
 # -- reading an answer inside the page ----------------------------------------
@@ -600,10 +694,10 @@ def save_download_as(download, out_path, *, partial=None) -> None:
     did not finish in time is cancelled and raises TooSlow. The browser's
     own copy is measured once it has finished, and one larger than a
     document may be is never copied. Where Playwright cannot say where its
-    copy is, the copy is made beside `out_path` and measured before it
-    takes its place, so a file already at `out_path` is never written over
-    by one that is then refused. Raises TooLarge, and whatever save_as
-    raises."""
+    copy is, the copy is saved in a private temporary folder and measured
+    before it takes its place, so a file already at `out_path` is never
+    written over by one that is then refused. Raises TooLarge, and whatever
+    save_as raises."""
     out_path = Path(out_path)
     if not finish(download, partial=partial):
         raise refusal(download) or TooSlow(_slow_words())
@@ -613,18 +707,34 @@ def save_download_as(download, out_path, *, partial=None) -> None:
         own = None
     if own:
         check_file(own, "The download for this document")
-    side = out_path.with_name(out_path.name + ".saving")
+    # Playwright never writes into the folder the document goes to. It
+    # writes the path it is handed with a plain open, through any link left
+    # at that name, and a fixed name beside the document, x.saving, was one
+    # someone on PaperPull Server's share could leave a link at (a private
+    # report of 2026-11-10). Its own finished copy is copied into place
+    # instead, or, where it cannot say where that is, a copy it saves in a
+    # folder of this process's own in the system's temporary folder, outside
+    # the share. The copy goes into a new file of its own beside out_path,
+    # made in that folder as any file is, so it takes the folder's own
+    # permissions, and moves into place whole (shared_folder.copy_whole).
+    from . import shared_folder
+    if shared_folder.on_server():
+        shared_folder.hold(out_path.parent)
+    private = None
     try:
-        download.save_as(str(side))
-        size = size_of(side)
+        if own:
+            source = Path(own)
+        else:
+            private = tempfile.mkdtemp(prefix="paperpull-save-")
+            source = Path(private) / "download"
+            download.save_as(str(source))
+        size = size_of(source)
         if size > DOCUMENT_BYTES:
             raise refuse("The download for this document", size=size)
-        os.replace(side, out_path)
+        shared_folder.copy_whole(source, out_path)
     finally:
-        try:
-            side.unlink(missing_ok=True)
-        except OSError:
-            pass
+        if private is not None:
+            shutil.rmtree(private, ignore_errors=True)
 
 
 def waits_for(download, page, seconds: Optional[float] = None, *, finished=None,

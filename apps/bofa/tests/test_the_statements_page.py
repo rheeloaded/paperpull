@@ -5,6 +5,7 @@ for the way the page asks, and anything that does not fit stops the run
 rather than being guessed at. The one press is the Statements heading, when
 the page leaves it shut, and paperpull_core.pressing.click is the stand-in's
 own here (standin_bank.press). Every value is invented."""
+import json
 import sys
 from pathlib import Path
 
@@ -682,20 +683,155 @@ def test_a_statement_no_longer_listed_is_not_asked_for():
     assert data is None and not page.pdfs
 
 
-def test_a_sign_in_instead_of_a_pdf_is_a_session_that_ended():
-    page = sb.Bank()
-    page.pdf_status = 401
-    with pytest.raises(site.SessionExpired):
-        site.document_bytes(page, account_ref="K-ALPHA-0001", date="2026-01-15",
-                            document_id="DOC000000000101", year="2026")
+# What one statement's PDF can be answered with that reads as a sign-out, a
+# 401, a 403, and a redirect that ends off the site.
+REFUSALS = {
+    "401": {"pdf_status": 401},
+    "403": {"pdf_status": 403},
+    "redirect": {"pdf_final_url": "https://signin.example.test/landing"},
+}
 
 
-def test_a_pdf_that_ended_up_off_the_site_is_not_taken():
-    page = sb.Bank()
-    page.pdf_final_url = "https://evil.test/landing"
+class SignsOutAtTheStatement(sb.Bank):
+    """A session that ends as the statement is asked for, once `ends` is
+    set. Its PDF is refused, and so is every list asked for after it."""
+
+    ends = False
+
+    def evaluate(self, js, arg=None):
+        got = super().evaluate(js, arg)
+        if self.ends and "content-disposition" in js:
+            self.list_status = 401
+        return got
+
+
+def learned_page(way, page=None):
+    """A statements page whose statements are asked for by their links'
+    form ("link") or by the call a pressed link made ("call"), learned
+    before anything is refused."""
+    page = page or sb.Bank()
+    if way == "call":
+        page.links = sb.script_links(page.listed["documentList"])
+    call = site.learned(page, form=True)
+    assert (call.template is None) == (way == "call")
+    return page
+
+
+def statements_asked(page, way):
+    if way == "call":
+        # The first call was the one asked again while the press was learned.
+        return [json.loads(c["body"])["docId"] for c in page.pdf_calls[1:]]
+    return [u[len(sb.LINK_BASE):] for u in page.pdfs]
+
+
+def take_january(page):
+    return site.document_bytes(page, account_ref="K-ALPHA-0001", date="2026-01-15",
+                               document_id="DOC000000000101", year="2026")
+
+
+@pytest.mark.parametrize("how", sorted(REFUSALS))
+@pytest.mark.parametrize("way", ["link", "call"])
+def test_a_statement_refused_while_the_list_still_reads_fails_alone(way, how):
+    """A 401, a 403 or a redirect off the site for one statement's PDF was
+    read as a sign-out, so every run stopped at that statement and Continue
+    stopped there again (#124). The list is read again with the call that
+    proves a session, and a list that still reads leaves the refusal that
+    statement's own, nothing taken."""
+    page = learned_page(way)
+    for name, value in REFUSALS[how].items():
+        setattr(page, name, value)
+    assert take_january(page) == (b"", "")
+    # The statement is asked for once, never a second time, and its own
+    # account's year is read once more after the refusal.
+    assert statements_asked(page, way) == ["DOC000000000101"]
+    assert [(c["body"][sb.KEY], c["body"]["year"]) for c in page.lists] == [
+        ("K-ALPHA-0001", "2026"), ("K-ALPHA-0001", "2026")]
+
+
+@pytest.mark.parametrize("how", sorted(REFUSALS))
+@pytest.mark.parametrize("way", ["link", "call"])
+def test_a_statement_refused_and_a_list_refused_after_it_is_a_session_that_ended(way, how):
+    """A session that ended refuses the list too, and only that stops the
+    run as signed out."""
+    page = learned_page(way, SignsOutAtTheStatement())
+    page.ends = True
+    for name, value in REFUSALS[how].items():
+        setattr(page, name, value)
     with pytest.raises(site.SessionExpired):
-        site.document_bytes(page, account_ref="K-ALPHA-0001", date="2026-01-15",
-                            document_id="DOC000000000101", year="2026")
+        take_january(page)
+    assert statements_asked(page, way) == ["DOC000000000101"]
+    assert len(page.lists) == 2
+
+
+@pytest.mark.parametrize("way", ["link", "call"])
+def test_a_list_that_fails_when_read_after_a_refusal_is_the_list_unread(way):
+    """Every statement after it reads the same list, so the run leaves as
+    one whose list did not end whole, never as one statement's failure."""
+    page = learned_page(way)
+    page.pdf_status = 403
+    real = page.evaluate
+
+    def list_fails_after_the_pdf(js, arg=None):
+        got = real(js, arg)
+        if "content-disposition" in js:
+            page.list_raises = RuntimeError("TypeError: Failed to fetch")
+        return got
+    page.evaluate = list_fails_after_the_pdf
+    with pytest.raises(site.ListUnread) as stop:
+        take_january(page)
+    assert str(stop.value) == "a list call failed in the page (RuntimeError)"
+    assert statements_asked(page, way) == ["DOC000000000101"]
+
+
+def after_the_pdf(page, change):
+    """A page that `change`s once a statement's PDF has been asked for, so
+    the list read again after the refusal is what it answers then."""
+    real = page.evaluate
+
+    def evaluate(js, arg=None):
+        got = real(js, arg)
+        if "content-disposition" in js:
+            change(page)
+        return got
+    page.evaluate = evaluate
+    return page
+
+
+# What the list read again after a refusal can answer that says neither
+# that the session ended nor that it still holds.
+NOT_ANSWERED = {
+    "500": lambda page: setattr(page, "list_status", 500),
+    "timeout": lambda page: setattr(page, "list_raises", TimeoutError("Timeout 30000ms exceeded")),
+    "empty": lambda page: setattr(page, "answer_list", lambda body: []),
+    "a row it cannot read": lambda page: setattr(
+        page, "answer_list", lambda body: [{"docCategoryId": "CAT-STMT"}]),
+}
+
+
+@pytest.mark.parametrize("how", sorted(NOT_ANSWERED))
+@pytest.mark.parametrize("way", ["link", "call"])
+def test_a_list_that_does_not_answer_after_a_refusal_is_the_list_unread_not_a_sign_out(way, how):
+    """A list that answered 500 or nothing was the list unread already, but
+    one that came back empty, or with a row this app cannot read, was taken
+    as a list that still reads, so the statement failed alone with nothing
+    shown of the session. None of them says the session ended either."""
+    page = after_the_pdf(learned_page(way), NOT_ANSWERED[how])
+    page.pdf_status = 403
+    with pytest.raises(site.ListUnread) as stop:
+        take_january(page)
+    assert not isinstance(stop.value, site.SessionExpired)
+    assert statements_asked(page, way) == ["DOC000000000101"]
+
+
+def test_the_list_read_after_a_refusal_leaves_the_next_statement_to_be_taken():
+    page = learned_page("link")
+    page.pdf_status = 403
+    assert take_january(page) == (b"", "")
+    page.pdf_status = 200
+    data, day = site.document_bytes(page, account_ref="K-ALPHA-0001", date="2026-02-15",
+                                    document_id="DOC000000000102", year="2026")
+    assert data.startswith(b"%PDF") and day == "2026-02-15"
+    assert statements_asked(page, "link") == ["DOC000000000101", "DOC000000000102"]
 
 
 def test_a_row_found_again_by_its_id_is_held_to_what_a_list_row_is():

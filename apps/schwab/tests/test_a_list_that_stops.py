@@ -321,7 +321,7 @@ def test_diagnose_keeps_what_the_page_shows_when_the_list_stops(
     monkeypatch.setattr(site, "read_page_ui", lambda _page: {
         "selectedAccount": "", "chips": [], "dateRange": "", "rows": [], "buttons": ["Statements"]})
     page = SimpleNamespace(url=PAGE.url, title=lambda: "Statements",
-                           screenshot=lambda **_kw: None)
+                           screenshot=lambda **_kw: b"")
     monkeypatch.setattr(docs.App, "page", lambda app: page)
 
     docs.main(["--config", str(cfg), "--diagnose"])

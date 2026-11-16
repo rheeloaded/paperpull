@@ -103,7 +103,184 @@ def test_the_port_and_url_reach_the_browser(monkeypatch, tmp_path, no_waiting):
     browser._launch("edge.exe", browser.EDGE, tmp_path / "p", "9231",
                     "https://bank.example/signin")
     assert "--remote-debugging-port=9231" in seen["args"]
-    assert seen["args"][-1] == "https://bank.example/signin"
+    assert seen["args"][-2:] == ["--", "https://bank.example/signin"]
+
+
+# -- the address is never read as a switch ---------------------------------------
+#
+# The address is the last thing on the browser's command line, and Chromium
+# reads anything there that begins with - or / as a switch. An account's
+# settings can hold an address (UKG's base_url), and a history file from
+# another computer could carry --no-sandbox into them (a private report of
+# 2026-11-10). The address goes after "--" now, which ends the switches,
+# and one that is not a web address is never handed over at all.
+
+REFUSED = ["--no-sandbox", "--renderer-cmd-prefix=/bin/sh -c true", "-no-sandbox",
+           "/no-sandbox", "javascript:alert(1)", "file:///etc/passwd", "chrome://settings",
+           "data:text/html,x", "https:--no-sandbox", "https://", "https:///x",
+           "ftp://example.ultipro.com", "", None, 7, " https://example.ultipro.com",
+           "https://example.ultipro.com\n--no-sandbox", "https://example.ultipro.com --x",
+           "https://exa\tmple.ultipro.com", "\u2014no-sandbox", "\u2212-no-sandbox",
+           "about:settings", "about:blank#x"]
+TAKEN = ["https://example.ultipro.com", "https://www.ukg.com/login",
+         "HTTPS://Example.UltiPro.com/", "https://bank.example/signin?next=%2Fdocs#top",
+         "http://127.0.0.1:9/", "about:blank"]
+
+
+def recording_popen(monkeypatch):
+    seen = []
+
+    def popen(cmd, **_k):
+        seen.append(list(cmd))
+        return _EndedProcess()
+    monkeypatch.setattr(browser.subprocess, "Popen", popen)
+    return seen
+
+
+@pytest.mark.parametrize("url", REFUSED)
+def test_an_address_that_is_not_a_web_address_never_reaches_the_browser(
+        url, monkeypatch, tmp_path, no_waiting, capsys):
+    seen = recording_popen(monkeypatch)
+    assert browser._launch("/x/chrome", browser.CHROMIUM, tmp_path / "p", "9231", url) is None
+    assert seen == []
+    assert "not a web address" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("url", TAKEN)
+def test_a_web_address_goes_after_the_end_of_the_switches(url, monkeypatch, tmp_path, no_waiting):
+    seen = recording_popen(monkeypatch)
+    browser._launch("/x/chrome", browser.CHROMIUM, tmp_path / "p", "9231", url)
+    args = seen[0]
+    assert args[-2:] == ["--", url]
+    assert args.count("--") == 1
+    assert all(a.startswith("--") for a in args[1:-2])
+
+
+def test_on_the_server_the_graphics_switches_stay_switches(monkeypatch, tmp_path, no_waiting):
+    """They come after the profile and the port. Had "--" gone before them,
+    each would have opened as a tab."""
+    seen = recording_popen(monkeypatch)
+    monkeypatch.setattr(browser, "server_gpu", lambda: (browser.SERVER_GPU_SWITCHES, None))
+    browser._launch("/x/chrome", browser.CHROMIUM, tmp_path / "p", "9231",
+                    "https://example.ultipro.com")
+    args = seen[0]
+    end = args.index("--")
+    for switch in browser.SERVER_GPU_SWITCHES:
+        assert args.index(switch) < end, switch
+    assert args[end + 1:] == ["https://example.ultipro.com"]
+
+
+def test_a_sign_in_with_such_an_address_opens_nothing_and_says_why(monkeypatch, tmp_path, capsys):
+    """Refused before a port is looked at or a browser is fetched."""
+    monkeypatch.setattr(browser, "debug_port_holder",
+                        lambda *a, **k: pytest.fail("a port was looked at"))
+    monkeypatch.setattr(browser, "browser_candidates",
+                        lambda *a, **k: pytest.fail("a browser was looked for"))
+    assert browser.open_signin_browser(tmp_path / "p", "9231", "--no-sandbox") is None
+    assert "not a web address" in capsys.readouterr().out
+
+
+def test_space_around_an_address_in_a_config_is_taken_off(monkeypatch):
+    """As a browser would. Nothing else of the address is changed."""
+    opened = []
+    monkeypatch.setattr(browser, "debug_port_holder", lambda *a, **k: "a browser")
+    monkeypatch.setattr(browser, "_open_tab_in", lambda port, url: opened.append(url) or True)
+    monkeypatch.setattr(browser, "bring_forward", lambda port: True)
+    monkeypatch.setattr(browser, "_say_shared_port", lambda port: None)
+    assert browser.open_signin_browser("p", "9231", "  https://example.ultipro.com \n") \
+        == browser.ALREADY_ON_PORT
+    assert opened == ["https://example.ultipro.com"]
+
+
+def test_a_browser_already_on_the_port_is_never_handed_such_an_address(monkeypatch):
+    """There the address goes to the browser's own /json/new, where a
+    javascript: or file: address opens as a tab."""
+    asked = []
+    monkeypatch.setattr(browser, "open_local", lambda req, timeout=3: asked.append(req))
+    for url in ("javascript:alert(1)", "file:///etc/passwd", "--no-sandbox"):
+        assert browser._open_tab_in("9231", url) is False
+    assert asked == []
+
+
+def test_no_spelling_of_a_switch_or_another_scheme_is_taken():
+    """A seeded run of prefixes a hand-written check can miss, each with
+    tails of its own. Whatever is taken is about:blank or an http or https
+    address with a host, and never begins with a switch's mark."""
+    import random
+    from urllib.parse import urlsplit
+    rng = random.Random(20261114)
+    prefixes = ["-", "--", "/", " ", "\t", "\u2014", "\u2212", "https:", "HTTPS://", "http://",
+                "https://", "javascript:", "about:", "data:", "file:", "https:/", "https:\\",
+                "\\\\", "http://-", "https://@", ""]
+    tails = ["", "no-sandbox", "example.ultipro.com", "a b", "x\n--y", "-x", "@evil.example",
+             ":443", "/path?q=1#f", "\u00e9xample.com", "[::1]", "[::1]:9"]
+    for _ in range(4000):
+        url = rng.choice(prefixes) + rng.choice(tails) + rng.choice(["", rng.choice(tails)])
+        if not browser.signin_address_ok(url):
+            continue
+        assert url == "about:blank" or (
+            urlsplit(url).scheme.lower() in ("http", "https") and urlsplit(url).hostname), url
+        assert not url.startswith(("-", "/", "\\")) and url == url.strip(), url
+        assert not any(c.isspace() for c in url), url
+
+
+def test_the_bundled_chromium_opens_the_address_after_the_end_of_its_switches(
+        monkeypatch, tmp_path):
+    """The real thing. Playwright's own Chromium, headless, on a profile in
+    a temp folder, launched by _launch, opens the page given after "--" as
+    its tab, and a switch given there is a tab too, not a switch it obeys.
+    Measured first by hand on 2026-11-14."""
+    import json
+    sync_api = pytest.importorskip("playwright.sync_api")
+    with sync_api.sync_playwright() as pw:
+        exe = pw.chromium.executable_path
+    if not exe or not Path(exe).is_file():
+        pytest.skip("Playwright's own Chromium is not installed here")
+    started = []
+    real = subprocess.Popen
+
+    def popen(cmd, **kwargs):
+        started.append(real(cmd, **kwargs))
+        return started[-1]
+    monkeypatch.setattr(browser.subprocess, "Popen", popen)
+    monkeypatch.setattr(browser, "server_gpu", lambda: (("--headless=new",), None))
+
+    def free():
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            return str(s.getsockname()[1])
+
+    def tabs(port):
+        with browser.open_local("http://127.0.0.1:%s/json/list" % port, timeout=5) as r:
+            return [t["url"] for t in json.load(r) if t.get("type") == "page"]
+
+    try:
+        port = free()
+        page = "http://127.0.0.1:9/signin"
+        assert browser._launch(exe, browser.CHROMIUM, tmp_path / "one", port, page)
+        for _ in range(40):
+            if page in tabs(port):
+                break
+            time.sleep(0.25)
+        assert page in tabs(port)
+        started[-1].kill()
+        started[-1].wait(10)
+        # Taken past the check here, to see what the browser does with it.
+        monkeypatch.setattr(browser, "signin_address_ok", lambda url: True)
+        port, other = free(), free()
+        assert browser._launch(exe, browser.CHROMIUM, tmp_path / "two", port,
+                               "--remote-debugging-port=" + other)
+        time.sleep(1)
+        assert any("remote-debugging-port" in t for t in tabs(port)), tabs(port)
+        with pytest.raises(OSError):
+            browser.open_local("http://127.0.0.1:%s/json/version" % other, timeout=2)
+    finally:
+        for proc in started:
+            proc.kill()
+            try:
+                proc.wait(10)
+            except Exception:
+                pass
 
 
 def test_a_port_that_is_not_a_number_is_not_waited_on():

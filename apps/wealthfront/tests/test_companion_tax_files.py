@@ -149,8 +149,12 @@ def test_the_files_of_a_form_are_saved_together_and_listed(tmp_path, monkeypatch
     assert sorted(app.stats["new_files"]) == sorted([str(first), str(second)])
     rec = stored(app, doc)
     assert rec["pdf_path"] == str(first)
-    assert rec["invoices"] == [{"file": str(first), "kept": True},
-                               {"file": str(second), "kept": True}]
+    # Each entry also says which of the dialog's links it came from and its
+    # place, so a run that did not get every file fetches only the rest.
+    assert [{k: e[k] for k in ("file", "kept")} for e in rec["invoices"]] == [
+        {"file": str(first), "kept": True}, {"file": str(second), "kept": True}]
+    assert [(e["link"], e["part"]) for e in rec["invoices"]] == [
+        ("http://example.com/form.pdf", "1 of 2"), ("http://example.com/gain_loss.xls", "2 of 2")]
     assert rec["notes"] == "form set has 2 files"
 
 

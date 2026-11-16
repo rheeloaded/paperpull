@@ -204,7 +204,18 @@ def test_the_default_pattern_reproduces_every_old_name(kind, tmp_path, monkeypat
         for record in (None, _Record(), {"category": "Tax Document"}):
             new = storage.build_pdf_filename(d, s, t, part=p, owner=o,
                                              record=record)
-            assert new == _old_build("Acme Co", d, s, t, p, o), (d, s, t, p, o)
+            old = _old_build("Acme Co", d, s, t, p, o)
+            tail = " (%d of %d).pdf" % p if p and p[1] > 1 else ""
+            if tail and not old.endswith(tail):
+                # The one name the defaults change, on purpose (a review of
+                # 2026-11-15). The old cut at 120 characters took the part
+                # off, so the invoices of one order shared a name and Rename
+                # read invoice 2 as the whole order. The summary gives way to
+                # the part now, and the rest of the name is the old one's.
+                assert new.endswith(tail) and len(new) - len(".pdf") <= 120, (d, s, t, p, o)
+                assert old.startswith(new[:-len(tail)]), (d, s, t, p, o)
+            else:
+                assert new == old, (d, s, t, p, o)
             # A summary holding a / makes no folder (#101).
             assert storage.folder_of(new) == "", (d, s, t, p, o)
             checked += 1

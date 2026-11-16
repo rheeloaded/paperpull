@@ -56,9 +56,12 @@ none open, in a tab of its own. A tab of another site is never used.
   list was asked for, stops the run and keeps what it saved. Sign in again
   and run Resume. A bill answered with a 401, a 403, a redirect or a
   sign-in page is followed by one more read of the list. A sign-out shows
-  there and stops the run the same way. A list that still reads leaves the
-  refusal that one bill's, so the run goes on and the next run tries it
-  again.
+  there and stops the run the same way. A list that does not answer, holds
+  no bill, or a page that stops answering while it is read, says neither,
+  so the run stops there with nothing recorded for that bill, and the panel
+  offers a run that reads the list first. A list that still reads leaves
+  the refusal that one bill's, so the run goes on and the next run tries
+  it again.
 
 ## Validation status
 

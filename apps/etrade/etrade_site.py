@@ -167,6 +167,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
@@ -3115,7 +3116,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         # event is not tied to the click, so an earlier press's late
         # download must not win over it.
         if got.get("body"):
-            out_path.write_bytes(got["body"])
+            shared_folder.write_bytes(out_path, got["body"])
             return True
         # Pointed at a folder, the browser can save the only copy there and
         # leave the event's own file empty, so that file is taken rather than
@@ -3134,7 +3135,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                                                 timeout=60000)
                 body = intake.body(resp) if resp.ok else b""
                 if _is_document(body, zip_ok=True):
-                    out_path.write_bytes(body)
+                    shared_folder.write_bytes(out_path, body)
                     return True
             except Exception:
                 pass
@@ -4729,7 +4730,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             if is_safe_url(target):
                 body = _fetch_pdf(page, target, zip_ok=True)
                 if body:
-                    out_path.write_bytes(body)
+                    shared_folder.write_bytes(out_path, body)
                     return True
                 if trace is not None:
                     trace.append({"note": "the control's own link did not answer with a PDF",

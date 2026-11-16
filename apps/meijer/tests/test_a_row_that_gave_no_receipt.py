@@ -14,6 +14,7 @@ https://www.meijer.com, and every other request is refused, so nothing
 leaves this machine. Every date, store and amount is invented.
 """
 import json
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -281,6 +282,136 @@ def test_rows_a_csv_refused_go_in_when_it_is_said_again(tmp_path, monkeypatch):
     assert app.progress.get(p.key)["state"] == "No Longer Listed"
     for book in (app.order_csv, app.index_csv):
         assert [r["Order or Receipt Number"] for r in book.read_all()] == [p.order_number]
+
+
+def _held_like_excel():
+    """The core's way of holding a file open as Excel holds a workbook."""
+    import importlib.util
+    path = (Path(__file__).resolve().parents[3] / "core" / "tests"
+            / "test_rename_with_a_ledger_held_open.py")
+    spec = importlib.util.spec_from_file_location("ledger_held_open_harness", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.held_like_excel
+
+
+def _rows_in(path: Path) -> list:
+    """The rows the file itself holds, and nothing kept beside it."""
+    import csv
+    if not path.exists():
+        return []
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+@pytest.fixture
+def no_wait(monkeypatch):
+    """The minute a write waits for a held file, without the minute."""
+    monkeypatch.setattr("time.sleep", lambda *_a, **_kw: None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows is where a file Excel has open cannot "
+                    "be written by anyone else")
+def test_rows_an_order_history_open_in_excel_refused_go_in_once_it_is_closed(
+        tmp_path, monkeypatch, no_wait):
+    """The same as above with the Order History held open for real. The
+    purchase is no longer listed, as Meijer says, and the mark that its rows
+    are written is never set while they are neither in the file nor kept
+    beside it to go in. Once the file is closed they go in, once."""
+    held_like_excel = _held_like_excel()
+    drops_off(monkeypatch)
+    app = runs(_app(tmp_path))
+    p = older_than_the_list()
+    app.order_csv._ensure_header()
+    marked = []
+    update = app.progress.update
+
+    def watched(key, record, save=True):
+        if record.get(mr.UNLISTED_ROWS):
+            ours = lambda rows: [r for r in rows if r["Order or Receipt Number"] == p.order_number]
+            in_file = ours(_rows_in(app.order_csv.path))
+            kept = ours(storage.CsvFile(app.order_csv.path,
+                                        storage.ORDER_HISTORY_COLUMNS).read_all())
+            marked.append(bool(in_file or kept))
+        return update(key, record, save=save)
+
+    monkeypatch.setattr(app.progress, "update", watched)
+    with held_like_excel(app.order_csv.path):
+        app.process_purchases([p])
+        assert _rows_in(app.order_csv.path) == []
+    assert app.progress.get(p.key)["state"] == "No Longer Listed"
+    assert app.stats["failed"] == 0, app.stats
+    assert marked == [True], "the mark was set while its rows were nowhere"
+    from paperpull_core import run_reporting
+    run_reporting.report_run_result(app.stats)
+    app.process_purchases([p])
+    for book in (app.order_csv, app.index_csv):
+        assert [r["Order or Receipt Number"] for r in _rows_in(book.path)] == [p.order_number]
+
+
+class _Refused:
+    """Every open of one file for writing refused, as Windows refuses it
+    while another program holds the file, `modes` of them only if given."""
+
+    def __init__(self, monkeypatch, path: Path, modes=("w", "a")):
+        from paperpull_core import shared_folder
+        real = shared_folder.open_to_write
+        self.modes, self.lifted, self.times = modes, False, 0
+        wanted = os.path.normcase(os.path.abspath(str(path)))
+
+        def open_to_write(p, mode="w", encoding=None, newline=None):
+            if not self.lifted and mode[:1] in self.modes \
+                    and os.path.normcase(os.path.abspath(str(p))) == wanted:
+                self.times += 1
+                raise PermissionError(13, "The file is open in another program", str(p))
+            return real(p, mode, encoding=encoding, newline=newline)
+
+        monkeypatch.setattr(shared_folder, "open_to_write", open_to_write)
+
+
+@pytest.mark.parametrize("closed", [True, False],
+                         ids=["closed before the receipt", "still refusing an append"])
+def test_rows_kept_for_a_purchase_no_longer_listed_give_way_to_its_receipt(
+        tmp_path, monkeypatch, no_wait, closed):
+    """The Order History refused the rows of a purchase no longer listed,
+    and they were kept to go in. A later run saves the purchase's receipt,
+    and the rows of its receipt take the place of the rows kept, whether
+    the file took the kept rows before then or still refuses an append when
+    the receipt's rows give them way."""
+    from paperpull_core import run_reporting
+    from paperpull_core.models import State
+    drops_off(monkeypatch)
+    app = runs(_app(tmp_path))
+    p = older_than_the_list()
+    app.order_csv._ensure_header()
+    refused = _Refused(monkeypatch, app.order_csv.path)
+    app.process_purchases([p])
+    assert refused.times, "the Order History was never refused, so this proves nothing"
+    rec = app.progress.get(p.key)
+    assert rec["state"] == "No Longer Listed" and rec.get(mr.UNLISTED_ROWS), rec
+
+    if closed:
+        refused.lifted = True
+    else:
+        refused.modes = ("a",)
+
+    def saved_receipt(page, purchase):
+        path = app.paths.folder_for(purchase.purchase_type) / "2026-05-01 Meijer Receipt.pdf"
+        path.write_bytes(b"%PDF-1.4 an invented receipt")
+        purchase.pdf_path, purchase.pdf_filename = str(path), path.name
+        app._record_state(purchase, State.PDF_VERIFIED, extra={"downloaded_ok": True})
+        return True
+
+    app._save_receipt = saved_receipt
+    app.process_one(_Page(), p)
+    refused.lifted = True
+    run_reporting.report_run_result(app.stats)
+    for book in (app.order_csv, app.index_csv):
+        rows = [r for r in _rows_in(book.path) if r["Order or Receipt Number"] == p.order_number]
+        assert [r["Processing Status"] for r in rows if r["Processing Status"]
+                == "No Longer Listed"] == [], (book.path.name, rows)
+        assert len(rows) == 1 and rows[0]["PDF Filename"] == "2026-05-01 Meijer Receipt.pdf", (
+            book.path.name, rows)
 
 
 def test_a_receipt_saved_before_is_never_said_to_have_dropped_off(tmp_path, monkeypatch):

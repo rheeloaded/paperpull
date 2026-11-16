@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import queue
+import stat
 import struct
 import subprocess
 import sys
@@ -102,11 +103,23 @@ def _source(source):
 
 def _asked(job: dict, source):
     """The worker's answer to `job` over a PDF, or the sentence refusing it
-    for a limit, said and remembered for the run as read() does."""
+    for a limit, said and remembered for the run as read() does.
+
+    A path that is not a plain file, a named pipe, a device or a folder, is
+    answered at once as a PDF that did not open, and never handed to the
+    worker nor read here, since its open or its read can wait for good in
+    either, and where no worker can start a PDF is read here with no limit
+    at all. Its size of 0 passes the limit, so it is looked at before it is
+    opened (the bug hunt of 2026-11-14)."""
     path, data, size = _source(source)
     if size > intake.DOCUMENT_BYTES:
         return None, _said_size(size)
-    digest = _digest(data, path)
+    try:
+        digest = _digest(data, path)
+    except intake.NotPlainFile as e:
+        return _not_opened(e), ""
+    except intake.TooLarge as e:
+        return None, str(e)
     if digest is not None and digest in _REFUSED:
         return None, _REFUSED[digest]
     answer = _ask(job, path, data)
@@ -177,19 +190,30 @@ def trim_blank_tail(path) -> int:
     """Remove the pages at the end of a PDF that hold no text and no image,
     keeping the first page whatever it holds, and answer how many went. The
     PDF is written again in place only when one does. 0 when it could not
-    be read, and nothing is written then."""
+    be read, and nothing is written then, and at once for a path that is not
+    a plain file, which the worker would wait on as _asked says."""
     path = os.path.abspath(os.fspath(path))
     size = intake.size_of(path)
     if size > intake.DOCUMENT_BYTES:
         log.info("not looked at for blank pages, %s", _said_size(size))
         return 0
+    try:
+        plain = stat.S_ISREG(os.stat(path).st_mode)
+    except (OSError, ValueError):
+        plain = False
+    if not plain:
+        log.info("not looked at for blank pages, not a plain file")
+        return 0
     answer = _ask({"op": "trim_blank_tail"}, path, None)
     # A worker ended in the middle of the write leaves the copy it was
-    # writing beside the PDF, which is left as it was.
-    try:
-        os.remove(path + TRIMMING)
-    except OSError:
-        pass
+    # writing beside the PDF, which is left as it was. A link someone left
+    # under such a name goes as a link, never what it leads to.
+    import glob
+    for left in sorted(glob.glob(glob.escape(path + TRIMMING) + ".*")):
+        try:
+            os.remove(left)
+        except OSError:
+            pass
     if answer.get("over_limit") or answer.get("error"):
         log.info("could not look for blank pages at the end (%s)",
                  answer.get("over_limit") or answer.get("error"))
@@ -234,17 +258,29 @@ _REFUSED: dict = {}
 
 
 def _digest(data, path) -> Optional[str]:
-    h = hashlib.sha256()
+    """The SHA-256 of a PDF's bytes, or of the plain file at path read no
+    further than a document may be, or None when the file could not be
+    read, for the reader to say why in its own words. Raises
+    intake.NotPlainFile for a path that is not a plain file, before it is
+    opened, and intake.TooLarge for a file that holds more than a document
+    may be although its size looked at before said less."""
+    if data is not None:
+        return hashlib.sha256(data).hexdigest()
     try:
-        if data is not None:
-            h.update(data)
-        else:
-            with open(path, "rb") as f:
-                for block in iter(lambda: f.read(1 << 20), b""):
-                    h.update(block)
-    except OSError:
+        digest = intake.plain_sha256(path)
+    except intake.NotPlainFile:
+        raise
+    except (OSError, ValueError):
         return None
-    return h.hexdigest()
+    if digest is None:
+        raise intake.TooLarge(_said_size(max(intake.size_of(path), intake.DOCUMENT_BYTES + 1)))
+    return digest
+
+
+def _not_opened(e: OSError) -> dict:
+    """The answer for a path that is not a plain file, as pypdf answers a
+    PDF it could not open."""
+    return {"opened": False, "error": e.strerror or str(e), "error_kind": type(e).__name__}
 
 
 def forget() -> None:
@@ -850,8 +886,16 @@ def _trim(reader, total: int, path: str) -> dict:
         writer.add_page(page)
     # Written beside and put in place whole, since the worker can be ended
     # at any moment, and a PDF written over in place would be left cut off.
-    beside = path + TRIMMING
-    with open(beside, "wb") as out:
+    # Beside it under a name nobody can guess, opened so it can never be
+    # anything already there, where a fixed name was one someone on
+    # PaperPull Server's share could leave a link at, and the PDF was
+    # written through it (a private report of 2026-11-10).
+    beside = "%s%s.%s" % (path, TRIMMING, os.urandom(4).hex())
+    fd = os.open(beside, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_BINARY", 0), 0o666)
+    # One cut off is left for trim_blank_tail to take away, as a worker
+    # ended in the middle of it leaves it.
+    with os.fdopen(fd, "wb") as out:
         writer.write(out)
     os.replace(beside, path)
     return {"opened": True, "pages": total, "removed": total - keep}

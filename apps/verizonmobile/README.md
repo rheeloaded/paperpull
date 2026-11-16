@@ -92,9 +92,12 @@ used.
   digits. Choose that account in My Verizon and run Resume.
 - **Signing out.** A refused bill is followed by one more read of the
   history. A sign-out shows there and stops the run, keeping what it saved.
-  Sign in again and run Resume. A history that still reads leaves the
-  refusal that one bill's, so the run goes on and the next run tries it
-  again.
+  Sign in again and run Resume. A history that does not answer, lists no
+  bill, or a page that stops answering while it loads, says neither, so
+  the run stops there with nothing recorded for that bill, and the panel
+  offers a run that reads the list first. A history that still reads
+  leaves the refusal that one bill's, so the run goes on and the next run
+  tries it again.
 - **Read-only.** Nothing is pressed. `FORBIDDEN_CONTROL_RE`, which blocks
   anything that pays, enrolls in autopay or paperless, changes a plan, adds
   a line, upgrades or trades in a device, suspends service, moves a number,

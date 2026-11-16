@@ -108,6 +108,8 @@ class Bank:
         self.signs_out_at = None     # an address that opens ING's sign-in form
         self.body = ""
         self.answer_with = {}
+        # What changes on the site as a document is fetched, by its name.
+        self.at_fetch = {}
         self.gotos, self.looked, self.fetched, self.stale, self.acted = [], [], [], [], []
 
     def goto(self, url, **_):
@@ -166,6 +168,8 @@ class Bank:
         if action != "download":
             self.acted.append("fetched a link that would archive " + name)
         self.fetched.append(name)
+        if name in self.at_fetch:
+            self.at_fetch[name](self)
         # Only the page on screen answers a link, and a link read on an
         # earlier version of it answers with a page, as an expired one does.
         if version != self.version or site._list_area(self.url) != area:
@@ -632,15 +636,109 @@ def test_a_document_answered_with_an_error_fails_and_the_run_carries_on(home):
 
 
 @pytest.mark.parametrize("answer", ["sign-in", 401, 403])
-def test_a_document_answered_as_signed_out_stops_the_run_and_keeps_what_was_saved(home, answer):
+def test_a_document_answered_as_signed_out_while_the_list_still_reads_fails_alone(home, answer):
+    """A document refused with a 401, a 403 or a sign-in page stopped the
+    run as signed out, so every run stopped at that document and Continue
+    stopped there again (#124). The list is opened and read again, and a
+    list that still reads leaves the refusal that document's own."""
     home.bank.lists["postbox"] = [statement("P1", 1), statement("P2", 2), statement("P3", 3)]
     home.bank.answer_with["P2"] = answer
     code, said = home.run_all()
+    assert code == 1 and home.stopped is None
+    assert home.bank.fetched == ["P3", "P2", "P1"]
+    assert home.on_disk() == ["P1", "P3"]
+    assert ("Could not capture this document. Nothing was saved, and the next run "
+            "tries it again.") in said
+    assert "signed out" not in said
+    # Discover opens both lists, each document opens the Postbox for its
+    # link, and the refused one opens it once more after the refusal.
+    assert home.bank.gotos == [POSTBOX, ARCHIVE, POSTBOX, POSTBOX, POSTBOX, POSTBOX]
+    assert home.bank.stale == []
+    del home.bank.answer_with["P2"]
+    code, _said = home.run_all()
+    assert code == 0
+    assert home.bank.fetched == ["P2"]
+    assert home.on_disk() == ["P1", "P2", "P3"]
+
+
+@pytest.mark.parametrize("answer", ["sign-in", 401, 403])
+def test_a_document_answered_as_signed_out_and_a_list_signed_out_after_it_stops_the_run(home, answer):
+    home.bank.lists["postbox"] = [statement("P1", 1), statement("P2", 2), statement("P3", 3)]
+    home.bank.answer_with["P2"] = answer
+    home.bank.at_fetch["P2"] = lambda bank: setattr(bank, "signs_out_at", POSTBOX)
+    code, said = home.run_all()
     assert isinstance(home.stopped, SystemExit) and code == 0
+    assert not isinstance(home.stopped, ListNotRead)
     assert home.bank.fetched == ["P3", "P2"]
     assert home.on_disk() == ["P3"]
+    assert home.failed() == []
     assert "!! ING answered as signed out instead of with the document." in said
     assert "Stopped. Everything downloaded so far is saved." in said
+
+
+def test_a_document_answered_as_signed_out_and_a_list_that_stops_after_it_leaves_the_list_unread(home):
+    home.bank.lists["postbox"] = [statement("P1", 1), statement("P2", 2), statement("P3", 3)]
+    home.bank.answer_with["P2"] = 403
+    home.bank.at_fetch["P2"] = lambda bank: bank.pager.add("postbox")
+    _code, said = home.run_all()
+    assert isinstance(home.stopped, ListNotRead)
+    assert home.bank.fetched == ["P3", "P2"]
+    assert home.on_disk() == ["P3"]
+    assert home.failed() == []
+    assert "The ING list could not be read again whole" in said
+
+
+def empties_on_the_next_open(bank):
+    """The Postbox shows ING's notice that nothing matches once it is next
+    opened by its own address."""
+    real = bank.goto
+
+    def goto(url, **kw):
+        bank.lists["postbox"] = []
+        return real(url, **kw)
+    bank.goto = goto
+
+
+def rows_time_out(bank):
+    real = bank.evaluate
+
+    def evaluate(js, arg=None):
+        if isinstance(arg, dict) and "rowSelectors" in arg:
+            raise TimeoutError("Timeout 30000ms exceeded")
+        return real(js, arg)
+    bank.evaluate = evaluate
+
+
+def does_not_open(bank):
+    def goto(url, **kw):
+        bank.gotos.append(url)
+        raise TimeoutError("Timeout 30000ms exceeded")
+    bank.goto = goto
+
+
+# What the list read again after a refusal can show that says neither that
+# the session ended nor that it still holds.
+NOT_ANSWERED = {"empty": empties_on_the_next_open, "rows time out": rows_time_out,
+                "does not open": does_not_open}
+
+
+@pytest.mark.parametrize("after", sorted(NOT_ANSWERED))
+def test_a_document_refused_and_a_list_that_does_not_answer_after_it_leaves_the_list_unread(home, after):
+    """A Postbox that comes back empty was taken as a list that still reads,
+    so the document failed alone and every document after it went on to an
+    empty list. Neither an empty list nor one that does not come says the
+    session ended, so the run stops with the list unread and the refused
+    document left as it was for the next run that lists."""
+    home.bank.lists["postbox"] = [statement("P1", 1), statement("P2", 2), statement("P3", 3)]
+    home.bank.answer_with["P2"] = 403
+    home.bank.at_fetch["P2"] = NOT_ANSWERED[after]
+    _code, said = home.run_all()
+    assert isinstance(home.stopped, ListNotRead), said
+    assert home.bank.fetched == ["P3", "P2"]
+    assert home.on_disk() == ["P3"]
+    assert home.failed() == []
+    assert "signed out" not in said
+    assert "The ING list could not be read again whole" in said
 
 
 def test_a_document_gone_from_the_list_fails_and_nothing_is_fetched_for_it(home):

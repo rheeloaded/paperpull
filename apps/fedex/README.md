@@ -79,6 +79,19 @@ Billing Online takes payments and disputes. This app activates no control
 at all. It opens the invoices page, keeps what the page receives, and
 fetches a PDF from an invoice's own link, every address on `fedex.com`.
 An expired session stops the run rather than reporting an empty success.
+FedEx answering every call the invoices page makes with a 401 or a 403
+means you are signed out, in Discover too, never that you have no
+invoices. A FedEx tab that fedex.com will not open in stops the run with
+the list unread, since nothing there says you are signed out.
+An invoice FedEx answers with a 401, a 403 or a redirect off fedex.com
+has the invoices page read again. A sign-in page there, or the list
+refused with a 401 or a 403, means you are signed out, and the run stops.
+A list that never comes, answers with an error, times out or shows no
+invoice says nothing of your session, so the run stops with the list
+unread, nothing is recorded against that invoice, and Get new documents
+reads the list first. A page that still lists invoices leaves that
+invoice failed with nothing saved, the run goes on to the others, and the
+next run tries it again.
 
 ## Commands
 

@@ -457,8 +457,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -511,11 +510,27 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.ListStopped as stop:
+                # My Invoices, read again after this invoice was refused,
+                # did not answer or showed no invoice. Every invoice after
+                # it reads the same list, so the run stops here, with
+                # nothing recorded against this one.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because My Invoices could not be read again after an
+        invoice was refused. Nothing is recorded against the invoice, and
+        the run leaves as one whose list did not end whole, which only a
+        run that lists carries on from (listing.read_again_stopped)."""
+        log.info("My Invoices could not be read again after a refused invoice")
+        self.write_failure("read the invoices list again", "the invoices list did not answer")
+        listing.read_again_stopped(self, (
+            "UPS's My Invoices list could not be read again, so this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one statement. The site layer asks for the PDF from

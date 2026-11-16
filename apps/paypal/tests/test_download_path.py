@@ -245,7 +245,8 @@ def _held(monkeypatch, tmp_path, move=False, copy=False, remove=False):
     """Make moving the statement to Manual Review, copying it there and
     removing it from the archive fail, as each does while a sync client or
     a virus scanner holds a file."""
-    replace, unlink, copyfile = Path.replace, Path.unlink, app_mod.shutil.copyfile
+    replace, unlink = Path.replace, Path.unlink
+    write = app_mod.shared_folder.write_bytes
 
     def moved(self, target):
         if move and Path(target).parent == tmp_path / "review":
@@ -257,14 +258,16 @@ def _held(monkeypatch, tmp_path, move=False, copy=False, remove=False):
             raise OSError("held by another program")
         return unlink(self, *a, **kw)
 
-    def copied(source, target, *a, **kw):
-        if copy:
+    def copied(target, data):
+        # The copy into Manual Review alone, which is written through the
+        # core's shared_folder so no link left there is written through.
+        if copy and Path(target).parent == tmp_path / "review":
             Path(target).write_bytes(b"%PDF-")
             raise OSError("held by another program")
-        return copyfile(source, target, *a, **kw)
+        return write(target, data)
     monkeypatch.setattr(Path, "replace", moved)
     monkeypatch.setattr(Path, "unlink", removed)
-    monkeypatch.setattr(app_mod.shutil, "copyfile", copied)
+    monkeypatch.setattr(app_mod.shared_folder, "write_bytes", copied)
 
 
 def _record(app):

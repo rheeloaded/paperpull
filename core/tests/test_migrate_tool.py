@@ -568,6 +568,170 @@ def test_a_file_name_pattern_is_taken_only_once_it_is_checked(tmp_path):
                                      check_pattern=lambda p: None) == pattern
 
 
+UKG = Path(__file__).resolve().parents[2] / "apps" / "ukg"
+
+
+def _ukg(tmp_path):
+    """An install of the real UKG app, copied as the panel copies it."""
+    import shutil
+    inst = tmp_path / "UKG Pay Stubs"
+    shutil.copytree(UKG, inst, ignore=shutil.ignore_patterns("tests", "__pycache__"))
+    (inst / "config.json").write_text((inst / "config.example.json").read_text(encoding="utf-8"),
+                                      encoding="utf-8")
+    return inst
+
+
+def test_an_address_from_a_file_is_written_only_on_the_providers_own_site(tmp_path):
+    """UKG's base_url is where its sign-in window opens, the last thing on
+    the browser's command line. A history file from another computer
+    carried --no-sandbox into it, which the browser took as a switch (a
+    private report of 2026-11-10). It is held to UKG's own domains, as
+    PaperPull Server holds it before every run, and the rest of the file's
+    settings still come across."""
+    inst = _ukg(tmp_path)
+    cfg = json.loads((inst / "config.json").read_text(encoding="utf-8"))
+    for value in ("--no-sandbox", "https://attacker.example", "https://yourhost/wfc/",
+                  "http://example.ultipro.com", "https://example.ultipro.com@evil.example",
+                  "https://example.ultipro.com/c/hcm", "javascript:alert(1)"):
+        left = []
+        got = migrate.settings_to_apply(inst, dict(cfg), {"base_url": value, "owner": "Pat Example"},
+                                        left_out=left)
+        assert got == {"owner": "Pat Example"}, (value, got)
+        assert left == ["base_url"], value
+    for value in ("https://example.ultipro.com", "https://secure6.saashr.com/",
+                  "https://REPLACE-ME.ultipro.com", ""):
+        left = []
+        got = migrate.settings_to_apply(inst, dict(cfg), {"base_url": value}, left_out=left)
+        assert got == {"base_url": value} and left == [], value
+    # Not the kind the install's own setting is, as before.
+    assert migrate.settings_to_apply(inst, dict(cfg), {"base_url": 7}) == {}
+
+
+def test_an_apps_addresses_are_read_from_its_code_without_running_it(tmp_path):
+    """Running storage.py binds the core to that app for the whole process,
+    and the panel imports every provider's history in one."""
+    from paperpull_core import storage as core_storage
+    before = core_storage._SPEC
+    assert migrate.url_settings_of(_ukg(tmp_path)) == {"base_url": ("ultipro.com", "saashr.com")}
+    assert core_storage._SPEC is before
+    assert migrate.url_settings_of(_app(tmp_path)) == {}
+
+
+def test_an_app_whose_addresses_cannot_be_read_takes_no_address_from_a_file(tmp_path):
+    inst = _ukg(tmp_path)
+    (inst / "storage.py").write_text("SPEC = AppSpec(url_settings=WHERE)\n", encoding="utf-8")
+    assert migrate.url_settings_of(inst) is None
+    left = []
+    got = migrate.settings_to_apply(inst, json.loads((inst / "config.json").read_text(encoding="utf-8")),
+                                    {"base_url": "https://example.ultipro.com", "owner": "Pat"},
+                                    left_out=left)
+    assert got == {"owner": "Pat"} and left == ["base_url"]
+    (inst / "storage.py").unlink()
+    assert migrate.url_settings_of(inst) is None
+
+
+def test_every_other_providers_settings_come_across_as_before(tmp_path):
+    """No app but UKG holds an address, so nothing of theirs is left out."""
+    inst = _app(tmp_path)
+    left = []
+    got = migrate.settings_to_apply(inst, dict(EXAMPLE), {"default_start_date": "2020-01-01",
+                                                          "owner": "Pat"}, left_out=left)
+    assert got == {"default_start_date": "2020-01-01", "owner": "Pat"} and left == []
+
+
+def _places(tmp_path):
+    root = tmp_path / "data"
+    install, spouse, outside = root / "Bank Statements", root / "Bank Statements - spouse", root / "outside"
+    for d in (install / "Statements", spouse / "Statements", outside):
+        d.mkdir(parents=True)
+    return install, spouse, outside
+
+
+def test_a_relative_path_that_leads_out_of_the_persons_folder_is_cleared(tmp_path):
+    """A relative path is kept as the app wrote it, read from the folder
+    the app runs in, as long as it leads into the person's own folder. One
+    that climbed out of it named any file of this computer, and AT&T's
+    repair at start moved that file into Manual Review (a private report of
+    2026-11-10). A second person's paths, which begin with "..", still lead
+    into their own folder beside the install."""
+    install, spouse, _ = _places(tmp_path)
+    rw = migrate._rewrite_path
+    for kept in ("Statements/a.pdf", "Statements\\a.pdf", "Manual Review/a.pdf",
+                 "./Statements/../Statements/a.pdf"):
+        assert rw(kept, [], install, install) == kept, kept
+    for out in ("../outside/x.pdf", "..\\outside\\x.pdf", "Statements/../../outside/x.pdf",
+                "../Bank Statements - spouse/Statements/a.pdf", ".", "Statements/../..",
+                "../../../../etc/passwd"):
+        assert rw(out, [], install, install) == "", out
+    theirs = "..\\Bank Statements - spouse\\Statements\\a.pdf"
+    assert rw(theirs, [], spouse, install) == theirs
+    assert rw("../Bank Statements - spouse/../outside/x.pdf", [], spouse, install) == ""
+    # A caller that does not say where the app runs gets what it always did.
+    assert rw("../outside/x.pdf", [], install) == "../outside/x.pdf"
+
+
+def test_a_relative_path_through_a_link_out_of_the_folder_is_cleared(tmp_path):
+    install, _, outside = _places(tmp_path)
+    try:
+        (install / "Statements" / "linked").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("this system does not let a test make a symbolic link")
+    assert migrate._rewrite_path("Statements/linked/x.pdf", [], install, install) == ""
+
+
+def _walked(start: list, rel: str) -> list:
+    """The folders a relative path names from `start`, a list of folder
+    names from the root, walked one part at a time, as a tree with no links
+    in it is walked. A rule of its own, so it checks the import's answer
+    rather than repeating how the import works it out."""
+    at = list(start)
+    for part in rel.replace("\\", "/").split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if at:
+                at.pop()
+        else:
+            at.append(part)
+    return at
+
+
+def test_a_relative_path_is_kept_exactly_when_it_leads_into_the_persons_folder(tmp_path):
+    """A seeded run of relative spellings, "..", ".", the folder's own
+    names, the sibling's name and both separators. A path is kept exactly
+    when, walked from the install, it ends below the person's own folder."""
+    import random
+    install, spouse, _ = _places(tmp_path)
+    root = list(install.parent.parts)
+    rng = random.Random(20261114)
+    parts = ["..", ".", "Statements", "Manual Review", "Bank Statements",
+             "Bank Statements - spouse", "outside", "a.pdf"]
+    for _ in range(3000):
+        rel = rng.choice(["/", "\\"]).join(rng.choice(parts) for _ in range(rng.randint(1, 6)))
+        for own in (install, spouse):
+            got = migrate._rewrite_path(rel, [], own, install)
+            ends = _walked(root + [install.name], rel)
+            mine = root + [own.name]
+            inside = len(ends) > len(mine) and [p.lower() for p in ends[:len(mine)]] == \
+                [p.lower() for p in mine]
+            assert got == (rel if inside else ""), (rel, own.name)
+
+
+def test_an_import_clears_a_path_that_leads_out_and_keeps_the_rest(tmp_path):
+    old = tmp_path / "old"
+    _install(old, "Bank Statements", "Bank",
+             {"id:1": _rec(path="Statements\\2026-01-31 Statement.pdf"),
+              "id:2": _rec(path="..\\..\\outside\\decoy.pdf")})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+    new = tmp_path / "new"
+    _install(new, "Bank Statements", "Bank", {})
+    migrate.do_import(archive, new, assume_yes=True)
+    got = json.loads((new / "Bank Statements" / "progress.json").read_text(encoding="utf-8"))
+    assert got["id:1"]["pdf_path"] == "Statements\\2026-01-31 Statement.pdf"
+    assert got["id:2"]["pdf_path"] == "" and got["id:2"]["downloaded_ok"] is True
+
+
 def test_a_first_persons_folder_is_never_taken_for_the_start_of_a_seconds():
     """The first version compared the start of a path with the folder and no
     separator, so a path in "Bank Statements - spouse" was taken for one in

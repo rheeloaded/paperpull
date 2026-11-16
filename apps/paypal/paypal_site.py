@@ -68,6 +68,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import blob_capture
 from paperpull_core import capture
@@ -536,7 +537,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     body = intake.decode(r["b64"])
     if body[:5] != b"%PDF-":
         return False
-    out_path.write_bytes(body)
+    shared_folder.write_bytes(out_path, body)
     return True
 
 

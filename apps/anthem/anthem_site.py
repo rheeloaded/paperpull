@@ -51,7 +51,9 @@ import re
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
+from paperpull_core import refused
 from paperpull_core.urls import host_matches, host_of
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
@@ -496,7 +498,9 @@ _DOWNLOAD_JS = r"""async (a) => {
 
 
 class SessionExpired(Exception):
-    """The server answered a document request with a sign-in page or 401."""
+    """The server answered a request with a sign-in page or 401. An EOB
+    refused that way raises it only when its list, read again, refuses too
+    (download_document)."""
 
 
 class ListingIncomplete(Exception):
@@ -504,6 +508,19 @@ class ListingIncomplete(Exception):
     error (not an auth failure). Raised rather than returning an empty list, so
     a transient 429/5xx/timeout stops the surface loudly instead of recording an
     empty success and leaving a document silently missing from the archive."""
+
+
+class ListStopped(Exception):
+    """A list read again after one of its documents was refused did not
+    answer, answered with something that is not its list, or held nothing
+    (paperpull_core.refused). None of those says the session ended or that
+    it still holds, so the run stops with the list unread, nothing recorded
+    against the document. `docs` holds what was read before it stopped. Its
+    words are this module's own, never the page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 def _has_headers(page) -> bool:
@@ -867,9 +884,10 @@ def _summary_rows(page, claim_type: str, start: str, end: str) -> List[dict]:
     """The current session's raw EOB summary rows for one claim type.
 
     Primes the captured auth headers if missing, and re-primes once if the token
-    has gone stale (401). Raises SessionExpired if it still cannot authenticate,
-    and ListingIncomplete, saying its status alone, for any other answer but
-    200, which is a list that did not come rather than an empty one.
+    has gone stale (401). Raises SessionExpired if it still cannot authenticate
+    or answers a page with a 200, and ListingIncomplete, saying its status
+    alone, for any other answer but 200, a gateway's error page included,
+    which is a list that did not come rather than an empty one.
     """
     arg = {"claimType": claim_type, "start": start, "end": end}
     res = page.evaluate(_SUMMARY_JS, arg) or {}
@@ -877,7 +895,10 @@ def _summary_rows(page, claim_type: str, start: str, end: str) -> List[dict]:
         if prime_session(page, force=True):
             res = page.evaluate(_SUMMARY_JS, arg) or {}
     status = res.get("status")
-    if res.get("noauth") or res.get("html") or status in (401, 403):
+    # A page where the list should be is Anthem's sign-in only when it came
+    # with a 200. A gateway's own error page, a 502 or a 503, is a list
+    # that did not come, which says nothing of the session.
+    if res.get("noauth") or (res.get("html") and status == 200) or status in (401, 403):
         raise SessionExpired(
             "Anthem would not authenticate an EOB listing "
             f"(status {status}); the signed-in session is no longer valid")
@@ -1064,7 +1085,19 @@ def download_document(page, doc_id: str, out_path) -> bool:
     alphanumeric claim number, so the request cannot be pointed elsewhere. The
     opaque eobId is resolved fresh from a current summary and the PDF is
     base64-decoded from the download envelope's result.data.file. Raises
-    SessionExpired when Anthem will not authenticate the request.
+    SessionExpired when Anthem will not authenticate the tab, the session or
+    the summary.
+
+    An EOB's PDF answered with a 401, a 403, no session headers or a sign-in
+    page has its claim type's list read again, with the same call that
+    proves a session (paperpull_core.refused). A session that has ended is
+    refused the list too, and its SessionExpired stops the run there. A list
+    that did not come (ListingIncomplete, a timeout, any other failure) or
+    that holds nothing says neither, and raises ListStopped, which stops the
+    run with the list unread and nothing recorded against the EOB. A list
+    that still reads leaves the refusal this EOB's own, so it fails alone,
+    since a stop here would stop every run at this EOB for good. The EOB is
+    not asked for after the list is read again.
     """
     parsed = parse_doc_id(doc_id)
     if not parsed:
@@ -1083,6 +1116,29 @@ def download_document(page, doc_id: str, out_path) -> bool:
     eob_id, claim_ref = found
     arg = {"claimId": claim_ref, "claimType": claim_type, "eobId": eob_id}
     try:
+        return _fetch_eob(page, arg, out_path)
+    except SessionExpired:
+        # A refusal may be the session ending or this one EOB. The list is
+        # read again, and a session that ended shows there and stops the
+        # run. A list that did not come, or holds nothing, proves neither,
+        # so it stops the run with the list unread (ListStopped). One that
+        # still reads leaves this EOB failed, so it never stops every later
+        # run at the same EOB.
+        start, end = _date_window()
+        refused.list_again(lambda: _summary_rows(page, claim_type, start, end),
+                           SessionExpired, ListStopped)
+        log.info("the %s %s was refused while the list still reads", claim_type, doc_kind)
+        return False
+
+
+def _fetch_eob(page, arg: dict, out_path) -> bool:
+    """GET one EOB's PDF through the download envelope with the session's
+    captured headers, taken again once when they are refused, and keep the
+    body only when it is a PDF. A 401, a 403, no session headers or a
+    sign-in page where the PDF should be raises SessionExpired, which
+    download_document weighs against the list read again. Any other answer
+    that is not a PDF fails this EOB alone."""
+    try:
         res = intake.evaluate(page, _DOWNLOAD_JS, arg) or {}
     except Exception as e:
         log.warning("download fetch failed: %s", str(e).splitlines()[0][:100])
@@ -1096,8 +1152,7 @@ def download_document(page, doc_id: str, out_path) -> bool:
                 return False
     status = res.get("status")
     if res.get("noauth") or status in (401, 403):
-        raise SessionExpired("Anthem refused the document request (%s), which "
-                             "means the session has expired" % status)
+        raise SessionExpired("Anthem refused the document request (%s)" % status)
     if status != 200:
         log.warning("download returned %s", status)
         return False
@@ -1119,7 +1174,7 @@ def download_document(page, doc_id: str, out_path) -> bool:
         return False
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(body)
+    shared_folder.write_bytes(out, body)
     return True
 
 
@@ -1490,39 +1545,24 @@ def _prime_and_fetch(page, target: str, bucket: str, js: str, what: str,
 
 
 def render_html_to_pdf(page, html: str) -> Optional[bytes]:
-    """Render a fragment of HTML to a PDF using the browser's own print-to-PDF,
-    on a throwaway blank page with all network blocked (so a letter body cannot
-    fetch a tracking pixel or any remote resource). Used to turn a letter's text
-    and an ID card's front/back images into filed PDFs."""
-    from paperpull_core.receipt_pdf import PRINT_TO_PDF_OPTIONS, PDF_MAGIC, printed_pdf
-    ctx = page.context
-    scratch = ctx.new_page()
+    """Render HTML this app put together to a PDF, a letter's text, an ID
+    card's front and back images or a claims summary's table, through the
+    core's inert drawing (receipt_pdf.inert_pdf_bytes): active content
+    stripped, JavaScript off, every request aborted, and never in a page of
+    the signed-in session where it can help it. A letter's body is a
+    secure message's, which this app does not write, and it was drawn with
+    JavaScript on in the signed-in context, its block covering http and
+    https alone. None when it cannot be drawn that way, so nothing is ever
+    drawn without the block, and the document is tried again next run."""
+    from paperpull_core.receipt_pdf import UnsafeHtml, inert_pdf_bytes
     try:
-        try:
-            scratch.route(re.compile(r"^https?://"), lambda r: r.abort())
-        except Exception as e:
-            # FAIL CLOSED. The content below is a secure-message body, which
-            # anyone able to send the member a message can influence, and this
-            # scratch page shares the signed-in browser context. If the block
-            # could not be installed, the promise in this docstring is not one
-            # this function can keep, so it renders nothing rather than
-            # rendering untrusted markup with the network wide open.
-            log.warning("could not block network for the PDF render (%s); "
-                        "skipping rather than rendering unguarded",
-                        str(e).splitlines()[0][:80])
-            return None
-        scratch.set_content(html, wait_until="load")
-        sess = ctx.new_cdp_session(scratch)
-        data = printed_pdf(sess, PRINT_TO_PDF_OPTIONS)
-        return data if data.startswith(PDF_MAGIC) else None
+        return inert_pdf_bytes(page, html)
+    except UnsafeHtml as e:
+        log.warning("refused to render a PDF of markup that stays active after stripping (%s)", e)
+        return None
     except Exception as e:
         log.warning("could not render a PDF: %s", str(e).splitlines()[0][:80])
         return None
-    finally:
-        try:
-            scratch.close()
-        except Exception:
-            pass
 
 
 def _b64_pdf(res: dict, what: str) -> Optional[bytes]:
@@ -1907,7 +1947,8 @@ def _period_summary(page, p: dict) -> Optional[dict]:
         if prime_session(page, force=True):
             res = _ask_export(page, arg, p["period"])
     status = res.get("status")
-    if res.get("noauth") or res.get("html") or status in (401, 403):
+    # A page is the sign-in only with a 200, as for the EOB list.
+    if res.get("noauth") or (res.get("html") and status == 200) or status in (401, 403):
         raise SessionExpired("Anthem would not authenticate the claims list "
                              f"(status {status})")
     if status != 200:

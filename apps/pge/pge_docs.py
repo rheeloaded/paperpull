@@ -30,6 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import pge_site as site
@@ -407,8 +408,7 @@ class App:
             return True
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -835,7 +835,7 @@ class App:
         try:
             self.paths.diagnostics.mkdir(parents=True, exist_ok=True)
             shot_path = self.paths.diagnostics / "diagnose-documents.png"
-            page.screenshot(path=str(shot_path), full_page=True)
+            shared_folder.write_bytes(str(shot_path), page.screenshot(full_page=True))
             info["screenshot"] = str(shot_path)
         except Exception as e:
             info["screenshot_error"] = str(e)

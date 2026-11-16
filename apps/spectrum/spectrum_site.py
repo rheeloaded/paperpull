@@ -168,6 +168,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import unquote, urlencode, urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core import pressing, receipt_pdf
@@ -1819,7 +1820,7 @@ def _press_for_statement(page, el, entry: Entry, entries: List[Entry], out_path:
             log.info("the press did not bring exactly one statement: %s", why)
         if not why:
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_bytes(data)
+            shared_folder.write_bytes(out_path, data)
             _KEPT[hashlib.sha256(data).hexdigest()] = entry.document_id
     except Exception as e:
         raise refused("what it brought could not be checked or kept, %s" % type(e).__name__) from None

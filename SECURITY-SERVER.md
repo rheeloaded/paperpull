@@ -51,7 +51,12 @@ See "Design safety" in [SECURITY.md](SECURITY.md).
 - **Requests from other sites are refused,** even from a browser that is
   signed in, by checking that a request came from the panel's own page.
   A link opened from an email, a chat or a PDF can open the panel, never
-  start a run. The panel also answers only to its own names, the server's
+  start a run, over plain HTTP as over HTTPS, and a page of another
+  program on the same server cannot start one either. Over plain HTTP a
+  browser does not say where a request came from, so the server takes
+  only a request that names the panel's own address in its Origin or
+  Referer, as every request of the panel's own page does. The panel also
+  answers only to its own names, the server's
   address, a home network name such as `nas` or `nas.local` and the names
   you list in `PAPERPULL_HOSTS`, see step 4 in [SERVER.md](SERVER.md), so a
   website cannot reach it through your browser by pointing a name of its

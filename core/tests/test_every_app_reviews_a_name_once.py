@@ -847,20 +847,34 @@ def keeps_a_list_of_invoices(tree) -> bool:
     return False
 
 
+# Apps whose records keep a list of invoices that no rename ever left naming
+# an old file, each with why, so they have nothing to mend.
+BORN_FOLLOWED = {
+    "amazon": "its list was first written after aa8ac7c1, from which Review Names and Rename "
+              "follow every list as they move its files (renaming._follow_invoices), so no "
+              "rename has left one naming an old file",
+}
+
+
 def test_every_app_keeping_a_list_of_invoices_mends_it_before_a_rename():
     """Review Names and Rename left a record's list of invoices naming the
     files they renamed until the list followed its files, and both read the
     list as naming the order's files. An app whose records keep such a list
     mends it (_mend_invoice_lists) in cmd_rename and in cmd_review_names,
-    before either reads it. Apps are found by what they write, and at least
-    one does, so this is not passing on no app at all."""
+    before either reads it, unless no version that wrote its list ever
+    renamed without following it (BORN_FOLLOWED). Apps are found by what
+    they write, and at least one does, so this is not passing on no app at
+    all."""
     import ast
     keeping = []
     for app in APPS:
         tree = ast.parse(entry_of(app).read_text(encoding="utf-8"))
         if not keeps_a_list_of_invoices(tree):
+            assert app.name not in BORN_FOLLOWED, (app.name, "keeps no list any more")
             continue
         keeping.append(app.name)
+        if app.name in BORN_FOLLOWED:
+            continue
         commands = {n.name: n for n in ast.walk(tree)
                     if isinstance(n, ast.FunctionDef)
                     and n.name in ("cmd_rename", "cmd_review_names")}

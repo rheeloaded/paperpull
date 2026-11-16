@@ -121,6 +121,18 @@ in or sign up" and the "Sign up / Log in" button), and that is read as
 signed out too. A wallet that shows neither the sign-in nor one Bilt Card
 stops the list instead.
 
+A statement whose details Bilt answers with a 401, a 403 or a redirect,
+whose tab lands on the sign-in page, or whose PDF address answers a 401, a
+403 or a redirect, has the list read again. A list refused too means you
+are signed out, and the run stops as above. A list that does not answer,
+times out or shows no statement says nothing about your sign-in, so the
+run stops there with nothing recorded against that statement, and the
+panel offers a run that reads the list first, which takes it. A list that
+still reads leaves that statement counted as failed with nothing saved,
+the run goes on to the other statements, and the next run tries it again.
+Its button is never pressed twice, and a tab it opened that will not close
+stops the run.
+
 Files are named `YYYY-MM-DD Bilt Card Statement.pdf`. Only when that name
 is already taken does the file add six letters that tell it apart. No card
 number or statement id is ever in a file name. A Download again of a

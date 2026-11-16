@@ -125,6 +125,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import parse_qsl, urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core import pressing
@@ -1071,7 +1072,7 @@ def _fetch_tax_pdf(page, title: str, out_path: Path, trace: Optional[list],
     if body[:5] != b"%PDF-":
         return False
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(body)
+    shared_folder.write_bytes(out_path, body)
     return True
 
 
@@ -2033,7 +2034,7 @@ def _take_card_statement(page, label: str, iso: str, out_path: Path, trace: Opti
             note(why)
             return False
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(body)
+        shared_folder.write_bytes(out_path, body)
         note("card statement taken")
         return True
     finally:

@@ -7,7 +7,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
-## [Unreleased]
+## [0.67.0] - 2026-11-15
+
+1822direkt, Amazon Visa and Sparkasse Pforzheim Calw are new, all three
+contributed by @MelleD. One document a provider refuses no
+longer stops every run in sixteen more apps, a document saved while a
+spreadsheet has its index open stays saved, and an Amazon order or a
+Wealthfront form of several files is done only once every file has come.
+A named pipe or a folder a run may not search no longer holds or ends a
+run, and file names fit every system PaperPull runs on. PaperPull Server
+refuses a request that does not say where it came from, and five more
+findings reported privately are fixed.
 
 ### Added
 - **1822direkt, the Postbox, its sent items and its trash (#174).** It
@@ -68,6 +78,173 @@ All notable changes to PaperPull are recorded here. Versioning follows
   own. The reworked page turns and download press have not been run
   against the bank yet, and whether the bank marks a document read when
   its PDF is taken has not been checked. Contributed by @MelleD.
+
+### Fixed
+- **A saved document stays saved while a spreadsheet has its index open.**
+  On Windows, an app's index or order history open in Excel refused the
+  new row of a document already saved and checked, and the app then
+  recorded that document Failed. No later run asked for it again, its row
+  was never written, and Rename, Review Names, Verify and the move to a
+  documents folder never reached the file. Every app now waits for the
+  spreadsheet as long as any other write waits, once in a run for each
+  file, and keeps the rows it could not write beside the index. They go in
+  by themselves, each once and in order, the next time the app writes or
+  reads that index or as the run ends, and a write that breaks partway
+  writes none of them twice. The run and the panel say
+  how many rows wait and that every document is saved. On a Mac, Linux and
+  PaperPull Server an index the run may not write is said to be one it
+  cannot write, with no wait. A document an earlier version left this way
+  is not repaired and stays out of Rename until it is downloaded again.
+- **An Amazon order split across sellers is done only once every invoice
+  is on file.** An invoice after the first that did not come was passed
+  over and the order marked done for good, so its other invoices were never
+  saved. Each invoice is now checked and written into the order's record
+  as it is put in place, the order stays Failed until every invoice the
+  menu lists is on file, and the next run fetches only the ones still
+  missing. An invoice that fails its check is put aside in Manual Review
+  and counted, where it had been moved there and counted nowhere. The run
+  that completes an order lists every invoice of it as new, so the move to
+  a documents folder after that run takes the order whole, and Target's
+  orders of several invoices are moved whole the same way.
+- **A Wealthfront tax form is done only once every file of its set has
+  come.** A companion file that did not come was passed over, and the form
+  was marked done with notes counting files that were never saved. The
+  form now stays Failed until every file has come, the next run fetches
+  only the missing ones and names each beside the first, and the first is
+  never saved a second time as "(2)". The run that completes a form lists
+  every file of it as new, so the move to a documents folder after that run
+  takes the form whole.
+- **A named pipe or a device a record names no longer holds a run.** A
+  record or an index row naming a named pipe, a device or a link to one
+  held Target's invoice walk and its Rename preview, and Robinhood's tax
+  form checks, until the run was killed. Such a path is now answered at
+  once as a PDF that did not open and is never read.
+- **A record naming a file in a folder the run may not search no longer
+  ends the run.** With Python 3.12, which every build ships, asking whether
+  such a file is there raised instead of answering, as it can after a
+  person changes a shared folder's permissions. Every app
+  ended its run at that document on every run, and Verify, Robinhood,
+  Amazon's Reparse, the transactions export, Rename and Move, and the
+  panel's Documents count and set-aside page failed the same way. Such a
+  file now counts as not there, so its document is fetched again as a
+  deleted copy is, and Verify says it cannot read the file. A path a hand
+  edit left as a number or a list names nothing, where it raised on every
+  system.
+- **Robinhood and E*TRADE no longer read another record's file whole.**
+  To tell whether a new statement was already saved, they read an older
+  record's file whole into memory to hash it. One larger than free memory
+  failed the document just taken, and every later run fetched it again and
+  failed the same way. They now hash it a block at a time, never past the
+  largest a document may be.
+- **A file name never starts with a dot.** With a naming pattern that
+  starts with the account, a masked account such as "...1234" made a hidden
+  file, which a Mac and Linux do not show and which PaperPull Server left
+  out of the set-aside download. Leading dots are now taken off a name.
+- **On Windows the path limit counts the whole path.** The longest path
+  was measured from the install's folder, while Windows with long paths
+  turned off counts from the drive, so a name filed three folders deep
+  passed the check and was more than 300 characters in full. It is now
+  measured as Windows measures it. A Mac and PaperPull Server keep the
+  names they had.
+- **A file name fits 255 bytes.** A name was counted in characters, so a
+  long title in Japanese or with emoji passed and then could not be saved
+  on PaperPull Server or a Mac, which hold a name in 255 bytes of UTF-8,
+  and Windows refused a long name of emoji. A name is now cut to fit
+  between two characters, keeping a part such as "(2 of 3)" at its end
+  that Rename reads. Every name that fit before is unchanged.
+- **A download another program holds open is never saved twice.** When a
+  sync client or a backup tool had a freshly downloaded file open as the
+  app moved it into place, the move copied it to its name and could not
+  take the original away, so the app counted it not saved and the next run
+  saved a second copy. A move on one drive is now a rename that either
+  happens or leaves nothing behind, and only a move to another drive copies.
+- **One document a provider refuses no longer stops every run in sixteen
+  more apps.** Affirm, American Express Banking, Anthem, Bank of America,
+  Bilt, FedEx, First Horizon, ING, the IRS, myPay, Portland General
+  Electric, SDG&E, Simmons Bank, Stripe, Tualatin Water and UPS read a 401,
+  a 403, a redirect or a page answered for one document as a sign-out, so
+  the run stopped at that document, and every run after it, Continue
+  included, stopped at the same one (#124). Now the list is read again when
+  one document is refused, as Ziply Fiber's is. A list refused too means
+  you are signed out, and the run stops as before. A list that still reads
+  leaves that document counted as failed with nothing saved, the run goes
+  on to the others, and the next run tries it again. A list that does not
+  answer, times out, comes back with a server's error page or holds
+  nothing says neither, so the run stops there without calling you signed
+  out, nothing is recorded against the document, and the panel offers Get
+  new documents, which reads the list first and asks for it again. Ziply
+  Fiber, Cetera, Verizon Mobile and NW Natural now read a list that times
+  out or stops answering after a refusal that way too, where it counted
+  the bill as failed and went on, and so do Cetera, NW Natural and
+  Portland General Electric when they read the list for a bill this run
+  holds no list for. Anthem's member documents and ID cards read their own
+  lists again the same way, and a list there that does not answer ends that
+  kind of document for the run, counted as failed, as it does when it will
+  not open. A document is not asked for twice, apart from the one more ask
+  with a fresh sign-in token that Anthem and Portland General Electric
+  already made. In First Horizon a page answered for a statement no longer
+  waits a minute for a download that never comes. M&T stays as it was,
+  since its list is the one you opened in your own tab, and nothing can
+  read that again without wiping it.
+- **FedEx reads an invoice list it refuses as a sign-out.** When FedEx
+  Billing Online answered every call of the invoices page with a 401 or a
+  403, Discover took that for a list with no invoices, said Discovery
+  complete and found nothing new with the session ended. After one refused
+  invoice, the list read again stopped the run as a list that did not
+  answer and never said you were signed out. Both now stop the run as
+  signed out. A list that answers with a server's error, times out, never
+  comes or holds no invoice is still not read as one, and nor is one call
+  refused while another answers. A FedEx tab that fedex.com will not open
+  in now stops the run with the list unread, where it was called a
+  sign-out.
+
+### Security
+- **PaperPull Server refuses a request that does not say where it came
+  from.** Over plain HTTP a browser sends no Sec-Fetch-Site, Origin or
+  Referer to an address on a home network, and the Server took such a
+  request as one from its own page. So a link opened from an email or a
+  chat, in a browser signed in to the panel, could start a run, a Rename
+  or a Move. A request with none of the three is now refused there, and
+  the panel's own requests, which carry their Referer, work as before.
+  The Browser Screen's time is renewed only from the panel's own page, where
+  any request for one of its pages renewed it. A Server set up with HTTPS
+  was not affected, and the desktop still takes a tool that sends no
+  headers at all. Reported privately by @JasperDale420.
+- **A sign-in window never reads its address as a browser switch.** The
+  address a sign-in window opens went last on the browser's command line,
+  so a value starting with two hyphens was read as a switch, one that turns
+  the browser's sandbox off say, and UKG's `base_url`, which an imported
+  history carries over, could hold one. The address now comes after the
+  mark that ends the switches, and one that is not an http or https
+  address with a host is refused. An imported history keeps UKG's
+  `base_url` only when it is an https address on ultipro.com or saashr.com,
+  and the import says when it left one out. Reported privately by
+  @JasperDale420.
+- **PaperPull Server never writes through a link or waits on a pipe in its
+  shared folder.** A link or a named pipe that someone able to write into
+  the shared folder put at a name the panel or an app uses could send a
+  write to a file outside it, or hold a read for good. On the Server a file
+  there is now read only when it is a plain file of its own, never through
+  a link, and written as a new file under a name nobody can guess, then
+  moved into place, by the panel, every app, both spreadsheets, the history
+  import, adding a person, the Paperless plug-in and the backup recovery.
+  On the desktop a link you made is still followed. Reported privately by
+  @JasperDale420.
+- **A record's path that leads out of an account's folders is never
+  moved.** An imported history kept paths with `..` in them, and AT&T's
+  repair of a copy filed under the wrong year, American Family's move of a
+  second copy of one PDF and NetBenefits' move of a statement it held back
+  moved the file a record named, wherever it was. Each now moves a file only
+  when it is in one of the account's filing folders once links and `..` are
+  followed, and the import keeps a relative path only when it leads into
+  your own folder, so a second person's `../` folders still work. Reported
+  privately by @JasperDale420.
+- **Anthem draws its letters and ID cards where nothing can run.** A
+  letter's own HTML was drawn into its PDF in a tab of the signed-in
+  browser with JavaScript on, so a message could open a connection or a
+  window from there. It is now drawn where scripts are off and nothing
+  reaches out, and the PDFs come out the same. Reported privately by
+  @JasperDale420.
 
 ## [0.66.0] - 2026-11-13
 

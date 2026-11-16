@@ -573,8 +573,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -620,10 +619,11 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except site.SessionExpired:
-                # The account answered as a signed-out session, or ID.me is
-                # asking for a code. Every document after it would get the
-                # same answer, so the run stops here, with nothing recorded
-                # against this one.
+                # The list, read for this transcript or read again after the
+                # transcript was refused, answered as a signed-out session,
+                # or ID.me is asking for a code. Every document after it
+                # would get the same answer, so the run stops here, with
+                # nothing recorded against this one.
                 self.session_ended()
             except site.ListStopped as stop:
                 # The list could not be read again, or holds this document

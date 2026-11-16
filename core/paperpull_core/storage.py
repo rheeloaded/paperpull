@@ -567,6 +567,16 @@ def _provider_address(domains) -> "re.Pattern":
         re.IGNORECASE | re.ASCII)
 
 
+def on_provider_site(address, domains) -> bool:
+    """Whether a url_setting's value is an https address under one of the
+    provider's own domains with nothing after the name (_provider_address).
+    PaperPull Server holds every config to it before a run, and a history
+    file imported on either edition is held to it before its settings are
+    written (tools/migrate.py settings_to_apply)."""
+    return (isinstance(address, str) and bool(domains)
+            and bool(_provider_address(domains).fullmatch(address)))
+
+
 def hold_to_the_server(cfg: dict, path: Path) -> None:
     """Hold a config read on PaperPull Server to the server's own places,
     from what the file itself says, before any default is filled in. The
@@ -600,7 +610,7 @@ def hold_to_the_server(cfg: dict, path: Path) -> None:
         address = cfg.get(key)
         if address is None or address == "":
             continue
-        if not (isinstance(address, str) and _provider_address(domains).fullmatch(address)):
+        if not on_provider_site(address, domains):
             raise SystemExit(
                 "%s holds a %s that is not an https address on %s with nothing after the name, "
                 "such as https://yourname.%s. On PaperPull Server a provider's address has to "
@@ -1054,6 +1064,88 @@ def sanitize_component(name: str, max_len: int = 120) -> str:
 
 
 # ---------------------------------------------------------------------------
+# How long a name and a path are
+# ---------------------------------------------------------------------------
+
+# The most bytes of UTF-8 a file's name may take. ext4 and btrfs, the file
+# systems PaperPull Server runs on, and APFS on a Mac hold a name in 255
+# bytes, and NTFS in 255 UTF-16 units, which a name of 255 bytes never
+# passes. The 120 characters sanitize_component keeps are 360 bytes in
+# Japanese, and such a name could not be saved on the Server at all.
+NAME_BYTES = 255
+
+# Whether max_path_length is measured as Windows measures a path, the whole
+# of it from the drive, in UTF-16 units. Windows with long paths turned off
+# refuses a path past 260 of them. Every install's output_dir is ".", so a
+# path measured as written, from the install, passed at 240 and was far
+# longer in full. A Mac and PaperPull Server have no such limit, and there a
+# path is measured as written, as it always was, so no name changes there.
+_WINDOWS_MEASURE = sys.platform == "win32"
+
+# The part "(2 of 3)" at the end of a name, which a cut keeps, since Rename
+# reads it only from there (renaming._part_of), and a file that lost it is
+# renamed as though it were the whole order.
+_PART_AT_END = re.compile(r" ?\(\d+ of \d+\)$", re.IGNORECASE)
+
+
+def name_length(text: str) -> int:
+    """How long max_path_length counts `text`. In UTF-16 units on Windows,
+    where a character past the first 65536, an emoji say, is two, and in
+    characters elsewhere."""
+    if _WINDOWS_MEASURE:
+        return len(text) + sum(1 for ch in text if ord(ch) > 0xFFFF)
+    return len(text)
+
+
+def path_length(path) -> int:
+    """How long max_path_length counts a folder's or a file's path. On
+    Windows that is the whole path, normalized as Windows reads it, so a
+    second person's "../<install> - Robin" counts as the folder it names,
+    and never followed through a link, since Windows counts the path it is
+    handed and not where a link leads. Elsewhere the path as written."""
+    text = str(path)
+    if _WINDOWS_MEASURE:
+        try:
+            text = os.path.abspath(text)
+        except (OSError, ValueError):
+            pass
+    return name_length(text)
+
+
+def _size(text: str) -> int:
+    """A name's bytes in UTF-8. Half of a character counts the three bytes
+    a file system would be handed for it rather than stopping the count."""
+    return len(text.encode("utf-8", "surrogatepass"))
+
+
+def _cut(text: str, most: int, length) -> str:
+    """The longest start of `text` that `length` counts at most `most`,
+    made of whole characters."""
+    if length(text) <= most:
+        return text
+    used = 0
+    for i, ch in enumerate(text):
+        used += length(ch)
+        if used > most:
+            return text[:i]
+    return text
+
+
+def _in_bytes(text: str, most: int) -> str:
+    """`text` cut to `most` bytes of UTF-8 between two characters, never
+    ending in a space or a dot, which Windows takes off. A part "(2 of 3)"
+    at its end stays, the text before it giving way."""
+    if _size(text) <= most:
+        return text
+    part = _PART_AT_END.search(text)
+    if part and _size(part.group(0)) < most:
+        head = _cut(text[:part.start()], most - _size(part.group(0)), _size).rstrip(" .")
+        if head:
+            return head + part.group(0)
+    return _cut(text, most, _size).rstrip(" .")
+
+
+# ---------------------------------------------------------------------------
 # Folders from a naming pattern (#101)
 # ---------------------------------------------------------------------------
 
@@ -1101,14 +1193,49 @@ def _folder_name(text: str) -> str:
     return sanitize_component(cleaned, max_len=FOLDER_MAX).strip(" .")
 
 
+NAME_MAX = 120
+
+
+def _name_cut(text: str) -> str:
+    """sanitize_component's name, cut to NAME_MAX characters, its part
+    "(2 of 3)" at the end kept as _in_bytes keeps it, the text before it
+    giving way. The cut took the part off a name past 120 characters before
+    the byte cut could keep it, and Rename then read invoice 2 of an order
+    as the whole order (a review of 2026-11-15). A name of NAME_MAX
+    characters or fewer, and one with no part, is what it always was."""
+    whole = sanitize_component(text, max_len=sys.maxsize)
+    if len(whole) > NAME_MAX:
+        part = _PART_AT_END.search(whole)
+        if part and len(part.group(0)) < NAME_MAX:
+            head = whole[:part.start()][:NAME_MAX - len(part.group(0))].rstrip(" .")
+            if head:
+                return head + part.group(0)
+    return sanitize_component(text, max_len=NAME_MAX)
+
+
 def file_name_of(parts: List[str]) -> FileName:
     """A file's name and folders from the text naming.render_path gives,
     the folders first and the name last, each made safe. A folder that
     comes to nothing is left out, so a document a folder's fields say
-    nothing about is filed one folder up."""
+    nothing about is filed one folder up.
+
+    The name never starts with a dot or a space, as no folder does. A
+    pattern can start with a field whose value does, American Family's
+    masked account "...1234" say, and a Mac, Linux and PaperPull Server's
+    share hide a file so named, and the panel's zip of what was set aside
+    leaves it out. And the name fits NAME_BYTES, its part "(2 of 3)" kept.
+    The File names page, a download and Rename all build a name here, so
+    they give the same one."""
     *folders, name = parts or [""]
     kept = [f for f in (_folder_name(text) for text in folders) if f]
-    return FileName(sanitize_component(name) + ".pdf", "/".join(kept))
+    name = _name_cut(name)
+    if name.startswith("."):
+        # Taken off here and never in sanitize_component, which builds the
+        # keys of most apps' records, so a key stays what it was. Made safe
+        # again, since what is left can be a name Windows keeps for a
+        # device, CON say.
+        name = sanitize_component(name.lstrip(" ."))
+    return FileName(_in_bytes(name, NAME_BYTES - len(".pdf")) + ".pdf", "/".join(kept))
 
 
 def _put_aside_in(directory: Path) -> bool:
@@ -1160,7 +1287,9 @@ def filing_folder(directory: Path, filename, max_path_length: int = 240) -> Path
         return directory
     target = directory.joinpath(*parts)
     ext = os.path.splitext(filename)[1] or ".pdf"
-    if max_path_length - len(str(target)) - 1 < len(ext) + 8:
+    # Measured as the name's own room is (_free_name), so a folder kept
+    # here always leaves the name room under max_path_length.
+    if max_path_length - path_length(target) - 1 < len(ext) + 8:
         return directory
     at = directory
     for part in parts:
@@ -1387,7 +1516,13 @@ def fitted_name(directory: Path, filename: str, max_path_length: int = 240) -> s
 def _free_name(directory: Path, filename: str, max_path_length: int,
                existing: set, distinguisher: str) -> str:
     """The name unique_path gives *filename* in *directory*, where `existing`
-    is every name held there, in lower case."""
+    is every name held there, in lower case.
+
+    It fits two limits. The room the path leaves under max_path_length,
+    measured as the system measures it (path_length), takes off the end of
+    the name, as it always did. And NAME_BYTES takes off the end of the
+    name's own stem, a part "(2 of 3)" there kept, with what tells it apart
+    and a " (2)" after it whole, so such an ending still reads as itself."""
     stem, ext = os.path.splitext(filename)
 
     # An empty stem used to return the DIRECTORY itself, because "dir / ''" is
@@ -1402,7 +1537,7 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
     # A folder deep enough to leave nothing is not something a shorter filename
     # can rescue, and returning an over-long path anyway only moved the failure
     # to the write, where it surfaced as an unexplained OS error.
-    room = max_path_length - len(str(directory)) - 1
+    room = max_path_length - path_length(directory) - 1
     if room < len(ext) + 8:
         raise ValueError(
             "%s is too deep to file into. The full path would exceed the %d "
@@ -1411,12 +1546,23 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
             % (directory, max_path_length))
 
     def shorten(base: str, suffix: str) -> str:
-        keep = room - len(ext) - len(suffix)
-        return base[:max(1, keep)].rstrip(" .") + suffix + ext
+        keep = room - name_length(ext) - name_length(suffix)
+        return (_cut(base, keep, name_length) or base[:1]).rstrip(" .") + suffix + ext
 
-    candidate = stem + ext
-    if len(candidate) > room:
-        candidate = shorten(stem, "")
+    def named(told: str, suffix: str = "") -> str:
+        """The stem with `told` and `suffix` after it and the ending, cut
+        to fit both limits."""
+        most = NAME_BYTES - _size(suffix + ext)
+        base = _in_bytes(stem, most - _size(told)) + told
+        if _size(base) > most:
+            # What tells it apart is too long to be kept whole.
+            base = _in_bytes(stem + told, most)
+        candidate = base + suffix + ext
+        if name_length(candidate) > room:
+            candidate = shorten(base, suffix)
+        return candidate
+
+    candidate = named("")
 
     # What tells this one from the other, when the caller knows. It is
     # sanitized like any other part of a name, and it is not used when the
@@ -1426,22 +1572,17 @@ def _free_name(directory: Path, filename: str, max_path_length: int,
     # distinguisher would tell two files apart by telling you nothing.
     raw_token = str(distinguisher or "").strip()
     token = sanitize_component(raw_token).strip(" .") if raw_token else ""
+    told = ""
     if candidate.lower() in existing and token and token.lower() not in stem.lower():
-        with_token = "%s %s" % (stem, token)
-        candidate = with_token + ext
-        if len(candidate) > room:
-            candidate = shorten(with_token, "")
+        candidate = named(" " + token)
         if candidate.lower() not in existing:
             return candidate
-        stem = with_token
+        told = " " + token
 
     n = 1
     while candidate.lower() in existing:
         n += 1
-        suffix = " (%d)" % n
-        candidate = stem + suffix + ext
-        if len(candidate) > room:
-            candidate = shorten(stem, suffix)
+        candidate = named(told, " (%d)" % n)
     return candidate
 
 
@@ -1604,6 +1745,47 @@ def backup_file(path: Path, backups_dir: Path) -> Optional[Path]:
 # CSV files (UTF-8 with BOM for Excel)
 # ---------------------------------------------------------------------------
 
+# What the rows a ledger could not take are kept under, beside it, the
+# ledger's own name with this in place of ".csv". It is never a name the
+# panel or a spreadsheet tool finds a ledger by, "* Index.csv" or
+# "* Order History.csv", and never a CSV a person might open in Excel and so
+# hold in turn.
+WAITING_ENDING = " (rows waiting).json"
+
+# Every ledger made in this run, by its file, so the run's way out can write
+# in what is kept beside each one and say what still waits
+# (rows_left_waiting). One run is one process outside the tests.
+_LEDGERS = {}
+
+
+# Windows says PermissionError for a file another program has open. A Mac,
+# Linux and PaperPull Server say it only for a file or folder the run may not
+# write, which no wait mends, and where the run had said the file was open in
+# another program, perhaps Excel (a review of 2026-11-15).
+_PERMISSION_IS_HELD = os.name == "nt"
+
+
+def _refused_while_held(e: OSError) -> bool:
+    """Whether a write was refused the way a file another program holds is
+    refused. Windows says PermissionError while Excel has the file open, and
+    a shared folder may say the file is busy while it is open on another
+    computer. Only such a refusal is waited for."""
+    import errno
+    return ((isinstance(e, PermissionError) and _PERMISSION_IS_HELD)
+            or e.errno in (errno.EBUSY, errno.ETXTBSY))
+
+
+class _BrokeOff(OSError):
+    """A ledger's write that failed after the file opened, a disk that filled
+    or a shared folder that dropped, with where in the file it began. Rows
+    before the break can be in the file, and the rows kept beside it carry
+    that place, so none is written twice (_not_written)."""
+
+    def __init__(self, began: Optional[int], error: OSError):
+        super().__init__(error.errno, error.strerror or str(error))
+        self.began, self.error = began, error
+
+
 class CsvFile:
     """An app's order history, receipt index or document index. They hold
     names other people chose and open in Excel on a double click, so every
@@ -1611,7 +1793,26 @@ class CsvFile:
     of text a spreadsheet would take for a formula, and comes out through
     sheets.read_stored, which takes that quote off again. Whatever reads
     one of these files reads it here, or through read_stored_row as both
-    spreadsheet tools do."""
+    spreadsheet tools do.
+
+    Every app writes a saved document's row after it has recorded the
+    document done for good, and an append to a file Excel had open used to
+    give up at once with PermissionError. The app then recorded the saved
+    document Failed, no later run asked for it again, and its row never
+    reached the file, so Rename, Review Names, Verify and the move to a
+    documents folder never reached the document. A receipt app appends its
+    order history first, and a held order history cost the receipt index
+    its row as well.
+
+    Now a file another program holds is waited for once in a run, the
+    minute atomic_write_text waits, and tried once with no wait after that.
+    The rows it would not take are kept beside it, in the output folder and
+    never in a documents folder, and go in, each once and in order, at the
+    first chance the file is free, before any row after them. That is the
+    next append, read_all or rewrite, and the run's way out
+    (rows_left_waiting). So the next command of the app, whichever it is,
+    finds them in the file. An append never raises into the download whose
+    row it writes, unless the rows can be neither written nor kept."""
 
     def __init__(self, path: Path, columns: List[str], backups_dir: Optional[Path] = None,
                  once: bool = False):
@@ -1627,6 +1828,25 @@ class CsvFile:
         # of its own. An order history holds one row per item bought, and two
         # alike items are two rows, so it never holds its rows once.
         self.once = once
+        # The kept rows the last read_all gave back, by their marks. A
+        # rewrite of what it read holds them as the command that read them
+        # meant them, one it took out included, so they wait no longer once
+        # the file is written (rewrite).
+        self._read_waiting = set()
+        _LEDGERS[_held_key(self.path)] = self
+
+    @property
+    def waiting_path(self) -> Path:
+        """Where the rows this file could not take are kept, beside it."""
+        return self.path.with_name(self.path.stem + WAITING_ENDING)
+
+    def _stored(self, row: dict) -> dict:
+        return {c: store_value(row.get(c, "")) for c in self.columns}
+
+    def _as_read(self, stored: dict) -> tuple:
+        """A stored row as read_stored gives it back from the file, the way
+        _held reads the rows already there."""
+        return tuple(read_stored(stored.get(c, "")) or "" for c in self.columns)
 
     def _ensure_header(self) -> None:
         if not self.path.exists() or self.path.stat().st_size == 0:
@@ -1652,33 +1872,288 @@ class CsvFile:
             return None
 
     def append_rows(self, rows: Iterable[dict]) -> None:
+        """Append rows, after any kept beside the file that it can take now.
+        A file another program holds is waited for the first time in a run,
+        and the rows it will not take are kept beside it, said, and written
+        in later (the class's own words)."""
+        rows = list(rows)
+        kept = self._kept()
+        entries = self._not_written(kept) if kept else []
+        key = _held_key(self.path)
+        first = key not in _HELD
+        began = None
+        try:
+            self._write_in(entries, rows, _LOCKED_TRIES if first else 1)
+            return
+        except _BrokeOff as e:
+            refused, began = e.error, e.began
+        except OSError as e:
+            refused = e
+        _HELD.add(key)
+        new = [self._stored(row) for row in rows]
+        if self.once:
+            # Kept as the file would hold them, each once.
+            have = (self._held() or set()) | {self._as_read(e["row"]) for e in entries}
+            fresh = []
+            for stored in new:
+                if self._as_read(stored) not in have:
+                    have.add(self._as_read(stored))
+                    fresh.append(stored)
+            new = fresh
+        if not new:
+            return
+        try:
+            self._keep(entries + [{"id": os.urandom(8).hex(), "row": stored} for stored in new],
+                       writing_from=began, unread=bool(kept and kept.get("unread")))
+        except OSError:
+            # Neither written nor kept, which only a folder that takes no
+            # file at all does, and then nothing is saved anyway.
+            raise refused
+        self._said_kept(new, refused, first)
+
+    def _open_to_append(self, tries: int):
+        """The file opened to append to, tried `tries` times _LOCKED_PAUSE_S
+        apart while another program holds it, as atomic_write_text tries,
+        saying so once. OSError when it is not opened."""
+        error = None
+        for attempt in range(tries):
+            try:
+                return shared_folder.open_to_write(self.path, "a", encoding="utf-8-sig",
+                                                   newline="")
+            except OSError as e:
+                if not _refused_while_held(e):
+                    raise
+                error = e
+                if tries > 1:
+                    if attempt == 0:
+                        print(f"  ! {self.path.name} is open in another program, perhaps Excel. "
+                              f"Close it. Trying again for up to a minute.", flush=True)
+                    time.sleep(_LOCKED_PAUSE_S)
+        raise error
+
+    def _write_in(self, entries: list, rows: list, tries: int) -> None:
+        """Append the kept rows still to go in, in order, each kept as
+        store_value gave it, then `rows`. OSError when the file was not
+        opened, and then nothing of it was written. _BrokeOff when the write
+        failed after the file opened, with where it began."""
         self._ensure_header()
         held = self._held() if self.once else None
-        with shared_folder.open_to_write(self.path, "a", encoding="utf-8-sig", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore",
-                               quoting=csv.QUOTE_MINIMAL)
-            for row in rows:
-                stored = {c: store_value(row.get(c, "")) for c in self.columns}
-                if held is not None:
-                    # As read_stored gives it back from the file, the way
-                    # _held reads the rows already there.
-                    written = tuple(read_stored(v) or "" for v in stored.values())
-                    if written in held:
-                        continue
-                    held.add(written)
-                w.writerow(stored)
+        cut = self._ends_mid_line()
+        f = self._open_to_append(tries)
+        began = None
+        try:
+            with f:
+                if cut:
+                    # A write cut short left its last row with no line break,
+                    # and the next row went onto the same line, both lost (a
+                    # review of 2026-11-15). That row is read as whole or not
+                    # by _not_written either way.
+                    f.write("\r\n")
+                    f.flush()
+                began = os.fstat(f.fileno()).st_size
+                if entries:
+                    # Where they begin is kept with them until they are taken
+                    # away below, so a run stopped in between, by Ctrl+C say,
+                    # finds them in the file and writes none of them twice. An
+                    # order history holds no row once, and would hold them twice.
+                    try:
+                        self._keep(entries, writing_from=began)
+                    except OSError:
+                        pass
+                w = csv.DictWriter(f, fieldnames=self.columns, extrasaction="ignore",
+                                   quoting=csv.QUOTE_MINIMAL)
+                new = [{c: store_value(row.get(c, "")) for c in self.columns} for row in rows]
+                for stored in [e["row"] for e in entries] + new:
+                    if held is not None:
+                        written = self._as_read(stored)
+                        if written in held:
+                            continue
+                        held.add(written)
+                    w.writerow(stored)
+        except OSError as e:
+            # Rows before the break can be in the file. Taken as a refusal,
+            # they were kept whole and written in again, so an order history,
+            # which holds no row once, held them twice (a review of
+            # 2026-11-15). The place the write began goes with them.
+            raise _BrokeOff(began, e) from e
+        _HELD.discard(_held_key(self.path))
+        if entries:
+            self._forget_kept()
+
+    def _ends_mid_line(self) -> bool:
+        """Whether the file's last row has no line break after it, as a write
+        cut short leaves it. False for a file that cannot be read."""
+        try:
+            with shared_folder.open_to_read(self.path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                if f.tell() == 0:
+                    return False
+                f.seek(-1, os.SEEK_END)
+                return f.read(1) not in (b"\n", b"\r")
+        except OSError:
+            return False
+
+    def _write_waiting(self) -> list:
+        """Write the rows kept beside the file into it, with one try and no
+        wait, and give back the ones that still wait."""
+        kept = self._kept()
+        if not kept:
+            return []
+        entries = self._not_written(kept)
+        if not entries:
+            if not kept.get("unread"):
+                self._forget_kept()
+            return []
+        try:
+            self._write_in(entries, [], 1)
+        except OSError:
+            # A write that broke after some went in leaves the place it began
+            # beside them, and only the rest still wait. All of them were
+            # given back, and a rewrite of what read_all read wrote those
+            # already in twice (a review of 2026-11-15).
+            again = self._kept()
+            if again and not again.get("unread"):
+                return self._not_written(again)
+            return entries
+        return []
+
+    def _kept(self) -> Optional[dict]:
+        """What is kept beside the file, its rows in order, each with a mark
+        of its own, and where in the file a write of them began, or None when
+        nothing is kept. Read as a plain file of its own, so on PaperPull
+        Server a link left at the name is never read through. A file there
+        that cannot be read as one holds no rows here and is left as it is
+        ("unread")."""
+        unread = {"rows": [], "from": None, "unread": True}
+        try:
+            # Made whole as read, since its rows hold a provider's text and
+            # are written into the ledger as they come back.
+            data = whole_json(json.loads(shared_folder.read_text(self.waiting_path)))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return unread
+        rows = data.get("rows") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            return unread
+        entries = []
+        for entry in rows:
+            row = entry.get("row") if isinstance(entry, dict) else None
+            if isinstance(row, dict) and isinstance(entry.get("id"), str):
+                entries.append({"id": entry["id"], "row": {
+                    str(k): v if isinstance(v, str) else "" for k, v in row.items()}})
+        at = data.get("writing_from")
+        return {"rows": entries, "from": at if type(at) is int and at >= 0 else None}
+
+    def _keep(self, entries: list, writing_from: Optional[int] = None,
+              unread: bool = False) -> None:
+        """Write what is kept beside the file, whole or not at all, tried once.
+        A link left at the name is replaced and never written through
+        (atomic_write_text). A file there that could not be read is copied
+        into Backups first, when it is a plain file of its own."""
+        path = self.waiting_path
+        if unread and self.backups_dir is not None and not shared_folder.linked(path):
+            try:
+                backup_file(path, self.backups_dir)
+            except OSError:
+                pass
+        data = {"note": "Rows PaperPull could not write into %s, most often because another "
+                        "program had it open. They go into it by themselves the next time the "
+                        "app can write it. Leave this file where it is." % self.path.name,
+                "ledger": self.path.name, "rows": entries}
+        if writing_from is not None:
+            data["writing_from"] = writing_from
+        atomic_write_text(path, json_text(data) + "\n", tries=1)
+
+    def _forget_kept(self) -> None:
+        """Take away what was kept beside the file, once its rows are in. A
+        file that will not go keeps the place its rows were written from, so
+        a later look finds them in the file and writes none again."""
+        try:
+            os.unlink(self.waiting_path)
+        except OSError:
+            pass
+
+    def _not_written(self, kept: dict) -> list:
+        """The kept rows the file does not hold yet. A write of them stopped
+        after it wrote them and before it took them away left the place it
+        began at, and the rows found there, in order, are in already."""
+        entries, at = kept["rows"], kept["from"]
+        if not entries or at is None:
+            return entries
+        import io
+        done = 0
+        try:
+            with shared_folder.open_to_read(self.path, "rb") as f:
+                f.seek(at)
+                tail = f.read()
+            # A write cut short can end in half a character, and a strict
+            # read of it took every row before for one not yet written.
+            for line, entry in zip(csv.reader(io.StringIO(tail.decode("utf-8", "replace"),
+                                                          newline="")), entries):
+                if [read_stored(v) for v in line] != [read_stored(entry["row"].get(c, ""))
+                                                      for c in self.columns]:
+                    break
+                done += 1
+        except (OSError, UnicodeError, csv.Error):
+            return entries
+        return entries[done:]
+
+    def _said_kept(self, rows: list, error: OSError, first: bool) -> None:
+        """What a run says when rows are kept, in full the first time in a
+        run, and in a line of its own for each document after that."""
+        name, one = self.path.name, len(rows) == 1
+        saved = " What was downloaded is saved." if any(
+            r.get("PDF Full Path") or r.get("PDF Filename") for r in rows) else ""
+        if not first:
+            print("  %s kept beside %s as well, since it is still not free.%s"
+                  % ("Its row is" if one else "Its %d rows are" % len(rows), name, saved),
+                  flush=True)
+            return
+        held = _refused_while_held(error)
+        why = ("was still held by another program after a minute" if held
+               else "could not be written (%s)" % type(error).__name__)
+        print("  ! %s %s, so %s kept beside it, in %s.%s %s into %s %s."
+              % (name, why, "the new row is" if one else "the %d new rows are" % len(rows),
+                 self.waiting_path.name, saved, "The row goes" if one else "They go", name,
+                 "once that file is closed" if held else "once it can be written"),
+              flush=True)
 
     def read_all(self) -> List[dict]:
-        if not self.path.exists():
-            return []
-        with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig", newline="") as f:
-            return [read_stored_row(r) for r in csv.DictReader(f)]
+        """Every row of the file, then the rows kept beside it that it has not
+        taken yet, as it will hold them. Those are written in first when the
+        file is free, with one try and no wait, so a command that reads the
+        ledger finds them in it."""
+        waiting = self._write_waiting()
+        self._read_waiting = {e["id"] for e in waiting}
+        rows = []
+        if self.path.exists():
+            with shared_folder.open_to_read(self.path, "r", encoding="utf-8-sig",
+                                            newline="") as f:
+                rows = [read_stored_row(r) for r in csv.DictReader(f)]
+        return rows + [{c: read_stored(e["row"].get(c, "")) for c in self.columns}
+                       for e in waiting]
 
     def rewrite(self, rows: List[dict], backup: bool = True) -> None:
         """Backup then atomically rewrite the whole file. A command that
-        writes the same file again and again backs it up the first time."""
+        writes the same file again and again backs it up the first time.
+
+        The kept rows the last read_all gave back are in `rows` as the
+        command that read them meant them, so once the file is written they
+        wait no longer, and Meijer's taking out the rows of a purchase no
+        longer listed takes out those kept as well. Any kept since go in
+        after."""
         if backup and self.backups_dir is not None:
             backup_file(self.path, self.backups_dir)
+        # The kept rows the file held already, from the place a write of them
+        # began, read before the file is written over. A command read them
+        # in the file and meant them in `rows`, and they went in a second
+        # time after (a review of 2026-11-15).
+        kept = self._kept()
+        already = set()
+        if kept and kept["rows"] and kept["from"] is not None:
+            still = {e["id"] for e in self._not_written(kept)}
+            already = {e["id"] for e in kept["rows"] if e["id"] not in still}
         import io
         buf = io.StringIO()
         w = csv.DictWriter(buf, fieldnames=self.columns, extrasaction="ignore",
@@ -1688,6 +2163,33 @@ class CsvFile:
             w.writerow({c: store_value(row.get(c, "")) for c in self.columns})
         # utf-8-sig: prepend BOM manually since we write text atomically
         atomic_write_text(self.path, "﻿" + buf.getvalue())
+        read, self._read_waiting = self._read_waiting, set()
+        if not kept or not kept["rows"]:
+            return
+        left = [e for e in kept["rows"] if e["id"] not in read and e["id"] not in already]
+        try:
+            if not left:
+                self._forget_kept()
+                return
+            if len(left) < len(kept["rows"]) or kept["from"] is not None:
+                # The place a stopped write began is no place in the file
+                # written now.
+                self._keep(left)
+        except OSError:
+            return
+        self._write_waiting()
+
+
+def rows_left_waiting() -> list:
+    """For a run's way out. Each ledger made in this run that has rows kept
+    beside it tries once more, with no wait, to take them, and each that
+    still has some is given as (its name, how many, where they are kept)."""
+    left = []
+    for ledger in list(_LEDGERS.values()):
+        waiting = ledger._write_waiting()
+        if waiting:
+            left.append((ledger.path.name, len(waiting), ledger.waiting_path.name))
+    return left
 
 
 # ---------------------------------------------------------------------------
@@ -1790,11 +2292,13 @@ class JsonStore:
         candidates = sorted(candidates, key=lambda p: p.stat().st_mtime, reverse=True)
         for c in candidates:
             try:
-                with open(c, "r", encoding="utf-8") as f:
-                    raw = json.load(f)
+                # A plain file of its own, never a pipe, and on the server
+                # never through a link left after the look above, which
+                # would put what it leads to into the share as the records.
+                raw = json.loads(shared_folder.read_text(c))
                 if isinstance(raw, dict):
                     return _whole_records(raw)
-            except (json.JSONDecodeError, OSError):
+            except (ValueError, OSError):
                 continue
         return None
 

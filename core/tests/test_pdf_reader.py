@@ -401,7 +401,9 @@ def test_a_trim_cut_off_leaves_the_pdf_whole(tmp_path, monkeypatch):
         pdf_reader._trim(reader, len(reader.pages), str(path))
     assert path.read_bytes() == buf.getvalue(), "the PDF was cut off"
     monkeypatch.undo()
-    assert (tmp_path / ("invoice.pdf" + pdf_reader.TRIMMING)).exists()
+    # Under a name nobody can guess, so no link can be waiting at it.
+    left = list(tmp_path.glob("invoice.pdf" + pdf_reader.TRIMMING + ".*"))
+    assert len(left) == 1 and left[0].read_bytes() == b"%PDF-1.4 half"
     assert pdf_reader.trim_blank_tail(path) == 1
     assert sorted(p.name for p in tmp_path.iterdir()) == ["invoice.pdf"]
 

@@ -103,7 +103,7 @@ import time
 from typing import List, Optional, Tuple
 from urllib.parse import quote, urlsplit
 
-from paperpull_core import intake, pressing
+from paperpull_core import intake, pressing, refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE, control_labels
 from paperpull_core.characters import whole_json
 from paperpull_core.dates import checked as _checked_date, full_year
@@ -176,7 +176,9 @@ NOT_MAPPED = ""
 
 
 class SessionExpired(RuntimeError):
-    """Bank of America answered with a sign-in or a refusal instead."""
+    """Bank of America answered with a sign-in or a refusal instead. A
+    statement's PDF refused that way raises it only when the list, read
+    again, refuses too (document_bytes)."""
 
 
 class NotThere(RuntimeError):
@@ -1603,7 +1605,9 @@ def _ask_pdf(page, pdf: PdfCall, row: dict) -> Optional[dict]:
     """A row's PDF asked from inside the page with the learned call, as
     {status, url, ct, cd, b64}. Raises NotLearned when the row's own call
     would not come out on the host the press's call went to, ListCut when
-    the page could not ask, and SessionExpired on a sign-in answer."""
+    the page could not ask, and SessionExpired on a 401, a 403 or a
+    redirect off the site, which document_bytes weighs against the list
+    read again."""
     filled = pdf.filled(row)
     if filled is None:
         raise NotLearned("a statement's address did not come out where the page's own call is")
@@ -1758,7 +1762,18 @@ def document_bytes(page, *, account_ref: str, date: str, document_id: str,
     the page's links came out of, and the day in the file name the bank
     gave it ("" when it gave none). (None, "") when its row is no longer
     listed. Raises NotThere or SessionExpired, ListUnread for the list read
-    again, and NotLearned or ListCut for this statement's own PDF."""
+    again, and NotLearned or ListCut for this statement's own PDF.
+
+    A PDF answered with a 401, a 403 or a redirect off the site has this
+    account's list for the year read again, the way Discover reads it
+    (paperpull_core.refused). A session that has ended is refused the list
+    too, and its SessionExpired stops the run there. A list that does not
+    answer, answers with a row this app cannot read, or holds nothing,
+    though it listed this statement, says neither, and raises ListUnread. A
+    list that still reads leaves the refusal this statement's own, so it
+    fails alone with (b"", ""), since a stop here would stop every run at
+    this statement for good. The statement is not asked for a second
+    time."""
     try:
         call = learned(page, form=True)
     except (NotLearned, ListCut) as e:
@@ -1768,20 +1783,47 @@ def document_bytes(page, *, account_ref: str, date: str, document_id: str,
         raise NotLearned(why, call.facts, reason)
     if not (account_ref and document_id and date):
         return None, ""
+    year = year or date[:4]
     try:
-        row = fresh_row(page, call, account_ref, year or date[:4], document_id)
+        row = fresh_row(page, call, account_ref, year, document_id)
     except ListCut as e:
         raise ListUnread(e) from e
     if row is None or row_date(row) != date:
         return None, ""
-    if call.template is None:
-        r = _ask_pdf(page, call.pdf, row)
-        if r.get("status") != 200 or not r.get("b64"):
-            return b"", ""
-        return intake.decode(r["b64"]), date_in_file_name(r.get("cd") or "")
-    url = fill(call.template, row)
-    if not url or not is_safe_url(url) or (urlsplit(url).hostname or "").lower() != call.link_host:
-        raise NotLearned("a statement's address did not come out where the page's own links are")
+    url = None
+    if call.template is not None:
+        url = fill(call.template, row)
+        if not url or not is_safe_url(url) or (urlsplit(url).hostname or "").lower() != call.link_host:
+            raise NotLearned("a statement's address did not come out where the page's own links are")
+    try:
+        r = _ask_pdf(page, call.pdf, row) if url is None else _ask_link(page, url)
+    except SessionExpired:
+        # A refusal may be the session ending or this one statement. This
+        # account's year is read again as Discover reads it, and a session
+        # that ended shows there and stops the run. A list that does not
+        # answer, or holds nothing, stops it with the list unread. One that
+        # still reads leaves this statement failed, so it never stops every
+        # later run at the same statement. The account is the one fresh_row
+        # found the statement's row under above.
+        account = next(a for a in call.accounts if a.get(call.account_key) == account_ref)
+        try:
+            refused.list_again(lambda: list_account_year(page, call, account, year)[0],
+                               SessionExpired, ListUnread, stops=(NotThere, ListCut))
+        except ListCut as e:
+            # The list's own words for why it was not whole, kept.
+            raise ListUnread(e) from e
+        log.info("the statement dated %s was refused while the list still reads", date)
+        return b"", ""
+    if r.get("status") != 200 or not r.get("b64"):
+        return b"", ""
+    return intake.decode(r["b64"]), date_in_file_name(r.get("cd") or "")
+
+
+def _ask_link(page, url: str) -> dict:
+    """A statement's PDF asked from inside the page at its own row's
+    address, as {status, url, ct, cd, b64}. Raises ListCut when the page
+    could not ask, and SessionExpired on a 401, a 403 or a redirect off the
+    site, which document_bytes weighs against the list read again."""
     try:
         r = intake.evaluate(page, _PDF_JS, url)
     except Exception as e:
@@ -1791,9 +1833,7 @@ def document_bytes(page, *, account_ref: str, date: str, document_id: str,
     status = r.get("status") if isinstance(r, dict) else None
     if status in (401, 403) or not is_safe_url(r.get("url") or ""):
         raise SessionExpired("Bank of America answered %s" % status)
-    if status != 200 or not r.get("b64"):
-        return b"", ""
-    return intake.decode(r["b64"]), date_in_file_name(r.get("cd") or "")
+    return r
 
 
 # ---------------------------------------------------------------------------

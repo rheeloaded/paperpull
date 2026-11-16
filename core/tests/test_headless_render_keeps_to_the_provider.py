@@ -362,10 +362,14 @@ class Printed:
     def emulate_media(self, media):
         self.media = media
 
-    def pdf(self, path, **_kwargs):
+    def pdf(self, path=None, **_kwargs):
+        """As Playwright's page.pdf, which writes path when given one and
+        answers the PDF's bytes either way."""
         assert self.media == "print"
-        Path(path).write_bytes(b"%PDF-1.4 a receipt")
+        if path is not None:
+            Path(path).write_bytes(b"%PDF-1.4 a receipt")
         self.left = self.leaves
+        return b"%PDF-1.4 a receipt"
 
 
 def test_a_page_that_leaves_while_it_prints_leaves_no_pdf(tmp_path):

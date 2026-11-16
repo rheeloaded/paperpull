@@ -37,6 +37,7 @@ WHAT IT ADDS
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import hmac
 import html
@@ -506,7 +507,10 @@ def same_origin(headers: dict) -> bool:
     connection, so none is refused too. Origin and Referer, when sent, have
     to name the very address the request was made to. An Origin of null,
     which a browser sends for a page that keeps its address to itself,
-    names no address, and neither does an empty one, so both are refused."""
+    names no address, and neither does an empty one, so both are refused.
+
+    On PaperPull Server a request that carries none of the three is refused
+    as well (names_nothing)."""
     site = (headers.get("sec-fetch-site") or "").lower()
     if site and site != "same-origin":
         return False
@@ -518,7 +522,34 @@ def same_origin(headers: dict) -> bool:
     referer = headers.get("referer")
     if referer and (urlsplit(referer.strip()).netloc or "").lower() != host:
         return False
-    return True
+    return not (enabled() and names_nothing(headers))
+
+
+def names_nothing(headers: dict) -> bool:
+    """Whether a request carries no Sec-Fetch-Site, no Origin and no
+    Referer at all, which on PaperPull Server reached over plain HTTP is a
+    link opened from an email or a chat, or another program's page on the
+    same NAS.
+
+    A browser sends Sec-Fetch-Site only to an address it counts as secure,
+    one over HTTPS or this computer's own. A server reached over plain HTTP
+    by a name on the home network, nas.local or its address, gets none, so
+    a link opened from outside the browser arrives there with the session's
+    cookie, SameSite=Strict and all, and nothing else. An image that
+    another program's page on the same NAS asks for under no-referrer
+    arrives the same way, its other port being the same site to the
+    browser. Both were measured in Chromium on 2026-11-14, after a private
+    report showed that such a link to /api/run started a run.
+
+    The panel's own page always names itself. Nothing in the panel sets a
+    Referrer-Policy, so its fetch, EventSource, frames and the addresses
+    its script sends the page to carry a Referer of its own address, and a
+    POST or a connection to the Browser Screen an Origin too. On the
+    desktop, at 127.0.0.1, every current browser sends Sec-Fetch-Site, and
+    a request with none of the three is curl or a script somebody wrote,
+    which stays allowed there."""
+    return (not (headers.get("sec-fetch-site") or "").strip() and headers.get("origin") is None
+            and not (headers.get("referer") or "").strip())
 
 
 # -- the names it answers to -----------------------------------------------------------
@@ -1034,12 +1065,21 @@ def install(app) -> None:
         if root not in target.parents or not target.is_file():
             raise HTTPException(404)
         if target.suffix == ".html":
-            token = session_token(_headers(request.scope))
+            headers = _headers(request.scope)
+            token = session_token(headers)
             if not screen_open(token):
                 return HTMLResponse(page(again_body("dock")), headers={"Cache-Control": "no-store"})
             # The page is opened by a person, from the panel or its own tab,
-            # where noVNC connecting again never opens it again.
-            note_screen_use(token)
+            # where noVNC connecting again never opens it again. Another
+            # program's page on the same NAS can ask for it too, as an image
+            # or in a frame of its own, and the browser sends the session's
+            # cookie with that, which kept the screen open for as long as
+            # that page stayed open. So only the panel's own page and an
+            # address the browser opened by itself count, and only for the
+            # page itself or a frame.
+            dest = (headers.get("sec-fetch-dest") or "").strip().lower()
+            if from_its_own_page(headers) and dest in ("", "document", "iframe"):
+                note_screen_use(token)
         return FileResponse(target, headers={"Cache-Control": "no-cache"})
 
     @app.post("/screen/again", include_in_schema=False)
@@ -1143,7 +1183,9 @@ def output_root(install: Path, account: str) -> Path:
     """The folder an account's documents and records are written to."""
     config = install / ("config.json" if account == "primary" else "config.%s.json" % account)
     try:
-        out = json.loads(config.read_text(encoding="utf-8-sig")).get("output_dir") or "."
+        # A plain file of its own, never a pipe, which held the end of a
+        # run for good, nor read through a link.
+        out = json.loads(read_text(config, "utf-8-sig")).get("output_dir") or "."
     except (OSError, ValueError, AttributeError):
         out = "."
     # A config written by hand can hold a number or a list here, which no
@@ -1218,22 +1260,89 @@ def own_file(path) -> bool:
     return inside_data(Path(path).parent) and not linked(path)
 
 
-def write_in_data(path, data) -> None:
+# The most read_plain reads. A history of years of documents is a few
+# megabytes.
+READ_LIMIT = 256 * 1024 * 1024
+
+
+def read_plain(path, limit: int = READ_LIMIT) -> bytes:
+    """The bytes of a plain file at path, for a file in the shared folder a
+    run or someone on the share may have written. Never a named pipe or a
+    device, whose open or read waits for good and would hold the panel's
+    thread, on either edition. On the server never through a link at its
+    name either, and never a file with a second name, a hard link, since
+    what either leads to, the server's password file among them, would be
+    shown, handed over or written back into the share. Linux refuses the
+    link in the open itself (O_NOFOLLOW). The desktop's folders are the
+    person's alone, and a link there is read as it always was. OSError for
+    any of that, ValueError past limit. paperpull_core.shared_folder.read_plain
+    is the same rule for the tools and the apps."""
+    server = enabled()
+    before = os.lstat(path) if server else os.stat(path)
+    if not stat.S_ISREG(before.st_mode) or (server and linked(path)):
+        raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
+    # O_NONBLOCK on the server alone, since a named pipe is what someone on the share
+    # can leave there, and the desktop's files can be cloud placeholders a
+    # non-blocking open has not been tried on.
+    flags = (os.O_RDONLY | getattr(os, "O_BINARY", 0)
+             | ((getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)) if server else 0))
+    fd = os.open(path, flags)
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
+            raise OSError(errno.EINVAL, "not a plain file of its own", str(path))
+        parts, got = [], 0
+        # The first read is the size the file says, so a small file is one
+        # read of its own size, never a buffer of the limit's.
+        want = min(st.st_size, limit) + 1
+        while True:
+            piece = os.read(fd, want)
+            if not piece:
+                break
+            got += len(piece)
+            if got > limit:
+                raise ValueError("%s is larger than %d bytes" % (path, limit))
+            parts.append(piece)
+            want = 1 << 20
+        return b"".join(parts)
+    finally:
+        os.close(fd)
+
+
+def read_text(path, encoding: str = "utf-8", errors: str = "strict",
+              limit: int = READ_LIMIT) -> str:
+    """read_plain, as text."""
+    return read_plain(path, limit).decode(encoding, errors)
+
+
+def write_in_data(path, data, mode=None, times=None) -> None:
     """Write text or bytes to a file in the shared folder on the server, in
     a folder held inside the data folder, as a new file of its own moved
-    into the file's place."""
+    into the file's place. mode and times (atime_ns, mtime_ns), when given,
+    are set on the new file before it is moved, through its own open file,
+    so nothing at its name is ever followed."""
     path = Path(path)
     hold_in_data(path.parent)
     tmp = path.with_name("%s.%s.tmp" % (path.name, os.urandom(6).hex()))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
                  | getattr(os, "O_BINARY", 0), 0o666)
+    by_fd = os.utime in os.supports_fd
     try:
-        if isinstance(data, str):
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(data)
-        else:
-            with os.fdopen(fd, "wb") as f:
-                f.write(data)
+        if mode is not None and hasattr(os, "fchmod"):
+            os.fchmod(fd, stat.S_IMODE(mode))
+        with (os.fdopen(fd, "w", encoding="utf-8") if isinstance(data, str)
+              else os.fdopen(fd, "wb")) as f:
+            f.write(data)
+            f.flush()
+            if times is not None and by_fd:
+                os.utime(f.fileno(), ns=times)
+        # Windows, where the panel runs as a server only in tests, takes
+        # neither through the open file, so there they go on its own
+        # temporary name, which nothing else knows.
+        if mode is not None and not hasattr(os, "fchmod"):
+            os.chmod(tmp, stat.S_IMODE(mode))
+        if times is not None and not by_fd:
+            os.utime(tmp, ns=times)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -1256,10 +1365,12 @@ def new_files(install: Path, account: str, started: float) -> list:
         return []
     listed = root / "new-this-run.txt"
     try:
-        if listed.stat().st_mtime < started:
+        if os.lstat(listed).st_mtime < started:
             return []
-        lines = listed.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        # Read as a plain file of its own, never a pipe, which would hold
+        # the end of the run for good, nor through a link.
+        lines = read_text(listed, errors="replace").splitlines()
+    except (OSError, ValueError):
         return []
     data = data_root().resolve()
     out = []

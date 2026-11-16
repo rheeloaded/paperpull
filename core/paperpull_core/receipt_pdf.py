@@ -15,13 +15,16 @@ from __future__ import annotations
 import base64
 import html as _html
 import logging
+import os
 import re
+import stat
 from pathlib import Path
 from typing import Iterable, NamedTuple, Optional
 
 from . import browser as _launcher
 from . import intake as _intake
 from . import pdf_reader as _pdf_reader
+from . import shared_folder as _shared_folder
 from .characters import whole_characters
 from .identity import MIN_TEXT, amount_variants, date_variants, on_its_own
 from .models import ValidationResult
@@ -309,7 +312,9 @@ def print_page_to_pdf(page, out_path: Path) -> None:
                 pass
         if not data.startswith(PDF_MAGIC):
             raise RuntimeError("printToPDF returned non-PDF data")
-        out_path.write_bytes(data)
+        # On PaperPull Server never written through a link left at its name,
+        # a staged ".delivering" name among them.
+        _shared_folder.write_bytes(out_path, data)
     finally:
         try:
             page.emulate_media(media="print" if before == "print" else "null")
@@ -626,6 +631,60 @@ def print_html_inert_to_pdf(page, html: str, out_path: Path, base: Optional[str]
             pass
 
 
+def inert_pdf_bytes(page, html: str, base: str = "") -> bytes:
+    """The PDF of HTML the app put together or fetched itself, drawn so that
+    nothing in it can run or reach anything, as bytes printed the way the
+    page is printed (PRINT_TO_PDF_OPTIONS). Active content is stripped
+    (inert_html), JavaScript is off, and every request the drawing would
+    make is aborted, a WebSocket and a popup included, since both need
+    script. Attached to a browser, it is drawn in a fresh context with none
+    of the signed-in session's cookies, as print_html_inert_to_pdf draws.
+    A persistent profile's context cannot open another, so there it is
+    drawn in a page of its own with JavaScript turned off for that page.
+
+    Anthem drew a secure message's body in a page of the signed-in context
+    with JavaScript on, its block covering http and https alone, so a
+    script in a body could open a WebSocket or a popup carrying the
+    session (a private report of 2026-11-10).
+
+    Raises UnsafeHtml when the HTML is refused before drawing, and anything
+    else when the drawing or its block cannot be made, never drawing
+    without the block."""
+    inert = inert_html(html, base)
+    browser = getattr(page.context, "browser", None)
+    if browser is not None:
+        ctx = browser.new_context(java_script_enabled=False, accept_downloads=False)
+        try:
+            ctx.route("**/*", lambda route: route.abort())
+            tab = ctx.new_page()
+            return _printed_inert(ctx.new_cdp_session(tab), tab, inert)
+        finally:
+            try:
+                ctx.close()
+            except Exception:
+                pass
+    ctx = page.context
+    tab = ctx.new_page()
+    try:
+        tab.route("**/*", lambda route: route.abort())
+        session = ctx.new_cdp_session(tab)
+        session.send("Emulation.setScriptExecutionDisabled", {"value": True})
+        return _printed_inert(session, tab, inert)
+    finally:
+        try:
+            tab.close()
+        except Exception:
+            pass
+
+
+def _printed_inert(session, tab, inert: str) -> bytes:
+    tab.set_content(inert, wait_until="load")
+    data = printed_pdf(session, PRINT_TO_PDF_OPTIONS)
+    if not data.startswith(PDF_MAGIC):
+        raise RuntimeError("printToPDF returned non-PDF data")
+    return data
+
+
 def get_print_snapshot(page) -> Optional[str]:
     """HTML stashed by the print hook at the moment print() was called
     (from the main window or any same-origin iframe), or None."""
@@ -820,10 +879,12 @@ def _print_checked(page, out_path: Path, still_the_providers) -> None:
     remove what was printed when the page left while it printed."""
     still_the_providers()
     page.emulate_media(media="print")
-    page.pdf(path=str(out_path), format="Letter", print_background=True,
-             prefer_css_page_size=True, display_header_footer=False,
-             margin={"top": "0.4in", "bottom": "0.4in",
-                     "left": "0.4in", "right": "0.4in"})
+    # Printed to bytes and written by the core, never by Playwright's own
+    # plain open, which follows a link left at out_path.
+    _shared_folder.write_bytes(out_path, page.pdf(
+        format="Letter", print_background=True, prefer_css_page_size=True,
+        display_header_footer=False,
+        margin={"top": "0.4in", "bottom": "0.4in", "left": "0.4in", "right": "0.4in"}))
     try:
         still_the_providers()
     except ValueError:
@@ -1094,7 +1155,7 @@ def _archive_too_big(path: Path) -> str:
                 % _intake._mb(size), "DOCUMENT_BYTES", "lets a larger one in")
     import zipfile
     try:
-        with open(path, "rb") as f:
+        with _open_archive(path) as f:
             # The record at the end of every ZIP, the ZIP64 one included,
             # read by zipfile's own reader of it.
             end = zipfile._EndRecData(f)
@@ -1180,7 +1241,6 @@ def _set_aside(path: Path, folder=None) -> Optional[Path]:
     must not. An archive already kept under that name that holds the same
     files is the same answer again, and this one goes, so a document tried
     on every run does not pile up copies. None only when it is gone."""
-    import shutil
 
     path = Path(path)
     if not path.exists():
@@ -1192,24 +1252,36 @@ def _set_aside(path: Path, folder=None) -> Optional[Path]:
         where.mkdir(parents=True, exist_ok=True)
         target = where / (path.stem + ".zip")
         n = 1
-        while target.exists():
-            if _same_archive(target, path):
+        # lexists, so a link left at a name takes the name, and only a plain
+        # file of its own is opened to compare, never a link or a pipe,
+        # whose open would wait for good.
+        while os.path.lexists(target):
+            if _plain_file(target) and _same_archive(target, path):
                 path.unlink()
                 return target
             n += 1
             target = where / ("%s (%d).zip" % (path.stem, n))
-        shutil.move(str(path), str(target))
+        _shared_folder.move(path, target)
         return target
     except OSError as e:
         log.warning("could not keep the archive %s: %s", path.name, e)
         return path if path.exists() else None
 
 
+def _plain_file(path) -> bool:
+    """Whether a name holds a plain file of its own, not a link, a named
+    pipe or a second name of another file."""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and not os.path.islink(path)
+
+
 def _same_archive(a: Path, b: Path) -> bool:
     """Whether two archives hold the same files. A ZIP built on request
     stamps each file with the moment it was built, so two answers holding
     the same documents differ in their bytes."""
-    import filecmp
     import zipfile
 
     def listing(z):
@@ -1218,14 +1290,43 @@ def _same_archive(a: Path, b: Path) -> bool:
     try:
         if _archive_too_big(a) or _archive_too_big(b):
             # Not listed at all, for the reason open_zip did not list it.
-            return filecmp.cmp(str(a), str(b), shallow=False)
-        with zipfile.ZipFile(a) as za, zipfile.ZipFile(b) as zb:
+            return _same_bytes(a, b)
+        with _open_archive(a) as fa, _open_archive(b) as fb, \
+                zipfile.ZipFile(fa) as za, zipfile.ZipFile(fb) as zb:
             return listing(za) == listing(zb)
     except Exception:
         try:
-            return filecmp.cmp(str(a), str(b), shallow=False)
+            return _same_bytes(a, b)
         except OSError:
             return False
+
+
+def _open_archive(path):
+    """open(path, "rb"), and on PaperPull Server never through a link nor a
+    named pipe, whose open would wait for good, nor a second name of
+    another file, all of which someone on the share can leave at a name in
+    Manual Review. OSError for any of those."""
+    if not _shared_folder.on_server():
+        return open(path, "rb")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0))
+    f = os.fdopen(fd, "rb")
+    st = os.fstat(f.fileno())
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
+        f.close()
+        raise OSError("%s is not a plain file of its own" % path)
+    return f
+
+
+def _same_bytes(a, b) -> bool:
+    """filecmp.cmp(a, b, shallow=False), each opened by _open_archive."""
+    with _open_archive(a) as fa, _open_archive(b) as fb:
+        while True:
+            x, y = fa.read(1 << 20), fb.read(1 << 20)
+            if x != y:
+                return False
+            if not x:
+                return True
 
 
 def save_download(download, out_path: Path) -> None:
@@ -1271,6 +1372,22 @@ class Together(tuple):
     this way, a date and a total."""
 
 
+def copy_still_valid(path, min_bytes: int = 3000) -> bool:
+    """Whether a record's path names a PDF still there that validates, the
+    question every app's _already_done asks of a copy set aside for review.
+    Never raises. A path that is not text, a number or a list a hand edit or
+    a damaged file left, names nothing. One that cannot be asked about, in a
+    folder the run may not search, counts as not there, so the document is
+    fetched again, as a deleted copy is. Each app asked Path(p).exists()
+    outside any try, which Python 3.12 lets raise for such a folder, so the
+    run ended at that document on every run (a bug hunt of 2026-11-14)."""
+    if isinstance(path, os.PathLike):
+        path = os.fspath(path)
+    if not isinstance(path, str) or not path:
+        return False
+    return validate_pdf(Path(path), min_bytes).ok
+
+
 def validate_pdf(path: Path, min_bytes: int = 3000,
                  expect_tokens: Optional[Iterable[str]] = None) -> ValidationResult:
     """Verify a saved PDF, that it exists, is not trivially small, carries
@@ -1290,9 +1407,20 @@ def validate_pdf(path: Path, min_bytes: int = 3000,
     the caller's to keep where it keeps those, and it is never deleted
     here."""
     path = Path(path)
-    if not path.exists():
+    # One stat, inside a try. Python 3.12's exists() and stat() raise for a
+    # file in a folder the run may not search, which ended Verify and every
+    # app's check of a review copy at that document on every run (a bug hunt
+    # of 2026-11-14). "Not there" is what exists() answered False for, a path
+    # it could not encode among them, and anything else is a file that could
+    # not be read.
+    try:
+        size = path.stat().st_size
+    except OSError as e:
+        if _shared_folder.not_there(e):
+            return ValidationResult(False, "File does not exist")
+        return ValidationResult(False, f"Cannot read file: {e}")
+    except ValueError:
         return ValidationResult(False, "File does not exist")
-    size = path.stat().st_size
     if size == 0:
         return ValidationResult(False, "File is zero bytes", size_bytes=0)
     if size < min_bytes:

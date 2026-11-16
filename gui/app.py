@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import io
 import hashlib
 import html
 import json
@@ -579,8 +580,11 @@ def _same_origin_only(request: Request) -> None:
     where it let such a link start a run, and only the pages a browser
     opens by their address take it. The header is absent from curl and
     from browsers old enough not to know it, Safari before 16.4 among
-    them, and those are allowed through, because the header being missing
-    is not the same as it saying cross-site.
+    them, and those are allowed through on the desktop, because the header
+    being missing is not the same as it saying cross-site. PaperPull Server
+    reached over plain HTTP gets no Sec-Fetch-Site from any browser, so
+    there a request has to carry an Origin or a Referer naming the panel
+    (server_mode.names_nothing).
 
     None of that tells the panel's page from a page that pointed a name of
     its own at this computer, since the browser takes the two for one
@@ -596,7 +600,8 @@ def _same_origin_only(request: Request) -> None:
     if not (_host_allowed(headers.get("host")) and server_mode.same_origin(headers)):
         # The one refusal a person meets by doing something ordinary,
         # opening an address of the API by hand, so it says why.
-        if (headers.get("sec-fetch-site") or "").strip().lower() == "none":
+        if ((headers.get("sec-fetch-site") or "").strip().lower() == "none"
+                or (server_mode.enabled() and server_mode.names_nothing(headers))):
             raise HTTPException(403, "only the panel's own page asks for this, never a link "
                                      "or an address typed in")
         raise HTTPException(403, "cross-origin request refused")
@@ -904,7 +909,7 @@ def setup_needed(meta: dict) -> str:
 
 def _login_flag(script: Path) -> str:
     try:
-        text = script.read_text(encoding="utf-8", errors="ignore")
+        text = server_mode.read_text(script, errors="ignore")
     except Exception:
         text = ""
     return "--open-browser" if "--open-browser" in text else "--login"
@@ -1138,8 +1143,12 @@ async def api_export(request: Request):
         provider = known[provider.lower()]
     try:
         result = mod.export(apps_root(), None, provider, as_csv)
-    except Exception as e:
-        return {"ok": False, "reason": "The file was not made (%s). Try again." % str(e).splitlines()[0][:120]}
+    except (Exception, SystemExit) as e:
+        # SystemExit too, the core's refusal of a link in the shared folder
+        # (shared_folder.LeadsOut), which inside the panel would otherwise
+        # end the panel itself.
+        return {"ok": False, "reason": "The file was not made (%s). Try again." % (
+            str(e).splitlines()[0][:120] if str(e) else type(e).__name__)}
     if not result["sources"]:
         return {"ok": False, "reason": "No receipts saved yet. Get new documents from a shop such as "
                 "Amazon or Target first."}
@@ -1463,7 +1472,7 @@ def _account_root(meta: dict, account: str) -> Path:
 
 def _read_run_log(root: Path) -> list:
     try:
-        raw = json.loads((root / RUN_LOG).read_text(encoding="utf-8"))
+        raw = json.loads(server_mode.read_text(root / RUN_LOG))
     except (OSError, ValueError):
         return []
     return [e for e in raw if isinstance(e, dict)] if isinstance(raw, list) else []
@@ -1511,10 +1520,12 @@ def _saved_this_run(root: Path, started: float) -> list:
     run's, left in place by a run that stopped before writing its own."""
     listed = root / "new-this-run.txt"
     try:
-        if listed.stat().st_mtime < started:
+        if os.lstat(listed).st_mtime < started:
             return []
-        lines = listed.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        # A plain file of its own, never a pipe, which held the panel's
+        # thread for good, and on the server never read through a link.
+        lines = server_mode.read_text(listed, errors="replace").splitlines()
+    except (OSError, ValueError):
         return []
     names = []
     for line in lines:
@@ -1531,7 +1542,7 @@ def _latest_saved(root: Path) -> list:
     """The newest files an account saved, as {"name", "date"}, read from its
     own records. Names only, so nothing here ever names a path to open."""
     try:
-        raw = json.loads((root / "progress.json").read_text(encoding="utf-8-sig"))
+        raw = json.loads(server_mode.read_text(root / "progress.json", "utf-8-sig"))
     except (OSError, ValueError):
         return []
     found = []
@@ -1559,8 +1570,8 @@ def _provider_of(meta: dict) -> tuple:
     """(provider name, kind) for an install, from its own storage.py, the
     way the welcome list reads a template."""
     try:
-        src = (Path(meta["dir"]) / "storage.py").read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        src = server_mode.read_text(Path(meta["dir"]) / "storage.py", errors="ignore")
+    except (OSError, ValueError):
         src = ""
     p, k = _PROVIDER_RE.search(src), _KIND_RE.search(src)
     name = meta["name"]
@@ -1932,11 +1943,14 @@ def _set_aside_file(root: Path, record: dict, kept_out=(), base=None):
     for path in tries:
         if not _named_inside(path, root):
             continue
+        # A file in a folder the panel may not search raises from is_file()
+        # on Python 3.12 (a bug hunt of 2026-11-14), so it is asked here too.
         try:
             inside = path.resolve(strict=True).is_relative_to(root.resolve())
+            plain = path.is_file() and not path.is_symlink()
         except (OSError, RuntimeError, ValueError):
             continue
-        if (inside and path.is_file() and not path.is_symlink()
+        if (inside and plain
                 and path.suffix.lower() in OPENS_FROM_THE_PANEL
                 and not any(_within(path, other) for other in kept_out)):
             return path
@@ -1992,7 +2006,7 @@ def _owner_of(meta: dict, account: str) -> str:
     config = Path(meta["dir"]) / ("config.json" if account == "primary"
                                   else "config.%s.json" % account)
     try:
-        owner = json.loads(config.read_text(encoding="utf-8-sig")).get("owner")
+        owner = json.loads(server_mode.read_text(config, "utf-8-sig")).get("owner")
     except (OSError, ValueError, AttributeError):
         return ""
     return owner.strip()[:80] if isinstance(owner, str) else ""
@@ -2336,8 +2350,8 @@ def _saved_folder(meta: dict, account: str) -> str:
     if not names:
         return ""
     try:
-        lines = (root / "new-this-run.txt").read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
+        lines = server_mode.read_text(root / "new-this-run.txt", errors="replace").splitlines()
+    except (OSError, ValueError):
         return ""
     docs = _documents_in_use(meta, account, root)
     kinds = {c.name: c for c in _document_folders(root, _not_for_documents(meta, account))}
@@ -2685,6 +2699,13 @@ _PERSONAL_RUNTIME_FILES = ("config.json", "progress.json", "discovery.json",
                            "new-this-run.txt", "run-summary.txt")
 
 
+# The rows a ledger open in another program could not take, kept beside it
+# under its own name with this ending (core storage WAITING_ENDING). They are
+# that account's rows, so they never travel to another install, and a copy
+# in a template would be written into the ledger of every install made.
+WAITING_ENDING = " (rows waiting).json"
+
+
 def _is_someones_own(name: str) -> bool:
     """A file that belongs to whoever set that folder up, not to the code.
 
@@ -2698,7 +2719,7 @@ def _is_someones_own(name: str) -> bool:
     return (any(low == item or low.startswith(item + ".") for item in _PERSONAL_RUNTIME_FILES)
             or (low.startswith("config.") and low.endswith(".json"))
             or low.endswith((".pdf", ".zip", ".csv", ".log", ".json.bak",
-                             ".json.orig", ".csv.bak")))
+                             ".json.orig", ".csv.bak", WAITING_ENDING)))
 
 
 def _skip_template_part(name: str) -> bool:
@@ -2823,7 +2844,7 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
         raise HTTPException(400, "PaperPull has no provider called %r. Reload the page." % slug)
     info = next(p for p in list_providers() if p["slug"] == slug)
     dst = root / info["folder"]
-    if dst.exists():
+    if os.path.lexists(dst):
         return "exists"
     # Most double-click launchers call .venv\Scripts\python.exe, which the
     # packaged app never has, and setup.bat wants a system Python it cannot
@@ -2839,17 +2860,23 @@ def create_install(root: Path, slug: str, owner: str = "") -> str:
             continue
         if _launcher_left_out(item):
             continue
+        # On the server each folder is held inside the data folder and each
+        # file written as a new one of its own (_make_folder, _copy_file),
+        # since someone on the share can leave a link in a folder just made.
         if item.is_dir():
-            (dst / rel).mkdir(parents=True, exist_ok=True)
+            _make_folder(dst / rel)
         else:
-            (dst / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(item, dst / rel)
-    example = dst / "config.example.json"
+            _make_folder((dst / rel).parent)
+            _copy_file(item, dst / rel)
+    example = src / "config.example.json"
     if example.is_file():
         # The example IS the config for a fresh install. Its output_dir and
         # profile_dir are relative to the install folder. Its port is no
         # other app's example port, but it can still be a second person's.
-        shutil.copy2(example, dst / "config.json")
+        # Copied from PaperPull's own example, never the one just copied
+        # into the shared folder, which a link could have replaced (a
+        # private report of 2026-11-10).
+        _copy_file(example, dst / "config.json")
         _set_free_port(dst / "config.json")
     if owner:
         _set_owner(dst / "config.json", owner)
@@ -2873,7 +2900,7 @@ def _set_free_port(config: Path) -> None:
         return
     with _CONFIG_WRITES:
         try:
-            data = json.loads(config.read_text(encoding="utf-8-sig"))
+            data = json.loads(server_mode.read_text(config, "utf-8-sig"))
         except (OSError, ValueError):
             return
         if not isinstance(data, dict):
@@ -2895,7 +2922,7 @@ def _set_profile(config: Path, profile: str) -> None:
         return
     with _CONFIG_WRITES:
         try:
-            data = json.loads(config.read_text(encoding="utf-8-sig"))
+            data = json.loads(server_mode.read_text(config, "utf-8-sig"))
         except (OSError, ValueError):
             return
         data["profile_dir"] = profile
@@ -2914,7 +2941,7 @@ def _set_owner(config: Path, owner: str) -> None:
         return
     try:
         with _CONFIG_WRITES:
-            data = json.loads(config.read_text(encoding="utf-8-sig"))
+            data = json.loads(server_mode.read_text(config, "utf-8-sig"))
             if not isinstance(data, dict):
                 return
             data["owner"] = owner[:80]
@@ -2953,12 +2980,16 @@ def _make_folder(folder: Path) -> None:
 
 def _copy_file(src: Path, dst: Path) -> None:
     """shutil.copy2, and on the server a copy written the way
-    _write_text writes, which never writes through a link at dst."""
+    _write_text writes, which never writes through a link at dst. The file
+    copied is read as a plain file of its own, never through a link, and
+    its mode and times are set on the new file before it is moved into
+    place, where shutil.copystat followed a link left at dst."""
     if not server_mode.enabled():
         shutil.copy2(src, dst)
         return
-    server_mode.write_in_data(dst, Path(src).read_bytes())
-    shutil.copystat(src, dst)
+    data = server_mode.read_plain(src)
+    st = os.lstat(src)
+    server_mode.write_in_data(dst, data, mode=st.st_mode, times=(st.st_atime_ns, st.st_mtime_ns))
 
 
 def _template_files(src: Path):
@@ -3002,9 +3033,9 @@ def refresh_install_code(dst: Path, src: Path) -> list:
         # backed up into the share nor written.
         through_link = server_mode.enabled() and not server_mode.own_file(target)
         try:
-            if not through_link and target.is_file() and target.read_bytes() == new:
+            if not through_link and target.is_file() and server_mode.read_plain(target) == new:
                 continue
-        except OSError:
+        except (OSError, ValueError):
             continue
         if not through_link and target.is_file():
             bak = dst / "Backups" / ("code-" + stamp) / rel
@@ -3046,8 +3077,8 @@ def ensure_settings(dst: Path, stamp: str = "") -> list:
 
 def _add_settings(dst: Path, example: Path, live: Path, stamp: str) -> list:
     try:
-        template = json.loads(example.read_text(encoding="utf-8-sig"))
-        current = json.loads(live.read_text(encoding="utf-8-sig"))
+        template = json.loads(server_mode.read_text(example, "utf-8-sig"))
+        current = json.loads(server_mode.read_text(live, "utf-8-sig"))
     except (OSError, ValueError):
         return []
     if not isinstance(template, dict) or not isinstance(current, dict):
@@ -3435,7 +3466,7 @@ async def api_account(request: Request):
         raise HTTPException(409, "%s already has a person called %s. Choose another name." % (name, label))
     app_dir = Path(apps[name]["dir"])
     dest = _make_account(app_dir, label, owner)
-    cfg = json.loads(dest.read_text(encoding="utf-8"))
+    cfg = json.loads(server_mode.read_text(dest))
     global _STATUS_MOD
     _STATUS_MOD = None
     return {"app": name, "account": label, "config": dest.name,
@@ -3630,7 +3661,7 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
             raise HTTPException(409, "%s's config.json is a link in the shared folder, so no "
                                      "person was added." % app_dir.name)
         try:
-            first = json.loads(base.read_text(encoding="utf-8-sig"))
+            first = json.loads(server_mode.read_text(base, "utf-8-sig"))
             server_mode.hold_in_data(
                 app_dir / server_mode.with_home(mod.output_dir_for(app_dir, first, label)))
         except (OSError, ValueError, TypeError, AttributeError):
@@ -3638,7 +3669,7 @@ def _make_account(app_dir: Path, label: str, owner: str) -> Path:
                                      "folder, so no person was added." % app_dir.name)
     try:
         dest = mod.make_config(app_dir, label, owner=owner)
-    except Exception as e:
+    except (Exception, SystemExit) as e:
         raise HTTPException(500, "Could not add this person (%s). Try again." % str(e).splitlines()[0][:160])
     if dest is None:
         raise HTTPException(409, NO_CONFIG_YET % app_dir.name)
@@ -3774,24 +3805,41 @@ def _history_root(raw: str):
     return root, True
 
 
-def _apply_settings(mod, cfg_path: Path, install: Path, settings: dict) -> None:
+def _apply_settings(mod, cfg_path: Path, install: Path, settings: dict, slug: str = "") -> list:
     """A file's settings, written into a config the import just made. Only
     what tools/migrate.py allows for this install, a file name pattern only
-    when it passes the same check the File names tab makes, and never the
-    folders, profile, browser or port, which belong to this computer."""
+    when it passes the same check the File names tab makes, an address only
+    on the provider's own site, and never the folders, profile, browser or
+    port, which belong to this computer. The app's url_settings are read
+    from PaperPull's own copy of the provider, slug, which nobody who can
+    write to the shared folder can change. Returns the addresses left out."""
+    left_out: list = []
     if not server_mode.own_file(cfg_path):
-        return
+        return left_out
     naming = _naming()
+    tmpl_root = _templates_root()
+    source = tmpl_root / slug if (slug and tmpl_root is not None) else install
     with _CONFIG_WRITES:
         cfg = _read_json(cfg_path)
         if not isinstance(cfg, dict):
-            return
+            return left_out
         take = mod.settings_to_apply(install, cfg, settings,
-                                     check_pattern=naming.check if naming else None)
+                                     check_pattern=naming.check if naming else None,
+                                     url_settings=mod.url_settings_of(source), left_out=left_out)
         if not take:
-            return
+            return left_out
         cfg.update(take)
         _replace_text(cfg_path, json.dumps(cfg, indent=2) + "\n")
+    return left_out
+
+
+def _left_out_note(left_out: list) -> str:
+    """What the import says of addresses it did not write. The address is
+    not repeated, since a provider's own address can name an employer."""
+    if not left_out:
+        return ""
+    return ("Its %s was left out, since it is not an address on the provider's own site. "
+            "Set it in the provider's settings." % " and ".join(sorted(set(left_out))))
 
 
 def _template_for(entry: dict, providers: list):
@@ -3808,6 +3856,8 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
     tmpl = _template_for(entry, providers)
     if tmpl is None:
         return None, "this version of PaperPull has no %s" % entry["provider"]
+    # The addresses _apply_settings left out, said in the import's row.
+    left_out: list = []
     account = entry["account"]
     if account != "primary" and (not _LABEL_RE.match(account) or account == "example"):
         return None, "its person's label cannot be used here"
@@ -3825,7 +3875,8 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
             if create_install(root, tmpl["slug"], owner=str(owner or "")[:80]) != "created":
                 return None, "a folder named %s is already there" % tmpl["folder"]
             if account == "primary":
-                _apply_settings(mod, install / "config.json", install, entry["settings"])
+                left_out = _apply_settings(mod, install / "config.json", install,
+                                           entry["settings"], tmpl["slug"])
             cfg = _read_json(install / "config.json") or {}
             where = mod.output_dir_of(install, cfg, tmpl["provider"])
         if _history_outside(where):
@@ -3839,11 +3890,14 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
                  "made": True}
         places.append(first)
         if account == "primary":
+            first["note"] = _left_out_note(left_out)
             return first, ""
     if first.get("config") is None:
         return None, "its first person's folder has no app to add a person to"
     install = root / first["install"]
-    if (install / ("config.%s.json" % account)).exists():
+    # lexists, since a link left at the name with nothing at its end is
+    # not there to exists(), and the config made next was written through it.
+    if os.path.lexists(install / ("config.%s.json" % account)):
         # There, and its history could not be read, so it was not listed.
         # Never written over, since it is somebody's account.
         return None, "%s already has a person called %s" % (install.name, account)
@@ -3865,7 +3919,7 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
     owner = str(entry["settings"].get("owner") or "")[:80]
     if apply:
         dest = _make_account(install, account, owner)
-        _apply_settings(mod, dest, install, entry["settings"])
+        left_out = _apply_settings(mod, dest, install, entry["settings"], tmpl["slug"])
         made = mod.output_dir_of(install, _read_json(dest) or {}, tmpl["provider"])
         if _history_outside(made):
             return None, "its folder is outside the data folder"
@@ -3875,6 +3929,7 @@ def _history_place(mod, entry, places, providers, root: Path, apply: bool):
              "provider": tmpl["provider"], "kind": tmpl["kind"], "path": where,
              "records": have, "settings": {}, "config": install / ("config.%s.json" % account),
              "made": True}
+    place["note"] = _left_out_note(left_out)
     places.append(place)
     return place, ""
 
@@ -3909,6 +3964,9 @@ def _history_walk(mod, manifest: dict, root: Path, apply: bool) -> list:
                 continue
             how = "set up" if entry["account"] == "primary" else "add person"
         row["action"] = how
+        note = place.pop("note", "")
+        if note:
+            row["note"] = note
         if place["account"] != "primary":
             row["account"] = place["account"]
         records, added, updated = mod.merged(place, entry, manifest)
@@ -4360,12 +4418,29 @@ def _removal_summary(folder: Path) -> dict:
             pdfs += 1
     history = 0
     try:
-        raw = json.loads((folder / "progress.json").read_text(encoding="utf-8-sig"))
+        raw = json.loads(server_mode.read_text(folder / "progress.json", "utf-8-sig"))
         history = sum(1 for v in raw.values() if isinstance(v, dict)) if isinstance(raw, dict) else 0
     except (OSError, ValueError):
         pass
     profile = any(d.is_dir() and "browser-profile" in d.name for d in folder.iterdir())
     return {"pdfs": pdfs, "history": history, "profile": profile}
+
+
+def _free_removed_name(dest_dir: Path, name: str, stamp: str, taken) -> Path:
+    """Where Remove moves an install, Removed/<name>, or with the time when
+    that is taken, and a number after it when that is taken too. taken is
+    lexists on the server, where a link left at a name, the dated one as
+    well, which anybody can guess to the second, has the whole install
+    moved into wherever it leads."""
+    dest = dest_dir / name
+    if not taken(dest):
+        return dest
+    dest = dest_dir / ("%s (%s)" % (name, stamp))
+    n = 2
+    while taken(dest):
+        dest = dest_dir / ("%s (%s %d)" % (name, stamp, n))
+        n += 1
+    return dest
 
 
 @app.post("/api/remove", dependencies=[Depends(_same_origin_only), Depends(_terms_first), Depends(_not_in_sample)])
@@ -4390,13 +4465,11 @@ async def api_remove(request: Request):
 
     summary = _removal_summary(src)
     dest_dir = root / REMOVED_DIR
-    dest = dest_dir / name
     # On the server a link left at the name counts as taken, and Removed is
     # held inside the data folder, since a move to another disk copies the
     # whole install to wherever a link would lead.
     taken = os.path.lexists if server_mode.enabled() else os.path.exists
-    if taken(dest):
-        dest = dest_dir / ("%s (%s)" % (name, datetime.now().strftime("%Y%m%d-%H%M%S")))
+    dest = _free_removed_name(dest_dir, name, datetime.now().strftime("%Y%m%d-%H%M%S"), taken)
     try:
         _make_folder(dest_dir)
         shutil.move(str(src), str(dest))
@@ -5226,8 +5299,8 @@ def _naming():
 
 def _storage_src(d: Path) -> str:
     try:
-        return (d / "storage.py").read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        return server_mode.read_text(d / "storage.py", errors="ignore")
+    except (OSError, ValueError):
         return ""
 
 
@@ -5244,8 +5317,11 @@ def _provider_name(d: Path) -> str:
 
 
 def _read_json(p: Path):
+    """A JSON file of an install, read as a plain file of its own, never a
+    pipe and on the server never through a link (server_mode.read_plain).
+    None for anything else."""
     try:
-        return json.loads(p.read_text(encoding="utf-8-sig"))
+        return json.loads(server_mode.read_text(p, "utf-8-sig"))
     except (OSError, ValueError):
         return None
 
@@ -5965,8 +6041,8 @@ def _indexed_files(root: Path):
     found = None
     for index in sorted(root.glob("* Index.csv")):
         try:
-            with open(index, encoding="utf-8-sig", newline="") as fh:
-                rows = [read_stored_row(r) for r in csv.DictReader(fh)]
+            text = server_mode.read_text(index, "utf-8-sig")
+            rows = [read_stored_row(r) for r in csv.DictReader(io.StringIO(text, newline=""))]
         except (OSError, ValueError, csv.Error):
             continue
         found = found if found is not None else set()
@@ -6015,11 +6091,15 @@ def _documents_left(meta: dict, account: str) -> int:
                 continue
             path = Path(raw.strip())
             path = path if path.is_absolute() else root / path
+            # is_file() raises on Python 3.12 for a file in a folder the
+            # panel may not search, which failed the Documents settings with
+            # a 500 (a bug hunt of 2026-11-14). Such a file is not counted.
             try:
                 where = path.resolve()
-            except (OSError, RuntimeError):
+                plain = where.is_file()
+            except (OSError, RuntimeError, ValueError):
                 continue
-            if here in where.parents or not where.is_file():
+            if here in where.parents or not plain:
                 continue
             for top in roots:
                 if top == here or top not in where.parents:

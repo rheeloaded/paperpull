@@ -24,6 +24,7 @@ Authentication is always manual (--login opens a browser and waits for you).
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import failure
 from paperpull_core import listing
 from paperpull_core import not_shown
@@ -774,9 +775,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             pdf_path = rec.get("pdf_path", "")
-            return bool(pdf_path and Path(pdf_path).exists()
-                        and receipt_pdf.validate_pdf(
-                            Path(pdf_path), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(pdf_path, self.config["min_pdf_bytes"])
         return False
 
     # -- processing core ----------------------------------------------------
@@ -817,6 +816,7 @@ class App:
             self._delay()
 
     def process_one(self, page, purchase: Purchase, dry_run: bool = False):
+        self._note_done_before(purchase)
         # The number the purchase was listed under. extract_details takes a
         # labeled number off the page in its place, so a wrong page would
         # otherwise be checked against its own number.
@@ -1496,6 +1496,18 @@ class App:
         else:
             print("  No printable receipt. The order's %d invoices are saved to the "
                   "Invoices folder." % len(kept))
+        # Every invoice kept is new to the run that completes the order,
+        # those an earlier run saved included. Each is filed now, and
+        # new-this-run.txt is what the panel's Move after a run takes, so an
+        # order finished over two runs moved its last invoice alone and left
+        # the rest behind (a review of 2026-11-15). A Download again of an
+        # order done before lists only what it fetched, as before.
+        listed = set(self.stats["new_files"])
+        if not self._done_before(purchase):
+            for e in kept:
+                if e["file"] not in listed:
+                    listed.add(e["file"])
+                    self.stats["new_files"].append(e["file"])
         return True
 
     def _invoice_tokens(self, purchase: Purchase) -> list:
@@ -1508,6 +1520,23 @@ class App:
             if len(name) >= 6:
                 tokens.append(name[:24])
         return tokens
+
+    def _done_before(self, purchase: Purchase) -> bool:
+        """Whether the order was done before this run, as process_one found
+        it. Any write of the attempt after that can take the record and say
+        it is not, a Download again whose purchase names the saved file
+        (saved_copy._names_its_copy), so it is read once, as the attempt
+        begins (_note_done_before)."""
+        found = getattr(self, "_done_as_found", {})
+        if purchase.key in found:
+            return found[purchase.key]
+        return (self.progress.get(purchase.key) or {}).get("downloaded_ok") is True
+
+    def _note_done_before(self, purchase: Purchase) -> None:
+        if not hasattr(self, "_done_as_found"):
+            self._done_as_found = {}
+        self._done_as_found[purchase.key] = (
+            (self.progress.get(purchase.key) or {}).get("downloaded_ok") is True)
 
     def _invoices_on_file(self, purchase: Purchase) -> list:
         """The order's invoices already saved, so none is saved twice.
@@ -1542,7 +1571,7 @@ class App:
                         and receipt_pdf.validate_pdf(Path(e["file"]),
                                                      self.config["min_pdf_bytes"]).ok
                         if not e.get("kept", True)
-                        else not again or (Path(e["file"]).exists()
+                        else not again or (shared_folder.file_there(e["file"])
                                            and not _among(e, lost)))]
         return self._indexed_invoices(purchase)
 
@@ -1861,8 +1890,8 @@ class App:
                   f"[confidence: {rec.get('confidence','')}]")
             print(f"    PDF:        {fn or '(none)'}")
             if fn:
-                path = Path(rec.get("pdf_path", ""))
-                exists = path.exists()
+                path = Path(shared_folder.path_text(rec.get("pdf_path")))
+                exists = shared_folder.file_there(path)
                 print(f"    PDF exists: {exists}  "
                       f"({rec.get('pdf_size','?')} bytes, {rec.get('pdf_pages','?')} pages)")
                 if not exists:
@@ -2138,7 +2167,7 @@ class App:
                 info["iframe_receipt"] = site.find_receipt_iframe(page) is not None
                 info["items_extracted"] = [i.name for i in site.extract_items(page)][:20]
                 shot = self.paths.diagnostics / f"diagnose-{ptype}.png"
-                page.screenshot(path=str(shot), full_page=True)
+                shared_folder.write_bytes(str(shot), page.screenshot(full_page=True))
                 info["screenshot"] = str(shot)
             except Exception as e:
                 info["error"] = str(e)

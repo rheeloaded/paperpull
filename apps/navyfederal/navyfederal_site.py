@@ -29,6 +29,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.delivery import TAB, DocumentRequest
 from paperpull_core.identity import Identity
@@ -448,7 +449,7 @@ def download_by_id(page, document_id: str, document_date: str, out_path) -> bool
         if b64:
             data = intake.decode(b64)
             if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
+                shared_folder.write_bytes(out_path, data)
                 return True
             log.info("deep-link blob for %s not a PDF (%d bytes)", document_id, len(data))
     except Exception as e:

@@ -20,6 +20,7 @@ sent to any external service.
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import delivery
 from paperpull_core import identity
 from paperpull_core import failure
@@ -560,8 +561,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -1055,8 +1055,7 @@ class App:
                         controls.append({"role": role, "text": t,
                                          "safe": site.is_safe_control(t)})
             info["controls"] = controls
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"

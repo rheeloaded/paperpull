@@ -19,12 +19,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, List, Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.characters import whole_json
 from paperpull_core.dates import last_day as _last_day
@@ -149,7 +149,22 @@ def is_safe_control(name: str) -> bool:
 class SessionExpired(Exception):
     """American Express answered the list or a PDF as a session it no
     longer holds, a 401 or a 403, or a redirect where an answer was asked
-    for. Every request after it would get the same, so the run stops."""
+    for. Every request after it would get the same, so the run stops. A PDF
+    refused that way stops it as signed out only when the list, read again,
+    is refused too or the page looks signed out (App.download_one)."""
+
+
+class ListStopped(Exception):
+    """The documents list, read again after one document was refused, did
+    not answer as a list, did not answer in time or held no document, none
+    of which says the session ended. Every document after it would read the
+    same list, so the run stops with the list unread. `docs` holds what was
+    read before it stopped. Its words are this module's own, never the
+    page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 # ---------------------------------------------------------------------------
@@ -635,14 +650,10 @@ def _write_if_pdf(data: bytes, out_path: Path) -> bool:
         return False
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = out_path.with_suffix(f".tmp.{os.getpid()}")
-    try:
-        tmp_path.write_bytes(data)
-        os.replace(tmp_path, out_path)
-    except Exception:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise
+    # A new file of its own under a name nobody can guess, moved into
+    # place, where a temporary name of the process's number was one
+    # someone on PaperPull Server's share could leave a link at.
+    shared_folder.write_whole(out_path, data)
     return True
 
 
@@ -650,8 +661,9 @@ def amexbanking_download(page, doc: RawDoc, out_path: Path,
                          session: Optional[BankingSession] = None, **kw) -> bool:
     """Save the PDF of `doc`, asked for by its own id with the token of the
     account its list was asked for. A document with either missing is not
-    asked for. A 401, a 403 or a redirect raises SessionExpired. A PDF whose
-    bytes are those of another document saved this run is not written."""
+    asked for. A 401, a 403 or a redirect raises SessionExpired, which the
+    caller weighs against the list read again. A PDF whose bytes are those
+    of another document saved this run is not written."""
     session = session or SESSION
     doc_id = getattr(doc, "document_id", "") or ""
     token = getattr(doc, "account_token", "") or ""

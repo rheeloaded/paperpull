@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import pdf_reader
 from paperpull_core import intake
 from paperpull_core.dates import last_day as _last_day
@@ -564,7 +565,7 @@ def download_by_url(page, url: str, out_path) -> bool:
         if b64:
             data = intake.decode(b64)
             if b"%PDF-" in data[:1024]:
-                out_path.write_bytes(data)
+                shared_folder.write_bytes(out_path, data)
                 return True
     except Exception as e:
         log.info("download_by_url blob fallback failed for %s: %s", where_it_leads(url), error_kind(e))
@@ -1480,7 +1481,7 @@ def keep_fetched(page, data: bytes, title: str, out_path, label: str = "", rende
     out_path = Path(out_path)
     if data and b"%PDF-" in data[:1024]:
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_bytes(data)
+        shared_folder.write_bytes(out_path, data)
         return True
     if not data or not (HTML_CONTROL_RE.search(label or "") and looks_like_html(data)):
         log.info("fetched %d bytes for %r but it is not a PDF", len(data or b""), shape_label(title))

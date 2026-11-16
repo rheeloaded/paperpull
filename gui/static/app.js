@@ -213,6 +213,7 @@ function present(r) {
       if (res.alike) bits.push(many(res.alike, n) + ' left unsaved, sharing a type and date');
       if (res.failed) bits.push(res.failed + ' failed');
       if (res.validation_failures) bits.push(many(res.validation_failures, 'PDF') + ' that failed the check');
+      if (res.rows_waiting) bits.push(many(res.rows_waiting, 'row') + ' waiting to go into a spreadsheet PaperPull could not write');
       return {chip: {cls: 'due', text: 'Needs a look'},
         say: 'The last run' + (lastAt ? ' on ' + lastAt : '') + ' left ' + (bits.join(', ') || 'something to check') + '.',
         act: {label: 'See what to check', nav: true}};
@@ -1271,6 +1272,7 @@ function runOutcome() {
     if (aside) details.push(`${aside} set aside`);
     if (res.failed) details.push(`${res.failed} failed`);
     if (res.validation_failures) details.push(`${many(res.validation_failures, 'PDF')} that failed the check`);
+    if (res.rows_waiting) details.push(`${many(res.rows_waiting, 'row')} waiting to go into a spreadsheet PaperPull could not write`);
     const says = [];
     if (named) says.push((named === 1 ? 'A receipt was' : named + ' receipts were') + ' saved under a name ' +
       'PaperPull was unsure of. Review names gives each a better one.');
@@ -1280,6 +1282,12 @@ function runOutcome() {
     const asideToo = aside > 0 || (res.validation_failures || 0) > 0;
     if (asideToo) says.push('A document set aside sits in the Manual Review folder, where PaperPull kept it ' +
       'rather than file it under the wrong name.');
+    // A ledger PaperPull could not write, open in Excel most often, would not take
+    // the rows of documents saved, and they are kept beside it to go in
+    // (core storage CsvFile). Nothing is downloaded again for them.
+    if (res.rows_waiting) says.push('Every document is saved. A list PaperPull keeps of them, its index or order ' +
+      'history, could not be written, most often because Excel or another program had it open, so some rows ' +
+      'wait beside it. They go in by themselves on the next run that can write it.');
     if (!says.length) says.push('The technical details below say what happened.');
     return {tone: 'warn', title: fresh ? many(fresh, 'new ' + n) + ' saved, some need a look' : 'Finished, some need a look',
       say: 'Finished, with ' + details.join(', ') + '. ' + says.join(' ') + alike, clean: true, attention: true,
@@ -2173,7 +2181,8 @@ async function hxPost(url) {
   return d;
 }
 function hxTable(d, done) {
-  const why = r => r.failed ? r.failed : r.action === 'skipped' ? 'skipped, ' + r.why : (done ? HX_DONE : HX_PLAN)[r.action];
+  const why = r => (r.failed ? r.failed : r.action === 'skipped' ? 'skipped, ' + r.why : (done ? HX_DONE : HX_PLAN)[r.action]) +
+    (r.note ? ' ' + r.note : '');
   const rows = d.rows.map(r =>
     '<tr><td>' + esc(r.provider) + '</td><td>' + esc(r.account === 'primary' ? '' : r.account) +
     '</td><td>' + esc(why(r)) + '</td><td class="num">' + r.records + '</td>' +

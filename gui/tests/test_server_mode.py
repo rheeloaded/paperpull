@@ -78,15 +78,29 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def ask(url, method="GET", form=None, headers=None, session=None, body=None, timeout=20):
+def ask(url, method="GET", form=None, headers=None, session=None, body=None, timeout=20,
+        bare=False):
     """(status, headers, body) for one request, redirects not followed. form
-    is sent as a form, body as JSON."""
+    is sent as a form, body as JSON. It is sent as the panel's own page sends
+    it over plain HTTP, a Referer naming the address it was made to and a
+    POST's Origin too, since a browser sends no Sec-Fetch-Site to a
+    plain-HTTP name on the home network and the server refuses a request
+    that names nothing. bare, or headers that say where it came from
+    themselves, leave that out."""
+    headers = dict(headers or {})
+    said = {k.lower() for k in headers}
+    if not bare and not said & {"origin", "referer", "sec-fetch-site"}:
+        host = next((v for k, v in headers.items() if k.lower() == "host"),
+                    urllib.parse.urlsplit(url).netloc)
+        headers["Referer"] = "http://%s/" % host
+        if method != "GET":
+            headers["Origin"] = "http://%s" % host
     data, kind = None, None
     if form is not None:
         data, kind = urllib.parse.urlencode(form).encode(), "application/x-www-form-urlencoded"
     if body is not None:
         data, kind = json.dumps(body).encode(), "application/json"
-    req = urllib.request.Request(url, data=data, method=method, headers=dict(headers or {}))
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
     if kind:
         req.add_header("Content-Type", kind)
     if session:
@@ -427,6 +441,21 @@ def test_a_name_a_website_could_give_is_refused_until_it_is_listed(monkeypatch):
     assert server_mode.host_allowed("paperpull.example.com")
     assert server_mode.host_allowed("nas.tail1234.ts.net")
     assert not server_mode.host_allowed("rebind.example")
+
+
+def test_a_request_that_names_nothing_is_refused_by_the_running_server(base, on_server):
+    """Over plain HTTP a browser sends no Sec-Fetch-Site, so a link opened
+    from an email arrives with the session's cookie and nothing else. The
+    API, the sign-in and the sign-out refuse it, and the page still opens."""
+    session = signed_in(base)
+    status, _, said = ask(base + "/api/apps", session=session, bare=True)
+    assert status == 403 and "link" in said
+    assert ask(base + "/api/apps", session=session)[0] == 200
+    assert ask(base + "/login", "POST", {"password": PASSWORD}, bare=True)[0] == 403
+    assert not server_mode._FAILS, "no password was even tried"
+    assert ask(base + "/logout", "POST", session=session, bare=True)[0] == 403
+    assert server_mode.session_valid(session)
+    assert ask(base + "/", session=session, bare=True)[0] == 200
 
 
 def test_a_page_that_points_its_own_name_at_the_server_is_refused(base, on_server):

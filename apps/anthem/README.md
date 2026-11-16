@@ -105,6 +105,24 @@ can see. It never handles your credentials or your MFA code.
 If a run stops saying the session expired or was blocked, sign in again and use
 `paperpull anthem resume`, finished documents are never re-fetched.
 
+When Anthem refuses one EOB (a 401, a 403 or a sign-in page where its PDF
+should be), the EOB list is read again. A list refused too means you are
+signed out, and the run stops. A list that still reads leaves that one EOB
+failed with nothing saved, the run goes on to the others, and the next run
+tries it again. A list that does not answer (a server error, a gateway's
+error page or a timeout) or holds nothing says neither, so the run stops with the list unread and
+nothing recorded against that EOB. The run says to use Get new documents
+(Pilot or Run All at the console), which reads the list first, rather
+than Resume, which reads no list of its own.
+
+A member document or ID card Anthem refuses has its own list read again
+the same way. A list refused too ends that kind as signed out. A list that
+still reads leaves that one document failed with nothing saved, and the
+others of its kind are still taken. A list that does not answer or holds
+nothing ends that kind as when its list will not open, counted as a
+failure, with nothing recorded against the document, and the next run
+takes it.
+
 ## Documents captured
 
 | Folder | Contents |

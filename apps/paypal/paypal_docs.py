@@ -29,6 +29,7 @@ external service.
 """
 from __future__ import annotations
 
+from paperpull_core import shared_folder
 from paperpull_core import delivery
 from paperpull_core import failure
 from paperpull_core import listing
@@ -45,7 +46,6 @@ import argparse
 import logging
 import random
 import re
-import shutil
 import sys
 import time
 from datetime import datetime
@@ -649,8 +649,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -949,7 +948,8 @@ class App:
         """A copy of the statement in Manual Review, for when it could not be
         moved there, or None when that failed too, with no part of one left."""
         try:
-            shutil.copyfile(str(source), str(review))
+            # Never written through a link left at review on the server.
+            shared_folder.write_bytes(review, shared_folder.read_plain(source))
             return review
         except OSError as e:
             log.info("could not copy the statement to Manual Review: %s", e)

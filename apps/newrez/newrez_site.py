@@ -41,13 +41,13 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE, MONEY_CONTROL_RE
 from paperpull_core.controls import dismiss_overlays as _dismiss_overlays
@@ -2102,7 +2102,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
         try:
             if out_path.exists():
                 out_path.unlink()
-            shutil.move(os.path.join(dl_dir, new[0]), str(out_path))
+            shared_folder.move(os.path.join(dl_dir, new[0]), out_path)
         except OSError as e:
             log.info("could not move the downloaded PDF: %s", e)
             return ""
@@ -2123,7 +2123,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
             if how:
                 return "download folder"
         if got.get("body"):
-            out_path.write_bytes(got["body"])
+            shared_folder.write_bytes(out_path, got["body"])
             return "pdf response"
         if got.get("refetch"):
             try:
@@ -2134,7 +2134,7 @@ def _catch_pdf(page, el, label: str, out_path: Path, trace: Optional[list] = Non
                                                 timeout=60000)
                 body = intake.body(resp) if resp.ok else b""
                 if _is_document(body, zip_ok=True):
-                    out_path.write_bytes(body)
+                    shared_folder.write_bytes(out_path, body)
                     return "refetched response"
             except Exception:
                 pass
@@ -2397,7 +2397,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         if is_safe_url(target):
             body = _fetch_pdf(page, target, zip_ok=True)
             if body:
-                out_path.write_bytes(body)
+                shared_folder.write_bytes(out_path, body)
                 _note(trace, "the control's own link answered with a PDF")
                 _note(trace, "the PDF landed", how="own link", window="no click")
                 return True

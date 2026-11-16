@@ -857,7 +857,9 @@ NOT_A_RECORD = {
 }
 # What the census has to find, so a change that hides one fails here.
 MUST_FIND = {
-    "core/paperpull_core/storage.py::append_rows": {"writes"},
+    # An append writes the rows a ledger could not take before, then its
+    # own (CsvFile._write_in).
+    "core/paperpull_core/storage.py::_write_in": {"writes"},
     "core/paperpull_core/storage.py::read_all": {"reads"},
     "core/paperpull_core/storage.py::rewrite": {"writes"},
     "tools/export_purchases.py::load_purchases": {"reads"},

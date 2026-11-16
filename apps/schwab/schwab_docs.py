@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+from paperpull_core import shared_folder
 from paperpull_core import doc_types, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import schwab_site as site
@@ -525,8 +526,7 @@ class App:
 
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
 
@@ -969,8 +969,7 @@ class App:
             }
             info["controls"] = [{"text": c[:60], "safe": site.is_safe_control(c)}
                                 for c in (ui.get("buttons") or [])[:60]]
-            page.screenshot(path=str(self.paths.diagnostics / "diagnose-documents.png"),
-                            full_page=True)
+            shared_folder.write_bytes(str(self.paths.diagnostics / "diagnose-documents.png"), page.screenshot(full_page=True))
         except Exception as e:
             info["error"] = str(e)
         out = self.paths.diagnostics / "diagnose-documents.json"

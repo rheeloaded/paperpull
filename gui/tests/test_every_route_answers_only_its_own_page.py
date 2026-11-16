@@ -36,6 +36,15 @@ that goes on after its answer is not seen. No program is really started,
 since subprocess.Popen is a stand-in here that notes what it was asked
 for, and nothing is served on a port, since each request goes to the app
 in this process with every setting under a temp folder.
+
+PaperPull Server reached over plain HTTP by a name on the home network is
+an edition of its own here, "server-plain". A browser sends it no
+Sec-Fetch-Site at all, so the panel's own page names itself only in its
+Referer, and a POST or a connection in its Origin too, and a link opened
+from an email or another program's image comes with the session's cookie
+and nothing else. Those two, one claiming HTTPS through proxy headers as
+well, are refused on every route there but a page, which a private report
+of 2026-11-10 showed were answered, a GET of /api/run starting a run.
 """
 import asyncio
 import io
@@ -56,7 +65,13 @@ import server_mode  # noqa: E402
 
 PASSWORD = "an invented passphrase"
 SHOP = "Shop Receipts"
-OWN = {"desktop": "127.0.0.1:8765", "server": "nas.local:8765"}
+OWN = {"desktop": "127.0.0.1:8765", "server": "nas.local:8765",
+       "server-plain": "nas.local:8765"}
+
+
+def _kind(edition: str) -> str:
+    """The edition a route is described for, the server's for both of its."""
+    return "server" if edition.startswith("server") else "desktop"
 ELSEWHERE = "rebind.example:8765"
 REFUSED = {400, 401, 403}
 
@@ -470,7 +485,7 @@ def ask(box, edition: str, key: tuple, headers: list):
         else:
             raw, kind = json.dumps(body).encode(), "application/json"
         headers += [("content-type", kind), ("content-length", str(len(raw)))]
-    if edition == "server" and box.token:
+    if _kind(edition) == "server" and box.token:
         headers.append(("cookie", "%s=%s" % (server_mode.SESSION_COOKIE, box.token)))
     target = how.get("ask", path)
     if method == "WEBSOCKET":
@@ -501,6 +516,12 @@ def own_page(edition: str, method: str, page: bool) -> list:
     """What the panel's own page sends, or a browser asked for a page by its
     address."""
     host = OWN[edition]
+    if edition == "server-plain":
+        if page:
+            return [("host", host)]
+        if method in ("GET", "HEAD"):
+            return [("host", host), ("referer", "http://%s/" % host)]
+        return [("host", host), ("origin", "http://%s" % host), ("referer", "http://%s/" % host)]
     if page:
         return [("host", host), ("sec-fetch-site", "none")]
     headers = [("host", host), ("sec-fetch-site", "same-origin")]
@@ -524,6 +545,15 @@ def to_refuse(edition: str, page: bool) -> list:
     ]
     if page:
         return out
+    if edition == "server-plain":
+        out += [
+            ("a link opened over plain HTTP, the session's cookie and nothing else",
+             [("host", own)]),
+            ("the same, claiming HTTPS through proxy headers",
+             [("host", own), ("x-forwarded-proto", "https"), ("forwarded", "proto=https")]),
+            ("another program's page on the same machine, by its Referer",
+             [("host", own), ("referer", "http://%s:5000/" % own.split(":")[0])]),
+        ]
     return out + [
         ("Origin null", [("host", own), ("sec-fetch-site", "same-origin"), ("origin", "null")]),
         ("Origin null from a browser that sends no Sec-Fetch-Site",
@@ -580,10 +610,14 @@ def own_page_problems(how: dict, edition: str, path: str, answer: dict, changed:
     if answer.get("sent") is None and answer["status"] in REFUSED:
         problems.append("the panel's own page was refused, %s %s"
                         % (answer["status"], answer["body"][:200]))
-    if how[edition] == "changes" and not changed:
+    if answer.get("status") == 422:
+        # FastAPI could not match the request to the function's own
+        # arguments, as when a helper took the route's decorator.
+        problems.append("the panel's own page was answered 422, %s" % answer["body"][:200])
+    if how[_kind(edition)] == "changes" and not changed:
         problems.append("the panel's own page was seen changing nothing, so the refusals "
                         "prove nothing here")
-    if how[edition] == "reads" and changed:
+    if how[_kind(edition)] == "reads" and changed:
         problems.append("it is said to change nothing, and changed %s" % changed)
     bad_frame = header_problem(path, answer)
     if bad_frame:
@@ -591,16 +625,17 @@ def own_page_problems(how: dict, edition: str, path: str, answer: dict, changed:
     return problems
 
 
-CASES = [(edition, key) for edition in ("desktop", "server") for key in ROUTES]
+CASES = [(edition, key) for edition in ("desktop", "server", "server-plain") for key in ROUTES]
 
 
 @pytest.mark.parametrize("edition, key", CASES,
                          ids=["%s %s %s" % (e, m, p) for e, (m, p) in CASES])
 def test_a_route_does_what_it_says_and_nothing_for_a_request_it_refuses(box, edition, key):
     how = ROUTES[key]
-    if edition == "server":
+    kind = _kind(edition)
+    if kind == "server":
         box.serve()
-    if how.get("before") and edition == "server":
+    if how.get("before") and kind == "server":
         how["before"](box)
     method, path = key
     page = bool(how.get("page"))
@@ -610,7 +645,7 @@ def test_a_route_does_what_it_says_and_nothing_for_a_request_it_refuses(box, edi
     # whether it is there at all in this edition. One that changes something
     # is asked last, so that every refused request meets it as it was.
     absent = False
-    if how[edition] == "reads":
+    if how[kind] == "reads":
         answer, changed = ask(box, edition, key, own)
         problems += own_page_problems(how, edition, path, answer, changed)
         absent = answer.get("status") == 404
@@ -623,10 +658,30 @@ def test_a_route_does_what_it_says_and_nothing_for_a_request_it_refuses(box, edi
         bad_frame = header_problem(path, answer)
         if bad_frame:
             problems.append("the answer to %s, %s" % (what, bad_frame))
-    if how[edition] == "changes":
+    if how[kind] == "changes":
         answer, changed = ask(box, edition, key, own)
         problems += own_page_problems(how, edition, path, answer, changed)
     assert not problems, "\n".join(problems)
+
+
+def test_every_route_is_answered_by_the_function_written_for_it():
+    """A function put between a route's decorator and the one written for it
+    takes the route. Remove did nothing for one commit that way, and was
+    caught only because it changes something, since a route that only reads
+    then answers the panel's page 422 and changes nothing. So every route's
+    function is a public one, never a helper, and every api_ function of the
+    panel answers a route."""
+    import ast
+    names = {getattr(r, "endpoint", None).__name__ for r in app_module.app.routes
+             if getattr(r, "endpoint", None) is not None}
+    helpers = sorted(n for n in names if n.startswith("_"))
+    assert not helpers, "a route answered by a helper: %s" % helpers
+    tree = ast.parse(Path(app_module.__file__).read_text(encoding="utf-8"))
+    written = {n.name for n in tree.body
+               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+               and n.name.startswith("api_")}
+    assert written - names == set(), "an api_ function that answers no route: %s" % (
+        sorted(written - names))
 
 
 def test_every_route_the_panel_answers_is_in_the_census():

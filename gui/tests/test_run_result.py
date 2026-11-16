@@ -231,3 +231,20 @@ def test_a_resume_only_a_listing_carries_on_from_is_carried_to_the_panel():
     assert run_result.parse(line(stopped=1), MARK)["list_not_read"] == 0
     assert run_result.parse(line(list_not_read=-1), MARK) is None
     assert run_result.parse(line(list_not_read="1"), MARK) is None
+
+
+def test_rows_waiting_for_a_ledger_need_a_look_and_never_read_as_a_stop():
+    """A run whose index or order history was open in another program saved
+    every document and kept the rows it could not write beside the file, to
+    go in once it is closed. The panel is told how many wait, which makes
+    the run one to look at and never one that stopped, since the next run
+    downloads nothing again. An app from before sends no count, which reads
+    as none."""
+    waiting = run_result.parse(line(rows_waiting=5, new_files=5), MARK)
+    assert waiting["rows_waiting"] == 5 and waiting["attention"] is True, waiting
+    assert waiting["stopped"] == 0
+    assert run_result.parse(line(new_files=5), MARK)["rows_waiting"] == 0
+    assert run_result.parse(line(new_files=5), MARK)["attention"] is False
+    assert run_result.parse(line(rows_waiting=-1), MARK) is None
+    assert run_result.parse(line(rows_waiting="5"), MARK) is None
+    assert "waiting to go into a spreadsheet PaperPull could not write" in app.HTML

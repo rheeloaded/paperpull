@@ -22,6 +22,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -29,6 +30,51 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 import paperpull  # noqa: E402  the launcher's app discovery
+
+
+def _read_config(path: Path):
+    """A config, read as a plain file, never a named pipe, whose open waits
+    for good, and on PaperPull Server never through a link left at its
+    name, since what it leads to would be copied into the new person's
+    config in the shared folder. The desktop's folders are the person's
+    alone, and a link there is read as it always was. OSError or
+    ValueError for anything else."""
+    server = os.environ.get("PAPERPULL_SERVER") == "1"
+    before = os.lstat(path) if server else os.stat(path)
+    if not stat.S_ISREG(before.st_mode):
+        raise OSError("%s is not a plain file" % path)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                 | ((getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)) if server else 0))
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or (server and st.st_nlink > 1):
+            raise OSError("%s is not a plain file of its own" % path)
+        limit = 4 * 1024 * 1024
+        data = f.read(min(st.st_size, limit) + 1)
+        if len(data) > limit:
+            raise OSError("%s is larger than any config" % path)
+        return json.loads(data.decode("utf-8-sig"))
+
+
+def _write_whole(path: Path, text: str) -> None:
+    """text written to path as a new file of its own beside it, under a name
+    nobody can guess and opened so it can never be anything already there,
+    then moved into the name's place. A link left at the name in PaperPull
+    Server's shared folder, with nothing at its end, had the new config
+    written through it (a private report of 2026-11-10)."""
+    tmp = path.with_name(".%s.%s.part" % (path.name, os.urandom(6).hex()))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+                 | getattr(os, "O_BINARY", 0), 0o666)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def slug(name: str) -> str:
@@ -58,7 +104,7 @@ def ports_in_use(app_dirs) -> set:
     for app_dir in app_dirs:
         for path in Path(app_dir).glob("config*.json"):
             try:
-                cfg = json.loads(path.read_text(encoding="utf-8-sig"))
+                cfg = _read_config(path)
             except (OSError, ValueError):
                 continue
             port = _port_of(cfg.get("cdp_url") if isinstance(cfg, dict) else "")
@@ -138,7 +184,7 @@ def make_config(app_dir: Path, name: str, port_offset: int | None = None,
     base = app_dir / "config.json"
     if not base.is_file():
         return None
-    cfg = json.loads(base.read_text(encoding="utf-8-sig"))
+    cfg = _read_config(base)
 
     cfg["owner"] = owner or name.title()   # stamped on every document this account downloads
     cfg["output_dir"] = output_dir_for(app_dir, cfg, name)
@@ -161,7 +207,7 @@ def make_config(app_dir: Path, name: str, port_offset: int | None = None,
         cfg["cdp_url"] = re.sub(r":%d\b" % base, ":%d" % port, cfg["cdp_url"], count=1)
 
     dest = app_dir / f"config.{slug(name)}.json"
-    dest.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    _write_whole(dest, json.dumps(cfg, indent=2))
     (app_dir / with_home(cfg["output_dir"])).mkdir(parents=True, exist_ok=True)
     return dest
 
@@ -180,7 +226,7 @@ def add_account(app_dirs: list[Path], name: str, port_offset: int | None = None,
         if not dest:
             print(f"  skip (no config.json, run setup first): {app_dir.name}")
             continue
-        cfg = json.loads(dest.read_text(encoding="utf-8"))
+        cfg = _read_config(dest)
         print(f"  {app_dir.name}")
         print(f"     config : {dest.name}")
         print(f"     output : {cfg['output_dir']}")

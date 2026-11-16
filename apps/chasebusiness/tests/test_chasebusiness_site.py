@@ -1325,7 +1325,7 @@ def test_a_failed_capture_says_no_file_name(tmp_path, monkeypatch, caplog):
     def no_move(src, dst):
         raise OSError("cannot move %s" % src)
     monkeypatch.setattr(Download, "save_as", no_save)
-    monkeypatch.setattr(capture.shutil, "move", no_move)
+    monkeypatch.setattr(capture.shared_folder, "move", no_move)
     page = center()
     page.folder_copy = tmp_path / "dl"
     (tmp_path / "dl").mkdir()

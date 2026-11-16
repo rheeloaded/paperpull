@@ -446,8 +446,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -492,11 +491,28 @@ class App:
                 # reports as a run that stopped. A return here finished
                 # the run clean, with documents still to download.
                 raise SystemExit(0)
+            except site.ListStopped as stop:
+                # The list of this document's type, read again after it was
+                # refused, did not answer as a list. Every document after it
+                # reads a list the same way, so the run stops here, with
+                # nothing recorded against this one.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because a document's list could not be read again
+        after the document was refused. Nothing is recorded against the
+        document, and the run leaves as one whose list did not end whole,
+        which only a run that lists carries on from
+        (listing.read_again_stopped)."""
+        log.info("a document's list could not be read again after it was refused")
+        self.write_failure("read the documents list again", "the documents list could not be read again")
+        listing.read_again_stopped(self, (
+            "myPay's documents list could not be read again, so this run stops here."))
 
     def download_one(self, page, doc: Document, filename: str):
         """Download one document PDF straight to its final path.
@@ -526,10 +542,12 @@ class App:
         try:
             saved = site.download_document(page, doc.document_id, out_path)
         except site.SessionExpired:
-            # Stop the whole run. Continuing would file every remaining
-            # document as "manual review" and finish looking successful while
-            # having saved nothing.
-            print("\n  !! myPay returned a sign-in page instead of a document.")
+            # The list of this document's type, read for it or read again
+            # after it was refused, answered as signed out. Stop the whole
+            # run. Continuing would file every remaining document as "manual
+            # review" and finish looking successful while having saved
+            # nothing.
+            print("\n  !! myPay returned a sign-in page instead of your documents.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, re-list your statements, then run Resume.")
             self.stats["session_expired"] = 1

@@ -286,10 +286,61 @@ class ListWhole(unittest.TestCase):
                 site.collect_download_docs(page)
 
 
+class ListFailsAfterTheRefusal(Page):
+    """Every PDF is refused, and the statement list read after the first
+    refusal answers 500, holds no statement, or times out in the page, so
+    the browser raises its own error. None of them says the session ended,
+    and none says it still holds."""
+
+    def __init__(self, how, **kw):
+        kw.setdefault("pdf_status", 403)
+        super().__init__(**kw)
+        self.how, self.gone = how, False
+
+    def evaluate(self, js, arg=None):
+        if self.gone and urlsplit(arg[0]).path == site.LIST_PATH:
+            if self.how == "500":
+                self.listing_status = 500
+            elif self.how == "empty":
+                self.rows = []
+            else:
+                self.asked.append(arg)
+                raise TimeoutError("Timeout 30000ms exceeded")
+        got = super().evaluate(js, arg)
+        if urlsplit(arg[0]).path not in (site.LIST_PATH, site.QPR_LIST_PATH):
+            self.gone = True
+        return got
+
+    def pdfs_asked(self):
+        return [a[0] for a in self.asked
+                if urlsplit(a[0]).path not in (site.LIST_PATH, site.QPR_LIST_PATH)]
+
+
+UNREAD = ("500", "timeout", "empty")
+
+
 class Download(unittest.TestCase):
     def setUp(self):
         site._RUN.clear()
         self.out = Path(tempfile.mkdtemp()) / "Statements" / "doc.pdf"
+
+    def test_a_list_read_again_after_a_refusal_that_does_not_answer_stops_unread(self):
+        """Lists that answer 500, hold nothing, or time out when read again
+        after a refusal are neither a sign-out nor this document's own
+        failure. A timeout reached the run as the document's failure, so the
+        run went on with no session shown. With headers kept from an earlier
+        reading the lists are read on the next pass, and the same holds."""
+        for how in UNREAD:
+            for kept in (False, True):
+                site._RUN.clear()
+                page = ListFailsAfterTheRefusal(how)
+                if kept:
+                    site.collect_download_docs(page)
+                with self.assertRaises(site.ListStopped, msg=(how, kept)):
+                    site.download_bill(page, None, "2026-09-30", self.out, href=site.DOWNLOAD_PATH,
+                                       document_id="statement-1111-20260930")
+                self.assertFalse(self.out.exists(), (how, kept))
+                self.assertEqual(len(page.pdfs_asked()), 1, (how, kept))
 
     def test_the_statement_with_that_account_and_date_is_fetched(self):
         page = Page()
@@ -462,6 +513,34 @@ class Orchestrator(unittest.TestCase):
         self.assertEqual(page.loads, 1)
         self.assertNotIn("Nothing was saved", out.getvalue())
         self.assertEqual(app.progress.data, {})
+
+    def test_one_document_refused_and_lists_that_do_not_answer_stop_the_run_unread(self):
+        """Nothing is recorded against the document, so the next run that
+        lists takes it again, and the run is not called signed out."""
+        for how in UNREAD:
+            site._RUN.clear()
+            app = make_app(tempfile.mkdtemp(), "--resume")
+            for r in site.statements_of(ROWS, 3, ACCOUNTS):
+                app._record_rawdoc(r, site.BILLING_URL)
+            app.discovery.save()
+            page = ListFailsAfterTheRefusal(how)
+            app.check_session = lambda p: None
+            app._on_its_site = lambda: page
+            app._delay = lambda *a, **k: None
+            out = io.StringIO()
+            ended = None
+            try:
+                with redirect_stdout(out):
+                    app.process(app._select())
+            except SystemExit as e:
+                ended = e
+            said = " ".join(out.getvalue().split())
+            self.assertIsInstance(ended, ListNotRead, (how, said))
+            self.assertEqual(app.progress.data, {}, how)
+            self.assertEqual(app.stats["failed"], 0, how)
+            self.assertNotIn("signed out", said, how)
+            self.assertNotIn("Timeout 30000ms", said, how)
+            self.assertEqual(len(page.pdfs_asked()), 1, how)
 
 
 class Privacy(unittest.TestCase):

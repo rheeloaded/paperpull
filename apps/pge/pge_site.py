@@ -128,6 +128,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlsplit
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import redirects
 from paperpull_core.dates import checked as _checked_date
@@ -2031,7 +2032,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                     res = redirects.get(page.request, target_url, is_safe_url)
                     body = intake.body(res) if res.ok else b""
                     if body[:5] == b"%PDF-":
-                        out_path.write_bytes(body)
+                        shared_folder.write_bytes(out_path, body)
                         print("  [site] Successfully fetched PDF via direct href!")
                         return True
         except Exception as e_href:
@@ -2217,7 +2218,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
 
         if captured_response_bytes[0]:
             print("  [site] Captured PDF from network response!")
-            out_path.write_bytes(captured_response_bytes[0])
+            shared_folder.write_bytes(out_path, captured_response_bytes[0])
         elif captured_download[0]:
             print("  [site] Download event captured!")
             try:
@@ -2235,7 +2236,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
             # The tab itself is asked only after both have failed.
             body, by_download = _take_blob((page, popup), blob_url)
             if body:
-                out_path.write_bytes(body)
+                shared_folder.write_bytes(out_path, body)
                 print("  [site] the bill came from the new tab")
             else:
                 print("  [site] the new tab held no bill this could read")
@@ -2255,7 +2256,7 @@ def download_bill(page, doc: dict, out_path: Path, config: dict) -> bool:
                 body = _https_by_download(page, blob_url)
                 by_download = body is not None
             if body:
-                out_path.write_bytes(body)
+                shared_folder.write_bytes(out_path, body)
                 print("  [site] Statement PDF saved!")
             else:
                 print("  [site] the new tab held no bill this could read")

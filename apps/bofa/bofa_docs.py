@@ -349,7 +349,11 @@ class App:
         statement and stop again (#124), and the run leaves as one whose
         list did not end whole, which only a run that lists carries on from
         (listing.read_again_stopped)."""
-        self.write_failure("download a statement", getattr(e, "reason", "") or str(e),
+        # A list read again after a refusal raises ListUnread with the
+        # helper's own sentence, which carries capitals and the kind of
+        # exception in brackets, so the failure file's reason is ours.
+        self.write_failure("download a statement",
+                           getattr(e, "reason", "") or "the list did not answer",
                            postmortem=getattr(e, "facts", None) or None)
         text = ("Bank of America's statements list did not answer the way this app "
                 "knows when it was read again for a statement, because %s. Nothing was "
@@ -570,8 +574,7 @@ class App:
         # a quarantined / failed one should be retried.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -702,6 +705,9 @@ class App:
                 page, account_ref=doc.account_ref, date=doc.date,
                 document_id=doc.document_id, year=doc.year)
         except site.SessionExpired:
+            # The list, read for this statement or read again after its PDF
+            # was refused, answered as a signed-out session. A refusal of the
+            # PDF alone, with the list still read, came back as nothing saved.
             print("\n  !! Bank of America answered with a sign-in page instead of a document.")
             print("     Your session has expired. Sign in again in the open")
             print("     browser, open Statements & Documents, then run Resume.")

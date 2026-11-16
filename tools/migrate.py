@@ -123,6 +123,7 @@ that the new machine starts with no history to report on until it runs.
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import io
 import json
@@ -142,7 +143,9 @@ if (_CORE / "paperpull_core").is_dir():
 from paperpull_core.keys import account_component  # noqa: E402
 from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
 from paperpull_core.ports import is_example  # noqa: E402
-from paperpull_core.storage import json_text, sanitize_component, with_home  # noqa: E402
+from paperpull_core.shared_folder import read_plain  # noqa: E402
+from paperpull_core.storage import (  # noqa: E402
+    json_text, on_provider_site, sanitize_component, with_home)
 
 # The file this writes. Version 1 had one entry per folder and no people or
 # settings, and still imports.
@@ -338,9 +341,54 @@ def _version() -> str:
 
 def _read_json(path: Path):
     try:
-        return json.loads(path.read_text(encoding="utf-8-sig"))
+        return json.loads(read_plain(path).decode("utf-8-sig"))
     except (OSError, ValueError):
         return None
+
+
+def url_settings_of(source: Path):
+    """The url_settings of the app whose storage.py is in source, {} for an
+    app with none, None when the file cannot be read or says something this
+    cannot follow. Read from the file's text and never by running it, since
+    running it binds the core to that app for the whole process the panel
+    runs in."""
+    try:
+        tree = ast.parse(read_plain(Path(source) / "storage.py", 4 * 1024 * 1024)
+                         .decode("utf-8", "replace"))
+    except (OSError, ValueError, SyntaxError):
+        return None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "url_settings":
+                continue
+            try:
+                found = ast.literal_eval(kw.value)
+            except (ValueError, SyntaxError, TypeError):
+                return None
+            if isinstance(found, dict) and all(
+                    isinstance(k, str) and isinstance(v, tuple) and v
+                    and all(isinstance(d, str) for d in v) for k, v in found.items()):
+                return found
+            return None
+    return {}
+
+
+def _address_kept(key: str, value, url_settings) -> bool:
+    """Whether a setting from a file may be written, as far as addresses go.
+    An app's url_settings name the settings that hold an address the app
+    opens, UKG's base_url, and each has to be on the provider's own site,
+    as PaperPull Server holds it before every run. A value there reaches
+    the browser's command line and the page a person signs in at, so a
+    file from another computer cannot choose it (a private report of
+    2026-11-10). An app whose url_settings could not be read keeps no
+    setting whose name ends in url."""
+    if url_settings is None:
+        return not (key.lower().endswith("url") and value not in (None, ""))
+    if key not in url_settings or value in (None, ""):
+        return True
+    return on_provider_site(value, url_settings[key])
 
 
 def _entry_script(folder: Path):
@@ -358,8 +406,10 @@ def _provider_kind(folder: Path):
     None when it has none."""
     src = ""
     try:
-        src = (folder / "storage.py").read_text(encoding="utf-8", errors="ignore")
-    except OSError:
+        # A plain file, never a pipe, whose open would hold an import's
+        # scan for good, and on PaperPull Server never through a link.
+        src = read_plain(folder / "storage.py", 4 * 1024 * 1024).decode("utf-8", "ignore")
+    except (OSError, ValueError):
         pass
     p = PROVIDER_RE.search(src)
     k = KIND_RE.search(src)
@@ -442,20 +492,30 @@ def _same_kind(ref, value) -> bool:
     return value is None or isinstance(value, (str, int, float))
 
 
-def settings_to_apply(install: Path, cfg: dict, settings: dict, check_pattern=None) -> dict:
+def settings_to_apply(install: Path, cfg: dict, settings: dict, check_pattern=None,
+                      url_settings=False, left_out=None) -> dict:
     """What of a file's settings may be written into a config this import
     just made. Only the keys settings_allowed gives this install, each the
-    same kind as the install's own value, and a file name pattern only when
+    same kind as the install's own value, an address only when it is on the
+    provider's own site (_address_kept), and a file name pattern only when
     check_pattern finds nothing wrong with it. With no way to check a
-    pattern, none is taken."""
+    pattern, none is taken. url_settings are the app's own (url_settings_of),
+    read from the install's storage.py when not given. Each address left
+    out is added to left_out, when given, for the import to say."""
     if not isinstance(settings, dict):
         return {}
     allowed = settings_allowed(install)
     example = _read_json(install / "config.example.json")
     example = example if isinstance(example, dict) else {}
+    if url_settings is False:
+        url_settings = url_settings_of(install)
     out = {}
     for key, value in settings.items():
         if key not in allowed or not _fits(value):
+            continue
+        if not _address_kept(key, value, url_settings):
+            if left_out is not None:
+                left_out.append(key)
             continue
         ref = example.get(key, cfg.get(key))
         if ref is not None and not _same_kind(ref, value):
@@ -861,7 +921,21 @@ def _stays_inside(rel: str) -> bool:
     return norm not in (".", "..") and not norm.startswith("../")
 
 
-def _rewrite_path(old: str, old_bases, new_base: Path) -> str:
+def _leads_inside(rel: str, home: Path, own: Path) -> bool:
+    """Whether a relative path a record holds, read from home as the app
+    reads it, names something inside own, the person's own folder, once
+    ".." and links are followed."""
+    try:
+        # Either separator, as the app on either system wrote it.
+        target = os.path.realpath(os.path.join(str(home), rel.replace("\\", os.sep).replace("/", os.sep)))
+        root = os.path.realpath(str(own))
+        target, root = os.path.normcase(target), os.path.normcase(root)
+        return target != root and os.path.commonpath([target, root]) == root
+    except (OSError, ValueError):
+        return False
+
+
+def _rewrite_path(old: str, old_bases, new_base: Path, home=None) -> str:
     """Point a recorded PDF path at this machine, or clear it.
 
     A path that cannot be rewritten is CLEARED rather than left alone. The
@@ -875,10 +949,16 @@ def _rewrite_path(old: str, old_bases, new_base: Path) -> str:
     # folder, others the full absolute one. A relative path is already portable
     # and is left exactly as it is. Only an absolute path names a machine. A
     # second person's paths begin with "..", since their folder sits beside
-    # the install a run starts in, so a relative path is never judged by
-    # whether it leaves a folder (a saved invoice with no path is taken
-    # again by Target).
+    # the install a run starts in, so a relative path is judged by where it
+    # leads from the folder the app runs in, home, never by whether it
+    # leaves that folder (a saved invoice with no path is taken again by
+    # Target). One that leads out of the person's own folder is cleared,
+    # since an app that moves the file a record names, AT&T's repair at
+    # start among them, then moved a file of this computer's that the file
+    # chose (a private report of 2026-11-10).
     if not _is_absolute(old):
+        if home is not None and not _leads_inside(old, Path(home), Path(new_base)):
+            return ""
         return old
     norm = old.replace("\\", "/")
     for base in old_bases or ():
@@ -900,7 +980,7 @@ def _under(path: str, old_bases) -> bool:
                          for x in old_bases or ()))
 
 
-def _moved(rec: dict, old_bases, new_base: Path) -> dict:
+def _moved(rec: dict, old_bases, new_base: Path, home=None) -> dict:
     """A record from another machine with its paths pointed at this one.
 
     Target keeps one file for each invoice of an order as well. An invoice
@@ -910,14 +990,14 @@ def _moved(rec: dict, old_bases, new_base: Path) -> dict:
     old folder that would lead out of it once moved is cleared, as a PDF
     path is."""
     rec = dict(rec)
-    rec["pdf_path"] = _rewrite_path(str(rec.get("pdf_path") or ""), old_bases, new_base)
+    rec["pdf_path"] = _rewrite_path(str(rec.get("pdf_path") or ""), old_bases, new_base, home)
     invoices = rec.get("invoices")
     if isinstance(invoices, list):
         out = []
         for inv in invoices:
             if isinstance(inv, dict) and isinstance(inv.get("file"), str) and inv["file"]:
                 old = inv["file"]
-                moved = _rewrite_path(old, old_bases, new_base)
+                moved = _rewrite_path(old, old_bases, new_base, home)
                 if not moved and _is_absolute(old) and not _under(old, old_bases):
                     moved = old
                 inv = dict(inv, file=moved)
@@ -943,7 +1023,7 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
     for key, inc in incoming.items():
         cur = target.get(key)
         if cur is None:
-            rec = _moved(inc, old_bases, new_base)
+            rec = _moved(inc, old_bases, new_base, Path(home or new_base))
             rec["imported_at"] = datetime.now().isoformat(timespec="seconds")
             target[key] = rec
             added += 1
@@ -970,7 +1050,7 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
         # lacks is filled in, with its paths pointed at this machine as a
         # record added is, and one it holds stays, since a run here wrote it
         # or emptied it on purpose.
-        here = _moved(inc, old_bases, new_base)
+        here = _moved(inc, old_bases, new_base, Path(home or new_base))
         lacking = {f: here[f] for f in _own_fields(inc, provider) if f in inc and f not in cur}
         # Where a run stopped on the old computer goes on here only for a
         # purchase this install has not finished either, and only when it
@@ -1030,10 +1110,16 @@ def write_history(where: Path, records: dict, stamp: str, write=None) -> None:
         backups = Path(where) / "Backups"
         backups.mkdir(parents=True, exist_ok=True)
         kept = backups / ("progress.%s.before-import.bak" % stamp)
+        # Read as a plain file, never a pipe, and on PaperPull Server never
+        # through a link, whose file would be copied into the share's Backups.
+        try:
+            before = read_plain(path)
+        except ValueError as e:
+            raise OSError(str(e)) from e
         if write is not None:
-            write(kept, path.read_bytes())
+            write(kept, before)
         else:
-            kept.write_bytes(path.read_bytes())
+            kept.write_bytes(before)
     if write is not None:
         write(path, text)
         return

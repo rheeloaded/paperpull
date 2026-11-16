@@ -64,8 +64,10 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from urllib.parse import urlencode, urlparse, parse_qsl, urlunparse
 
+from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import redirects
+from paperpull_core import refused
 from paperpull_core.controls import SETTINGS_CONTROL_RE, AUTH_CONTROL_RE
 
 # Everything on its way into a diagnostic file goes through here. It
@@ -264,12 +266,26 @@ def is_safe_control(name: str) -> bool:
 
 
 class SessionExpired(RuntimeError):
-    """Stripe answered with a sign-in page instead of the thing asked for."""
+    """Stripe answered with a sign-in page instead of the thing asked for. A
+    document's file refused that way raises it only when the lists, read
+    again, are refused too (download_bill)."""
 
 
 class NeedsPerson(RuntimeError):
     """Stripe asked for something only the account holder may give, such
     as the tax ID before a 1099. Never answered here."""
+
+
+class ListStopped(Exception):
+    """The lists, read again after one document was refused, did not answer
+    (a 500, a timeout) or showed no document, though they listed that one.
+    That says neither that the session ended nor that it holds, so the run
+    stops with the lists unread. Its words are this module's own, never the
+    page's."""
+
+    def __init__(self, why: str, docs=None):
+        super().__init__(why)
+        self.docs = list(docs or [])
 
 
 def goto_documents(page) -> bool:
@@ -583,7 +599,16 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     """Fetch one document's PDF from its own link, from inside the page, and
     write it. The link is looked up again when the one on record may have
     expired. A form with no link at all, which is how a 1099 behind a tax ID
-    step would look, raises NeedsPerson. `dl_dir` is unused."""
+    step would look, raises NeedsPerson. `dl_dir` is unused.
+
+    A file answered with a 401, a 403 or a redirect off stripe.com has the
+    lists read again, with the same calls that prove a session
+    (refused.list_again). Lists refused too raise SessionExpired, which
+    stops the run as signed out. Lists that do not answer (a 500, a
+    timeout) or show no document raise ListStopped, which stops the run
+    with the lists unread, since they say neither. Lists that still read
+    leave the document failed alone (False), and the next run tries it
+    again."""
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
@@ -592,23 +617,41 @@ def download_bill(page, dl_dir, iso_date: str, out_path, href: str = "",
     link = link or (href if is_safe_url(href) else "")
     if not link:
         raise NeedsPerson("Stripe lists %s with no download link" % (title or "a document"))
-    r = _fetch_file(page, link)
-    if r.get("json") is not None:
-        body = r["json"] if isinstance(r["json"], dict) else {}
-        words = " ".join(str(k) for k in body).lower() + " " + str(body.get("error", "")).lower()
-        if "challenge" in words or "tin" in words.split():
-            raise NeedsPerson("Stripe asked for the tax ID before %s" % (title or "this form"))
-        # A JSON answer may carry the real file address one level down.
-        inner = row_link(body)
-        if inner and inner != link:
-            r = _fetch_file(page, inner)
+    # Where the tab is says nothing about this document, so a tab off the
+    # account's Dashboard pages stops the run here, before anything is
+    # asked and unweighed. Only what Stripe answers for the document itself
+    # is weighed.
+    if not on_dashboard(page):
+        raise SessionExpired("the Stripe tab is not on a signed-in Dashboard page")
+    try:
+        r = _fetch_file(page, link)
+        if r.get("json") is not None:
+            body = r["json"] if isinstance(r["json"], dict) else {}
+            words = " ".join(str(k) for k in body).lower() + " " + str(body.get("error", "")).lower()
+            if "challenge" in words or "tin" in words.split():
+                raise NeedsPerson("Stripe asked for the tax ID before %s" % (title or "this form"))
+            # A JSON answer may carry the real file address one level down.
+            inner = row_link(body)
+            if inner and inner != link:
+                r = _fetch_file(page, inner)
+    except SessionExpired:
+        # A refusal may be the session ending or this one document. The
+        # lists are read again, the way Discover reads them, and a session
+        # that ended is refused there too and stops the run. Lists that do
+        # not answer or show no document raise ListStopped, which stops it
+        # with the lists unread. Lists that still read leave the refusal
+        # this document's own, so it fails alone and never stops every
+        # later run at the same document. It is not asked for a second time.
+        refused.list_again(lambda: list_documents(page), SessionExpired, ListStopped)
+        log.info("the document dated %s was refused while the lists still read", iso_date)
+        return False
     if not r.get("b64"):
         log.info("no PDF for %s: status %s, %s", iso_date, r.get("status"), r.get("ct"))
         return False
     data = intake.decode(r["b64"])
     if data[:5] != b"%PDF-":
         return False
-    out_path.write_bytes(data)
+    shared_folder.write_bytes(out_path, data)
     return True
 
 

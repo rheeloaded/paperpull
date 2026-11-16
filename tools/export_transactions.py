@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import csv
+import io
 import json
 import os
 import re
@@ -57,6 +58,7 @@ if (_CORE / "paperpull_core").is_dir() and str(_CORE) not in sys.path:
     sys.path.insert(0, str(_CORE))
 try:
     from paperpull_core import pdf_reader  # noqa: E402
+    from paperpull_core import shared_folder  # noqa: E402
     from paperpull_core.characters import whole_json  # noqa: E402
     from paperpull_core.run_reporting import MARK_ENV, marked, one_line  # noqa: E402
     from paperpull_core.sheets import csv_value, keep_text, read_stored_row, xlsx_value  # noqa: E402
@@ -874,7 +876,7 @@ def statement_name(index: Path, pdf: Path) -> str:
     written down beside the index, in documents-folders.json."""
     roots = [index.parent]
     try:
-        listed = json.loads((index.parent / "documents-folders.json").read_text("utf-8"))
+        listed = json.loads(shared_folder.read_text(index.parent / "documents-folders.json"))
         roots += [Path(p) for p in listed if isinstance(p, str) and Path(p).is_absolute()]
     except (OSError, ValueError, TypeError):
         pass
@@ -892,7 +894,7 @@ def providers(root: Path) -> List[dict]:
     out: "OrderedDict[str, dict]" = OrderedDict()
     for prov, f in find_indexes(root):
         rows = _index_rows(f)
-        on_disk = sum(1 for r in rows if pdf_path(f, r).is_file())
+        on_disk = sum(1 for r in rows if shared_folder.file_there(pdf_path(f, r)))
         if not on_disk:
             continue
         e = out.setdefault(prov, {"provider": prov, "folders": [], "pdfs": 0})
@@ -905,7 +907,9 @@ def _index_rows(path: Path) -> List[dict]:
     """The document index's rows as the app wrote them, each quote it put in
     front of a value that starts like a formula taken off again, so a file
     name reads as the file is named."""
-    with open(path, encoding="utf-8-sig", newline="") as fh:
+    # A plain file of its own, never a pipe, and on PaperPull Server never
+    # read through a link, whose file would land in the spreadsheet.
+    with io.StringIO(shared_folder.read_text(path, "utf-8-sig"), newline="") as fh:
         return [read_stored_row(r) for r in csv.DictReader(fh)]
 
 
@@ -914,7 +918,7 @@ class Cache:
         self.path = root / CACHE_NAME
         self.data: dict = {}
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            raw = json.loads(shared_folder.read_text(self.path))
             if raw.get("version") == CACHE_VERSION:
                 # Each file's path is kept exactly as the disk gave it, and
                 # what was read from it is made whole, as pdf_lines reads it.
@@ -937,9 +941,10 @@ class Cache:
     def save(self) -> None:
         if not self.dirty:
             return
-        tmp = self.path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"version": CACHE_VERSION, "files": self.data}), encoding="utf-8")
-        os.replace(tmp, self.path)
+        # A new file of its own moved into place, where a fixed .tmp name
+        # was one someone on the share could leave a link at.
+        shared_folder.write_whole(self.path, json.dumps({"version": CACHE_VERSION,
+                                                         "files": self.data}))
 
 
 # -- the export -------------------------------------------------------------------
@@ -970,7 +975,7 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
     for prov, index in indexes:
         for row in _index_rows(index):
             p = pdf_path(index, row)
-            if not p.is_file():
+            if not shared_folder.file_there(p):
                 missing += 1
                 continue
             parsed = cache.get(p)
@@ -1056,7 +1061,8 @@ def export(root: Path, out: Optional[Path] = None, provider: Optional[str] = Non
 def _write_csv(path: Path, rows: List[dict]) -> None:
     """Descriptions, accounts and the rest are written as text a spreadsheet
     will not take for a formula (paperpull_core.sheets). Amounts are numbers."""
-    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+    # On PaperPull Server never written through a link left at its name.
+    with shared_folder.open_to_write(path, "w", encoding="utf-8-sig", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=TXN_COLUMNS)
         w.writeheader()
         for r in rows:
@@ -1096,7 +1102,8 @@ def _write_xlsx(path: Path, txns: List[dict], stmts: List[dict]) -> None:
     sheet(wb.create_sheet("Statements"), STMT_COLUMNS, stmts,
           {"Account": 34, "Statement": 60, "Status": 34, "Provider": 16},
           {"Beginning Balance", "Ending Balance", "Sum of Amounts"})
-    wb.save(path)
+    with shared_folder.open_to_write(path, "wb") as fh:
+        wb.save(fh)
 
 
 def main(argv=None) -> int:

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import refused
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core import tabs
@@ -550,8 +551,7 @@ class App:
         # and a failed one is tried again.
         if state == State.NEEDS_MANUAL_REVIEW.value:
             p = rec.get("pdf_path", "")
-            return bool(p and Path(p).exists()
-                        and receipt_pdf.validate_pdf(Path(p), self.config["min_pdf_bytes"]).ok)
+            return receipt_pdf.copy_still_valid(p, self.config["min_pdf_bytes"])
         return False
 
     # -- processing --------------------------------------------------------
@@ -597,20 +597,73 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except site.SessionExpired:
-                # American Express answered a document as a signed-out
-                # session. Every document after it would get the same, so the
-                # run stops here, with nothing recorded against this one.
+                # The documents list, read again after a document was
+                # refused, answered as a signed-out session. Every document
+                # after it would get the same, so the run stops here, with
+                # nothing recorded against this one.
                 self.session_ended()
+            except site.ListStopped as stop:
+                # The documents list, read again after a document was
+                # refused, did not answer as a list. Every document after it
+                # reads the same list, so the run stops here, with nothing
+                # recorded against this one.
+                self.list_changed(stop)
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
 
+    def _read_the_list_again(self, page) -> None:
+        """Documents and Statements loaded again after one document was
+        refused, and its list read the way Discover reads it
+        (refused.list_again). A list refused raises SessionExpired, which
+        the loop stops the run on, and a page that looks signed out stops it
+        as signed out here. A list that does not answer as a list, does not
+        answer in time or holds no document proves no session either, and
+        Discover reads it as a list not read whole, not as a sign-out, so it
+        raises ListStopped and the run stops with the list unread
+        (list_changed). A list of another account than the records hold
+        stops it as Discover does. Returns only when the list answers for
+        this config's account with a document in it."""
+        refused.list_again(lambda: self._list_answered(page),
+                           site.SessionExpired, site.ListStopped)
+
+    def _list_answered(self, page):
+        """The documents the page's list answered with once Documents and
+        Statements was loaded again, or None when the page did not open or
+        its list did not answer as a list, which refused.list_again reads as
+        a list unread. A page that looks signed out stops the run as signed
+        out, and a list of another account stops it as Discover does, both
+        before its documents are weighed."""
+        if not site.goto_documents(page):
+            if site.looks_signed_out(page):
+                self.session_ended()
+            return None
+        raw = site.collect_documents(page)
+        if raw is None or not site.answers_its_list(page):
+            return None
+        self._stop_if_another_account(raw)
+        return raw
+
+    def list_changed(self, stop) -> None:
+        """Stop the run because the documents list, read again after one
+        document was refused, could not be read. Nothing is recorded against
+        the document, the listing is noted as one that stopped, and the run
+        leaves on ListNotRead, so the panel offers a run that lists first
+        rather than Continue, which would stop at the same document again
+        (#124)."""
+        log.info("the documents list could not be read again after a document was refused")
+        self.write_failure("read the documents list again", "the documents list could not be read again")
+        listing.read_again_stopped(self, (
+            "American Express Banking's documents list could not be read again, so "
+            "this run stops here."))
+
     def download_one(self, page, doc: Document, filename: str):
         """Download one document's PDF straight to its final path, asked for
         by the document's own id and its own account's token, never by its
-        place in the list."""
+        place in the list. A document refused as a signed-out session fails
+        alone when the list, read again, still answers."""
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
@@ -623,14 +676,31 @@ class App:
             title=doc.title, date_text=doc.date, href=doc.href,
             category=doc.category, tag=doc.document_id, document_id=doc.document_id,
             account=doc.account, account_token=doc.account_token)
-        saved = site.amexbanking_download(page, raw_doc, out_path)
+        refused = False
+        try:
+            saved = site.amexbanking_download(page, raw_doc, out_path)
+        except site.SessionExpired:
+            # A refusal may be the session ending or this one document. The
+            # list is read again the way Discover reads it, and a session
+            # that ended shows there and stops the run. A list that still
+            # answers for this account leaves this document failed alone,
+            # so it never stops every later run at the same document. It is
+            # not asked for a second time.
+            self._read_the_list_again(page)
+            log.info("the document dated %s was refused while the list still reads", doc.date)
+            saved, refused = False, True
         if not saved:
             # Nothing was saved, so nothing is in Manual Review. A failure,
             # which the next run tries again (#152).
             self._record(doc, State.FAILED,
-                         notes="Could not capture the document PDF (see the log)")
+                         notes=("Refused by American Express while its documents list still reads"
+                                if refused else "Could not capture the document PDF (see the log)"))
             self._write_row(doc, "Capture failed", State.FAILED.value)
-            self.write_failure('capture the document', 'the document would not render')
+            if refused:
+                self.write_failure('capture the document',
+                                   'the document was refused while its list still reads')
+            else:
+                self.write_failure('capture the document', 'the document would not render')
             self.stats["failed"] += 1
             print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return

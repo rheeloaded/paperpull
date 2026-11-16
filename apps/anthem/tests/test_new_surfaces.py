@@ -227,13 +227,38 @@ def test_the_new_navigations_only_target_host_checked_urls():
     assert site.is_safe_url(site.IDCARD_URL)
 
 
-def test_a_letter_body_cannot_phone_home_when_rendered():
-    """A letter body is rendered to PDF with all network blocked, so an embedded
-    tracking pixel or remote resource cannot load. It is printed by the
-    core's printed_pdf, which reads the PDF within the core's limit."""
-    assert "def render_html_to_pdf" in SRC
-    assert 'r.abort()' in SRC
-    assert 'printed_pdf(sess, PRINT_TO_PDF_OPTIONS)' in SRC
+def test_a_letter_body_is_drawn_by_the_cores_inert_drawing(monkeypatch):
+    """A letter body is a secure message, which this app does not write. It
+    was drawn with JavaScript on in a page of the signed-in context, its
+    block covering http and https alone, so a script in it could open a
+    WebSocket or a popup carrying the session (a private report of
+    2026-11-10). Every PDF this app draws of its own HTML goes through
+    receipt_pdf.inert_pdf_bytes, which core/tests/test_html_an_app_draws_reaches_nothing.py
+    holds to reaching nothing, in a real browser."""
+    from paperpull_core import receipt_pdf
+    drawn = []
+
+    def inert(page, html, base=""):
+        drawn.append(html)
+        return b"%PDF-1.7 drawn"
+    monkeypatch.setattr(receipt_pdf, "inert_pdf_bytes", inert)
+    out = site.render_letter(object(), "A subject", "<p>The body</p><script>x()</script>",
+                             "2026-05-14")
+    assert out == b"%PDF-1.7 drawn"
+    assert len(drawn) == 1 and "The body" in drawn[0] and "A subject" in drawn[0]
+    assert site.render_claims_summary(object(), "2025 claims", "Claim,Paid\nC1,10.00\n") == out
+    assert "C1" in drawn[1]
+
+
+def test_a_letter_the_core_refuses_to_draw_is_none_and_tried_again(monkeypatch):
+    """Markup still active after stripping is refused before anything is
+    drawn, and the letter is recorded failed, to be tried next run."""
+    from paperpull_core import receipt_pdf
+
+    def refused(page, html, base=""):
+        raise receipt_pdf.UnsafeHtml("an active tag was left after stripping")
+    monkeypatch.setattr(receipt_pdf, "inert_pdf_bytes", refused)
+    assert site.render_letter(object(), "A subject", "<p>x</p>") is None
 
 
 # -- robustness: a failed listing must not read as an empty archive ----------

@@ -72,8 +72,8 @@ from . import shared_folder
 from .characters import whole_json
 from .models import State
 from .storage import (FileName, build_pdf_filename, filing_folder, fitted_name,
-                      free_to_write, remove_empty, sanitize_component, title_case,
-                      unique_path)
+                      free_to_write, name_length, path_length, remove_empty,
+                      sanitize_component, title_case, unique_path)
 
 
 @dataclass
@@ -366,7 +366,25 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
         if not raw and not old_name:
             continue
         old_path = Path(raw) if raw else Path(old_name)
-        if raw and old_path.exists() and _held_row(row, inside, path_key) is None:
+        # Asked once, with one stat in a try. Python 3.12's exists() raises
+        # for a file in a folder Rename may not search, which ended every
+        # Rename and Move at that row (a bug hunt of 2026-11-14), and 3.14's
+        # says it is not there. Such a file is left as it is, said so on
+        # every Python, and "not there" is what 3.12's exists() said False to.
+        on_disk = False
+        if raw:
+            try:
+                old_path.stat()
+                on_disk = True
+            except ValueError:
+                pass
+            except OSError as e:
+                if not shared_folder.not_there(e):
+                    changes.append(Change(row, old_path, old_name,
+                                          reason="its file could not be looked at (%s)"
+                                                 % (e.strerror or type(e).__name__)))
+                    continue
+        if on_disk and _held_row(row, inside, path_key) is None:
             changes.append(Change(row, old_path, old_name, reason=NOT_HELD))
             continue
         try:
@@ -402,7 +420,7 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
         if new_name == old_path.name and _same_folder(where, old_path.parent):
             changes.append(Change(row, old_path, new_name, reason="already named that"))
             continue
-        if not raw or not old_path.exists():
+        if not on_disk:
             changes.append(Change(row, old_path, new_name,
                                   reason="not on disk, so only the record would change"))
             continue
@@ -1752,9 +1770,13 @@ def _fits_whole(folder: Path, name: str, token: str, max_path_length: int) -> bo
     """Whether `name` with `token` after it and a count after that, as
     unique_path writes the second file told apart by one ending, fits
     max_path_length whole in `folder`, the one the row's file is filed in
-    under that name."""
+    under that name. Measured as a download measures the room a name has
+    (storage.path_length), the whole path on Windows, so Rename and a
+    download agree on what fits. NAME_BYTES never cuts such an ending, since
+    a cut by bytes takes the stem before it."""
     stem, ext = os.path.splitext(name)
-    return len(str(folder)) + len("/%s %s (99)%s" % (stem, token, ext)) <= max_path_length
+    return (path_length(folder) + name_length("/%s %s (99)%s" % (stem, token, ext))
+            <= max_path_length)
 
 
 def _say_stranded(result: Result, say) -> None:
