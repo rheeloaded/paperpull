@@ -413,6 +413,7 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the statements list", "the statements page would not open")
                 print("Could not open your Vanguard statements page. Sign in in the")
                 print("browser, then try again.")
                 # Nothing was listed, so this run stops here rather than finish

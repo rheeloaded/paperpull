@@ -26,6 +26,16 @@ how Pilot, Run All and Discover end and the result line the panel reads.
 Twenty-five other document apps ask their opener twice and read whatever
 page is open however the second answer went, which neither check covers.
 
+Such a stop also writes a failure file before it says why it stopped, so
+a tester has something to attach (#228). It used to write none, so a run
+that stopped at "Could not open your Chase statements" left nothing to
+send. A third check reads the block Discover runs when its opener said no
+twice for a failure file on every way that stops the run, and the driven
+runs read the one file each writes. A Discover account moved to Capital
+One is no failure and writes none. Anthem, whose Run All goes on to its
+other lists, writes it where the run stops, so a later failure in the same
+run keeps the one file a run writes.
+
 Nothing here can reach a real browser or site. The browser is a stand-in
 that answers whatever it is asked, the opener and the session check are
 replaced, and the output folder and config are made up for each test.
@@ -34,6 +44,7 @@ import ast
 import importlib
 import json
 import sys
+import textwrap
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -615,6 +626,14 @@ class Home:
         return (json.loads(noted.read_text(encoding="utf-8"))["complete"] is False
                 and (not found.exists() or not json.loads(found.read_text(encoding="utf-8"))))
 
+    def failure_files(self) -> list:
+        return sorted((self.out / "Diagnostics").glob("failure-*.json"))
+
+    def recorded_nothing(self) -> bool:
+        """No document's progress was written, as before the file."""
+        kept = self.out / "progress.json"
+        return not kept.exists() or not json.loads(kept.read_text(encoding="utf-8"))
+
 
 @pytest.fixture
 def home(request, tmp_path, monkeypatch, capsys):
@@ -641,7 +660,8 @@ def test_a_pilot_whose_documents_page_will_not_open_stops(home):
     assert home.asked == 2, "%s asked its opener %d times\n%s" % (
         home.app.name, home.asked, said[-1500:])
     assert ended == ("exit", 0) and stopped(result), said[-1500:]
-    assert home.listed_nothing()
+    assert home.listed_nothing() and home.recorded_nothing()
+    wrote_the_refusal_file(home, said)
 
 
 @pytest.mark.parametrize("home", ASKERS, ids=ASKER_IDS, indirect=True)
@@ -652,7 +672,8 @@ def test_run_all_reads_every_other_list_and_then_stops(home):
     assert home.asked == 2, said[-1500:]
     assert ended == ("exit", 0) and stopped(result), said[-1500:]
     assert home.read == {name: 1 for name in other_lists(entry_of(home.app))}, home.read
-    assert home.listed_nothing()
+    assert home.listed_nothing() and home.recorded_nothing()
+    wrote_the_refusal_file(home, said)
 
 
 @pytest.mark.parametrize("home", ASKERS, ids=ASKER_IDS, indirect=True)
@@ -661,7 +682,8 @@ def test_a_discover_whose_documents_page_will_not_open_stops(home):
     assert home.asked == 2, said[-1500:]
     assert ended == ("exit", 0), said[-1500:]
     assert result is None or stopped(result), said[-1500:]
-    assert home.listed_nothing()
+    assert home.listed_nothing() and home.recorded_nothing()
+    wrote_the_refusal_file(home, said)
 
 
 @pytest.mark.parametrize("home", [REPO / "apps" / "discovercard"], ids=["discovercard"],
@@ -681,6 +703,353 @@ def test_a_discover_account_moved_to_capital_one_still_ends_clean(home, monkeypa
         assert result is None or result["stopped"] == 0, said[-1500:]
         assert json.loads((home.out / "last-listing.json").read_text(
             encoding="utf-8"))["complete"] is True
+        assert not home.failure_files() and FILE_LINE not in said, said[-1500:]
         said, result, ended = home.run("--resume", "--yes")
         assert ended == ("returned", 0) and result["stopped"] == 0, said[-1500:]
         assert "stopped before it read" not in said and "listed yet" not in said, said[-1500:]
+        assert not home.failure_files() and FILE_LINE not in said, said[-1500:]
+
+
+@pytest.mark.parametrize("home", [REPO / "apps" / "discoverbank"], ids=["discoverbank"],
+                         indirect=True)
+def test_a_discover_bank_page_on_capital_one_stops_and_writes_no_file(home, monkeypatch):
+    """Discover Bank's statements page opening on Capital One's site stops
+    the run with its list unread, as before. Nothing failed there, so no
+    failure file is written."""
+    monkeypatch.setattr(home.mod.site, "looks_moved_to_capital_one", lambda _page: True)
+    for args in (("--pilot",), ("--all", "--yes"), ("--discover",)):
+        said, result, ended = home.run(*args)
+        assert "may have moved to Capital One" in said, said[-1500:]
+        assert "Could not open your Discover Bank statements" not in said, said[-1500:]
+        assert ended == ("exit", 0), said[-1500:]
+        assert stopped(result) or (args == ("--discover",) and result is None), said[-1500:]
+        assert home.listed_nothing() and home.recorded_nothing()
+        assert not home.failure_files() and FILE_LINE not in said, said[-1500:]
+
+
+# -- a failure file before the stop -----------------------------------------------------
+
+# Every app whose Discover refuses at its opener, by name, so that one more
+# is read here because somebody added it and not only because its code
+# took the shape these checks look for.
+REFUSERS = (
+    "aafmaa", "affirm", "ally", "amazonvisa", "amex", "amexbanking", "anthem", "capitalone",
+    "chase", "direkt1822", "discoverbank", "discovercard", "dkb", "fairfaxwater", "fidelity",
+    "ibkr", "ing", "invest529", "mtb", "mypay", "navyfederal", "netbenefits", "pge",
+    "renaultbank", "schwab", "sparkassepc", "tsp", "usaa", "usbank", "vanguard", "wealthfront",
+)
+
+# A Discover account moved to Capital One is no failure, so the way through
+# that answer writes no file.
+MOVED = "looks_moved_to_capital_one"
+
+# The first line write_failure says about the file it wrote.
+FILE_LINE = "This run wrote a file about what went wrong:"
+
+
+def refusal_of(path: Path) -> list:
+    """The block Discover runs when its opener said no twice."""
+    fn = methods_of(path).get("cmd_discover")
+    for node in ast.walk(fn) if fn else ():
+        name = isinstance(node, ast.If) and site_test(node.test)
+        if name:
+            for stmt in node.body:
+                if isinstance(stmt, ast.If) and site_test(stmt.test) == name:
+                    return stmt.body
+    return []
+
+
+def failure_written(stmt):
+    """(step, reason) when the statement is self.write_failure with both
+    written as strings in the source, or None."""
+    call = stmt.value if isinstance(stmt, ast.Expr) else None
+    if isinstance(call, ast.Call) and self_attr(call.func) == "write_failure" \
+            and len(call.args) >= 2 and all(isinstance(a, ast.Constant) and isinstance(a.value, str)
+                                            for a in call.args[:2]):
+        return call.args[0].value, call.args[1].value
+    return None
+
+
+def said_by(stmt) -> str:
+    """The line a statement prints, when it is written in the source."""
+    node = stmt.value if isinstance(stmt, ast.Expr) else None
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id == "print" and node.args \
+            and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+        return " ".join(node.args[0].value.split())
+    return ""
+
+
+def moved_side(stmt):
+    """For an if on whether the account moved to Capital One, the block it
+    runs for a moved account, "body" or "orelse". None for any other if."""
+    test = stmt.test
+    negated = isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)
+    if negated:
+        test = test.operand
+    if isinstance(test, ast.Call) and isinstance(test.func, ast.Attribute) \
+            and isinstance(test.func.value, ast.Name) and test.func.value.id == "site" \
+            and test.func.attr == MOVED:
+        return "orelse" if negated else "body"
+    return None
+
+
+def ways_through(statements, always, flags, written=None, moved=False, before=(), after=()):
+    """Each way through these statements, taking both sides of every if.
+
+    Each way says the line it ends at and how. "stop" raises SystemExit or
+    calls a method that always does, "mark" sets a mark a method stops on,
+    "return" and "end" leave or run off the end, and "unread" is a block of
+    a kind this does not follow, which a reader has to teach it. With that,
+    the failure written on the way, whether the way is a moved account's,
+    the marks set, and the lines said before and after the failure."""
+    before, after = list(before), list(after)
+    for at, stmt in enumerate(statements):
+        found = failure_written(stmt)
+        if found and written is None:
+            written = found
+            continue
+        line = said_by(stmt)
+        if line:
+            (after if written else before).append(line)
+        marks = set_true([stmt]) & flags
+        how = ("stop" if raises_system_exit(stmt) or called_on_self(stmt) in always
+               else "mark" if marks else "return" if isinstance(stmt, ast.Return) else None)
+        if how is None and isinstance(stmt, ast.If):
+            side = moved_side(stmt)
+            for field in ("body", "orelse"):
+                yield from ways_through(getattr(stmt, field) + statements[at + 1:], always, flags,
+                                        written, moved or side == field, before, after)
+            return
+        if how is None and any(getattr(stmt, f, None) for f in
+                               ("body", "orelse", "handlers", "finalbody", "cases")):
+            how = "unread"
+        if how:
+            yield SimpleNamespace(line=stmt.lineno, how=how, written=written, moved=moved,
+                                  marks=marks, before=before, after=after)
+            return
+    yield SimpleNamespace(line=statements[-1].end_lineno if statements else 0, how="end",
+                          written=written, moved=moved, marks=set(), before=before, after=after)
+
+
+def stops_on(methods, attr) -> list:
+    """Where a mark stops the run, as (method, the body of the if that tests
+    the mark and raises SystemExit)."""
+    return [(name, node.body) for name, fn in methods.items() for node in ast.walk(fn)
+            if isinstance(node, ast.If)
+            and attr in {self_attr(n) for n in ast.walk(node.test)}
+            and any(raises_system_exit(n) for n in in_statements(node.body))]
+
+
+def refusal_stops(path: Path) -> list:
+    """Each way the refusal block ends. A way that sets a mark goes on
+    through the block that stops the run on it, since the run stops there,
+    and keeps what it wrote before the mark as `early`. `earlier` is what
+    it said before the file and may stay there, the refusal's own lines
+    ahead of a mark, `first` what it said before the file in the block
+    that writes it, and `after` what it said after the file."""
+    methods = methods_of(path)
+    flags, _stops = stop_flags(methods)
+    always = stoppers(methods)
+    out = []
+    for way in ways_through(refusal_of(path), always, flags):
+        if way.how != "mark":
+            out.append(SimpleNamespace(via="cmd_discover", line=way.line, how=way.how,
+                                       written=way.written, early=None, moved=way.moved,
+                                       earlier=[], first=way.before, after=way.after))
+            continue
+        for attr in sorted(way.marks):
+            for name, body in stops_on(methods, attr):
+                for then in ways_through(body, always, flags):
+                    out.append(SimpleNamespace(
+                        via=name, line=then.line, how=then.how, written=then.written,
+                        early=way.written, moved=way.moved, earlier=way.before + way.after,
+                        first=then.before, after=then.after))
+    return out
+
+
+def refusal_faults(path: Path) -> list:
+    """What is wrong with the failure file on the ways the refusal stops.
+
+    Every way that stops the run writes one, with a step and a reason
+    written in the source, before anything it says in that block, so its
+    own lines come after the file's. A moved account's way writes none,
+    and so does a way before its mark, where the run may go on and a later
+    failure is the one to keep."""
+    faults = []
+    stops = 0
+    for way in refusal_stops(path):
+        where = "%s line %d" % (way.via, way.line)
+        if way.how == "unread":
+            faults.append("%s is a block this check does not read through" % where)
+        elif way.moved:
+            if way.written or way.early:
+                faults.append("%s writes a failure file for an account moved to Capital One"
+                              % where)
+        elif way.how == "stop":
+            stops += 1
+            if way.early:
+                faults.append("%s writes the file before its mark, where the run may go on"
+                              % where)
+            if not way.written:
+                faults.append("%s stops with no failure file written before it" % where)
+            elif way.first:
+                faults.append("%s says %r before the failure file" % (where, way.first[0]))
+    if not stops:
+        faults.append("no way through the refusal stops the run")
+    return faults
+
+
+def wrote_the_refusal_file(home, said):
+    """One failure file, its step and reason the ones the refusal writes,
+    and every line the run says of its own in full, those after the file
+    below its lines."""
+    found = home.failure_files()
+    assert len(found) == 1, "%s wrote %d failure files\n%s" % (
+        home.app.name, len(found), said[-1500:])
+    report = json.loads(found[0].read_text(encoding="utf-8"))
+    ways = [w for w in refusal_stops(entry_of(home.app)) if w.how == "stop" and not w.moved]
+    assert report["step"] != "unnamed step" and report["reason"], report
+    assert (report["step"], report["reason"]) in {w.written for w in ways}, report
+    assert FILE_LINE in said, said[-1500:]
+    at = said.index(FILE_LINE)
+    assert any(all(line in said[:at] for line in w.earlier)
+               and all(line in said[at:] for line in w.after) for w in ways), said[-1500:]
+
+
+def test_the_apps_that_refuse_at_their_opener_are_the_ones_named():
+    assert sorted(ASKER_IDS) == sorted(REFUSERS)
+
+
+@pytest.mark.parametrize("app", ASKERS, ids=ASKER_IDS)
+def test_every_refusal_writes_a_failure_file_before_it_stops(app):
+    assert not refusal_faults(entry_of(app))
+
+
+def test_a_refusal_is_read_through_the_shapes_it_takes():
+    """Discover Bank's two answers under one stop, Discover's moved account
+    that goes on, and Anthem's mark, each read as itself."""
+    def ways(app):
+        return refusal_stops(entry_of(REPO / "apps" / app))
+    bank = ways("discoverbank")
+    assert sorted((w.how, w.moved) for w in bank) == [("stop", False), ("stop", True)]
+    card = ways("discovercard")
+    assert sorted((w.how, w.moved) for w in card) == [("end", True), ("stop", False)]
+    anthem = ways("anthem")
+    assert [(w.via, w.how) for w in anthem] == [("_stop_if_eobs_unread", "stop")]
+
+
+@pytest.mark.parametrize("home", ASKERS, ids=ASKER_IDS, indirect=True)
+def test_a_failure_file_that_cannot_be_written_leaves_the_stop_as_it_was(home, monkeypatch):
+    """The page and the journal both fail as the file is written. The run
+    still says why it stopped and ends as it did."""
+    from paperpull_core import failure, journal
+
+    def broken(*_a, **_kw):
+        raise RuntimeError("made to fail")
+    monkeypatch.setattr(failure, "page_state", broken)
+    monkeypatch.setattr(journal.Journal, "checkpoint", broken)
+    said, result, ended = home.run("--pilot")
+    assert ended == ("exit", 0) and stopped(result), said[-1500:]
+    assert home.listed_nothing() and home.recorded_nothing()
+    assert "Traceback" not in said and "made to fail" not in said, said[-1500:]
+    ways = [w for w in refusal_stops(entry_of(home.app)) if w.how == "stop" and not w.moved]
+    assert any(all(line in said for line in w.earlier + w.after) for w in ways), said[-1500:]
+
+
+# -- the rule for the file, on samples --------------------------------------------------
+
+# OLD's refusal, which the samples below put other blocks in place of.
+OLD_REFUSAL = ('                print("Could not open your statements. Sign in and open")\n'
+               '                print("Statements in the browser, then try again.")\n'
+               '                return 0\n')
+
+WRITE = 'self.write_failure("open the statements list", "the statements page would not open")\n'
+SAY = ('print("Could not open your statements. Sign in and open")\n'
+       'print("Statements in the browser, then try again.")\n')
+STOP = "raise SystemExit(0)\n"
+MOVED_TEST = "if site.looks_moved_to_capital_one(page):\n"
+
+
+def under(block: str) -> str:
+    """A block one level in."""
+    return textwrap.indent(block, "    ")
+
+
+def refusing(block: str) -> str:
+    """OLD with this block run when its opener said no twice."""
+    return OLD.replace(OLD_REFUSAL, textwrap.indent(block, " " * 16))
+
+
+# The way it is now, the file first, then the app's own lines, then the stop.
+WRITTEN = refusing(WRITE + SAY + STOP)
+
+
+def test_a_refusal_that_writes_its_file_first_passes(tmp_path):
+    assert WRITTEN != OLD
+    assert not refusal_faults(sample(tmp_path, WRITTEN))
+
+
+@pytest.mark.parametrize("src, fault", [
+    (refusing(SAY + STOP), "stops with no failure file"),
+    (refusing(SAY + STOP + WRITE), "stops with no failure file"),
+    (refusing("if quiet:\n" + under(WRITE) + SAY + STOP), "stops with no failure file"),
+    (refusing(WRITE.replace('("open the', '(f"open the {page}') + SAY + STOP),
+     "stops with no failure file"),
+    (refusing(SAY + STOP).replace("            self.check_session(page)\n",
+                                  "            " + WRITE + "            self.check_session(page)\n", 1),
+     "stops with no failure file"),
+    (refusing(SAY + WRITE + STOP),
+     "says 'Could not open your statements. Sign in and open' before the failure file"),
+], ids=["no call", "after the raise", "only when quiet", "a step built at run time",
+        "before the second ask", "after its own lines"])
+def test_a_refusal_without_its_file_first_is_found(tmp_path, src, fault):
+    found = refusal_faults(sample(tmp_path, src))
+    assert len(found) == 1 and fault in found[0], found
+
+
+def test_a_moved_account_writes_no_file_and_the_other_answer_does(tmp_path):
+    """Discover Bank's shape, one stop under both answers, and Discover's,
+    a moved account that goes on."""
+    moved = 'print("This account has moved to Capital One.")\n'
+    bank = refusing(MOVED_TEST + under(moved) + "else:\n" + under(WRITE + SAY) + STOP)
+    card = refusing("if not " + MOVED_TEST[3:] + under(WRITE + SAY + STOP) + moved)
+    for src in (bank, card):
+        assert not refusal_faults(sample(tmp_path, src))
+    ahead = refusing(WRITE + MOVED_TEST + under(moved) + "else:\n" + under(SAY) + STOP)
+    found = refusal_faults(sample(tmp_path, ahead))
+    assert len(found) == 1 and "for an account moved to Capital One" in found[0], found
+    inside = refusing(MOVED_TEST + under(WRITE + moved) + "else:\n" + under(WRITE + SAY) + STOP)
+    found = refusal_faults(sample(tmp_path, inside))
+    assert len(found) == 1 and "for an account moved to Capital One" in found[0], found
+    unwritten = refusing(MOVED_TEST + under(moved) + "else:\n" + under(SAY) + STOP)
+    found = refusal_faults(sample(tmp_path, unwritten))
+    assert len(found) == 1 and "stops with no failure file" in found[0], found
+
+
+# MARKED with the file written where the run stops on its mark.
+STOPS_ON_THE_MARK = '        if self._unread:\n            print("The list was not read.")\n'
+MARKED_WRITTEN = MARKED.replace(
+    STOPS_ON_THE_MARK,
+    '        if self._unread:\n            ' + WRITE + '            print("The list was not read.")\n')
+
+
+def test_a_mark_writes_its_file_where_the_run_stops(tmp_path):
+    assert MARKED_WRITTEN != MARKED
+    assert not refusal_faults(sample(tmp_path, MARKED_WRITTEN))
+    found = refusal_faults(sample(tmp_path, MARKED))
+    assert len(found) == 1 and "_stop_if_unread line" in found[0] \
+        and "stops with no failure file" in found[0], found
+    early = MARKED_WRITTEN.replace("                self._unread = True\n",
+                                   "                " + WRITE + "                self._unread = True\n")
+    found = refusal_faults(sample(tmp_path, early))
+    assert len(found) == 1 and "before its mark" in found[0], found
+    late = MARKED.replace("            raise SystemExit(0)\n",
+                          "            raise SystemExit(0)\n            " + WRITE)
+    found = refusal_faults(sample(tmp_path, late))
+    assert len(found) == 1 and "stops with no failure file" in found[0], found
+
+
+def test_a_block_this_check_does_not_follow_is_named(tmp_path):
+    found = refusal_faults(sample(tmp_path, refusing("for _ in ():\n" + under(WRITE) + SAY + STOP)))
+    assert any("does not read through" in f for f in found), found

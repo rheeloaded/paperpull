@@ -422,6 +422,8 @@ class App:
             self.check_session(page)
             if not site.ensure_statements(page):
                 if not site.looks_moved_to_capital_one(page):
+                    self.write_failure("open the statement list",
+                                       "the statements page would not open")
                     print("Could not open your Discover statements. Sign in and open")
                     print("Statements & Documents in the browser, then try again.")
                     print("If it shows no statements yet, there is nothing to download")

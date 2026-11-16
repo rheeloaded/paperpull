@@ -442,6 +442,8 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the documents list",
+                                   "the documents page could not be reached")
                 print("Could not reach the Document Access Hub. Sign in to Fidelity in the")
                 print("browser window and leave it open, then try again.")
                 # Nothing was listed, so this run stops here rather than finish

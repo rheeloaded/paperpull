@@ -922,6 +922,10 @@ class App:
         read as one that did. It leaves the way a run leaves on a sign-out,
         which the panel reports as stopped."""
         if self._eobs_unread:
+            # Written here, where the run stops, rather than where the EOB
+            # list would not open, since Run All reads its other lists in
+            # between and a run writes one failure file, the first (#228).
+            self.write_failure("open the eob list", "the eob list would not open")
             print("\nYour EOBs were not listed, so this run stops here rather than finish.")
             raise SystemExit(0)
 

@@ -287,6 +287,10 @@ def run_discover(tmp_path, attached, capsys):
     return ended, said, whole, len(listed)
 
 
+def failure_files(tmp_path) -> list:
+    return sorted((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+
+
 def their_tab(attached, server, path):
     """The person's AAFMAA tab on this page, the only tab open."""
     theirs = testkit.open_tab(attached, address(server, path), "Member Center")
@@ -301,6 +305,7 @@ def test_discover_reads_the_list_whatever_it_holds(server, attached, tmp_path, c
     assert ended == ("returned", 0) and whole is True, said[-1500:]
     assert "Could not open your Armed Forces Mutual documents" not in said, said[-1500:]
     assert listed == SITE.held, said[-1500:]
+    assert not failure_files(tmp_path), said[-1500:]
 
 
 @pytest.mark.parametrize("name", ["one document, no letters", "no document, no letters or header"])
@@ -321,3 +326,4 @@ def test_discover_stops_on_a_page_that_never_drew(server, attached, tmp_path, ca
     assert ended == ("exit", 0) and whole is False, said[-1500:]
     assert "Could not open your Armed Forces Mutual documents" in said, said[-1500:]
     assert listed == 0
+    assert len(failure_files(tmp_path)) == 1, said[-1500:]

@@ -444,6 +444,7 @@ class App:
                     # Nobody has seen a Discover Bank account move, so this
                     # says what the tab shows and no more, and the list
                     # stays unread like any other list that would not open.
+                    # Nothing failed, so it writes no failure file.
                     print("Discover Bank's statements page opened on Capital One's site, so")
                     print("this account may have moved to Capital One. PaperPull's Capital One")
                     print("provider reads accounts there. To add it, press Add a provider on")
@@ -452,6 +453,8 @@ class App:
                     print("Nothing was downloaded here. Anything this app saved before is")
                     print("untouched, and its history is kept.")
                 else:
+                    self.write_failure("open the statement list",
+                                       "the statements page would not open")
                     print("Could not open your Discover Bank statements. Sign in and open")
                     print("Statements at https://bank.discover.com/web/deposits/documents/statements,")
                     print("then try again.")

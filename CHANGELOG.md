@@ -7,6 +7,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+
+- **A list that would not open leaves a failure file to attach (#228).**
+  When Discover could not open a provider's statements or documents page,
+  even after asking again once the sign-in was checked, the run stopped with
+  "Could not open your Chase statements" or its like and wrote no failure
+  file, so there was nothing to attach to an issue. The 31 providers that
+  stop there now write one first, with the page's shape and no text from
+  it, and then say what they said before. A Discover account moved to
+  Capital One is no failure and writes none. Anthem, whose Run All reads its
+  other lists after the EOBs, writes it where the run stops, so a later
+  failure in the same run is the one kept.
+
 ## [0.68.0] - 2026-11-16
 
 Every provider now says which country it is for, in the control panel, in

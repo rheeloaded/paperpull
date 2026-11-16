@@ -462,6 +462,7 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the documents list", "the postbox could not be reached")
                 print("Could not reach the ING Postbox. Sign in in the browser (the tab")
                 print("should be on banking.ing.de), then try again.")
                 # Nothing was listed, so this run stops here rather than finish

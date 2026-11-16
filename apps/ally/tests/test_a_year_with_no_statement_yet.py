@@ -236,11 +236,16 @@ def run_discover(tmp_path, attached, server, capsys):
     return ended, said, json.loads(noted.read_text(encoding="utf-8"))["complete"]
 
 
+def failure_files(tmp_path) -> list:
+    return sorted((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+
+
 def test_discover_on_a_year_with_no_statement_yet_reads_the_list(server, attached,
                                                                   tmp_path, capsys):
     ended, said, whole = run_discover(tmp_path, attached, server, capsys)
     assert ended == ("returned", 0) and whole is True, said[-1500:]
     assert "Could not open your Ally statements" not in said, said[-1500:]
+    assert not failure_files(tmp_path), said[-1500:]
 
 
 def test_a_year_whose_list_never_answered_leaves_the_list_unread(server, attached, tmp_path,
@@ -266,3 +271,4 @@ def test_discover_where_the_list_never_draws_still_stops(server, attached, tmp_p
     ended, said, whole = run_discover(tmp_path, attached, server, capsys)
     assert ended == ("exit", 0) and whole is False, said[-1500:]
     assert "Could not open your Ally statements" in said, said[-1500:]
+    assert len(failure_files(tmp_path)) == 1, said[-1500:]

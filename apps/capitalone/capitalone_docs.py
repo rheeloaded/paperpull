@@ -411,6 +411,7 @@ class App:
         if not site.ensure_documents(page):
             self.check_session(page)
             if not site.ensure_documents(page):
+                self.write_failure("open the document center", "the document center would not open")
                 print("Could not open your Capital One document center. Sign in in")
                 print("the browser, then try again.")
                 # Nothing was listed, so this run stops here rather than finish

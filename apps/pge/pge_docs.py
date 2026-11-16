@@ -328,6 +328,7 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             if not site.goto_documents(page):
+                self.write_failure("open the bill history", "the bill history would not open")
                 print("Could not open the PG&E bill history. In the browser go to")
                 print("Billing and payments, then try again.")
                 # Nothing was listed, so this run stops here rather than finish
