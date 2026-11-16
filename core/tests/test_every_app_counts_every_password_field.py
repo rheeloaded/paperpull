@@ -18,21 +18,30 @@ is_visible, is_hidden, bounding_box, filter(visible=), get_by_role for a
 text box (which leaves hidden elements out unless asked), a wait for a drawn
 or hidden state (a wait's default is drawn), and expect's checks of the
 same. The recorder's DRAWN_PASSWORD_FIELD, and setting PASSWORD_FIELD at
-all. Page script is read the other way round. A password selector in it may
-only be counted, by !!querySelector, querySelector against null or
-querySelectorAll's length, itself or through a name the script gives it. Any
-other use, in a script that tests drawing anywhere or is joined to one that
-does, is a drawn-only check. The field may be named in the statement itself,
-through what the module, the function or a function around it bound to a
-name or gave a parameter as its default, through a constant of another
-module of the same app, or by a helper of the module, or a helper of that
-helper, that is handed one.
+all.
+
+Page script is read the other way round. A password field in it may only
+be counted, querySelectorAll's length, or querySelector taken as true or
+false (by !, Boolean, if, a test against null or a ternary) with nothing of
+the element read after it, itself or through a name the script gives it.
+Any other use, in a script that tests drawing anywhere or is joined to one
+that does, is a drawn-only check. Script that Python puts together, by an
+f-string, %, +, join, replace or json.dumps, is put together before it is
+read.
+
+The field may be named in the statement itself, through what the module, the
+function or a function around it bound to a name or gave a parameter as its
+default, through a dict entry, through a constant another module of the
+same app holds and this one imports or reads off that module, or by a
+helper of the module, or a helper of that helper, that is handed one. Text a
+page shows is not a field, so what get_by_text, has_text and the name of a
+button or a link match is not read as one.
 
 What it does not follow, and a review still reads for (NOT_FOLLOWED holds
 each as a test that is expected to fail). A field named only as a PIN or by
-an id with no password word in it, a name kept on self or on a class, a
-helper in another module or in the core, and names reused within one
-function for different things, which are read as all of them at once.
+an id with no password word in it, a name kept on self or on a class, and a
+helper in another module or in the core. Names reused within one function
+for different things are read as all of them at once.
 
 Nothing finds an app by its name. Every module of every app is read, and no
 app keeps code in a folder below its own (test_no_app_keeps_code_below_its_own_folder).
@@ -62,17 +71,17 @@ NAMED = {
 
 # A drawn-only check that is not the count of the page's own password
 # fields, allowed as the one call it is, in its module and function, as many
-# times as it is there. Each allowed check stands beside the page's own
-# count, which decides alone
+# times as it is there. Each allowed check stands after the page's own
+# count, which decides alone at the top of the function
 # (test_an_allowed_app_still_counts_every_field_of_the_page_itself).
 # (app, module, function, the call as written): (how many, reason)
 ALLOWED = {
     ("applecard", "applecard_site.py", "looks_signed_out", "fields.nth(i).is_visible()"): (
         1, "Apple's sign-in is a frame from its own host laid over card.apple.com. The page's "
-           "own password fields are all counted. In that frame only a drawn field counts, "
-           "since a signed-in page may keep the frame (a guess in applecard_site.py, never "
-           "measured). Neither the app's page count nor the recorder reads a frame at all, "
-           "so this adds a sign-out answer and takes none away "
+           "own password fields are all counted first. In a frame on Apple's sign-in host only "
+           "a drawn field counts, since a signed-in page may keep the frame (a guess in "
+           "applecard_site.py, never measured). Neither the app's page count nor the recorder "
+           "reads a frame at all, so this adds a sign-out answer and takes none away "
            "(test_apple_cards_allowed_check_reads_only_its_sign_in_frames)."),
 }
 
@@ -93,20 +102,24 @@ def _password_field(tree):
 
 ## Reading a module for a drawn-only check ##################################
 
+# The words a password field goes by. pwd only as a word of its own.
 PASSWORD_WORDS = ("password", "passwort", "kennwort", "passwd", "pwd")
+_PASSWORD = re.compile(r"password|passwort|kennwort|passwd|(?<![a-z])pwd|pwd(?![a-z])")
 
 # Selector text that keeps only drawn elements, or leaves hidden ones out,
 # read with spaces taken out and in any case.
 SELECTOR_DRAWN = (":visible", "visible=true", "visible=false", ":not([hidden", "[hidden]",
-                  "display:none", "visibility:hidden")
+                  "display:none", "visibility:hidden", ":not(.hidden", ":not(.d-none",
+                  ":not(.invisible", ":not(.sr-only")
 
 # Page script that asks whether an element is drawn.
 SCRIPT_DRAWN = ("offsetparent", "offsetwidth", "offsetheight", "clientwidth", "clientheight",
                 "getboundingclientrect", "getclientrects", "checkvisibility",
                 "getcomputedstyle", "intersectionobserver", "style.display", "style.visibility",
                 ".hidden", "[hidden]")
-# What tells page script from a selector.
-SCRIPT_MARKS = ("=>", "function", "document", "queryselector", "return ")
+# What tells page script from a selector, written as script writes it, so
+# a label that says Return or Document is no script.
+_SCRIPT = re.compile(r"=>|\bfunction\s*\(|\bdocument\.|\.querySelector(?:All)?\(|\breturn\s")
 
 # Playwright calls that ask whether something is drawn.
 DRAWN_CALLS = {"is_visible", "is_hidden", "bounding_box", "to_be_visible", "not_to_be_visible",
@@ -118,18 +131,26 @@ DRAWN_STATES = {"visible", "hidden"}
 KEYWORD_CALLS = {"filter", "locator", "get_by_role"}
 # The roles a password field can be found by.
 FIELD_ROLES = {"textbox"}
+# What matches the text a page shows, which no field has.
+TEXT_CALLS = {"get_by_text", "get_by_title", "get_by_alt_text"}
+TEXT_KEYWORDS = {"has_text", "has_not_text"}
 # Calls that run page script, and where their script sits among the
 # arguments. The other arguments name what it runs on.
 SCRIPT_CALLS = {"evaluate": 0, "evaluate_handle": 0, "evaluate_all": 0,
                 "wait_for_function": 0, "add_init_script": 0,
                 "eval_on_selector": 1, "eval_on_selector_all": 1}
 SCRIPT_KEYWORDS = ("expression", "script")
+# Calls that put a container's contents into it.
+MUTATORS = {"update", "setdefault", "append", "extend", "insert", "add"}
+# The calls that put text together, read when script is put together.
+JOINS = {"format", "join", "replace", "dumps"}
 DRAWN_CONSTANT = "DRAWN_PASSWORD_FIELD"
+CALLS_TO_READ = (DRAWN_CALLS | WAIT_CALLS | KEYWORD_CALLS | set(SCRIPT_CALLS)
+                 | {"get_by_role", "getattr"})
 
 
 def _says_password(text: str) -> bool:
-    low = text.lower()
-    return any(w in low for w in PASSWORD_WORDS)
+    return bool(_PASSWORD.search(text.lower()))
 
 
 def _says(text: str, words) -> bool:
@@ -138,22 +159,68 @@ def _says(text: str, words) -> bool:
 
 
 def _is_script(text: str) -> bool:
-    low = text.lower()
-    return any(m in low for m in SCRIPT_MARKS)
+    return bool(_SCRIPT.search(text))
 
 
-# Page script. The quoted strings in it that name a password field, and
-# whether each is only counted.
-_JS_STRING = re.compile(r'''"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`''')
-_JS_FIELD = re.compile(r"input|\[|type|autocomplete", re.I)
-_JS_QUERY_BEFORE = re.compile(r"[\w$.\])]*\.querySelector(All)?\(\s*$")
-_JS_NAME_BEFORE = re.compile(r"\b(?:const|let|var)\s+(\w+)\s*=\s*$")
-_JS_STATEMENT_ENDS = re.compile(r"\s*\)?\s*;?[ \t]*(?:\n|$)")
+## Page script ##############################################################
+
+_FIELD = re.compile(r"input|\[|type|autocomplete", re.I)
+_QUERY_BEFORE = re.compile(r"[\w$.\])]*\.querySelector(All)?\(\s*$")
+_NAME_BEFORE = re.compile(r"\b(?:const|let|var)\s+(\w+)\s*=\s*$")
+_ENDS = re.compile(r"\s*;?[ \t]*(?:\n|$)")
+_TRUTH_BEFORE = re.compile(r"(?:!|Boolean\(|\b(?:if|while)\s*\()\s*$")
+_PROPERTY_AFTER = re.compile(r"\s*(?:\?\.|\.|\[)")
+_NULL_AFTER = re.compile(r"\s*(?:(?:!==?|===?)\s*null\b|\?(?![.?]))")
+_REGEX_BEFORE = set("(,=:[!&|?{};+-*%<>~^")
+
+
+def _script_literals(text: str):
+    """(kind, start, end) of each string, template and regex literal of page
+    script, comments left out. kind is 's' for a string or a template, 'r'
+    for a regex."""
+    out, i, n, prev = [], 0, len(text), ""
+    while i < n:
+        c = text[i]
+        if c in "\"'`":
+            j = i + 1
+            while j < n and text[j] != c and not (text[j] == "\n" and c != "`"):
+                j += 2 if text[j] == "\\" else 1
+            out.append(("s", i, min(j + 1, n)))
+            i, prev = j + 1, c
+            continue
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            i = n if j < 0 else j
+            continue
+        if text.startswith("/*", i):
+            j = text.find("*/", i + 2)
+            i = n if j < 0 else j + 2
+            continue
+        if c == "/" and (prev == "" or prev in _REGEX_BEFORE or text[:i].rstrip().endswith("return")):
+            j, in_class = i + 1, False
+            while j < n and text[j] != "\n" and (in_class or text[j] != "/"):
+                if text[j] == "\\":
+                    j += 1
+                elif text[j] == "[":
+                    in_class = True
+                elif text[j] == "]":
+                    in_class = False
+                j += 1
+            if j < n and text[j] == "/":
+                j += 1
+                while j < n and text[j].isalpha():
+                    j += 1
+                out.append(("r", i, j))
+                i, prev = j, "/"
+                continue
+        if not c.isspace():
+            prev = c
+        i += 1
+    return out
 
 
 def _names_a_field(body: str) -> bool:
-    return _says_password(body) and bool(_JS_FIELD.search(body)
-                                          or body.strip().lower() in PASSWORD_WORDS)
+    return _says_password(body) and bool(_FIELD.search(body) or body.strip().lower() in PASSWORD_WORDS)
 
 
 def _uses_after(text: str, name: str, at: int):
@@ -163,28 +230,34 @@ def _uses_after(text: str, name: str, at: int):
         yield at + m.start(), at + m.end()
 
 
-def _only_counted(text: str, s: int, e: int, depth: int = 0) -> bool:
+def _true_or_false(text: str, a: int, b: int) -> bool:
+    """Whether what stands at text[a:b] is taken only as true or false, and
+    nothing of it is read after."""
+    after = text[b:b + 40]
+    if _PROPERTY_AFTER.match(after):
+        return False
+    return bool(_TRUTH_BEFORE.search(text[max(0, a - 40):a]) or _NULL_AFTER.match(after))
+
+
+def _only_counted(text: str, s: int, e: int) -> bool:
     """Whether what stands at text[s:e], a password selector or a name the
     script gave one, is only counted where it is used."""
-    if depth > 4:
+    before = text[max(0, s - 120):s]
+    query = _QUERY_BEFORE.search(before)
+    close = re.match(r"\s*\)", text[e:])
+    if not (query and close):
         return False
-    before, after = text[max(0, s - 120):s], text[e:e + 60]
-    query = _JS_QUERY_BEFORE.search(before)
-    if not query:
-        return False
-    head = before[:query.start()]
-    named = _JS_NAME_BEFORE.search(head)
-    if named and _JS_STATEMENT_ENDS.match(after):
+    start, end = s - len(before) + query.start(), e + close.end()
+    named = _NAME_BEFORE.search(before[:query.start()])
+    if named and _ENDS.match(text[end:end + 40]):
         # The list or the element is given a name. Each use of it decides.
-        rest = [(a, b) for a, b in _uses_after(text, named.group(1), e)]
+        uses = list(_uses_after(text, named.group(1), end))
         if query.group(1):
-            return all(re.match(r"\s*\.length\b", text[b:]) for a, b in rest)
-        return all(re.search(r"!!\s*$", text[:a]) or re.match(r"\s*(?:!==?|===?)\s*null\b", text[b:])
-                   for a, b in rest)
+            return all(re.match(r"\s*\.length\b", text[b:]) for _, b in uses)
+        return all(_true_or_false(text, a, b) for a, b in uses)
     if query.group(1):
-        return bool(re.match(r"\s*\)\s*\.length\b", after))
-    return bool(re.search(r"(?:!!|Boolean\()\s*$", head)
-                or re.match(r"\s*\)\s*(?:!==?|===?)\s*null\b", after))
+        return bool(re.match(r"\s*\.length\b", text[end:]))
+    return _true_or_false(text, start, end)
 
 
 @functools.lru_cache(maxsize=None)
@@ -193,15 +266,20 @@ def _script_reads_a_field(text: str) -> str:
     keeps drawn fields, 'used' when it uses one beyond counting it, '' when
     every one is only counted."""
     used = ""
-    for m in _JS_STRING.finditer(text):
-        body = m.group(0)[1:-1]
+    for kind, s, e in _script_literals(text):
+        if kind == "r":
+            body = text[s + 1:text.rindex("/", s + 1, e)]
+            plain = re.sub(r"[\^$()?:\\]|\\b", "", body).lower()
+            if _says_password(body) and (_FIELD.search(body) or plain in PASSWORD_WORDS):
+                used = "used"
+            continue
+        body = text[s + 1:e - 1]
         if not _names_a_field(body):
             continue
         if _says(body, SELECTOR_DRAWN):
             return "drawn"
-        s, e = m.start(), m.end()
-        named = _JS_NAME_BEFORE.search(text[max(0, s - 80):s])
-        if named and _JS_STATEMENT_ENDS.match(text[e:e + 40]):
+        named = _NAME_BEFORE.search(text[max(0, s - 80):s])
+        if named and _ENDS.match(text[e:e + 40]):
             # A name for the selector. Each place it is handed on decides.
             if all(_only_counted(text, a, b) for a, b in _uses_after(text, named.group(1), e)):
                 continue
@@ -211,9 +289,24 @@ def _script_reads_a_field(text: str) -> str:
     return used
 
 
+_MARK = "\x01"
+_UNREAD = "\x00"
+
+
+def _with_fields(text: str) -> str:
+    """A script put together, each password selector joined into it written
+    as one the script quotes."""
+    for q in "'\"`":
+        text = text.replace(q + _MARK + q, _MARK)
+    return text.replace(_MARK, '"input[type=password]"')
+
+
+## Reading a module #########################################################
+
 def _bindings(nodes):
     """Name -> what was bound to it, by assignment, loop, with, walrus or
-    comprehension, anywhere in these nodes."""
+    comprehension, an item put into it, or a call that fills it, anywhere in
+    these nodes."""
     out = {}
 
     def bind(target, value):
@@ -224,6 +317,8 @@ def _bindings(nodes):
                 bind(t, value)
         elif isinstance(target, ast.Starred):
             bind(target.value, value)
+        elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+            out.setdefault(target.value.id, []).append(value)
 
     for top in nodes:
         for n in ast.walk(top):
@@ -238,6 +333,10 @@ def _bindings(nodes):
                 bind(n.optional_vars, n.context_expr)
             elif isinstance(n, ast.NamedExpr):
                 bind(n.target, n.value)
+            elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                  and n.func.attr in MUTATORS and isinstance(n.func.value, ast.Name)):
+                for v in n.args + [k.value for k in n.keywords]:
+                    out.setdefault(n.func.value.id, []).append(v)
     return out
 
 
@@ -262,6 +361,19 @@ def _script_args(call):
         return []
     out = [call.args[at]] if len(call.args) > at else []
     return out + [k.value for k in call.keywords if k.arg in SCRIPT_KEYWORDS]
+
+
+def _plain_role(call) -> bool:
+    """get_by_role of a role no password field has."""
+    role = call.args[0] if call.args else next((k.value for k in call.keywords if k.arg == "role"), None)
+    return isinstance(role, ast.Constant) and role.value not in FIELD_ROLES
+
+
+def _composed(value) -> bool:
+    """Text Python puts together."""
+    return (isinstance(value, ast.JoinedStr)
+            or isinstance(value, ast.BinOp) and isinstance(value.op, (ast.Add, ast.Mod))
+            or isinstance(value, ast.Call) and _call_name(value) in JOINS)
 
 
 _BODIES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -329,9 +441,17 @@ class _Signature:
                             else self.more if k.arg else None)
 
 
+def _through_partial(call):
+    """functools.partial(f, a, b) as the call f(a, b) it stands for, or the
+    call itself."""
+    if _call_name(call) == "partial" and call.args:
+        return ast.Call(func=call.args[0], args=call.args[1:], keywords=call.keywords)
+    return call
+
+
 class _NameIs:
     """A leaf that takes one name, equal to another for the same name so the
-    module's record of names read keeps one entry for it."""
+    module keeps one record of what reaches it."""
 
     def __init__(self, name):
         self.name = name
@@ -348,29 +468,61 @@ class _NameIs:
 
 class _Module:
     def __init__(self, tree, others=frozenset()):
-        """others, the names of constants of the app's other modules that
-        name a password field."""
+        """others, the constants another module of the app holds that name a
+        password field."""
         self.tree, self.others = tree, others
-        self.every, self.docs, functions, self.parent = [], set(), [], {}
-        todo = [(tree, None)]
+        self.every, self.docs, self.parent = [], set(), {}
+        self.aliases, self.imported = set(), set()
+        self.calls, self.marked, functions = {}, {}, []
+        todo = [(tree, None, None)]
         while todo:
-            n, fn = todo.pop()
+            n, fn, stmt = todo.pop()
             self.every.append(n)
+            if isinstance(n, ast.stmt):
+                stmt = n
             if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant):
                 self.docs.add(id(n.value))
+            elif isinstance(n, ast.Import):
+                self.aliases |= {a.asname or a.name.split(".")[0] for a in n.names}
+            elif isinstance(n, ast.ImportFrom):
+                self.imported |= {a.asname or a.name for a in n.names}
+            if isinstance(n, ast.Call):
+                self.calls.setdefault(id(fn), []).append(n)
+            if self._worth_reading(n):
+                self.marked.setdefault(id(fn), {})[id(stmt)] = stmt
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 functions.append(n)
                 self.parent[id(n)] = fn
                 fn = n
-            todo.extend((c, fn) for c in ast.iter_child_nodes(n))
+            todo.extend((c, fn, stmt) for c in ast.iter_child_nodes(n))
         functions.sort(key=lambda f: f.lineno)
-        self.units = [("<module>", None, list(_statements(tree.body)))]
-        self.units += [(fn.name, fn, list(_statements(fn.body))) for fn in functions]
+        self.units = [("<module>", None)] + [(fn.name, fn) for fn in functions]
+        self.selectors = any(self.selector_drawn(n) for n in self.every)
         self._names = None
+        self._module_scope = {}
+        self._registry = {id(self._module_scope): self._module_scope}
         self._scopes = {}
         self._known = {}
-        self._reading = set()
-        self._cycle = False
+        self.steps = 0
+
+    def _worth_reading(self, n) -> bool:
+        """Whether a node is one this census reads its statement for."""
+        if isinstance(n, ast.Call):
+            return (_call_name(n) in CALLS_TO_READ
+                    or any(k.arg is None or k.arg == "visible" for k in n.keywords))
+        if isinstance(n, ast.Attribute):
+            return n.attr in DRAWN_CALLS
+        if isinstance(n, (ast.Assign, ast.AnnAssign)):
+            return n.value is not None and _composed(n.value)
+        text = self.string(n)
+        return bool(text) and _says_password(text) and _is_script(text)
+
+    def statements(self, fn):
+        """The statements of a function, or of the module, worth reading, in
+        order. Every one where the module holds a drawn selector."""
+        if self.selectors:
+            return list(_statements(fn.body if fn is not None else self.tree.body))
+        return sorted(self.marked.get(id(fn), {}).values(), key=lambda s: (s.lineno, s.col_offset))
 
     @property
     def names(self):
@@ -382,6 +534,8 @@ class _Module:
         """What the names of a function were bound to, in it, as its
         parameters' defaults, or in a function around it. Read once and only
         when asked."""
+        if fn is None:
+            return self._module_scope
         if id(fn) not in self._scopes:
             out, f = {}, fn
             while f is not None:
@@ -390,61 +544,138 @@ class _Module:
                         out.setdefault(name, []).extend(values)
                 f = self.parent.get(id(f))
             self._scopes[id(fn)] = out
+            self._registry[id(out)] = out
         return self._scopes[id(fn)]
 
-    def involves(self, expr, scope, leaf, skip=frozenset()) -> bool:
-        """Whether expr, or what a name in it was bound to, has a part leaf
-        takes. Parts in skip are left out. A constant key of a dict that a
-        name holds reads only that key's value."""
-        todo = [expr]
+    def with_lambdas(self, scope, nodes):
+        """The scope with each lambda's parameters bound to what the call it
+        is handed to also holds, as map and filter hand it, and the
+        parameters of a lambda no call hands anything."""
+        owner = {id(a): n for n in nodes if isinstance(n, ast.Call)
+                 for a in n.args if isinstance(a, ast.Lambda)}
+        extra, unbound = {}, set()
+        for n in nodes:
+            if isinstance(n, ast.Lambda):
+                call = owner.get(id(n))
+                given = [a for a in call.args if a is not n] if call else []
+                for p in _Signature(n).names():
+                    if given:
+                        extra.setdefault(p, []).extend(given)
+                    else:
+                        unbound.add(p)
+        if not extra:
+            return scope, unbound
+        merged = {k: list(v) for k, v in scope.items()}
+        for k, v in extra.items():
+            merged.setdefault(k, []).extend(v)
+        self._registry[id(merged)] = merged
+        return merged, unbound
+
+    # -- What an expression names, names followed ---------------------------
+
+    def _bound(self, sid, name):
+        """(the name's place, what is bound to it, the scope that binding is
+        read in)."""
+        scope = self._registry[sid]
+        if name in scope:
+            return (sid, name), scope[name] + self.names.get(name, []), sid
+        msid = id(self._module_scope)
+        return (msid, name), self.names.get(name, []), msid
+
+    def _direct(self, expr, sid, leaf, skip=frozenset()):
+        """(whether expr has a part leaf takes, the names it uses), names not
+        followed. A dict entry read by a constant key reads only the entries
+        that key can be. Text a page shows is left out."""
+        refs, todo, keys = set(), [expr], set()
         while todo:
             n = todo.pop()
+            self.steps += 1
             if n is None or id(n) in skip:
                 continue
             if leaf(n):
-                return True
-            if isinstance(n, ast.Name) and self._name_involves(n.id, scope, leaf):
-                return True
+                return True, refs
+            if isinstance(n, ast.Name):
+                refs.add((sid, n.id))
+                continue
+            entry = None
             if (isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name)
                     and isinstance(n.slice, ast.Constant)):
-                held = scope.get(n.value.id, []) + self.names.get(n.value.id, [])
+                entry = n.value.id, n.slice
+            elif (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "get"
+                  and n.args and isinstance(n.func.value, ast.Name) and isinstance(n.args[0], ast.Constant)):
+                entry = n.func.value.id, n.args[0]
+            if entry is not None:
+                held = self._bound(sid, entry[0])[1]
                 if held and all(isinstance(d, ast.Dict) for d in held):
-                    if leaf(n.slice):
-                        return True
-                    todo.extend(v for d in held for k, v in zip(d.keys, d.values)
-                                if k is None or isinstance(k, ast.Constant) and k.value == n.slice.value)
+                    if leaf(entry[1]):
+                        return True, refs
+                    if entry[0] not in keys:
+                        keys.add(entry[0])
+                        todo.extend(v for d in held for k, v in zip(d.keys, d.values)
+                                    if not isinstance(k, ast.Constant) or k.value == entry[1].value)
                     continue
-            todo.extend(c for c in ast.iter_child_nodes(n) if id(c) not in skip)
-        return False
+            if isinstance(n, ast.Call):
+                name = _call_name(n)
+                todo.append(n.func)
+                if name in TEXT_CALLS:
+                    continue
+                plain = name == "get_by_role" and _plain_role(n)
+                todo.extend(n.args)
+                todo.extend(k.value for k in n.keywords
+                            if k.arg not in TEXT_KEYWORDS and not (plain and k.arg == "name"))
+                continue
+            todo.extend(ast.iter_child_nodes(n))
+        return False, refs
 
-    def _name_involves(self, name, scope, leaf) -> bool:
-        # Kept per name, scope and leaf, the leaf held in the key so its id
-        # is never reused. A name met again while it is being read counts as
-        # not involved for now, which ends a loop of names, and an answer of
-        # no reached through such a loop is not kept, since the loop was not
-        # read to its end.
-        key = (id(scope), name, leaf)
-        if key in self._known:
-            return self._known[key]
-        if key in self._reading:
-            self._cycle = True
-            return False
-        self._reading.add(key)
-        outer, self._cycle = self._cycle, False
-        try:
-            found = any(self.involves(b, scope, leaf)
-                        for b in scope.get(name, []) + self.names.get(name, []))
-        finally:
-            self._reading.discard(key)
-        if found or not self._cycle:
-            self._known[key] = found
-        self._cycle = outer or self._cycle
-        return found
+    def _name_involves(self, sid, name, leaf) -> bool:
+        """Whether what a name was bound to has a part leaf takes, read as a
+        graph of names once for each leaf, so a loop of names costs no more
+        than its names."""
+        table = self._known.setdefault(leaf, {})
+        start = self._bound(sid, name)[0]
+        if start in table:
+            return table[start]
+        graph, todo = {}, [(sid, name)]
+        while todo:
+            s, nm = todo.pop()
+            place, held, bsid = self._bound(s, nm)
+            if place in graph or place in table:
+                continue
+            hit, refs = False, set()
+            for value in held:
+                found, more = self._direct(value, bsid, leaf)
+                if found:
+                    hit = True
+                    break
+                refs |= more
+            graph[place] = (hit, set() if hit else {self._bound(*r)[0] for r in refs})
+            if not hit:
+                todo.extend(refs)
+        value = {place: hit for place, (hit, _) in graph.items()}
+        grew = True
+        while grew:
+            grew = False
+            for place, (_, edges) in graph.items():
+                if not value[place] and any(value.get(e, table.get(e, False)) for e in edges):
+                    value[place] = True
+                    grew = True
+        table.update(value)
+        return table[start]
+
+    def involves(self, expr, scope, leaf, skip=frozenset()) -> bool:
+        """Whether expr, or what a name in it was bound to, has a part leaf
+        takes. Parts in skip are left out."""
+        sid = id(scope)
+        self._registry.setdefault(sid, scope)
+        hit, refs = self._direct(expr, sid, leaf, skip)
+        return hit or any(self._name_involves(s, n, leaf) for s, n in refs)
 
     def reaches(self, expr, scope, names) -> set:
         """Which of names expr uses, itself or through what was bound to a
         name in it."""
         return {p for p in names if self.involves(expr, scope, _NameIs(p))}
+
+    # -- Text ----------------------------------------------------------------
 
     def string(self, n) -> str:
         """A string a module writes, never a docstring."""
@@ -452,12 +683,69 @@ class _Module:
             return n.value
         return ""
 
+    def text_of(self, n, scope, depth=0, seen=frozenset()) -> str:
+        """The text an expression puts together, names followed. A part that
+        cannot be read is written as _UNREAD, a password selector joined in
+        as _MARK."""
+        if depth > 12:
+            return _UNREAD
+        if isinstance(n, ast.Constant):
+            return n.value if isinstance(n.value, str) else str(n.value)
+        if isinstance(n, ast.JoinedStr):
+            return "".join(self._part(v.value if isinstance(v, ast.FormattedValue) else v,
+                                      scope, depth, seen) for v in n.values)
+        if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add):
+            return self._part(n.left, scope, depth, seen) + self._part(n.right, scope, depth, seen)
+        if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Mod):
+            template = self.text_of(n.left, scope, depth + 1, seen)
+            values = iter([self._part(v, scope, depth, seen)
+                           for v in (n.right.elts if isinstance(n.right, ast.Tuple) else [n.right])])
+            return re.sub(r"%%|%(?:\([^)]*\))?[-#0 +]*\d*(?:\.\d+)?[a-z]",
+                          lambda m: "%" if m.group(0) == "%%" else next(values, _UNREAD), template)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+            name, on = n.func.attr, n.func.value
+            if name == "format":
+                template = self.text_of(on, scope, depth + 1, seen)
+                values = iter([self._part(v, scope, depth, seen) for v in n.args])
+                named = {k.arg: self._part(k.value, scope, depth, seen) for k in n.keywords if k.arg}
+                return re.sub(r"\{(\w*)[^{}]*\}", lambda m: named.get(m.group(1), _UNREAD)
+                              if m.group(1) and not m.group(1).isdigit() else next(values, _UNREAD),
+                              template)
+            if name == "join" and n.args and isinstance(n.args[0], (ast.List, ast.Tuple)):
+                return self.text_of(on, scope, depth + 1, seen).join(
+                    self._part(v, scope, depth, seen) for v in n.args[0].elts)
+            if name == "replace" and len(n.args) >= 2:
+                return self.text_of(on, scope, depth + 1, seen).replace(
+                    self.text_of(n.args[0], scope, depth + 1, seen), self._part(n.args[1], scope, depth, seen))
+            if name == "dumps" and n.args:
+                return '"%s"' % self._part(n.args[0], scope, depth, seen)
+            if name in ("strip", "lstrip", "rstrip"):
+                return self.text_of(on, scope, depth + 1, seen)
+        if isinstance(n, ast.Name) and n.id not in seen:
+            held = self._bound(id(scope), n.id)[1] if id(scope) in self._registry else []
+            if len(held) == 1:
+                return self.text_of(held[0], scope, depth + 1, seen | {n.id})
+        return _UNREAD
+
+    def _part(self, n, scope, depth, seen) -> str:
+        text = self.text_of(n, scope, depth + 1, seen)
+        if isinstance(n, ast.Constant):
+            return text
+        if (_says_password(text) and not _is_script(text)
+                or _UNREAD in text and not _is_script(text) and self.involves(n, scope, self.password)):
+            return _MARK
+        return text
+
+    # -- Leaves --------------------------------------------------------------
+
     def password(self, n) -> bool:
         if isinstance(n, ast.Name):
-            return _says_password(n.id) or n.id in self.others
+            return _says_password(n.id) or n.id in self.others and n.id in self.imported
         if isinstance(n, ast.Attribute):
-            return _says_password(n.attr) or n.attr in self.others
-        return _says_password(self.string(n))
+            return _says_password(n.attr) or (n.attr in self.others and isinstance(n.value, ast.Name)
+                                              and n.value.id in self.aliases)
+        text = self.string(n)
+        return bool(text) and _says_password(text) and not text.lower().startswith("text=")
 
     def selector_drawn(self, n) -> bool:
         text = self.string(n)
@@ -473,16 +761,16 @@ def _drawn_call(call):
     keywords = {k.arg: k.value for k in call.keywords if k.arg}
     if name in DRAWN_CALLS:
         return name + "()"
+    if name == "getattr" and len(call.args) > 1 and isinstance(call.args[1], ast.Constant) \
+            and call.args[1].value in DRAWN_CALLS:
+        return "%s() through getattr" % call.args[1].value
     if "visible" in keywords:
         return "%s(visible=...)" % name
     if name == "get_by_role":
-        role = call.args[0] if call.args else keywords.get("role")
         shown = keywords.get("include_hidden")
-        if isinstance(role, ast.Constant) and role.value not in FIELD_ROLES:
+        if _plain_role(call) or isinstance(shown, ast.Constant) and shown.value is True:
             return None
-        if not (isinstance(shown, ast.Constant) and shown.value is True):
-            return "get_by_role(), which leaves hidden elements out"
-        return None
+        return "get_by_role(), which leaves hidden elements out"
     if name in WAIT_CALLS:
         state = keywords.get("state")
         if state is None and name == "wait_for_element_state" and call.args:
@@ -498,18 +786,22 @@ def _drawn_call(call):
 
 
 def _asks(nodes):
-    """(node, form) for each drawn question among nodes, a call, or one of
-    Playwright's drawn checks taken without calling it."""
+    """(node, form, what it asks about) for each drawn question among nodes,
+    a call, or one of Playwright's drawn checks taken without calling it."""
     called = {id(n.func) for n in nodes if isinstance(n, ast.Call)}
     out = []
     for n in nodes:
         if isinstance(n, ast.Call) and not _script_args(n):
             form = _drawn_call(n)
             if form:
-                out.append((n, form))
+                out.append((n, form, n.args[0] if form.endswith("getattr") else n))
         elif isinstance(n, ast.Attribute) and n.attr in DRAWN_CALLS and id(n) not in called:
-            out.append((n, "%s, taken without a call" % n.attr))
+            out.append((n, "%s, taken without a call" % n.attr, n))
     return out
+
+
+SCRIPT_FORM = "page script that tests a field is drawn"
+SELECTOR_FORM = "a selector that keeps drawn fields"
 
 
 def drawn_checks(tree, mod=None):
@@ -529,28 +821,35 @@ def drawn_checks(tree, mod=None):
                 or isinstance(n, ast.alias) and DRAWN_CONSTANT in (n.name, n.asname)):
             form = "the recorder's " + DRAWN_CONSTANT
             hits.append((getattr(n, "lineno", 0), "<module>", form, form))
-    selectors = any(mod.selector_drawn(n) for n in mod.every)
     helpers = {}
-    for fn_name, fn, stmts in mod.units:
+    for fn_name, fn in mod.units:
         signature = _Signature(fn) if fn is not None else None
-        for stmt in stmts:
+        for stmt in mod.statements(fn):
             exprs = [e for e in _own(stmt) if e is not None]
             nodes = [n for e in exprs for n in ast.walk(e)]
             calls = [n for n in nodes if isinstance(n, ast.Call)]
             scripts = [(c, _script_args(c)) for c in calls if _script_args(c)]
-            asks = _asks(nodes)
-            texts = [n for n in nodes if _says_password(mod.string(n)) and _is_script(mod.string(n))]
-            if not (scripts or asks or selectors or texts):
-                continue
-            scope = mod.scope(fn)
             skip = frozenset(id(s) for _, at_script in scripts for s in at_script)
-            # Page script that names a password field.
-            for n in texts:
-                read = _script_reads_a_field(mod.string(n))
-                if read == "drawn" or read and any(mod.involves(e, scope, mod.script_drawn)
-                                                   for e in exprs):
-                    form = "page script that tests a field is drawn"
-                    hits.append((n.lineno, fn_name, form, form))
+            scope, unbound = mod.with_lambdas(mod.scope(fn), nodes)
+            # Page script that names a password field, as written, or as
+            # Python puts it together.
+            for n in nodes:
+                text = mod.string(n)
+                if text and _says_password(text) and _is_script(text):
+                    read = _script_reads_a_field(text)
+                    if read == "drawn" or read and any(mod.involves(e, scope, mod.script_drawn)
+                                                       for e in exprs):
+                        hits.append((n.lineno, fn_name, SCRIPT_FORM, SCRIPT_FORM))
+            composed = [s for _, at_script in scripts for s in at_script if not isinstance(s, ast.Constant)]
+            if isinstance(stmt, (ast.Assign, ast.AnnAssign)) and stmt.value is not None \
+                    and _composed(stmt.value):
+                composed.append(stmt.value)
+            for s in composed:
+                text = _with_fields(mod.text_of(s, scope))
+                if _says_password(text) and _is_script(text):
+                    read = _script_reads_a_field(text)
+                    if read == "drawn" or read and _says(text, SCRIPT_DRAWN):
+                        hits.append((s.lineno, fn_name, SCRIPT_FORM, SCRIPT_FORM))
             # Page script run on a password field.
             for call, at_script in scripts:
                 on = [a for a in [call.func] + call.args + [k.value for k in call.keywords]
@@ -561,35 +860,33 @@ def drawn_checks(tree, mod=None):
                     hits.append((call.lineno, fn_name, form, ast.unparse(call)))
             # A selector that keeps drawn fields, in one call, or bound or
             # returned outside any call.
-            if selectors:
-                form = "a selector that keeps drawn fields"
-                both = [c for c in calls
-                        if mod.involves(c, scope, mod.password)
+            if mod.selectors:
+                both = [c for c in calls if mod.involves(c, scope, mod.password)
                         and mod.involves(c, scope, mod.selector_drawn)]
-                hits.extend((c.lineno, fn_name, form, ast.unparse(c)) for c in both)
+                hits.extend((c.lineno, fn_name, SELECTOR_FORM, ast.unparse(c)) for c in both)
                 outside = frozenset(id(c) for c in calls)
                 if not both and any(mod.involves(e, scope, mod.password, outside) for e in exprs) \
                         and any(mod.involves(e, scope, mod.selector_drawn, outside) for e in exprs):
-                    hits.append((stmt.lineno, fn_name, form, form))
+                    hits.append((stmt.lineno, fn_name, SELECTOR_FORM, SELECTOR_FORM))
             # A drawn question asked of a password field. A lambda's own
-            # parameter is bound only by what the statement hands it.
-            lambdas = {a for n in nodes if isinstance(n, ast.Lambda) for a in _Signature(n).names()}
-            for node, form in asks:
-                if lambdas and mod.reaches(node, scope, lambdas):
+            # parameter that no call hands anything is read through the
+            # whole statement.
+            for node, form, about in _asks(nodes):
+                if unbound and mod.reaches(about, scope, unbound):
                     named = any(mod.involves(e, scope, mod.password, skip) for e in exprs)
                 else:
-                    named = mod.involves(node, scope, mod.password)
+                    named = mod.involves(about, scope, mod.password)
                 if named:
                     hits.append((node.lineno, fn_name, form, ast.unparse(node)))
                     continue
                 # Or of a parameter, which makes a helper.
                 if signature is not None:
-                    used = mod.reaches(node, scope, signature.names())
+                    used = mod.reaches(about, scope, signature.names())
                     if used:
                         helpers.setdefault(fn_name, []).append((signature, used, form))
                 if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Lambda):
                     inner = _Signature(stmt.value)
-                    used = mod.reaches(node, scope, inner.names())
+                    used = mod.reaches(about, scope, inner.names())
                     for t in stmt.targets if used else []:
                         if isinstance(t, ast.Name):
                             helpers.setdefault(t.id, []).append((inner, used, form))
@@ -599,49 +896,52 @@ def drawn_checks(tree, mod=None):
     grew = bool(helpers)
     while grew:
         grew = False
-        for fn_name, fn, stmts in mod.units:
+        for fn_name, fn in mod.units:
             if fn is None:
                 continue
             signature, scope = _Signature(fn), mod.scope(fn)
-            for stmt in stmts:
-                for call in [c for e in _own(stmt) if e for c in ast.walk(e) if isinstance(c, ast.Call)]:
-                    for inner, used, form in list(helpers.get(_call_name(call), [])):
-                        for arg, at in inner.handed(call):
-                            if at is not None and at not in used:
-                                continue
-                            mine = mod.reaches(arg, scope, signature.names())
-                            if mine and (fn_name, frozenset(mine)) not in seen:
-                                seen.add((fn_name, frozenset(mine)))
-                                helpers.setdefault(fn_name, []).append(
-                                    (signature, mine, "%s(), which asks %s" % (_call_name(call), form)))
-                                grew = True
+            for call in map(_through_partial, mod.calls.get(id(fn), [])):
+                for inner, used, form in list(helpers.get(_call_name(call), [])):
+                    for arg, at in inner.handed(call):
+                        if at is not None and at not in used:
+                            continue
+                        mine = mod.reaches(arg, scope, signature.names())
+                        if mine and (fn_name, frozenset(mine)) not in seen:
+                            seen.add((fn_name, frozenset(mine)))
+                            helpers.setdefault(fn_name, []).append(
+                                (signature, mine, "%s(), which asks %s" % (_call_name(call), form)))
+                            grew = True
     # A helper handed a password field.
-    for fn_name, fn, stmts in mod.units if helpers else []:
+    for fn_name, fn in mod.units if helpers else []:
         scope = mod.scope(fn)
-        for stmt in stmts:
-            for call in [c for e in _own(stmt) if e for c in ast.walk(e) if isinstance(c, ast.Call)]:
-                for inner, used, form in helpers.get(_call_name(call), []):
-                    if any((at is None or at in used) and mod.involves(arg, scope, mod.password)
-                           for arg, at in inner.handed(call)):
-                        hits.append((call.lineno, fn_name, "%s(), which asks %s"
-                                     % (_call_name(call), form), ast.unparse(call)))
-                        break
+        for original in mod.calls.get(id(fn), []):
+            call = _through_partial(original)
+            for inner, used, form in helpers.get(_call_name(call), []):
+                if any((at is None or at in used) and mod.involves(arg, scope, mod.password)
+                       for arg, at in inner.handed(call)):
+                    hits.append((original.lineno, fn_name, "%s(), which asks %s"
+                                 % (_call_name(call), form), ast.unparse(original)))
+                    break
     return sorted(set(hits))
 
 
 def _sets_password_field(tree, nodes=None) -> bool:
     """Whether a module gives PASSWORD_FIELD a value in any way, an
-    assignment of any kind, another name imported as it, or a setattr. The
-    recorder's own strict value imported under its own name sets nothing."""
+    assignment of any kind, an import from anywhere but the recorder, or a
+    setattr. The recorder's own strict value imported under its own name
+    sets nothing."""
     for n in ast.walk(tree) if nodes is None else nodes:
         if isinstance(n, ast.Assign):
             targets = n.targets
         elif isinstance(n, (ast.AnnAssign, ast.AugAssign)):
             targets = [n.target]
         elif isinstance(n, (ast.Import, ast.ImportFrom)):
-            if any(a.asname == "PASSWORD_FIELD" and a.name.rsplit(".", 1)[-1] != "PASSWORD_FIELD"
-                   for a in n.names):
-                return True
+            source = getattr(n, "module", None) or ""
+            for a in n.names:
+                if (a.asname or a.name.rsplit(".", 1)[-1]) != "PASSWORD_FIELD":
+                    continue
+                if not (a.name == "PASSWORD_FIELD" and source.endswith("recorder")):
+                    return True
             continue
         elif isinstance(n, ast.Call) and _call_name(n) in ("setattr", "__setitem__"):
             if any(isinstance(a, ast.Constant) and a.value == "PASSWORD_FIELD" for a in n.args):
@@ -664,15 +964,20 @@ def _counts_only_drawn(tree) -> bool:
     return bool(drawn_checks(tree))
 
 
+_TEXTLIKE = (ast.Constant, ast.JoinedStr, ast.BinOp, ast.Name, ast.Tuple, ast.List, ast.Dict,
+             ast.Subscript, ast.Attribute)
+
+
 def _password_constants(tree):
-    """The module's constants, named in capitals, whose value names a
-    password field, itself or through another such constant."""
+    """The module's constants, named in capitals, whose value is text, a
+    collection or a name and names a password field, itself or through
+    another such constant. A compiled pattern is text to match, not a field."""
     names = _bindings([s for s in tree.body if not isinstance(s, _BODIES)])
     found, grew = set(), True
     while grew:
         grew = False
         for name, values in names.items():
-            if name in found or not name.isupper():
+            if name in found or not name.isupper() or not all(isinstance(v, _TEXTLIKE) for v in values):
                 continue
             if any(isinstance(x, ast.Constant) and isinstance(x.value, str) and _says_password(x.value)
                    or isinstance(x, ast.Name) and x.id in found
@@ -755,48 +1060,160 @@ def _function(app, module, name):
 
 def _counts_the_page(test) -> bool:
     """page.locator(<every password field>).count() > 0, and nothing else."""
-    return (isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Gt)
-            and isinstance(test.comparators[0], ast.Constant) and test.comparators[0].value == 0
-            and isinstance(test.left, ast.Call) and _call_name(test.left) == "count"
-            and not test.left.args and isinstance(test.left.func.value, ast.Call)
-            and _call_name(test.left.func.value) == "locator"
-            and ast.unparse(test.left.func.value.func.value) == "page"
-            and [ast.literal_eval(a) for a in test.left.func.value.args] == [recorder.PASSWORD_FIELD])
+    if not (isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.ops[0], ast.Gt)
+            and isinstance(test.comparators[0], ast.Constant) and test.comparators[0].value == 0):
+        return False
+    count = test.left
+    if not (isinstance(count, ast.Call) and not count.args and not count.keywords
+            and isinstance(count.func, ast.Attribute) and count.func.attr == "count"):
+        return False
+    find = count.func.value
+    if not (isinstance(find, ast.Call) and isinstance(find.func, ast.Attribute)
+            and find.func.attr == "locator" and ast.unparse(find.func.value) == "page"
+            and len(find.args) == 1 and not find.keywords):
+        return False
+    field = find.args[0]
+    return (isinstance(field, ast.Constant) and field.value == recorder.PASSWORD_FIELD
+            or ast.unparse(field) == "recorder.PASSWORD_FIELD")
+
+
+def _top_of(fn):
+    """The statements of a function's body, and of a try at its top."""
+    for s in fn.body:
+        yield s
+        if isinstance(s, ast.Try):
+            yield from s.body
+
+
+def _decides_alone(fn):
+    """The line of an if at the top of a function that says signed out on
+    any password field of the page itself, or None."""
+    for s in _top_of(fn):
+        if (isinstance(s, ast.If) and _counts_the_page(s.test) and not s.orelse and len(s.body) == 1
+                and isinstance(s.body[0], ast.Return) and isinstance(s.body[0].value, ast.Constant)
+                and s.body[0].value.value is True):
+            return s.lineno
+    return None
+
+
+def _page_count_comes_first(fn, what):
+    """What keeps the page's own count from deciding alone ahead of the
+    allowed call, empty when nothing does."""
+    line = _decides_alone(fn)
+    if not line:
+        return ["no if at the top says signed out on any password field of the page"]
+    allowed = [n.lineno for n in ast.walk(fn) if isinstance(n, ast.Call) and ast.unparse(n) == what]
+    if not allowed:
+        return ["the allowed call is not there"]
+    return ["the allowed call comes before the page's count"] if min(allowed) < line else []
+
+
+def _reads_only_sign_in_frames(fn):
+    """What lets Apple Card's frame check read a frame other than its sign-in
+    frames, or answer signed in, empty when nothing does."""
+    loops = [n for n in ast.walk(fn) if isinstance(n, ast.For) and ast.unparse(n.iter) == "page.frames"]
+    if len(loops) != 1:
+        return ["%d loops over page.frames" % len(loops)]
+    [loop] = loops
+    out, first = [], loop.body[0]
+    if not (isinstance(first, ast.If) and not first.orelse
+            and ast.unparse(first.test).startswith("not _on_sign_in_host(frame.url")
+            and [type(s) for s in first.body] == [ast.Continue]):
+        out.append("the loop does not skip a frame off the sign-in host first")
+    if not [n for n in ast.walk(loop) if isinstance(n, ast.Call)
+            and ast.unparse(n) == "fields.nth(i).is_visible()"]:
+        out.append("the allowed call is not in the loop")
+    answers = {ast.unparse(n) for n in ast.walk(loop) if isinstance(n, ast.Return)}
+    if answers != {"return True"}:
+        out.append("in the loop a frame answers %s" % sorted(answers))
+    bound = _bindings(fn.body)
+    if not bound.get("fields") or not all(
+            isinstance(v, ast.Call) and _call_name(v) == "locator" and ast.unparse(v.func.value) == "frame"
+            for v in bound["fields"]):
+        out.append("fields is found other than in a frame")
+    if [ast.unparse(v) for v in bound.get("frame", [])] != ["page.frames"]:
+        out.append("frame is bound other than by the loop over page.frames")
+    return out
 
 
 def test_an_allowed_app_still_counts_every_field_of_the_page_itself():
-    """The allowance is for one check beside the page's own count, which
-    decides alone, never in place of it."""
-    for app, module, name, _ in ALLOWED:
-        fn = _function(app, module, name)
-        decides = [n for n in ast.walk(fn) if isinstance(n, ast.If) and _counts_the_page(n.test)
-                   and len(n.body) == 1 and isinstance(n.body[0], ast.Return)
-                   and isinstance(n.body[0].value, ast.Constant) and n.body[0].value.value is True]
-        assert decides, "%s.%s no longer says signed out on any password field of the page" % (
-            module, name)
+    """The allowance is for one check after the page's own count, which
+    decides alone at the top of the function, never in place of it."""
+    for app, module, name, what in ALLOWED:
+        assert not _page_count_comes_first(_function(app, module, name), what), (app, module, name)
+
+
+def test_apple_cards_allowed_check_reads_only_its_sign_in_frames():
+    """page.frames holds the page's own frame too. So the loop the allowed
+    check sits in skips every frame not on Apple's sign-in host first, and
+    in it a frame's fields only ever say signed out."""
+    fn = _function("applecard", "applecard_site.py", "looks_signed_out")
+    assert not _reads_only_sign_in_frames(fn)
+
+
+# Apple Card's check changed in the ways that would make its allowance hide
+# a drawn-only check of the page's own fields. Each is one edit of the real
+# function, so a change to the app that breaks an edit is seen here.
+_APPLE_PAGE = '''        if page.locator("input[type='password']").count() > 0:
+            return True'''
+_APPLE_LOOP = '''            if not _on_sign_in_host(frame.url or ""):
+                continue
+'''
+_APPLE_ASK = '''                if fields.nth(i).is_visible():
+                    return True'''
+_APPLE_END = '''    except Exception:
+        pass
+    return False
+
+
+def detect_security_challenge'''
+APPLE_CHANGED = {
+    "the page's count only where the page draws a field": [(_APPLE_PAGE, '''        if (page.locator("input[type='password']").count() > 0
+                and page.locator("input[type='password']").first.is_visible()):
+            return True''')],
+    "the page's count under a condition": [(_APPLE_PAGE, '''        if not page.frames[1:]:
+            if page.locator("input[type='password']").count() > 0:
+                return True''')],
+    "the page's count after the frames": [(_APPLE_PAGE, "        pass"), (_APPLE_END, '''    except Exception:
+        pass
+    if page.locator("input[type='password']").count() > 0:
+        return True
+    return False
+
+
+def detect_security_challenge''')],
+    "the loop reads every frame, the page's own too": [(_APPLE_LOOP, "")],
+    "a frame with hidden fields answers signed in": [(_APPLE_ASK, _APPLE_ASK + '''
+                    return False''')],
+}
+
+
+@pytest.mark.parametrize("name", sorted(APPLE_CHANGED))
+def test_apple_cards_tests_see_each_change_that_would_widen_its_allowance(name):
+    text = (REPO / "apps" / "applecard" / "applecard_site.py").read_text(encoding="utf-8")
+    for old, new in APPLE_CHANGED[name]:
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    [fn] = [n for n in ast.parse(text).body if isinstance(n, ast.FunctionDef) and n.name == "looks_signed_out"]
+    what = next(iter(ALLOWED))[3]
+    found = _page_count_comes_first(fn, what) + _reads_only_sign_in_frames(fn)
+    left = _not_allowed({"applecard": tuple(_app_hits({"applecard_site.py": text}))})
+    assert found or left, name
 
 
 @pytest.mark.parametrize("test, alone", [
     ('page.locator("input[type=\'password\']").count() > 0', True),
+    ("page.locator(recorder.PASSWORD_FIELD).count() > 0", True),
     ('page.locator("input[type=\'password\']").count() > 0'
      ' and page.locator("input[type=\'password\']").first.is_visible()', False),
     ('page.locator("input[type=\'password\']:visible").count() > 0', False),
     ('page.locator("input[type=\'password\']").count() > 1', False),
     ('frame.locator("input[type=\'password\']").count() > 0', False),
+    ("count() > 0", False),
+    ("page.count() > 0", False),
 ])
 def test_the_page_count_reads_only_a_count_that_decides_alone(test, alone):
     assert _counts_the_page(ast.parse(test, mode="eval").body) is alone
-
-
-def test_apple_cards_allowed_check_reads_only_its_sign_in_frames():
-    """The fields it asks about are found in a frame, and only in the frames
-    of the page, never in the page itself."""
-    fn = _function("applecard", "applecard_site.py", "looks_signed_out")
-    bound = _bindings(fn.body)
-    assert bound["fields"] and all(
-        isinstance(v, ast.Call) and _call_name(v) == "locator" and ast.unparse(v.func.value) == "frame"
-        for v in bound["fields"]), [ast.unparse(v) for v in bound["fields"]]
-    assert [ast.unparse(v) for v in bound["frame"]] == ["page.frames"]
 
 
 def test_a_named_app_sets_the_one_value_the_core_takes():
@@ -1061,6 +1478,129 @@ def f(page):
     "page script handed the selector":
         _PW + '''def f(page):\n    return page.evaluate("s => [...document.querySelectorAll(s)]'''
               '''.some(e => e.checkVisibility())", PW)\n''',
+    "page script that reads the field after !!":
+        _script('''() => !!document.querySelector("input[type='password']")?.offsetParent'''),
+    "page script that reads the field's width after !!":
+        _script('''() => !!document.querySelector("input[type='password']").offsetWidth'''),
+    "page script that reads the field inside Boolean()":
+        _script('''() => Boolean(document.querySelector("input[type='password']")?.offsetParent)'''),
+    "page script that names the field, then reads it":
+        _script('''() => { const el = document.querySelector("input[type='password']"); '''
+                '''return !!el && !!el.offsetParent; }'''),
+    "page script that names the field by let, then tests it against null":
+        _script('''() => {\n  let el = document.querySelector("input[type='password']");\n'''
+                '''  return !!el && el.offsetParent !== null;\n}'''),
+    "page script that hands the named field on":
+        _script('''() => {\n  var f = document.querySelector("input[type='password']");\n  var g = f;\n'''
+                '''  return !!f && g.checkVisibility();\n}'''),
+    "page script that reads the first of the list":
+        _script('''() => { const els = document.querySelectorAll("input[type='password']");\n'''
+                '''  return els.length && !!els[0].offsetParent; }'''),
+    "page script that compares the list with its hidden ones":
+        _script('''() => document.querySelectorAll("input[type='password']").length > '''
+                '''[...document.querySelectorAll("input[type='password']")].filter(e => !e.offsetParent).length'''),
+    "page script that finds the field in a shadow root":
+        _script('''() => [...document.querySelectorAll('x-login')].some(h => h.shadowRoot && '''
+                '''h.shadowRoot.querySelector("input[type='password']") && h.offsetParent)'''),
+    "page script that tests a field's type":
+        _script('''() => [...document.querySelectorAll('input')].some(e => e.type === 'password' && e.offsetParent)'''),
+    "page script that tests a field's type by a pattern":
+        _script('''() => [...document.querySelectorAll('input')].some(e => /^password$/i.test(e.type) && e.offsetParent)'''),
+    "page script run on every input":
+        '''def f(page):\n    return page.locator("input").evaluate_all('''
+        '''"els => els.some(e => e.type === 'password' && e.offsetParent)")\n''',
+    "page script that waits for the field to be drawn":
+        '''def f(page):\n    page.wait_for_function("() => { const e = document.querySelector('input[type=password]'); '''
+        '''return e && e.offsetParent; }")\n''',
+    "page script put together by an f-string":
+        _PW + '''def f(page):\n    return page.evaluate(f"() => [...document.querySelectorAll('{PW}')]'''
+              '''.some(e => e.offsetParent)")\n''',
+    "page script put together by %":
+        _PW + '''def f(page):\n    return page.evaluate("() => [...document.querySelectorAll('%s')]'''
+              '''.some(e => e.offsetParent)" % PW)\n''',
+    "page script put together with json.dumps":
+        '''import json\n\n''' + _PW + '''def f(page):\n    return page.evaluate("() => [...document.querySelectorAll(" + json.dumps(PW) + ")]'''
+        '''.some(e => e.offsetParent)")\n''',
+    "page script joined at the call":
+        '''_VISIBLE_JS = "const visible = el => !!(el.offsetWidth || el.offsetHeight);"\n'''
+        '''_PW_JS = """return [...document.querySelectorAll("input[type='password']")].some(visible);"""\n\n\n'''
+        '''def f(page):\n    return page.evaluate("() => {" + _VISIBLE_JS + _PW_JS + "}")\n''',
+    "page script joined by join()":
+        '''_VISIBLE_JS = "const visible = el => !!(el.offsetWidth || el.offsetHeight);"\n'''
+        '''_PW_JS = """return [...document.querySelectorAll("input[type='password']")].some(visible);"""\n\n\n'''
+        '''def f(page):\n    return page.evaluate("() => {%s}" % "\\n".join([_VISIBLE_JS, _PW_JS]))\n''',
+    "page script joined in a local name":
+        '''_PW_JS = """return [...document.querySelectorAll("input[type='password']")].some(visible);"""\n\n\n'''
+        '''def f(page):\n    vis = "const visible = el => !!el.offsetParent;"\n'''
+        '''    script = "() => {" + vis + _PW_JS + "}"\n    return page.evaluate(script)\n''',
+    "a selector that names a document form":
+        '''def f(page):\n    return page.locator("#document-login input[type='password']:visible").count() > 0\n''',
+    "a selector that says function":
+        '''def f(page):\n    return page.locator("[data-function=login] input[type=password]:visible").count() > 0\n''',
+    "a selector that says return":
+        '''def f(page):\n    return page.locator("form[aria-label='Return to sign in'] '''
+        '''input[type=password]:visible").count() > 0\n''',
+    "a drawn selector constant that names documents":
+        _PW + '''ONLY = ":visible, a[href*='documents']:visible"\n\n\n'''
+              '''def f(page):\n    return page.locator(PW + ONLY).count() > 0\n''',
+    "a selector that leaves a hidden class out":
+        '''def f(page):\n    return page.locator("input[type='password']:not(.hidden)").count() > 0\n''',
+    "a selector that leaves a d-none class out":
+        '''def f(page):\n    return page.locator("input[type='password']:not(.d-none)").count() > 0\n''',
+    "a helper whose question sits in a lambda":
+        _PW + '''def _drawn(page, sel):\n    return any(map(lambda e: e.is_visible(), page.locator(sel).all()))\n\n\n'''
+              '''def f(page):\n    return _drawn(page, PW)\n''',
+    "a helper handed the field by keyword":
+        _PW + '''def _drawn(page, *, sel):\n    return page.locator(sel).is_visible()\n\n\n'''
+              '''def f(page):\n    return _drawn(page, sel=PW)\n''',
+    "a helper through functools.partial":
+        '''import functools\n\n''' + _PW + '''def _drawn(page, sel):\n    return page.locator(sel).is_visible()\n\n\n'''
+        '''def f(page):\n    g = functools.partial(_drawn, page, PW)\n    return g()\n''',
+    "a helper of a helper of a helper":
+        _PW + '''def _a(loc):\n    return loc.is_visible()\n\n\ndef _b(loc):\n    return _a(loc)\n\n\n'''
+              '''def _c(page, sel):\n    return _b(page.locator(sel))\n\n\ndef f(page):\n    return _c(page, PW)\n''',
+    "a helper that is a nested function":
+        _PW + '''def f(page):\n    def drawn(sel):\n        return page.locator(sel).is_visible()\n    return drawn(PW)\n''',
+    "a helper through a local name":
+        _PW + '''def _d(page, sel):\n    loc = page.locator(sel)\n    return loc.first.is_visible()\n\n\n'''
+              '''def f(page):\n    s = PW\n    return _d(page, s)\n''',
+    "a helper that hands back the drawn locator":
+        _PW + '''def _shown(loc):\n    return loc.filter(visible=True)\n\n\n'''
+              '''def f(page):\n    return _shown(page.locator(PW)).count() > 0\n''',
+    "a dict keyed by a name, read by its text":
+        '''KEY = "login"\nS = {KEY: "input[type='password']"}\n\n\n'''
+        '''def f(page):\n    return page.locator(S["login"]).is_visible()\n''',
+    "a dict filled by an item":
+        '''S = {}\nS["login"] = "input[type='password']"\n\n\n'''
+        '''def f(page):\n    return page.locator(S["login"]).is_visible()\n''',
+    "a dict made by dict()":
+        '''S = dict(login="input[type='password']")\n\n\n'''
+        '''def f(page):\n    return page.locator(S["login"]).is_visible()\n''',
+    "a dict entry read by get()":
+        '''S = {"login": "input[type='password']", "rows": "tr"}\n\n\n'''
+        '''def f(page):\n    return page.locator(S.get("login")).is_visible()\n''',
+    "a dict filled by update()":
+        '''S = {"rows": "tr"}\nS.update(login="input[type='password']")\n\n\n'''
+        '''def f(page):\n    return page.locator(S["login"]).is_visible()\n''',
+    "a dict in a dict":
+        '''S = {"sign_in": {"field": "input[type='password']"}}\n\n\n'''
+        '''def f(page):\n    return page.locator(S["sign_in"]["field"]).is_visible()\n''',
+    "is_visible() through getattr":
+        _PW + '''def f(page):\n    return getattr(page.locator(PW).first, "is_visible")()\n''',
+    "bounding_box kept as a name and called":
+        _PW + '''def f(page):\n    box = page.locator(PW).first.bounding_box\n    return box() is not None\n''',
+    "expect() kept as a name":
+        '''from playwright.sync_api import expect\n\n''' + _PW +
+        '''def f(page):\n    e = expect(page.locator(PW))\n    e.to_be_visible(timeout=500)\n''',
+    "page script joined in a call of the app's own":
+        '''_SHOWN_FN = "const shown = el => !!el.offsetParent;"\n\n\n'''
+        '''def _run(page, js):\n    return page.evaluate(js)\n\n\n'''
+        '''def f(page):\n    return _run(page, r"""() => { %s\n'''
+        '''  return [...document.querySelectorAll("input[type='password']")].some(shown); }""" % _SHOWN_FN)\n''',
+    "is_visible() in a lambda handed as a keyword":
+        _PW + '''def f(page):\n    return max(page.locator(PW).all(), key=lambda e: e.is_visible()).count() > 0\n''',
+    "get_by_role() of a text box kept as a name":
+        '''def f(page):\n    box = page.get_by_role("textbox", name="Password")\n    return box.count() > 0\n''',
 }
 
 # A check in one module on a constant of another module of the same app.
@@ -1083,6 +1623,8 @@ SETS_PASSWORD_FIELD = {
     "an assignment to another module": '''import a_site\n\na_site.PASSWORD_FIELD = "x"\n''',
     "globals()": '''globals()["PASSWORD_FIELD"] = "x"\n''',
     "setattr()": '''import a_site\n\nsetattr(a_site, "PASSWORD_FIELD", "x")\n''',
+    "an import from another app's site":
+        '''from consorsbank_site import PASSWORD_FIELD  # noqa: F401\n''',
 }
 
 # What counts every password field, and must not be taken for a drawn-only
@@ -1170,6 +1712,71 @@ EVERY_FIELD = {
     "the recorder's strict selector imported":
         '''from paperpull_core.recorder import PASSWORD_FIELD\n\n\ndef f(page):\n'''
         '''    return page.locator(PASSWORD_FIELD).count() > 0\n''',
+    "page script that tests the field by if":
+        _script('''() => {\n  const shown = el => !!el.offsetParent;\n'''
+                '''  if (document.querySelector("input[type='password']")) return {out: true};\n'''
+                '''  return {rows: [...document.querySelectorAll('tr')].filter(shown).length};\n}'''),
+    "page script that tests a named field by Boolean()":
+        _script('''() => {\n  const shown = el => !!el.offsetParent;\n'''
+                '''  const pw = document.querySelector("input[type='password']");\n'''
+                '''  return {password: Boolean(pw), rows: [...document.querySelectorAll('tr')].filter(shown).length};\n}'''),
+    "page script that tests the field by a ternary":
+        _script('''() => {\n  const shown = el => !!el.offsetParent;\n'''
+                '''  return {password: document.querySelector("input[type='password']") ? 1 : 0,'''
+                ''' rows: [...document.querySelectorAll('tr')].filter(shown).length};\n}'''),
+    "page script that tests the field by !":
+        _script('''() => {\n  const shown = el => !!el.offsetParent;\n'''
+                '''  if (!document.querySelector("input[type='password']")) return '''
+                '''{rows: [...document.querySelectorAll('tr')].filter(shown).length};\n  return {out: true};\n}'''),
+    "page script that counts a named list":
+        _script('''() => {\n  const shown = el => !!el.offsetParent;\n'''
+                '''  const all = document.querySelectorAll("input[type='password']");\n'''
+                '''  return {password: all.length > 0, rows: [...document.querySelectorAll('tr')].filter(shown).length};\n}'''),
+    "page script with a pattern that holds quotes":
+        _script('''() => {\n  const shown = el => !!el.offsetParent;\n'''
+                '''  const id = (a.getAttribute('href') || '').match(/PostBackOptions\\("([^"]+)"/); '''
+                '''const pw = !!document.querySelector("input[type='password']");\n'''
+                '''  return {pw: pw, rows: [...document.querySelectorAll('tr')].filter(shown).length};\n}'''),
+    "page script with a comment that names the field":
+        _script('''() => {\n  const shown = el => !!el.offsetParent;\n'''
+                '''  // the bank's input[type=password] isn't drawn on every page\n'''
+                '''  return {pw: !!document.querySelector("input[type='password']"), '''
+                '''rows: [...document.querySelectorAll('tr')].filter(shown).length};\n}'''),
+    "a pattern that names a password, matched against a button":
+        '''import re\n\nSKIP_RE = re.compile(r"sign out|password|delete", re.I)\n\n\n'''
+        '''def f(page):\n    return page.get_by_role("button").filter(has_not_text=SKIP_RE).first.is_visible()\n''',
+    "is_visible() of a link that names a password":
+        '''def f(page):\n    if page.locator("input[type='password']").count() > 0:\n        return True\n'''
+        '''    return page.get_by_role("link", name="Forgot your password?").is_visible()\n''',
+    "get_by_role() of a button in the sign-in form":
+        '''def f(page):\n    if page.locator("input[type='password']").count() > 0:\n        return True\n'''
+        '''    return page.locator("form:has(input[type='password'])").get_by_role("button").count() > 0\n''',
+    "is_visible() of text a page shows":
+        '''MARKERS = ("Enter your password", "Sign in")\n\n\ndef f(page):\n'''
+        '''    return any(page.get_by_text(m).first.is_visible() for m in MARKERS)\n''',
+    "pwd inside another word":
+        '''def f(page):\n    return page.locator("#upwdate").is_visible()\n''',
+    "a dict entry read by get() beside a password entry":
+        '''S = {"password_field": "input[type='password']", "rows": "tr"}\n\n\ndef f(page):\n'''
+        '''    if page.locator(S["password_field"]).count() > 0:\n        return True\n'''
+        '''    return page.locator(S.get("rows")).first.is_visible()\n''',
+    "a lambda drawn test of another element in the same statement":
+        _PW + '''def f(page):\n    return page.locator(PW).count() > 0 or '''
+              '''any(map(lambda e: e.is_visible(), page.locator("nav").all()))\n''',
+    "a comprehension drawn test of another element in the same statement":
+        _PW + '''def f(page):\n    return page.locator(PW).count() > 0 or '''
+              '''any(e.is_visible() for e in page.locator("nav").all())\n''',
+}
+
+# A module's own constant named as another module's that names a password
+# field, used beside a drawn test of another element.
+SAME_NAME_ELSEWHERE = {
+    "x_site.py": '''import re\n\nFORBIDDEN_CONTROL_RE = re.compile(r"sign out|password|delete", re.I)\n'''
+                 '''LOGIN = "input[type='password']"\n''',
+    "x_docs.py": '''import re\n\nFORBIDDEN_CONTROL_RE = re.compile(r"close|delete", re.I)\n'''
+                 '''LOGIN = "a.login"\n\n\ndef open_first(page):\n'''
+                 '''    b = page.locator("button").filter(has_not_text=FORBIDDEN_CONTROL_RE).first\n'''
+                 '''    return b.is_visible() and page.locator(LOGIN).is_visible()\n''',
 }
 
 # Ways the census does not follow, each expected to fail so a reader sees
@@ -1193,6 +1800,31 @@ def test_the_census_finds_each_way_of_counting_only_drawn_fields(name):
 def test_the_census_finds_a_check_on_a_constant_of_another_module():
     hits = _app_hits(ACROSS_MODULES)
     assert [(h[0], h[2]) for h in hits] == [("x_docs.py", "f")], hits
+
+
+def test_a_constant_of_the_same_name_as_another_modules_is_this_modules_own():
+    assert not _app_hits(SAME_NAME_ELSEWHERE)
+
+
+def test_a_loop_of_names_is_read_in_steps_that_grow_with_its_names():
+    """Names that bind each other in a loop, as cursors do, read once each
+    for each question rather than once for every path through them."""
+    def module(n):
+        names = ["n%d" % i for i in range(n)]
+        lines = [_PW + "def f(page):"] + ["    %s = page.locator('a')" % x for x in names]
+        lines += ["    for _ in range(3):"]
+        lines += ["        %s = %s" % (x, " or ".join(y for y in names if y != x)) for x in names]
+        for x in names:
+            lines += ["        if %s.first.is_visible():" % x, "            return True"]
+        return "\n".join(lines + ["    return page.locator(PW).count() > 0"]) + "\n"
+    steps = []
+    for n in (6, 12):
+        mod = _Module(ast.parse(module(n)))
+        assert not drawn_checks(mod.tree, mod)
+        steps.append(mod.steps)
+    # Twice the names, each asked about, and each bound from all the others,
+    # is about eight times the work, never the factorial of a path count.
+    assert steps[1] < 20 * steps[0], steps
 
 
 @pytest.mark.parametrize("name", sorted(SETS_PASSWORD_FIELD))
