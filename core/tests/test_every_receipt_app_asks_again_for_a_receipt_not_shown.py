@@ -111,11 +111,43 @@ def looking_methods(app: Path):
     return [m for m in cls.body if isinstance(m, ast.FunctionDef) and _not_shown_tests(m)]
 
 
+def _tries_again(node) -> bool:
+    """Whether the code under `node` calls the core's not_shown.tried_again."""
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+               and n.func.attr == "tried_again" and isinstance(n.func.value, ast.Name)
+               and n.func.value.id == "not_shown" for n in ast.walk(node))
+
+
+def names_tried_again(app: Path) -> bool:
+    """Whether any of the app's own code names tried_again, by any route."""
+    return any("tried_again" in f.read_text(encoding="utf-8-sig") for f in app.glob("*.py"))
+
+
+def trying_methods(app: Path):
+    """The App's methods that hand a purchase whose receipt did not show to
+    the core's tried_again."""
+    cls = _app_class(app) if entry_of(app) else None
+    if cls is None:
+        return []
+    return [m for m in cls.body if isinstance(m, ast.FunctionDef) and _tries_again(m)]
+
+
 APPS = sorted(d for d in (REPO / "apps").iterdir()
               if d.is_dir() and entry_of(d) and skips_what_it_saved(d))
 IDS = [d.name for d in APPS]
 LOOKING = [(d, m.name) for d in APPS for m in looking_methods(d)]
 LOOKING_IDS = ["%s.%s" % (d.name, name) for d, name in LOOKING]
+
+# Every app whose own code hands a purchase to tried_again, and the methods
+# that do. Target looks for its receipt by the controls naming it, not by
+# receipt_is_present, so LOOKING never found it (#225).
+TRYING_APPS = sorted(d for d in (REPO / "apps").iterdir() if d.is_dir() and names_tried_again(d))
+TRYING = [(d, m.name) for d in TRYING_APPS for m in trying_methods(d)]
+TRYING_IDS = ["%s.%s" % (d.name, name) for d, name in TRYING]
+
+# Named, so a new app that sets receipts aside joins on purpose.
+SETS_RECEIPTS_ASIDE = {"amazon", "bestbuy", "costco", "ebay", "gap", "github", "homedepot",
+                       "kroger", "lowes", "meijer", "target"}
 
 
 def test_every_receipt_app_is_asked():
@@ -123,6 +155,14 @@ def test_every_receipt_app_is_asked():
     look for the receipt on a page before printing it."""
     assert len(APPS) >= 14, IDS
     assert len({d for d, _ in LOOKING}) >= 9, LOOKING_IDS
+
+
+def test_every_app_that_sets_a_receipt_aside_is_asked():
+    """Each app whose code names tried_again calls it from a method of its
+    App, where these tests drive it, and the eleven are the ones named."""
+    assert {d.name for d in TRYING_APPS} == SETS_RECEIPTS_ASIDE, TRYING_IDS
+    assert {d.name for d, _ in TRYING} == SETS_RECEIPTS_ASIDE, TRYING_IDS
+    assert {d for d, _ in LOOKING} <= set(TRYING_APPS)
 
 
 def load(app: Path):
@@ -146,13 +186,21 @@ class _Anything:
         return lambda *a, **k: None
 
 
+class _NoControls(list):
+    """No control on the page, each one that was there read in full."""
+    unread = False
+
+
 class _SiteThatShowsNothing:
     """The app's site module, where every page is this purchase's and
-    belongs to the provider, and no receipt ever shows on it."""
+    belongs to the provider, and no receipt ever shows on it. Target looks
+    for a receipt by the controls naming it, and finds none."""
 
     def __getattr__(self, name):
         if name.startswith("is_"):            # is_safe_url, is_receipt_address
             return lambda *a, **k: True
+        if name.endswith("_controls"):        # find_invoice_controls
+            return lambda *a, **k: _NoControls()
         return lambda *a, **k: None
 
 
@@ -241,11 +289,20 @@ def test_only_those_records_are_asked_for_again(app, tmp_path):
 
 
 def look(mod, out: Path, method: str, redownload: bool = False, rec: dict = None,
-         day: int = None):
+         day: int = None, first=None):
     """One run's look for the receipt on a page that never shows it, by the
-    app's own method. The run, and what it printed is read off capsys."""
+    app's own method. The run, and what it printed is read off capsys.
+    `first` is what the run did before it, handed the run."""
     inst = app_in(mod, out, redownload, day)
-    p = purchase()
+    if first is not None:
+        first(inst)
+    look_in(inst, method, purchase(), rec)
+    return inst
+
+
+def look_in(inst, method: str, p, rec: dict = None):
+    """The run's look for this purchase's receipt, on a page that does not
+    show it, by the app's own method."""
     inst.discovery.update(p.key, p.to_dict())
     if rec:
         inst.progress.update(p.key, dict(p.to_dict(), **rec))
@@ -253,7 +310,27 @@ def look(mod, out: Path, method: str, redownload: bool = False, rec: dict = None
     named = inspect.signature(found).parameters
     args = [_Anything() if n == "page" else p for n in named if n in ("page", "purchase")]
     assert not found(*args), "nothing was saved"
-    return inst
+
+
+def another(number: str = "ORDER-0002", purchase_type: str = ONLINE):
+    """A purchase other than this one, bought a few days later."""
+    return Purchase(purchase_type=purchase_type, purchase_date="2026-05-20",
+                    order_number=number, total="$23.45", summary="Watering Can",
+                    receipt_url="https://receipts.example.invalid/r/" + number)
+
+
+def save_another(inst, number: str = "ORDER-0002", kept: bool = True,
+                 purchase_type: str = ONLINE):
+    """The run saves another purchase's receipt, through the app's own
+    _finish_pdf. Its page showed it, and the copy is kept, or put aside in
+    Manual Review when the page was another purchase's."""
+    from paperpull_core import testkit
+    other = another(number, purchase_type)
+    lines = (["Order " + number, "Placed " + other.purchase_date, "Watering Can  1  $23.45",
+              "Total $23.45"] if kept else ANOTHER_PAGE)
+    filed = testkit.file_a_receipt(inst, other, lines, listed=other.to_dict())
+    assert filed.kept is kept and filed.path.exists(), (filed, inst.progress.get(other.key))
+    return other
 
 
 def written_down(inst) -> int:
@@ -261,7 +338,7 @@ def written_down(inst) -> int:
                if ORDER in " ".join(r.values()))
 
 
-@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+@pytest.mark.parametrize("app, method", TRYING, ids=TRYING_IDS)
 def test_a_page_that_did_not_show_the_receipt_is_asked_for_again(app, method, tmp_path,
                                                                  monkeypatch, capsys):
     mod = load(app)
@@ -299,7 +376,7 @@ def test_a_page_that_did_not_show_the_receipt_is_asked_for_again(app, method, tm
     assert written_down(inst) == rows
 
 
-@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+@pytest.mark.parametrize("app, method", TRYING, ids=TRYING_IDS)
 def test_download_again_keeps_a_receipt_saved_before(app, method, tmp_path, monkeypatch, capsys):
     """Download again asks for a receipt saved before, and when its page
     does not show it no plain run asks for it again, so the run does not
@@ -368,7 +445,7 @@ def test_the_words_for_a_purchase_set_aside():
     assert not_shown.skipped(None, "done") == "done"
 
 
-@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+@pytest.mark.parametrize("app, method", TRYING, ids=TRYING_IDS)
 def test_a_purchase_written_down_before_is_not_written_down_again(app, method, tmp_path,
                                                                   monkeypatch, capsys):
     """An older version recorded the purchase as having no receipt and wrote
@@ -392,7 +469,7 @@ def test_a_purchase_written_down_before_is_not_written_down_again(app, method, t
     assert written_down(inst) == before, app.name
 
 
-@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+@pytest.mark.parametrize("app, method", TRYING, ids=TRYING_IDS)
 def test_a_history_that_cannot_be_written_leaves_it_to_the_next_run(app, method, tmp_path,
                                                                     monkeypatch, capsys):
     """The third run could not write the order history, open in Excel. The
@@ -424,7 +501,7 @@ def test_a_history_that_cannot_be_written_leaves_it_to_the_next_run(app, method,
     assert done_already(mod, tmp_path, p)
 
 
-@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+@pytest.mark.parametrize("app, method", TRYING, ids=TRYING_IDS)
 def test_every_run_of_one_day_counts_once(app, method, tmp_path, monkeypatch, capsys):
     """Pilot, Run All and Resume one after another, or a server running every
     hour through a provider's outage, are many runs on one bad day. They
@@ -489,7 +566,7 @@ def test_a_record_with_no_days_gets_none_from_a_save(app, tmp_path):
     assert "not_shown_days" not in filed.record, filed.record
 
 
-@pytest.mark.parametrize("app, method", LOOKING, ids=LOOKING_IDS)
+@pytest.mark.parametrize("app, method", TRYING, ids=TRYING_IDS)
 def test_after_a_copy_put_aside_the_days_count_again_from_one(app, method, tmp_path,
                                                              monkeypatch, capsys):
     """The page showed nothing on two days, then showed a page that was put

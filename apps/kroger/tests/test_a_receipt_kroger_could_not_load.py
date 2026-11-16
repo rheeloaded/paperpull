@@ -318,6 +318,41 @@ def test_a_receipt_that_never_shows_is_set_aside_after_three_days(attached, tmp_
     assert downloaded(tmp_path) == [STORE]
 
 
+NOT_SET_ASIDE = ("Kroger could not load this receipt, on 3 separate days. It is not set aside, "
+                 "because no in-store receipt was saved before it in this run, and it is tried "
+                 "again next run.")
+
+
+def test_a_run_that_saved_no_receipt_sets_none_aside(attached, tmp_path, capsys, monkeypatch):
+    """Kroger stopped showing a tester's receipts, every one of 244, and the
+    third day of runs set each aside for good, written into both CSVs, on
+    PaperPull Server, which has no Download again (#225). A page that shows
+    nothing for every purchase says Kroger's pages are broken, not that
+    there is no receipt. So a run that saved no receipt sets none aside,
+    each is tried again next run with its days kept, and the next day asks
+    for both."""
+    SITE.failing = {STORE_KEY: COULD_NOT_LOAD, OTHER_KEY: COULD_NOT_LOAD}
+    for n in (1, 2):
+        said, panel = run_all(tmp_path, attached, capsys, day=n, monkeypatch=monkeypatch)
+        assert said.count("on %d of 3 separate days. It is tried again next run." % n) == 2, said
+
+    said, panel = run_all(tmp_path, attached, capsys, day=3, monkeypatch=monkeypatch)
+    for key in (STORE, OTHER):
+        rec = progress(tmp_path)[key]
+        assert rec["state"] == "Failed", (key, rec["state"], said)
+        assert len(rec["not_shown_days"]) == 3, rec
+        assert rows_naming(tmp_path, key) == {"receipt_index_csv": 0, "order_history_csv": 0}
+    assert "set aside for review" not in said, said
+    assert said.count(NOT_SET_ASIDE) == 2, said
+    assert panel["failed"] == 2 and panel["manual_review"] == 0, panel
+    assert "Failed: 2" in said and "No printable receipt: 0" in said, said
+
+    said, panel = run_all(tmp_path, attached, capsys, day=4, monkeypatch=monkeypatch)
+    assert receipts_opened() == sorted([OTHER_KEY, STORE_KEY]), said
+    assert all(progress(tmp_path)[k]["state"] == "Failed" for k in (STORE, OTHER))
+    assert panel["failed"] == 2, panel
+
+
 @pytest.mark.parametrize("why", [w for _, w in FAILING.values()])
 def test_a_receipt_an_older_version_gave_up_on_is_fetched(attached, why, tmp_path, capsys):
     """His records from 0.44.0 say No Receipt Available, in the words that
