@@ -460,3 +460,275 @@ def test_a_frame_raised_over_a_control_turned_on_late_stops_the_run(show):
         pressing.click(page, page.locator("#b"), css="button", what="the control b",
                        words=WORDS, timeout=4000)
     assert pressed(page) == ["a", "b"]
+
+
+# --- A cover that passes before the press (click_when_clear, #221) ---------------
+
+def in_page(page, js):
+    """Run `js` in a world of the test's own in the page, which shares the
+    page's elements, since the page's own eval is replaced."""
+    session = page.context.new_cdp_session(page)
+    try:
+        frame = session.send("Page.getFrameTree")["frameTree"]["frame"]["id"]
+        world = session.send("Page.createIsolatedWorld", {"frameId": frame, "worldName": "test"})
+        answer = session.send("Runtime.evaluate", {
+            "expression": js, "contextId": world["executionContextId"]})
+        assert not answer.get("exceptionDetails"), answer
+    finally:
+        session.detach()
+
+
+class Steps:
+    """The clock click_when_clear waits by, which moves only while it waits,
+    and that wait, which does what the page does meanwhile, one step a wait,
+    and never sleeps. Past 100 waits it fails, so a press that never stops
+    trying fails rather than hangs."""
+
+    def __init__(self, *during):
+        self.during = list(during)
+        self.t = 0.0
+        self.calls = 0
+
+    def clock(self):
+        return self.t
+
+    def wait(self, page, ms):
+        self.calls += 1
+        assert self.calls <= 100, "the press never stopped trying"
+        self.t += ms / 1000.0
+        if self.during:
+            step = self.during.pop(0)
+            step(page) if callable(step) else in_page(page, step)
+
+
+def _when_clear(page, steps, locator="#go", find=None, **kw):
+    loc = page.locator(locator)
+    return pressing.click_when_clear(
+        page, loc, find or (lambda: loc), css="button", what="the button", words=WORDS,
+        clock=steps.clock, wait=steps.wait, **kw)
+
+
+# A box over the button, gone once the run has waited once.
+PASSING = BUTTON + ('<div class="cover" id="cover" style="right: 20px; bottom: 20px; '
+                    'width: 200px; height: 60px;" onclick="said(\'cover\')"></div>')
+GONE = "document.getElementById('cover').hidden = true"
+# The yes or no facts a cover is said with, once it has been waited for.
+ABOUT = ("over_it_holds_control", "control_clickable", "clip_at_point", "over_it_in_menu")
+
+
+def test_a_control_with_nothing_on_top_is_pressed_once_and_not_waited_for(show):
+    page = show(BUTTON)
+    steps = Steps()
+    assert _when_clear(page, steps) == {}
+    assert pressed(page) == ["go"] and steps.calls == 0
+
+
+def test_a_cover_that_passes_before_the_press_is_waited_for(show):
+    page = show(PASSING)
+    steps = Steps(GONE)
+    said = _when_clear(page, steps)
+    assert pressed(page) == ["go"]
+    assert steps.calls == 1
+    assert said["attempts"] == 2 and said["covered_ms"] == pressing.CLEAR_EVERY_MS
+    assert said["cleared"] is True
+    assert set(ABOUT) <= set(said), said
+
+
+def test_a_cover_that_stays_stops_the_run_once_the_time_is_up(show):
+    page = show(PASSING)
+    steps = Steps()
+    with pytest.raises(pressing.Covered) as stopped:
+        _when_clear(page, steps)
+    stop = stopped.value
+    assert pressed(page) == []
+    assert stop.after_a_press is False
+    assert stop.reason == "something on the page is over the control"
+    assert stop.lines[0] == "Something on the page covers the button, so nothing was pressed."
+    facts = stop.facts
+    assert facts["attempts"] >= 2 and facts["covered_ms"] >= pressing.CLEAR_MS, facts
+    assert facts["cleared"] is False and "checked_again" not in facts
+    assert set(ABOUT) <= set(facts), facts
+    assert facts["over_it"]["tag"] == "div" and facts["fixed"] is True
+    assert steps.calls == pressing.CLEAR_MS // pressing.CLEAR_EVERY_MS
+
+
+def test_the_control_found_again_is_the_one_pressed(show):
+    """While the cover passes the page draws the button again as a new
+    element. The one found again is pressed, not the one first found."""
+    page = show(PASSING.replace(' onclick="said(\'go\')"', ' data-say="go"')
+                + '<script>document.addEventListener("click", (e) => {'
+                  ' const b = e.target.closest("[data-say]"); if (b) said(b.dataset.say); });'
+                  '</script>')
+    steps = Steps(GONE + "; const old = document.getElementById('go');"
+                         " const now = old.cloneNode(true); now.id = 'go2';"
+                         " now.dataset.say = 'go2'; old.replaceWith(now)")
+    _when_clear(page, steps, find=lambda: page.locator("#go2"))
+    assert pressed(page) == ["go2"]
+
+
+@pytest.mark.parametrize("how", ["not_found", "refused"])
+def test_a_control_not_found_again_or_refused_by_the_check_is_not_pressed(show, how):
+    page = show(PASSING)
+    steps = Steps(GONE)
+    checked = []
+
+    def check(found):
+        checked.append(found)
+        return how != "refused"
+    with pytest.raises(pressing.Covered) as stopped:
+        _when_clear(page, steps, find=(lambda: None) if how == "not_found"
+                    else (lambda: page.locator("#go")), check=check)
+    assert pressed(page) == []
+    facts = stopped.value.facts
+    assert facts["checked_again"] is False and facts["cleared"] is False
+    assert facts["attempts"] == 1
+    assert len(checked) == (1 if how == "refused" else 0)
+
+
+def test_the_check_runs_before_every_try_but_the_first(show):
+    page = show(PASSING)
+    steps = Steps("void 0", GONE)
+    checked = []
+    _when_clear(page, steps, check=lambda found: checked.append(found) or True)
+    assert pressed(page) == ["go"] and len(checked) == 2 and steps.calls == 2
+
+
+def test_a_frame_that_comes_over_the_control_as_it_is_pressed_is_not_tried_again(show):
+    """Once the cover passed, a frame comes over the button as the pointer
+    moves onto it, and Playwright's press goes to the frame. That stop came
+    after a press, so nothing is tried again."""
+    page = show(LATE % LATE_FRAME + '<div class="cover" id="cover" style="left: 380px; '
+                'top: 230px; width: 200px; height: 80px"></div>')
+    steps = Steps(GONE)
+    with pytest.raises(pressing.Covered) as stopped:
+        _when_clear(page, steps)
+    stop = stopped.value
+    assert stop.after_a_press is True and stop.facts["after_the_press"] is True
+    assert steps.calls == 1
+    assert pressed(page).count("frame-down") == 1 and "go" not in pressed(page)
+
+
+def _raising(stop):
+    calls = []
+
+    def press(*args, **kwargs):
+        calls.append(1)
+        raise stop
+    return press, calls
+
+
+@pytest.mark.parametrize("stop", [
+    pressing.NotPressed("press a control", "the press did not go through", ["x"],
+                        after_a_press=True),
+    pressing.Unread("press a control", "the control could not be checked", ["x"]),
+    pressing.NoAnswer("press a control", "the press was made and the page did not answer",
+                      ["x"], after_a_press=True),
+    pressing.TurnedOff("press a control", "the control is turned off", ["x"],
+                       after_a_press=True),
+    pressing.Covered("press a control", "something on the page came over the control", ["x"],
+                     after_a_press=True),
+], ids=lambda s: type(s).__name__ + ("_after_a_press" if s.after_a_press else ""))
+def test_only_a_cover_before_any_press_is_waited_for(monkeypatch, stop):
+    press, calls = _raising(stop)
+    monkeypatch.setattr(pressing, "_click", press)
+    steps = Steps()
+    with pytest.raises(pressing.Stop) as raised:
+        pressing.click_when_clear(object(), object(), lambda: pytest.fail("found again"),
+                                  css="button", what="the button", words=WORDS,
+                                  clock=steps.clock, wait=steps.wait)
+    assert raised.value is stop and calls == [1] and steps.calls == 0
+    assert stop.facts == {}
+
+
+def test_a_stop_on_a_later_try_says_how_long_it_was_waited_for(monkeypatch):
+    covered = pressing.Covered("press a control", "something on the page is over the control",
+                               ["x"], {"over_it": {}})
+    then = pressing.NotPressed("press a control", "the press did not go through", ["x"],
+                               {"error": "timeout"}, after_a_press=True)
+    stops = [covered, then]
+    calls = []
+
+    def press(*args, **kwargs):
+        calls.append(1)
+        raise stops.pop(0)
+    monkeypatch.setattr(pressing, "_click", press)
+    steps = Steps()
+    with pytest.raises(pressing.NotPressed) as raised:
+        pressing.click_when_clear(object(), "first", lambda: "again", css="button",
+                                  what="the button", words=WORDS,
+                                  clock=steps.clock, wait=steps.wait)
+    assert raised.value is then and calls == [1, 1] and steps.calls == 1
+    assert then.facts == {"error": "timeout", "attempts": 2,
+                          "covered_ms": pressing.CLEAR_EVERY_MS}
+
+
+def test_a_plain_press_says_a_cover_as_it_always_did(show):
+    """Only a press that waits for a cover says the yes or no facts, so
+    every other press's stop is as it was."""
+    page = show(PASSING)
+    with pytest.raises(pressing.Covered) as stopped:
+        pressing.click(page, page.locator("#go"), css="button", what="the button", words=WORDS)
+    assert set(stopped.value.facts) == {"over_it", "topmost", "fixed"}
+
+
+# A menu's panel under the button that opened it, holding the control, over
+# a band of the page's own. Each page draws one of the ways a control can be
+# covered, and the facts say which. Every word is made up.
+MENU_PAGE = ('<div id="head" style="position: absolute; left: 0; top: 0; width: 900px">'
+             '<button id="opener" aria-expanded="true" style="position: absolute; left: 10px; '
+             'top: 10px; width: 120px; height: 30px">Accounts</button>%s'
+             '<div id="panel" style="position: absolute; left: 0; top: 60px; width: 600px; '
+             'height: 300px; background: #fff; z-index: 2; %s">'
+             '<div id="entries" style="position: relative; width: 600px; height: 300px">'
+             '<button id="go" style="position: absolute; left: 100px; top: 100px; width: 200px; '
+             'height: 40px; %s" onclick="said(\'go\')">View Statements</button>%s</div></div></div>')
+BAND_UNDER = ('<div id="band" style="position: absolute; left: 0; top: 60px; width: 900px; '
+              'height: 500px; background: #eef; z-index: 1">Summary</div>')
+ENTRY_OVER = ('<div id="entry" style="position: absolute; left: 80px; top: 90px; width: 300px; '
+              'height: 60px; z-index: 3; background: #ddd">Summary</div>')
+
+COVERS = {
+    # The tester's shape. The panel takes no pointer, so the point finds
+    # the band under it.
+    "a panel that takes no pointer over a band": (
+        MENU_PAGE % (BAND_UNDER, "pointer-events: none", "", ""),
+        {"over_it_holds_control": False, "control_clickable": False, "clip_at_point": False,
+         "over_it_in_menu": False}),
+    # The panel cut away while it grows, so the point finds the band.
+    "a panel cut away at the point": (
+        MENU_PAGE % (BAND_UNDER, "clip-path: inset(0 0 100% 0)", "", ""),
+        {"over_it_holds_control": False, "control_clickable": True, "clip_at_point": True,
+         "over_it_in_menu": False}),
+    # The control takes no pointer, so the point finds what holds it.
+    "the panel on top of a control that takes no pointer": (
+        MENU_PAGE % ("", "", "pointer-events: none", ""),
+        {"over_it_holds_control": True, "control_clickable": False, "clip_at_point": False,
+         "over_it_in_menu": True}),
+    # Another entry of the menu drawn over the control.
+    "another entry of the menu": (
+        MENU_PAGE % ("", "", "", ENTRY_OVER),
+        {"over_it_holds_control": False, "control_clickable": True, "clip_at_point": False,
+         "over_it_in_menu": True}),
+}
+
+
+# The page's address is the test's name, so no id holds a space.
+@pytest.mark.parametrize("shape", list(COVERS), ids=lambda shape: shape.replace(" ", "_"))
+def test_a_cover_that_stays_is_said_in_yes_or_no(show, shape):
+    body, said = COVERS[shape]
+    page = show(body)
+    steps = Steps()
+    with pytest.raises(pressing.Covered) as stopped:
+        _when_clear(page, steps, opener=page.locator("#opener"), limit_ms=250)
+    facts = stopped.value.facts
+    assert {k: facts.get(k) for k in ABOUT} == said, facts
+    assert pressed(page) == []
+
+
+def test_with_no_opener_whether_the_cover_is_in_its_menu_is_not_known(show):
+    body, _ = COVERS["another entry of the menu"]
+    page = show(body)
+    with pytest.raises(pressing.Covered) as stopped:
+        _when_clear(page, Steps(), limit_ms=250)
+    assert stopped.value.facts["over_it_in_menu"] is None
+    assert stopped.value.facts["over_it_holds_control"] is False

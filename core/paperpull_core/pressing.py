@@ -32,7 +32,15 @@ So a press here takes three steps, and stops the run rather than guess.
      run, with the press perhaps gone to it, unless it was at the point
      before the press and the control has left the point since.
 
-When something covers the control, the run stops with Covered. When the
+When something covers the control, the run stops with Covered. A caller
+that presses a control a page has just drawn, an entry of a menu that may
+still be opening, presses through click_when_clear instead. A cover that
+came before any press is then read again every quarter of a second for up
+to three seconds, the control found again and checked by the caller before
+each try, and each try is the same three steps. A cover that came as the
+control was pressed is never tried again, and a cover that stays stops the
+run as before, with how long it was waited for and yes or no about what it
+was. Nothing is pressed meanwhile, no key either. When the
 control could not be read, it stops with Unread, and when Playwright could
 not make the press, with NotPressed. A control that shows with nothing over
 it and that the page keeps turned off for as long as Playwright waits for
@@ -94,6 +102,7 @@ import logging
 import os
 import re
 import secrets
+import time
 from typing import Callable, Iterable, NamedTuple, Optional
 
 from .words import shape, shape_label
@@ -111,6 +120,11 @@ LINKS = "a[href], [role=link], area[href]"
 
 # How long Playwright is given to make a press once nothing covers it.
 PRESS_MS = 8000
+
+# How long click_when_clear waits for a cover that came before any press to
+# pass, and how often it reads the control again meanwhile, in milliseconds.
+CLEAR_MS = 3000
+CLEAR_EVERY_MS = 250
 
 
 class Stop(SystemExit):
@@ -362,6 +376,68 @@ LOOK_JS = r"""(args) => {
     return {state: 'unread', why: same.length ? 'several' : 'none', matched: found.size};
   const el = same[0];
 
+  // For a press that waits for a cover to pass (args.about), the button that
+  // opened the menu holding the control (args.opener), found the way the
+  // control is and before anything scrolls, or null unless exactly one.
+  let opener = null;
+  if (args.about && args.opener) {
+    try {
+      const o = args.opener, those = new Set();
+      const gather = (root) => {
+        for (const e of root.querySelectorAll(o.css)) those.add(e);
+        for (const e of root.querySelectorAll('*')) if (e.shadowRoot) gather(e.shadowRoot);
+      };
+      gather(document);
+      const at = [...those].filter((e) => {
+        const r = e.getBoundingClientRect();
+        return near(r.left, o.box.x) && near(r.top, o.box.y) && near(r.width, o.box.width) &&
+          near(r.height, o.box.height);
+      });
+      if (at.length === 1) opener = at[0];
+    } catch (e) { opener = null; }
+  }
+
+  // Yes or no about what covers the control, null for what could not be
+  // told. Whether the cover holds the control, so the point went through
+  // the control to what holds it, whether the control takes the pointer,
+  // whether the control or anything around it cuts its point away, and
+  // whether the cover sits in the part of the page that holds the control
+  // and not the opener, so in the menu the opener opened.
+  const aboutCover = (target, chain, point) => {
+    const out = {holds: null, clickable: null, clipped: null, in_menu: null};
+    try {
+      let common = null, k = -1;
+      for (let t = target; t; t = parentOrHost(t)) {
+        k = chain.indexOf(t);
+        if (k !== -1) { common = t; break; }
+      }
+      if (common) out.holds = k === 0;
+      out.clickable = getComputedStyle(target).pointerEvents !== 'none';
+      let clipped = false;
+      for (let a = target; a && a.nodeType === 1; a = parentOrHost(a)) {
+        const s = getComputedStyle(a);
+        if ((s.clipPath && s.clipPath !== 'none') || (s.clip && s.clip !== 'auto')) {
+          clipped = true;
+          break;
+        }
+        if (a !== target && (s.overflowX !== 'visible' || s.overflowY !== 'visible')) {
+          const r = a.getBoundingClientRect();
+          if (point.x < r.left || point.x > r.right || point.y < r.top || point.y > r.bottom) {
+            clipped = true;
+            break;
+          }
+        }
+      }
+      out.clipped = clipped;
+      if (opener && common) {
+        let holds = false;
+        for (let t = opener; t; t = parentOrHost(t)) if (t === common) { holds = true; break; }
+        out.in_menu = !holds;
+      }
+    } catch (e) {}
+    return out;
+  };
+
   // 1. To the middle of the window, at once rather than smoothly, so what
   // is read next is where it ends up.
   try { el.scrollIntoView({block: 'center', inline: 'center', behavior: 'instant'}); }
@@ -475,8 +551,11 @@ LOOK_JS = r"""(args) => {
     }
   }
 
-  // Covered. What is on top, and the widget it belongs to.
-  return Object.assign(coverOf(target, chain), where);
+  // Covered. What is on top, and the widget it belongs to, and for a press
+  // that waits for a cover to pass, yes or no about it.
+  const cover = coverOf(target, chain);
+  if (args.about) cover.about = aboutCover(target, chain, point);
+  return Object.assign(cover, where);
 }""" % _ON_TOP_JS
 
 # Runs in this module's own world right after a press, at the point LOOK_JS
@@ -1006,7 +1085,17 @@ def _box(locator) -> Optional[dict]:
         return None
 
 
-def look(page, locator, css: str, labels: bool = False, off: bool = False, frame=None) -> dict:
+def _opener_box(opener) -> Optional[dict]:
+    """The box of the button that opened a menu, for look, or None. Read
+    for a short while only, since it is for the yes or no facts alone."""
+    try:
+        return opener.bounding_box(timeout=1000)
+    except Exception:
+        return None
+
+
+def look(page, locator, css: str, labels: bool = False, off: bool = False, frame=None,
+         about: bool = False, opener=None) -> dict:
     """What sits on top of the control once it is in the middle of the
     window, as a dict whose "state" is "inside", "label", "covered" or
     "unread". Raw words from the page are in it, so it goes through
@@ -1021,7 +1110,12 @@ def look(page, locator, css: str, labels: bool = False, off: bool = False, frame
     `frame` is the Playwright frame the control is in, when that is not
     the page's main frame. The control is then read in that frame, and
     each frame around it has to be on top in its own parent at the point
-    (_look_in_frame)."""
+    (_look_in_frame).
+
+    `about` is for click_when_clear. A cover is then read with yes or no
+    about it as well, under "about", and `opener`, the locator of the button
+    that opened the menu holding the control and a selector it matches, says
+    which part of the page that menu is. Not in a frame."""
     if frame is not None and frame.parent_frame is not None:
         return _look_in_frame(page, locator, css, labels, frame)
     seen = {"state": "unread", "why": "no box"}
@@ -1029,8 +1123,13 @@ def look(page, locator, css: str, labels: bool = False, off: bool = False, frame
         box = _box(locator)
         if not box:
             return {"state": "unread", "why": "no box"}
-        seen = _in_own_world(page, LOOK_JS, {"css": css, "box": box, "labels": bool(labels),
-                                             "off": bool(off)})
+        args = {"css": css, "box": box, "labels": bool(labels), "off": bool(off)}
+        if about:
+            args["about"] = True
+            opened_by = _opener_box(opener[0]) if opener is not None else None
+            if opened_by:
+                args["opener"] = {"css": opener[1], "box": opened_by}
+        seen = _in_own_world(page, LOOK_JS, args)
         if seen is None:
             return {"state": "unread", "why": "not read"}
         if seen.get("state") != "unread" or seen.get("why") not in ("none", "several"):
@@ -1093,6 +1192,22 @@ _WHY = frozenset(("selector", "several", "none", "no box", "not read", "unknown 
                   "frame drawn at another size", "off the control"))
 
 
+# The yes or no facts LOOK_JS reads about a cover for click_when_clear, each
+# with the name a failure file keeps it under. Every word of those names is
+# on paperpull_core.words's list, so they leave whole.
+_ABOUT = (("holds", "over_it_holds_control"), ("clickable", "control_clickable"),
+          ("clipped", "clip_at_point"), ("in_menu", "over_it_in_menu"))
+
+
+def _about(raw) -> dict:
+    """The yes or no facts about a cover, None for one not told, or nothing
+    for a look that was not asked for them."""
+    if not isinstance(raw, dict):
+        return {}
+    return {key: raw.get(name) if isinstance(raw.get(name), bool) else None
+            for name, key in _ABOUT}
+
+
 def judge(seen: dict, what: str, words, step: str = "press a control") -> None:
     """Raise Covered or Unread unless the control itself, or its own label,
     is what is on top."""
@@ -1105,8 +1220,11 @@ def judge(seen: dict, what: str, words, step: str = "press a control") -> None:
         facts = {"over_it": cover["widget"], "topmost": cover["top"], "fixed": cover["pinned"]}
         if seen.get("over_the_frame"):
             facts["over_the_frame"] = True
-        raise Covered(step, "something on the page is over the control",
-                      covering_lines(what, cover), facts)
+        stop = Covered(step, "something on the page is over the control",
+                       covering_lines(what, cover), facts)
+        # Kept beside the facts, for click_when_clear to say with its own.
+        stop.about = _about(seen.get("about"))
+        raise stop
     why = str(seen.get("why") or "")
     why = why if why in _WHY else "other"
     log.info("refused to press %s, it could not be read (%s)", what, why)
@@ -1302,14 +1420,140 @@ def click(page, locator, *, css: str, what: str, words, step: str = "press a con
     one (off), so what holds a control drawn to take no pointer is not
     taken for something over it, and Playwright's own check at the press
     still keeps the press from anything that is."""
+    _click(page, locator, css=css, what=what, words=words, step=step, timeout=timeout,
+           frame=frame)
+
+
+def _click(page, locator, *, css: str, what: str, words, step: str,
+           timeout: Optional[int] = None, frame=None, about: bool = False,
+           opener=None) -> None:
+    """click, and for click_when_clear a cover read with yes or no about it
+    as well (look's `about` and `opener`)."""
     timeout = timeout or PRESS_MS
-    seen = look(page, locator, css, off=_shown_and_off(locator) is True, frame=frame)
+    seen = look(page, locator, css, off=_shown_and_off(locator) is True, frame=frame,
+                about=about, opener=opener)
     judge(seen, what, words, step)
     _press(page, lambda: locator.click(timeout=timeout), what, step,
            off=lambda kind: _leave_if_turned_off(page, locator, css, what, words, step,
                                                  {"error": kind}, after_a_press=True,
                                                  frame=frame))
     after(page, seen, what, words, step, frame=frame)
+
+
+def _now() -> float:
+    """The clock click_when_clear waits by, in seconds. A test replaces it."""
+    return time.monotonic()
+
+
+def _wait(page, ms: int) -> None:
+    """How click_when_clear waits between two tries. A test replaces it."""
+    page.wait_for_timeout(ms)
+
+
+def _seconds(ms: int) -> str:
+    n = max(1, int(round(ms / 1000.0)))
+    return "%d second%s" % (n, "" if n == 1 else "s")
+
+
+def _stayed(stop: Covered, what: str, attempts: int, ms: int, changed: bool) -> Covered:
+    """The last cover's stop, once the time to wait for it is up, or once
+    the control found again is gone or not the one its caller checked, with
+    how long it was waited for and yes or no about the cover. Nothing more
+    is pressed."""
+    stop.facts.update({"attempts": attempts, "covered_ms": ms, "cleared": False})
+    if changed:
+        stop.facts["checked_again"] = False
+    stop.facts.update(getattr(stop, "about", None) or {})
+    if changed:
+        said = ("The run waited for it to pass, and by then %s was no longer the one it had "
+                "checked." % what)
+    else:
+        said = "The run waited %s for it to pass, and it did not." % _seconds(ms)
+    stop.lines.insert(1, said)
+    log.info("refused to press %s after %d tries over %d ms (%s)", what, attempts, ms,
+             "it changed" if changed else "it stayed covered")
+    return stop
+
+
+def click_when_clear(page, locator, find: Callable[[], object], *, css: str, what: str, words,
+                     step: str = "press a control",
+                     check: Optional[Callable[[object], bool]] = None,
+                     opener=None, opener_css: str = BUTTONS,
+                     limit_ms: Optional[int] = None, every_ms: Optional[int] = None,
+                     clock: Optional[Callable[[], float]] = None,
+                     wait: Optional[Callable[[object, int], None]] = None,
+                     timeout: Optional[int] = None) -> dict:
+    """Press `locator` once, as click does, and when something covers it
+    before any press, wait for the cover to pass and try again, or stop the
+    run.
+
+    For a control a page has just drawn, an entry of a menu say, which can
+    show while the menu is still opening and is not yet the thing on top
+    at its point. Playwright's own press waits and tries again while its
+    check fails. click reads the point once (#221).
+
+    Only Covered with after_a_press false is tried again, a cover that came
+    before anything was pressed. Every other stop, and a cover that came as
+    the control was pressed, which may have taken the press, ends it at
+    once. Each later try waits `every_ms` (CLEAR_EVERY_MS), finds the
+    control again with `find`, which answers a locator or None, and hands
+    what it found to `check`, the caller's own reads of its words and of
+    whatever else has to hold, before the same three steps as click. A
+    control not found again, or one `check` refuses, is not pressed. Once
+    `limit_ms` (CLEAR_MS) has passed since the first cover, the run stops
+    with the last cover's Covered. Nothing else is pressed meanwhile, no
+    key either, and nothing is dismissed.
+
+    `opener` is the locator of the button that opened the menu holding the
+    control, when one did, and `opener_css` a selector it matches. `clock`,
+    in seconds, and `wait`, handed the page and the milliseconds, are for a
+    test, _now and _wait when not given.
+
+    Answers yes or no about the cover and how long it was waited for, for
+    the caller to keep, and nothing when nothing covered the control. A
+    stop it raises says the same in its facts, attempts, covered_ms,
+    cleared and the yes or no about the cover, all on the word list, and a
+    stop of a later try says the attempts and covered_ms that came before
+    it."""
+    limit_ms = CLEAR_MS if limit_ms is None else limit_ms
+    every_ms = CLEAR_EVERY_MS if every_ms is None else every_ms
+    clock = clock or _now
+    wait = wait or _wait
+    opened_by = (opener, opener_css) if opener is not None else None
+    target, attempts, started, last = locator, 0, None, None
+
+    def waited() -> int:
+        return 0 if started is None else int(round((clock() - started) * 1000))
+
+    while True:
+        attempts += 1
+        try:
+            _click(page, target, css=css, what=what, words=words, step=step, timeout=timeout,
+                   about=True, opener=opened_by)
+        except Covered as stop:
+            if stop.after_a_press:
+                if last is not None:
+                    stop.facts.update({"attempts": attempts, "covered_ms": waited()})
+                raise
+            last = stop
+        except Stop as stop:
+            if last is not None:
+                stop.facts.update({"attempts": attempts, "covered_ms": waited()})
+            raise
+        else:
+            if last is None:
+                return {}
+            log.info("pressed %s once a cover passed, after %d tries", what, attempts)
+            return {"attempts": attempts, "covered_ms": waited(), "cleared": True,
+                    **(getattr(last, "about", None) or {})}
+        if started is None:
+            started = clock()
+        wait(page, every_ms)
+        if waited() >= limit_ms:
+            raise _stayed(last, what, attempts, waited(), changed=False)
+        target = find()
+        if target is None or (check is not None and not check(target)):
+            raise _stayed(last, what, attempts, waited(), changed=True)
 
 
 def _is_checked(locator) -> Optional[bool]:
