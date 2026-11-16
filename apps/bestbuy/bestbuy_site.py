@@ -84,6 +84,14 @@ LOGIN_URL_MARKERS = ["/identity/signin", "/identity/global/signin", "/signin", "
                      "/login", "/identity/verify", "/mfa"]
 
 YEAR_MENU = "[data-testid^='YearDate-Filter-TestID']"
+# The range menu's own button. On a tester's history (#226) the button sat
+# inside two wrappers drawn the same size, and they and the label and icon
+# inside it all carried test ids starting with the menu's, so YEAR_MENU,
+# which the run waits on, matched five elements. The press is made on this
+# button and names it by its tag and whole test id (_named_alone).
+YEAR_MENU_BUTTON = "button[data-testid^='YearDate-Filter-TestID']"
+# A year in the open menu, when the page draws the years as options.
+YEAR_OPTION = "[role='option']"
 DETAILS_BUTTON = "View order details"
 
 FORBIDDEN_CONTROL_RE = re.compile(
@@ -112,6 +120,7 @@ RATE_LIMIT_MARKERS = ["too many requests", "rate limit", "temporarily blocked", 
 
 FALLBACK = {
     "year_menu": YEAR_MENU,
+    "year_menu_button": YEAR_MENU_BUTTON,
     "survey": ".confirmIt, #confirmIt-backdrop",
     "page_ready": YEAR_MENU,
     "print_page_body": "body",
@@ -248,8 +257,49 @@ def _press(page, el, what: str, css: str, guard, *args) -> None:
 
 
 def _menu(page):
-    """The range menu's element, or None."""
-    return page.locator(YEAR_MENU).first.element_handle(timeout=10000)
+    """The range menu's element. Whatever carries the menu's test id is
+    waited for as before, and then the button carrying it is taken, since
+    the wrappers around it and the parts inside it can carry test ids that
+    start the same way (#226). On a page where no button carries it, the
+    first element that does, as before."""
+    first = page.locator(YEAR_MENU).first.element_handle(timeout=10000)
+    buttons = page.locator(YEAR_MENU_BUTTON)
+    if buttons.count():
+        return buttons.first.element_handle(timeout=10000)
+    return first
+
+
+def _css_string(text: str) -> str:
+    """`text` as a quoted CSS string. Every character but a letter, a digit,
+    a hyphen or an underscore is written as its code, so nothing a page puts
+    in a test id can end the string or the selector."""
+    return '"%s"' % "".join(ch if ch.isascii() and (ch.isalnum() or ch in "-_")
+                            else "\\%x " % ord(ch) for ch in str(text))
+
+
+def _named_alone(el) -> str:
+    """A selector naming `el` by its tag and its whole test id, for
+    paperpull_core.pressing to tell it from what is drawn in its place. A
+    test id matched by its start also matched the wrappers around the menu,
+    drawn the same size, so the press counted three and pressed nothing
+    (#226). Empty, which pressing refuses, when the tag does not read as
+    one."""
+    tag = str(el.evaluate("(e) => e.localName") or "")
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", tag):
+        return ""
+    return "%s[data-testid=%s]" % (tag, _css_string(el.get_attribute("data-testid") or ""))
+
+
+def _the_option(el) -> tuple:
+    """The year to press and a selector naming it among what is drawn in
+    its place. When the element reading the year is an option, or sits in
+    one, and the option reads that year alone, the option by its role, so an
+    element of its size inside it or around it is not counted as a second.
+    Otherwise the element itself by its tag, as before."""
+    option = el.evaluate_handle("(e, css) => e.closest(css)", YEAR_OPTION).as_element()
+    if option is not None and _tidy(option.inner_text()) == _tidy(el.inner_text()):
+        return option, YEAR_OPTION
+    return el, el.evaluate("(e) => e.tagName.toLowerCase()")
 
 
 def _shown(page, year: str) -> list:
@@ -359,7 +409,8 @@ def year_choices(page) -> List[str]:
     hide_survey(page)
     try:
         before = page.evaluate_handle(_YEAR_LEAVES_JS)
-        _press(page, _menu(page), "the range menu", YEAR_MENU, is_year_menu)
+        menu = _menu(page)
+        _press(page, menu, "the range menu", _named_alone(menu), is_year_menu)
         page.wait_for_timeout(1000)
         texts = page.evaluate(
             "(before) => (" + _YEAR_LEAVES_JS + ")().filter(e => !before.includes(e))"
@@ -407,7 +458,8 @@ def pick_year(page, year: str, reads: int = 3, gap_ms: int = 1200, limit: int = 
     hide_survey(page)
     try:
         before = _shown(page, year)
-        _press(page, _menu(page), "the range menu", YEAR_MENU, is_year_menu)
+        menu = _menu(page)
+        _press(page, menu, "the range menu", _named_alone(menu), is_year_menu)
         page.wait_for_timeout(1000)
         shown = _shown(page, year)
         came = _came_with_the_menu(before, shown)
@@ -418,8 +470,8 @@ def pick_year(page, year: str, reads: int = 3, gap_ms: int = 1200, limit: int = 
             came = shown
         if len(came) != 1:
             raise Refused("the range menu did not show the year once, so no year was pressed")
-        tag = came[0].evaluate("(e) => e.tagName.toLowerCase()")
-        _press(page, came[0], "the year %s in the range menu" % year, tag, is_year_option, year)
+        option, css = _the_option(came[0])
+        _press(page, option, "the year %s in the range menu" % year, css, is_year_option, year)
     except Refused:
         raise
     except Exception as e:

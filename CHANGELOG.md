@@ -7,6 +7,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Fixed
+- **Best Buy chooses a year again on a history whose range menu sits inside
+  wrappers (#226).** The menu's button was drawn inside two wrappers of its
+  own size, and they and the label and icon inside it carried test ids that
+  start like the menu's. The check made before every press counted three
+  elements in the menu's place and pressed nothing, so each run stopped at
+  "choose a year" before reading the history. The run now presses the
+  button that carries the test id, named by its tag and its whole test id,
+  and a page where only a wrapper carries it is pressed through the wrapper
+  as before. A year drawn as an option is named by its role, so an element
+  of its size inside it does not stop the run the same way once the menu
+  opens. A new check of every app holds that no press names its control by
+  the start, the end or a part of an attribute.
+
 ## [0.68.0] - 2026-11-16
 
 Every provider now says which country it is for, in the control panel, in
