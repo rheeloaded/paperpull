@@ -24,6 +24,21 @@ another, or a server running every hour through a provider's outage, are
 many runs on one bad day, and PaperPull Server offers no Download again to
 ask for a receipt once more after it is set aside.
 
+It is set aside only on a run that saved a receipt of its kind, online or
+in-store, before it, with no receipt page of that kind showing nothing in
+between (#225). Kroger once stopped showing the receipt for every purchase
+a tester had, and the third day of runs set every one of them aside, on
+PaperPull Server. A provider whose receipt pages show nothing for every
+purchase has broken pages, which says nothing about whether the purchases
+have receipts. Without such a save the purchase is tried again next run
+and keeps its most recent DAYS days, so a provider that shows no receipt at
+all costs time, never the purchases. The cost is a receipt that is truly
+missing and has no receipt of its kind saved before it in a run, the newest
+purchase most often. It is asked for on every such run and set aside only
+on a run that saved a newer one first. A purchase set aside already stays
+set aside, those an earlier version set aside included. Whether a run
+saved one is kept on the app object, so it is that run's alone.
+
 asked_again() is for the records the older versions left. A No Receipt
 Available record whose note is one of the words they wrote for a page that
 did not show is not done, so the next run asks for its receipt. The words
@@ -90,6 +105,32 @@ def _days(rec) -> list:
 # a receipt, one invoice of an order, or a copy put aside for review.
 SAVED_STATES = frozenset({State.PDF_SAVED.value, State.PDF_VERIFIED.value})
 
+# Where a run keeps, on its own app object, each kind of purchase
+# (Purchase.purchase_type) it has saved a receipt of, and whether no receipt
+# page of that kind has shown nothing since the last one it saved.
+SAVED_KEY = "_not_shown_saved"
+
+
+def _saved(app) -> dict:
+    kinds = getattr(app, SAVED_KEY, None)
+    if not isinstance(kinds, dict):
+        kinds = {}
+        setattr(app, SAVED_KEY, kinds)
+    return kinds
+
+
+# Where a run keeps the purchases that were set aside when it began and that
+# it has since written another state over, short of a save.
+SET_ASIDE_KEY = "_not_shown_set_aside"
+
+
+def _set_aside_before(app) -> set:
+    keys = getattr(app, SET_ASIDE_KEY, None)
+    if not isinstance(keys, set):
+        keys = set()
+        setattr(app, SET_ASIDE_KEY, keys)
+    return keys
+
 
 def let_go_on_save(app, purchase, state, rec: dict) -> None:
     """Every receipt app's _record_state hands this the record it is about
@@ -100,10 +141,22 @@ def let_go_on_save(app, purchase, state, rec: dict) -> None:
     another missing, has no downloaded_ok, and one more day of an empty page
     used to set it aside. It is a save that lets them go, not a page that
     showed. A page that showed and saved nothing new, a print that failed or
-    a Target walk that found only invoices already on file, keeps them."""
+    a Target walk that found only invoices already on file, keeps them.
+
+    Every save, of a record with days or without, also lets a purchase of
+    its kind whose page shows nothing later in this run be set aside
+    (tried_again). And a purchase set aside before, written over on a
+    Download again with another state before its page is looked at (GitHub
+    and Meijer note that its receipt was located), is remembered for this
+    run, so a page that shows nothing again leaves it set aside."""
+    before = app.progress.get(purchase.key) or {}
     if getattr(state, "value", state) not in SAVED_STATES:
+        if set_aside(before):
+            _set_aside_before(app).add(purchase.key)
         return
-    if _days(app.progress.get(purchase.key) or {}):
+    _saved(app)[purchase.purchase_type] = True
+    _set_aside_before(app).discard(purchase.key)
+    if _days(before):
         # The store merges a record into the one it has, so the days are
         # written empty rather than left out.
         rec[DAYS_KEY] = []
@@ -129,7 +182,17 @@ def written_down(app, purchase) -> bool:
 def tried_again(app, purchase, why: str) -> bool:
     """Record that this purchase's receipt page did not show its receipt.
     Always False, nothing was saved. `why` is a sentence without its full
-    stop."""
+    stop.
+
+    On its DAYS-th separate day it is set aside only when this run saved a
+    receipt of its kind before it, with no page of that kind showing
+    nothing in between, or when it was set aside before. This page showed
+    nothing, so the next one of its kind waits for another save."""
+    kinds = _saved(app)
+    kind = purchase.purchase_type
+    after_a_save = kinds.get(kind)          # None when this run saved none
+    if kind in kinds:
+        kinds[kind] = False
     rec = app.progress.get(purchase.key) or {}
     if rec.get("downloaded_ok"):
         # Download again, for a receipt saved before. The copy saved then
@@ -142,12 +205,29 @@ def tried_again(app, purchase, why: str) -> bool:
     days = _days(rec)
     if _this_day(app) not in days:
         days.append(_this_day(app))
+    seen = len(days)
+    # The most recent DAYS, never a list that grows by a day on every run.
+    days = days[-DAYS:]
     if len(days) < DAYS:
         app._record_state(purchase, State.FAILED, notes="%s, %s" % (why, TRIED_AGAIN),
                           extra={DAYS_KEY: days})
         app.stats["failed"] += 1
         print("  %s, on %d of %d separate days. It is tried again next run."
               % (why, len(days), DAYS))
+        return False
+    if not (after_a_save or set_aside(rec) or purchase.key in _set_aside_before(app)):
+        app._record_state(purchase, State.FAILED, notes="%s, %s" % (why, TRIED_AGAIN),
+                          extra={DAYS_KEY: days})
+        app.stats["failed"] += 1
+        lower = kind.lower()
+        if after_a_save is None:
+            because = "no %s receipt was saved before it in this run" % lower
+        else:
+            because = ("an %s receipt page showed nothing after the last %s receipt this run "
+                       "saved" % (lower, lower))
+        print("  %s, on %s separate days. It is not set aside, because %s, and it is tried "
+              "again next run." % (why, seen if seen <= DAYS else "more than %d" % DAYS,
+                                   because))
         return False
     said = "%s on %d separate days, so it is not asked for again" % (why, len(days))
     # Written down once. An older version that recorded the purchase as

@@ -55,21 +55,24 @@ def install(root: Path, app: Path, records: dict = None) -> Path:
 
 def set_aside(mod, out: Path):
     """The purchase's receipt page shows nothing on three separate days,
-    through the app's own _record_state."""
+    through the app's own _record_state. The third day's run saved another
+    purchase's receipt first, as a run must before it sets one aside (#225)."""
     for day in range(1, not_shown.DAYS + 1):
-        tried(mod, out, day)
+        tried(mod, out, day, saved_first=day == not_shown.DAYS)
     p = census.purchase()
     rec = census.app_in(mod, out).progress.get(p.key)
     assert not_shown.set_aside(rec), rec
     return p
 
 
-def tried(mod, out: Path, day: int):
+def tried(mod, out: Path, day: int, saved_first: bool = False):
     """One run on that day, whose receipt page shows nothing. A new run
     reads the purchase afresh, as a run does from discovery."""
     p = census.purchase()
     inst = census.app_in(mod, out, day=day)
     inst.discovery.update(p.key, p.to_dict())
+    if saved_first:
+        census.save_another(inst)
     not_shown.tried_again(inst, p, "The receipt page did not show the receipt")
     return inst
 

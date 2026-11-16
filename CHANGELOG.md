@@ -23,6 +23,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
   opens. A new check of every app holds that no press names its control by
   the start, the end or a part of an attribute.
 
+- **A receipt is set aside only on a run that saved one of its kind first
+  (#225).** Kroger stopped showing a tester's receipts, every one of his
+  244 purchases, and on the third separate day of runs each of them was set
+  aside as No Receipt Available for good and written into both CSVs, on
+  PaperPull Server, which has no Download again. The eleven receipt apps
+  that set aside a purchase whose receipt page shows nothing (Amazon, Best
+  Buy, Costco, eBay, Gap, GitHub, Home Depot, Kroger, Lowe's, Meijer and
+  Target) now do so only on a run that saved a receipt of the same kind,
+  online or in-store, before it, with no receipt page of that kind showing
+  nothing in between. Otherwise the purchase is tried again next run and
+  keeps its days, the last three at most, and the run says why it was not
+  set aside. A provider whose receipt pages show nothing now costs time,
+  never the purchases. A receipt that is truly missing is set aside only on
+  a run that saved a newer receipt of its kind first, and until then it is
+  asked for on every run. Purchases an earlier version set aside stay set
+  aside.
+
 ## [0.68.0] - 2026-11-16
 
 Every provider now says which country it is for, in the control panel, in
