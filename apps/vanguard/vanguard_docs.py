@@ -905,7 +905,12 @@ class App:
             info["title"] = page.title()
             info["signed_out"] = site.looks_signed_out(page)
             info["challenge"] = site.detect_security_challenge(page)
-            stmts = site.collect_statements_json(page)
+            # The years a run asks for, from the same config and command
+            # line, so a report selects the years in the picker a run
+            # selects and no others
+            # (test_every_diagnose_lists_as_its_discover_does).
+            stmts = site.collect_statements_json(
+                page, keep=scope.period_filter(self.args, self.config))
             kinds, by_account, samples = {}, {}, []
             for s in stmts:
                 cat, date, period, _title = site.classify_document(s)

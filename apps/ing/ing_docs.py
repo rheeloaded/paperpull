@@ -1008,7 +1008,11 @@ class App:
             try:
                 # Only the list on screen, as it stands. Diagnose neither moves
                 # the tab nor scrolls it.
-                docs = site.collect_documents(page, config=self.config, navigate=False)
+                # The years a run asks for as well as its kinds
+                # (test_every_diagnose_lists_as_its_discover_does).
+                docs = site.collect_documents(
+                    page, keep=scope.period_filter(self.args, self.config),
+                    config=self.config, navigate=False)
             except site.NotShownEmpty:
                 # The list on screen shows only ING's notice that nothing
                 # matches, as it stands, where a search or filter of the

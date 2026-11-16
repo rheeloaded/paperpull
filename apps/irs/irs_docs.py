@@ -982,8 +982,11 @@ class App:
             stopped=stopped or getattr(self, "_diagnose_stopped", None))
 
     def cmd_diagnose(self):
-        """Survey the transcript and notice lists and write a file a tester
-        can attach to the GitHub issue. False, having read nothing on the
+        """Survey the transcript list, and the notice list when notices are
+        in scope as a run reads it, and write a file a tester can attach
+        to the GitHub issue. The rows sampled are those of the list the
+        tab ends on, the notice list or, with notices out of scope, the
+        transcript list. False, having read nothing on the
         page, when the tab is on a sign-in page or another site. No screenshot, digit runs masked, JSON bodies as
         shape only. Nothing is downloaded and nothing but a documents link is
         followed."""
@@ -991,7 +994,8 @@ class App:
         words = words_for('IRS', site)
         page = self.page()
         info = {"timestamp": now_iso(),
-                "note": Fixed("A survey of the IRS Online Account transcript and notice lists. "
+                "note": Fixed("A survey of the IRS Online Account transcript list, and of the "
+                              "notice list when notices are in scope. "
                               "It is what the site layer's assumptions are checked against.")}
         stopped = None
         try:
@@ -1034,7 +1038,12 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            found_docs = site.collect_download_docs(page) if found else []
+            # The notices page only when notices are in scope, as a run
+            # reads it, so a notice there never stops a report where it
+            # would not stop the run
+            # (test_every_diagnose_lists_as_its_discover_does).
+            found_docs = (site.collect_download_docs(page, notices=self._reads_notices())
+                          if found else [])
             info["documents_recognized"] = [{"date": b.date_text, "kind": b.kind, "id": b.document_id}
                                             for b in found_docs[:40]]
             docs = site.collect_documents(page)

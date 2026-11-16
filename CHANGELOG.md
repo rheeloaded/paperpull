@@ -87,6 +87,22 @@ support report keeps the error its listing met.
   a sign-in page, and now says to sign in. U.S. Bank's report also printed
   a question mark for the rows it collected whatever it read, and never
   showed the years its picker offered. It now shows both.
+- **A support report asks for what a run asks for.** In sixteen apps the
+  report listed documents without the settings a run lists with, so it could
+  show nothing wrong where the run failed. NetBenefits made quarterly
+  statements for a run set to monthly ones. Invest529, Amazon Visa, DKB,
+  1822direkt and Renault Bank direkt listed every kind of document whatever
+  kinds you chose. Those six, with Affirm, Consorsbank, Fairfax Water,
+  Fidelity, ING, Interactive Brokers, Sparkasse Pforzheim Calw, Target
+  RedCard and Vanguard, read every year where a run reads the years you gave
+  it or those from your start date on. The IRS report opened the notices
+  page when notices were left out. Each report now asks for the kinds,
+  periods and years its run asks for, so one made with a start date or a
+  year lists fewer documents than before. When NetBenefits' plan list would
+  not read, its report now keeps that error in a place of its own, where the
+  count of plans used to hold the error's name. A census now checks every
+  app whose report and run share a listing, or whose report's listing takes
+  the run's years or settings.
 
 ## [0.67.0] - 2026-11-15
 

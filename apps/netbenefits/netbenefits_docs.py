@@ -1437,7 +1437,15 @@ class App:
             # are masked and JSON bodies are recorded as shape only.
             info["survey"] = site.survey(page)
             try:
-                docs = site.collect_documents(page)
+                # The periods a run asks for, monthly or quarterly as its
+                # statement_period says, and its years, from the same
+                # config and command line. With the page alone this made
+                # quarterly statements back to the plan's start, whatever
+                # the run asks for
+                # (test_every_diagnose_lists_as_its_discover_does).
+                docs = site.collect_documents(
+                    page, keep=scope.period_filter(self.args, self.config),
+                    config=self.config)
             except Exception as e:
                 # This read `except site.NotMapped`, a name no module in
                 # this repository defines. An except clause is evaluated
@@ -1458,7 +1466,11 @@ class App:
                         "listed": len(choices),
                         "left_for_review": sum(1 for p in choices if not p["path"])}
             except Exception as e:
-                info["plans"] = type(e).__name__
+                # No count was read. The error has a key of its own, as
+                # the listing's has, where it was written in place of the
+                # counts.
+                info["plans"] = None
+                info["plans_error"] = "%s: %s" % (type(e).__name__, e)
             info["samples"] = []
             for d in docs[:12]:
                 cat, summ, _ = doc_types.classify_document(d.get("title", ""), self.rules)

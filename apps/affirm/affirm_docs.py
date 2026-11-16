@@ -879,7 +879,12 @@ class App:
             # text is exactly a document word, account numbers
             # are masked and JSON bodies are recorded as shape only.
             info["survey"] = site.survey(page)
-            docs = site.collect_documents(page)
+            # The years a run asks for, from the same config and command
+            # line, so a report lists what a run lists
+            # (test_every_diagnose_lists_as_its_discover_does).
+            docs = site.collect_documents(
+                page, keep=scope.period_filter(self.args, self.config),
+                config=self.config)
             info["collected"] = len(docs)
             info["samples"] = []
             for d in docs[:12]:
