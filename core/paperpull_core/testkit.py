@@ -468,7 +468,7 @@ def _start_fresh_browser(exe, profile, args, window=True):
 
     proc = subprocess.Popen(
         [str(exe), "--headless=new", "--remote-debugging-port=0",
-         "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check",
+         "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
          *args, "about:blank" if window else "--no-startup-window"],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port, deadline = "", time.monotonic() + 30

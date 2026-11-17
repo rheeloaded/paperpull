@@ -239,7 +239,7 @@ def _start_browser(exe, profile):
     proc = subprocess.Popen(
         [exe, "--headless=new", "--remote-debugging-port=0",
          "--user-data-dir=%s" % profile, "--disable-extensions", "--disable-sync",
-         "--no-first-run", "--no-default-browser-check", "--no-startup-window", NO_HOSTS],
+         "--no-first-run", "--no-default-browser-check", "--use-mock-keychain", "--no-startup-window", NO_HOSTS],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port, deadline = "", time.monotonic() + 30
     while not port and time.monotonic() < deadline and proc.poll() is None:
