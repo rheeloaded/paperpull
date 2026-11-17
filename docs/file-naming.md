@@ -68,6 +68,42 @@ Manual Review stays one flat folder whatever the pattern says.
   a link all leave the file in the folder of its kind with no folders. A
   folder never stops a download.
 
+### Without a folder for each kind
+
+For a provider that files one kind of document, the folder of its kind
+says nothing. An account with a documents folder of its own
+(`documents_dir`) can leave it out with `"kind_folders": false` in its
+config.json (#201), so with `{year}/{date:yyyy-mm-dd} {summary}`
+
+```
+9 Utilities/PG&E/Statements/2026/2026-10-07 Statement.pdf
+```
+
+becomes
+
+```
+9 Utilities/PG&E/2026/2026-10-07 Statement.pdf
+```
+
+* **Only the documents folder changes.** A download is still written and
+  checked in the folder of its kind in the provider's own folder, a file
+  that fails its check is still put aside in Manual Review there, and
+  Logs, Diagnostics, Backups and the records stay where they are.
+* **The Move brings documents out of their kind folders,** in the
+  provider's own folder and in the documents folder alike, keeping the
+  folders the pattern made. A folder of a kind it leaves empty in the
+  documents folder is removed.
+* **A run stops before saving or moving anything** when the setting is
+  not `true` or `false`, when the account has no documents folder of its
+  own (documents would sit loose beside its records), or when the provider
+  files more than one kind and the pattern has no `{kind}`, since two
+  kinds sharing a folder could want one file name. The message names the
+  kinds. `{kind}` counts anywhere in the pattern, as a folder, in an
+  optional section or as an alternative, so the usual names, which end in
+  `[ {kind}]`, are fine.
+* Setting it back to `true` does not move documents back into folders of
+  their kind. They stay where they are and are still found.
+
 **Rename** moves files into the folders a pattern names and back out of
 them, the same way a download would file them now. Changing back to a
 pattern with no `/` moves every file back to the folder of its kind. The
