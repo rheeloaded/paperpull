@@ -500,16 +500,17 @@ class App:
                 # list of its own, so it asks for no stop here (finish=False)
                 # and stops at its end instead.
                 self._eobs_unread = True
+                if not finish:
+                    # Run All reads its other lists before it stops, and the
+                    # tab then shows the last of them. The page is read here,
+                    # where the EOB list would not open, the same two reads a
+                    # failure file makes, and the journal notes the moment, so
+                    # the stop's file describes this page. Discover, Pilot and
+                    # the dry runs stop below and read the page once, as they
+                    # always did.
+                    self._read_where_the_eobs_would_not_open(page)
                 if finish:
                     self._stop_if_eobs_unread()
-                    return 0
-                # Run All reads its other lists before it stops, and the tab
-                # then shows the last of them. The page is read here, where
-                # the EOB list would not open, the same two reads a failure
-                # file makes, and the journal notes the moment, so the stop's
-                # file describes this page. Discover, Pilot and the dry runs
-                # stop above and read the page once, as they always did.
-                self._read_where_the_eobs_would_not_open(page)
                 return 0
         self.check_session(page)
 
@@ -951,12 +952,9 @@ class App:
             # that page goes in the file, said so by one fact. It is used
             # once, whether this writes the file or a later failure had.
             facts, self._eob_page_facts = self._eob_page_facts, None
-            if facts is None:
-                self.write_failure("open the eob list", "the eob list would not open")
-            else:
-                self.write_failure("open the eob list", "the eob list would not open",
-                                   extra={"page_read_where_eob_list_would_not_open": True},
-                                   page_facts=facts)
+            said = None if facts is None else {"page_read_where_eob_list_would_not_open": True}
+            self.write_failure("open the eob list", "the eob list would not open",
+                               extra=said, page_facts=facts)
             print("\nYour EOBs were not listed, so this run stops here rather than finish.")
             raise SystemExit(0)
 
