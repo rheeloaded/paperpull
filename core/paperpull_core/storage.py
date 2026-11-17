@@ -53,6 +53,9 @@ _FLAT = set()
 # Each documents folder an account's documents were moved to, a JSON list
 # of full paths in its output folder (Paths.documents_roots).
 DOCUMENTS_FOLDERS = "documents-folders.json"
+# Each of those the Move filed documents in without a folder of their kind
+# (#201), so documents are looked for in it as a whole, and in no other.
+FLAT_DOCUMENTS_FOLDERS = "documents-folders-flat.json"
 # The config file load_config last read, which Login asks about, since a
 # sign-in is opened on that config's port (ports.say_at_sign_in).
 _CONFIG_READ = None
@@ -308,7 +311,8 @@ def load_config(path: Optional[Path] = None) -> dict:
         hold_to_the_server(cfg, path)
         refuse_links_out(cfg["output_dir"], path)
         if cfg.get("documents_dir"):
-            refuse_links_out(cfg["documents_dir"], path)
+            refuse_links_out(cfg["documents_dir"], path,
+                             every_folder=cfg.get("kind_folders", True) is False)
     cfg.setdefault("output_dir", str(Path.home() / "Downloads" / sp.provider))
     cfg.setdefault("min_pdf_bytes", 3000)
     cfg.setdefault("max_path_length", 240)
@@ -461,24 +465,59 @@ def _kinds_filed() -> List[str]:
     return [f.name for f in spec().folders if f.attr not in _KEPT_WITH_RECORDS]
 
 
-def pattern_names_kind(pattern: str) -> bool:
-    """Whether names built by `pattern` say which kind a document is, so
-    documents of several kinds can share one folder (#201).
+def fields_telling_kinds_apart(app_spec=None) -> Optional[List[str]]:
+    """The fields a pattern needs so that documents of this app's kinds,
+    sharing one folder, never want one name (#201). Empty for an app that
+    files one kind. None when no field can, as for an app that files a
+    kind by name rather than by routing it, Anthem's ID cards and letters,
+    which no field of the record says.
 
-    Any field that names kind counts, in an optional section or as one of
-    a field's alternatives too, as {number|kind} is, so the usual names,
-    which carry it in [ {kind}], are taken as they are."""
+    A field tells kinds apart when the folder of a document's kind follows
+    from its value. A statements app routes a document by its category
+    (folder_for(doc.category)) and names it passing no kind, so {kind} is
+    that category. A receipts app routes by purchase type, {type}, and
+    files invoices apart by their document type, {kind}. The census
+    test_every_app_kind_folders.py holds every app to this."""
+    sp = app_spec or spec()
+    kinds = [f.attr for f in sp.folders if f.attr not in _KEPT_WITH_RECORDS]
+    if len(kinds) < 2:
+        return []
+    routed = set(sp.routes.values()) | ({sp.default_route} if sp.default_route else set())
+    if any(attr not in routed for attr in kinds):
+        return None
+    if sp.kind != RECEIPT:
+        return ["kind"]
+    invoices = sp.routes.get("invoices")
+    need = ["type"] if len([a for a in kinds if a != invoices]) > 1 else []
+    return need + (["kind"] if invoices in kinds else [])
+
+
+def pattern_shows(pattern: str, name: str) -> bool:
+    """Whether every name `pattern` builds carries the field `name`'s own
+    value (#201). A field that is one of several alternatives does not, as
+    {number|kind} is the number when there is one, and neither does one in
+    an optional section beside another field, which drops the section when
+    it is empty. The usual names never do, since under them {kind} is what
+    the app passed, which for a statements app is nothing."""
     from . import naming
-
-    def names_kind(nodes) -> bool:
-        for node in nodes:
-            if isinstance(node, naming._Field) and "kind" in node.names:
-                return True
-            if isinstance(node, naming._Optional) and names_kind(node.parts):
-                return True
+    if pattern in (naming.DEFAULT_RECEIPTS, naming.DEFAULT_STATEMENTS):
         return False
 
-    return names_kind(naming.parse(pattern))
+    def shows(nodes) -> bool:
+        for node in nodes:
+            if isinstance(node, naming._Field) and node.names == [name]:
+                return True
+            if isinstance(node, naming._Optional):
+                alone = all(n.names == [name] for n in node.parts
+                            if isinstance(n, naming._Field))
+                if alone and shows(node.parts):
+                    return True
+        return False
+
+    try:
+        return shows(naming.parse(pattern))
+    except naming.PatternError:
+        return False
 
 
 def set_kind_folders(cfg: dict, path) -> bool:
@@ -512,18 +551,29 @@ def set_kind_folders(cfg: dict, path) -> bool:
             "or moving anything. Set documents_dir to a full path, or take kind_folders "
             "out, and run again." % name)
     kinds = _kinds_filed()
-    if len(kinds) > 1:
-        from . import naming
-        pattern = _FILENAME_PATTERN or (naming.DEFAULT_RECEIPTS if spec().kind == RECEIPT
-                                        else naming.DEFAULT_STATEMENTS)
-        if not pattern_names_kind(pattern):
-            raise SystemExit(
-                "kind_folders is false in %s, but %s files %s, which would then share one "
-                "folder with nothing in a file's name to say which kind it is, and two of "
-                "them could want the same name. This run stopped before saving or moving "
-                "anything. Put {kind} in the file naming pattern, as a folder or in the "
-                "name, or take kind_folders out, and run again."
-                % (name, spec().provider, _listed_kinds(kinds)))
+    need = fields_telling_kinds_apart()
+    if need is None:
+        raise SystemExit(
+            "kind_folders is false in %s, but %s files %s, and some of them by name, "
+            "which no field of a file naming pattern says, not even {kind}, so they "
+            "would share one folder with nothing in a file's name to say which kind it "
+            "is. This run stopped before saving or moving anything. Take kind_folders "
+            "out, and run again." % (name, spec().provider, _listed_kinds(kinds)))
+    from . import naming
+    pattern = _FILENAME_PATTERN or (naming.DEFAULT_RECEIPTS if spec().kind == RECEIPT
+                                    else naming.DEFAULT_STATEMENTS)
+    missing = [f for f in need if not pattern_shows(pattern, f)]
+    if missing:
+        raise SystemExit(
+            "kind_folders is false in %s, but %s files %s, which would then share one "
+            "folder with nothing in a file's name to say which kind it is, and two of "
+            "them could want the same name. This run stopped before saving or moving "
+            "anything. The file naming pattern needs %s, as a folder or in the name, "
+            "and not as one of a field's alternatives or in an optional section with "
+            "another field. The usual names do not carry it. Change the pattern, or "
+            "take kind_folders out, and run again."
+            % (name, spec().provider, _listed_kinds(kinds),
+               _listed_kinds(["{%s}" % f for f in need])))
     _FLAT.add(key)
     return False
 
@@ -688,7 +738,7 @@ def server_profile_dir(config_path) -> str:
     return str(Path(os.environ.get("PAPERPULL_PROFILES") or "/profiles") / folder)
 
 
-def refuse_links_out(output_dir: str, path: Path) -> None:
+def refuse_links_out(output_dir: str, path: Path, every_folder: bool = False) -> None:
     """On PaperPull Server, stop a run before it writes anything when the
     folder its documents go to holds a link, file or folder, that leads
     outside the data folder. Logs, Diagnostics, Backups, Manual Review, a
@@ -697,8 +747,13 @@ def refuse_links_out(output_dir: str, path: Path) -> None:
     browser profiles among the places it could reach. A folder that is a
     link staying in the data folder is looked through as well, and only
     the folders the app files into are walked below the first level, so a
-    virtual environment's link to the system's Python stops nothing."""
-    found = shared_folder.first_link_out(output_dir, [f.name for f in spec().folders])
+    virtual environment's link to the system's Python stops nothing.
+    `every_folder` walks every folder below the first level too, as for a
+    documents folder filed without kind folders (#201), whose first level
+    is a pattern's folders, all but a virtual environment, a cache and a
+    browser profile."""
+    found = shared_folder.first_link_out(
+        output_dir, None if every_folder else [f.name for f in spec().folders])
     if found is None:
         return
     raise SystemExit(
@@ -840,6 +895,8 @@ class Paths:
             _folder_key(self.documents) == _folder_key(self.root))
         # Each documents folder this account's documents were moved to.
         self.documents_folders_json = self.root / DOCUMENTS_FOLDERS
+        # Each of those filed without kind folders (#201).
+        self.flat_documents_json = self.root / FLAT_DOCUMENTS_FOLDERS
         for folder in self._spec.folders:
             setattr(self, folder.attr, self.root / folder.name)
         for csv_spec in self._spec.csv_files:
@@ -940,9 +997,12 @@ class Paths:
                     held.append(path)
         # Filed with no folder of its kind, a document is in the documents
         # folder itself (#201), and so it may be in each documents folder
-        # it was moved to before, whatever kind_folders says now, so it is
-        # still found after the setting is taken out.
-        for root in ([] if self.kind_folders else [self.documents]) + used:
+        # the Move filed it in that way before, whatever kind_folders says
+        # now, so it is still found after the setting is taken out. Only
+        # those, so an account that never used the setting holds what it
+        # always held, and not every file anywhere in a folder it used.
+        flat = self.flat_documents_roots(used)
+        for root in ([] if self.kind_folders else [self.documents]) + flat:
             if _folder_key(root) not in seen:
                 seen.add(_folder_key(root))
                 held.append(Path(root))
@@ -953,29 +1013,45 @@ class Paths:
         beside the records."""
         return [f for f in self._spec.folders if f.attr not in _KEPT_WITH_RECORDS]
 
+    @staticmethod
+    def _listed(path: Path) -> List[str]:
+        """The full paths a list of documents folders names."""
+        try:
+            with shared_folder.open_to_read(path, "r", encoding="utf-8") as f:
+                listed = json.loads(f.read())
+        except (OSError, ValueError, SystemExit):
+            return []
+        return [item for item in (listed if isinstance(listed, list) else ())
+                if isinstance(item, str) and Path(item).is_absolute()]
+
     def documents_roots(self) -> List[Path]:
         """Each documents folder this account's documents were moved to, as
         the Move wrote them down in documents-folders.json, a full path
         each. On PaperPull Server, where anybody on the share can edit the
         file, only one inside the data folder holding no link out of it, in
         it or in a folder of a kind in it (shared_folder.first_link_out),
-        as the documents folder itself is held when a run starts."""
-        try:
-            with shared_folder.open_to_read(self.documents_folders_json, "r",
-                                            encoding="utf-8") as f:
-                listed = json.loads(f.read())
-        except (OSError, ValueError, SystemExit):
-            return []
+        as the documents folder itself is held when a run starts. One filed
+        without kind folders (#201) is walked whole, since its first level
+        is a pattern's folders."""
+        flat = {_folder_key(p) for p in self._listed(self.flat_documents_json)}
         roots = []
-        for item in listed if isinstance(listed, list) else ():
-            if not (isinstance(item, str) and Path(item).is_absolute()):
-                continue
+        for item in self._listed(self.documents_folders_json):
             if shared_folder.on_server() and (
                     not _in_data(os.path.realpath(item), shared_folder.data_folder())
-                    or shared_folder.first_link_out(item, [f.name for f in self._routed()])):
+                    or shared_folder.first_link_out(
+                        item, None if _folder_key(item) in flat
+                        else [f.name for f in self._routed()])):
                 continue
             roots.append(Path(item))
         return roots
+
+    def flat_documents_roots(self, roots: Optional[List[Path]] = None) -> List[Path]:
+        """Each documents folder of documents_roots the Move filed documents
+        in without kind folders (#201), as it wrote them down in
+        documents-folders-flat.json."""
+        flat = {_folder_key(p) for p in self._listed(self.flat_documents_json)}
+        return [r for r in (self.documents_roots() if roots is None else roots)
+                if _folder_key(r) in flat]
 
     def documents_moves(self) -> Dict[Path, Path]:
         """Each folder of a kind a document may be in that is not where it
@@ -1020,6 +1096,13 @@ class Paths:
         setting changes or is cleared."""
         if _folder_key(self.documents) == _folder_key(self.root):
             return
+        if not self.kind_folders:
+            # Filed without kind folders (#201), so it is looked in as a
+            # whole from now on.
+            flat = self._listed(self.flat_documents_json)
+            if not any(_folder_key(p) == _folder_key(self.documents) for p in flat):
+                atomic_write_text(self.flat_documents_json,
+                                  json.dumps(flat + [str(self.documents)], indent=1))
         known = [str(p) for p in self.documents_roots()]
         if any(_folder_key(p) == _folder_key(self.documents) for p in known):
             return

@@ -7,6 +7,32 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+
+- **Documents without a folder for each kind (#201).** `"kind_folders":
+  false` in an account's config.json files its documents straight into its
+  documents folder, in the folders a naming pattern makes, with no
+  `Statements` or `Tax Documents` folder between. Downloads are still
+  written and checked in the provider's own folder, Manual Review, Logs and
+  the records stay there, and the Move brings documents out of their kind
+  folders, offered on the Documents settings page. Since every kind then
+  shares one folder, a run stops before saving or moving anything unless
+  the pattern says which kind a document is, `{kind}` for a statements
+  provider and `{type}` for a receipts one, and the message names the
+  kinds. It stops as well with no documents folder of the account's own.
+  Contributed by @appchamp. Before merging, the check was made to ask
+  whether the name really carries the kind, since the usual names leave it
+  out for every statements provider and two kinds of one day got one name,
+  and to refuse a provider that files some kinds by name, as Anthem does.
+  The Documents settings were made to count documents still in a kind
+  folder of the documents folder, PaperPull Server's start-of-run check was
+  made to walk every folder of such a documents folder for a link out of
+  the data folder, the setting was made to travel with Export history, and
+  an earlier documents folder is searched as a whole only when documents
+  were filed in it this way.
+
 ## [0.68.0] - 2026-11-16
 
 Every provider now says which country it is for, in the control panel, in

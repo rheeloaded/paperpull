@@ -300,7 +300,12 @@ NAMING_KEYS = ("filename_pattern", "filename_pattern_receipts",
 # What load_config gives every app, so an install made before its
 # config.example.json existed still carries them.
 CORE_SETTINGS = ("owner", "owner_in_filename", "default_start_date", "min_pdf_bytes",
-                 "max_path_length", "delay_min_seconds", "delay_max_seconds")
+                 "max_path_length", "delay_min_seconds", "delay_max_seconds",
+                 "kind_folders")
+# What load_config takes for a core setting no config.example.json lists,
+# so an import holds a value to its kind (kind_folders is true or false,
+# #201, and a run refuses anything else).
+CORE_DEFAULTS = {"kind_folders": True}
 # The longest a setting may be once written as JSON. The longest real one is a
 # list of account labels.
 MAX_SETTING_CHARS = 4000
@@ -549,7 +554,7 @@ def settings_to_apply(install: Path, cfg: dict, settings: dict, check_pattern=No
             if left_out is not None:
                 left_out.append(key)
             continue
-        ref = example.get(key, cfg.get(key))
+        ref = example.get(key, cfg.get(key, CORE_DEFAULTS.get(key)))
         if ref is not None and not _same_kind(ref, value):
             continue
         if key in NAMING_KEYS:

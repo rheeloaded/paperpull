@@ -2793,6 +2793,11 @@ async function dcLoad() {
   $('drapplyall').hidden = !own.length;
   $('dcleft').hidden = !d.left;
   $('dclefttext').textContent = !d.left ? ''
+    : d.documents_dir && d.kind_folders === false
+      ? many(d.left, 'document') + (d.left === 1 ? ' is' : ' are') + ' still in a folder of ' +
+        (d.left === 1 ? 'its' : 'their') + ' kind, in ' + d.output_dir + ', ' + d.documents_dir +
+        ' or an earlier documents folder. PaperPull still finds them there. ' +
+        'Preview, then Move, to bring them out into ' + d.documents_dir + '.'
     : d.documents_dir ? many(d.left, 'document') + (d.left === 1 ? ' is' : ' are') + ' still in ' +
       d.output_dir + ' or an earlier documents folder. PaperPull still finds them there. ' +
       'Preview, then Move, to bring them to ' + d.documents_dir + '.'

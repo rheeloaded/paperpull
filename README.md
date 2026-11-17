@@ -616,9 +616,10 @@ folder has to be inside the data folder, see
 [SERVER.md](SERVER.md#paperless).
 
 Documents go into a folder of their kind, `Statements` or `Tax Documents`,
-inside the documents folder. For a provider with one kind, `"kind_folders":
-false` in its config.json files them straight into the documents folder
-instead, see [file naming](docs/file-naming.md#without-a-folder-for-each-kind).
+inside the documents folder. `"kind_folders": false` in a config.json files
+them straight into the documents folder instead, once the file naming
+pattern says which kind each one is, see
+[file naming](docs/file-naming.md#without-a-folder-for-each-kind).
 
 ## Moving to another computer
 

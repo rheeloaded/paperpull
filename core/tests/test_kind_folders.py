@@ -44,6 +44,11 @@ from test_documents_folder import (ACCOUNTS, BEFORE, FIRST, SECOND, Office, body
                                    moving, write)
 
 
+# A pattern whose names say which kind a document is, which a provider of
+# several kinds needs without kind folders (test_kind_folders_tell_kinds_apart.py).
+KIND_SHOWN = "{date} {summary} {kind}"
+
+
 @pytest.fixture(autouse=True)
 def no_pattern():
     storage.set_filename_patterns({})
@@ -83,7 +88,8 @@ def test_kind_folders_are_kept_unless_the_config_says_otherwise(tmp_path):
 def test_the_setting_reaches_the_paths_every_app_builds(tmp_path, capsys):
     out, docs = tmp_path / "out", tmp_path / "Watched"
     cfg = storage.load_config(write(tmp_path / "app", {
-        "output_dir": str(out), "documents_dir": str(docs), "kind_folders": False}))
+        "output_dir": str(out), "documents_dir": str(docs), "kind_folders": False,
+        "filename_pattern": KIND_SHOWN}))
     assert Paths(Path(cfg["output_dir"])).documents_moves()[out / "Statements"] == docs
     assert capsys.readouterr().out == ""
 
@@ -103,18 +109,12 @@ def test_a_provider_of_several_kinds_with_no_kind_in_its_pattern_is_refused(tmp_
 
 @pytest.mark.parametrize("pattern", ["{year}/{date} {account} {kind}",
                                      "{kind}/{date} {account}",
-                                     "{date}[ {number|kind}]"])
+                                     "{date}[ {kind}]"])
 def test_a_pattern_naming_the_kind_lets_several_kinds_share_the_folder(tmp_path, pattern):
     cfg = storage.load_config(write(tmp_path / "app", {
         "output_dir": str(tmp_path / "out"), "documents_dir": str(tmp_path / "Watched"),
         "kind_folders": False, "filename_pattern": pattern}))
     assert cfg["kind_folders"] is False
-
-
-def test_the_usual_names_carry_the_kind_already(tmp_path):
-    storage.load_config(write(tmp_path / "app", {
-        "output_dir": str(tmp_path / "out"), "documents_dir": str(tmp_path / "Watched"),
-        "kind_folders": False}))
 
 
 def test_a_provider_of_one_kind_needs_no_kind_in_its_pattern(tmp_path):
@@ -153,7 +153,8 @@ def test_one_account_without_kind_folders_leaves_the_next_with_them(tmp_path):
     app = tmp_path / "app"
     first, second = tmp_path / "first", tmp_path / "second"
     storage.load_config(write(app, {"output_dir": str(first), "kind_folders": False,
-                                    "documents_dir": str(tmp_path / "A")}))
+                                    "documents_dir": str(tmp_path / "A"),
+                                    "filename_pattern": KIND_SHOWN}))
     storage.load_config(write(app, {"output_dir": str(second),
                                     "documents_dir": str(tmp_path / "B")}, "config.b.json"))
     assert Paths(first).documents_moves()[first / "Statements"] == tmp_path / "A"

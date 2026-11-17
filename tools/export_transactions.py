@@ -873,18 +873,26 @@ def statement_name(index: Path, pdf: Path) -> str:
     of its kind is its name alone, as it always was. A statement moved to
     the account's documents folder (#102) is named from inside that folder
     the same way, each documents folder its documents went to being
-    written down beside the index, in documents-folders.json."""
-    roots = [index.parent]
-    try:
-        listed = json.loads(shared_folder.read_text(index.parent / "documents-folders.json"))
-        roots += [Path(p) for p in listed if isinstance(p, str) and Path(p).is_absolute()]
-    except (OSError, ValueError, TypeError):
-        pass
+    written down beside the index, in documents-folders.json. One the Move
+    filed without kind folders (#201), written down in
+    documents-folders-flat.json, has a pattern's folders at its first
+    level, so each of them is kept in the name."""
+    def listed(name: str) -> List[Path]:
+        try:
+            items = json.loads(shared_folder.read_text(index.parent / name))
+            return [Path(p) for p in items if isinstance(p, str) and Path(p).is_absolute()]
+        except (OSError, ValueError, TypeError):
+            return []
+
+    roots = [index.parent] + listed("documents-folders.json")
+    flat = {os.path.normcase(str(p)) for p in listed("documents-folders-flat.json")}
     for root in sorted(roots, key=lambda p: len(str(p)), reverse=True):
         try:
             parts = pdf.relative_to(root).parts
         except ValueError:
             continue
+        if os.path.normcase(str(root)) in flat:
+            return "/".join(parts)
         return "/".join(parts[1:]) if len(parts) > 2 else pdf.name
     return pdf.name
 

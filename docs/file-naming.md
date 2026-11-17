@@ -70,10 +70,10 @@ Manual Review stays one flat folder whatever the pattern says.
 
 ### Without a folder for each kind
 
-For a provider that files one kind of document, the folder of its kind
-says nothing. An account with a documents folder of its own
-(`documents_dir`) can leave it out with `"kind_folders": false` in its
-config.json (#201), so with `{year}/{date:yyyy-mm-dd} {summary}`
+A document is filed in the folder of its kind, and the folders a pattern
+makes go inside it. An account with a documents folder of its own
+(`documents_dir`) can leave that folder out with `"kind_folders": false`
+in its config.json (#201), so with `{year}/{date:yyyy-mm-dd} {kind}`
 
 ```
 9 Utilities/PG&E/Statements/2026/2026-10-07 Statement.pdf
@@ -92,17 +92,29 @@ becomes
 * **The Move brings documents out of their kind folders,** in the
   provider's own folder and in the documents folder alike, keeping the
   folders the pattern made. A folder of a kind it leaves empty in the
-  documents folder is removed.
+  documents folder is removed. The Documents settings count the documents
+  still in a folder of their kind and offer the Move.
+* **Every kind shares one folder, so the name has to say which kind a
+  document is.** For a statements provider the pattern needs `{kind}`,
+  which is the document's category, Statement or Tax Document. For a
+  receipts provider it needs `{type}`, Online or In-Store, and `{kind}`
+  too when the provider files invoices apart, as Target and Walmart do.
+  The field has to stand on its own, as a folder or in the name, not as
+  one of a field's alternatives (`{number|kind}` is the number when there
+  is one) and not in an optional section with another field. The usual
+  names do not carry the kind for a statements provider, so they are not
+  enough. A provider that files some kinds by name, as Anthem files ID
+  cards and letters, keeps its kind folders.
 * **A run stops before saving or moving anything** when the setting is
   not `true` or `false`, when the account has no documents folder of its
-  own (documents would sit loose beside its records), or when the provider
-  files more than one kind and the pattern has no `{kind}`, since two
-  kinds sharing a folder could want one file name. The message names the
-  kinds. `{kind}` counts anywhere in the pattern, as a folder, in an
-  optional section or as an alternative, so the usual names, which end in
-  `[ {kind}]`, are fine.
+  own (documents would sit loose beside its records), or when the pattern
+  does not say which kind a document is. The message names the kinds and
+  the field the pattern needs.
 * Setting it back to `true` does not move documents back into folders of
   their kind. They stay where they are and are still found.
+* The setting comes along when history is exported and imported, and the
+  documents folder does not, so on the new computer a run asks for a
+  documents folder first.
 
 **Rename** moves files into the folders a pattern names and back out of
 them, the same way a download would file them now. Changing back to a

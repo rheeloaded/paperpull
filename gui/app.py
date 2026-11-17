@@ -23,6 +23,7 @@ moved or copied, and the old way of running them keeps working alongside.
 """
 from __future__ import annotations
 
+import ast
 import base64
 import csv
 import io
@@ -6297,12 +6298,52 @@ def _indexed_files(root: Path):
 DOCUMENT_ENDINGS = (".pdf", ".xls", ".xlsx", ".csv")
 
 
+def _kind_folder_names(d: Path) -> list:
+    """The folders of a kind an app files documents in, by name, read from
+    its own storage.py without running it, every Folder its AppSpec declares
+    but those kept with the records. A name may be a constant of the file,
+    as Apple's and Uber's are. Empty when the file cannot be read."""
+    try:
+        tree = ast.parse(_storage_src(d))
+    except (SyntaxError, ValueError):
+        return []
+    consts = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+            consts[node.targets[0].id] = node.value.value
+    found = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and getattr(node.func, "id", "") == "Folder"
+                and len(node.args) >= 2):
+            continue
+        arg = node.args[1]
+        name = (arg.value if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                else consts.get(arg.id) if isinstance(arg, ast.Name) else None)
+        if name and name not in KEPT_FOLDERS:
+            found.append(((node.lineno, node.col_offset), name))
+    return [name for _, name in sorted(found)]
+
+
+def _kind_folders_of(meta: dict, account: str) -> bool:
+    """Whether an account's documents are filed in a folder of their kind
+    in its documents folder, true unless its config says "kind_folders":
+    false, the one value a run takes for it (core storage.set_kind_folders,
+    #201)."""
+    return _config_of(meta, account).get("kind_folders", True) is not False
+
+
 def _documents_left(meta: dict, account: str) -> int:
     """How many documents an account's records name that are saved and
     checked, and are in a folder of their kind in its own folder or in a
     documents folder it used before, and so not yet in its documents folder,
     as the Move would count them. Read from its progress.json, each file
-    counted once and only while it is there, never one in Manual Review."""
+    counted once and only while it is there, never one in Manual Review.
+
+    Without kind folders (#201) a document in a folder of its kind in the
+    documents folder itself is not where it belongs either, and the Move
+    brings it out, so it is counted too."""
     try:
         root = _account_root(meta, account)
         home = root.resolve()
@@ -6311,6 +6352,11 @@ def _documents_left(meta: dict, account: str) -> int:
         roots = [home] + [r.resolve() for r in _documents_roots(root)]
     except (ValueError, OSError, RuntimeError):
         return 0
+    # The folders of a kind in the documents folder a Move empties, when it
+    # is a folder of the account's own and is filed without them.
+    kinds = set()
+    if docs and here != home and meta.get("dir") and not _kind_folders_of(meta, account):
+        kinds = {os.path.normcase(n) for n in _kind_folder_names(Path(meta["dir"]))}
     data = _read_json(root / "progress.json")
     indexed = _indexed_files(root)
     seen = set()
@@ -6341,7 +6387,12 @@ def _documents_left(meta: dict, account: str) -> int:
                 plain = where.is_file()
             except (OSError, RuntimeError, ValueError):
                 continue
-            if here in where.parents or not plain:
+            if not plain:
+                continue
+            if here in where.parents:
+                parts = where.relative_to(here).parts
+                if len(parts) >= 2 and os.path.normcase(parts[0]) in kinds:
+                    seen.add(os.path.normcase(str(where)))
                 continue
             for top in roots:
                 if top == here or top not in where.parents:
@@ -6420,6 +6471,7 @@ def _documents_answer(meta: dict, account: str, root: Path, apps: dict = None) -
             "unfollowed": len(own),
             "own": own,
             "left": _documents_left(meta, account),
+            "kind_folders": _kind_folders_of(meta, account),
             "kept": list(KEPT_FOLDERS)}
 
 
