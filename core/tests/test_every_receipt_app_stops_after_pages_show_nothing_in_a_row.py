@@ -234,7 +234,34 @@ def test_a_list_not_read_whole_wins(home):
     assert len(home.fetched) == 5, report(home, said)
     assert ended in (("exit", 0), ("returned", 0)), report(home, said)
     assert STOP_WORDS in said and "reads the list first" in said, report(home, said)
+    assert "in a few hours or tomorrow" not in said, report(home, said)
     assert result and result["stopped"] == 1 and result.get("list_not_read") == 1, result
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_pilot_table_that_fails_keeps_the_stop(home, monkeypatch):
+    """Review NOTE 4. The table raising does not turn the stop into an error."""
+    def broken(*_a, **_kw):
+        raise RuntimeError("made to fail")
+    monkeypatch.setattr(home.mod.App, "_pilot_report", broken)
+    home.list_these(6, 6)
+    said, result, ended = home.run("--pilot")
+    assert_the_stop(home, said, result, ended, 5)
+    assert "results could not be shown" in said and "made to fail" not in said, report(home, said)
+
+
+@pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
+def test_a_download_again_run_never_stops(home):
+    """Review MINOR 3. A restore of receipts saved before, whose pages show
+    nothing now, goes through every one as before."""
+    home.list_these(7)
+    progress = {k: dict(r, state=State.COMPLETED.value, downloaded_ok=True)
+                for k, r in home.found.items()}
+    (home.out / "progress.json").write_text(json.dumps(progress), encoding="utf-8")
+    said, result, ended = home.run(*scope.RUN_ALL, "--redownload")
+    assert len(home.fetched) == 7, report(home, said)
+    assert STOP_WORDS not in said, report(home, said)
+    assert result and "stop" not in result, result
 
 
 @pytest.mark.parametrize("app, method", census.TRYING, ids=census.TRYING_IDS)

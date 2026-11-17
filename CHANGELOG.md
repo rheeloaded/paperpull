@@ -82,11 +82,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   why and to continue in a few hours or tomorrow, writes a failure file of
   its own with counts only, and ends with exit code 0 as a stop. The panel
   says the receipt pages came back empty, in the same words. A run whose
-  list was not read whole still offers Get new rather than Continue, and
-  Pilot still shows its results table. Each run of an outage day opens up
-  to five such pages, plus those that showed nothing on earlier days, so a
-  PaperPull Server schedule that runs every hour still opens many pages a
-  day while an outage lasts.
+  list was not read whole says only to run Get new, which reads the list,
+  and offers it rather than Continue, and Pilot still shows its results
+  table. A Download again never stops this way, since it goes over dates
+  the person chose and may reach past what the provider still shows. Only
+  pages new to showing nothing count, so an install that already holds
+  purchases whose pages showed nothing on earlier days, as #225's 244 did,
+  still opens every one of those on each run while an outage lasts, and
+  the stop comes only after them. Each run of an outage day opens up to
+  five new such pages besides, so a PaperPull Server schedule that runs
+  every hour still opens many pages a day while an outage lasts.
 
 - **Anthem's failure file for an EOB list that would not open describes
   that page.** Run All goes on to the member documents, ID cards, letters
@@ -103,8 +108,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   whose page showed nothing could be set aside as No Receipt Available on
   its first day of that. Words that are no date counted as days too, and so
   did a day later than the run's own, from a clock set back or a record
-  made on a computer ahead in time. Now only real dates up to the run's day
-  count, a day after it is dropped when the record is next written, and a
+  made on a computer ahead in time. Now a run counts only real dates up to
+  its own day and drops a later day when it next writes the record. A
+  record reads as set aside, and Meijer holds it final, only with three
+  real dates in a list. Import history keeps only a list of real dates. A
   saved receipt lets go of whatever was there.
 
 ## [0.68.0] - 2026-11-16

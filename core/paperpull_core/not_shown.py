@@ -46,8 +46,9 @@ nothing was otherwise opened on every run, with no end, and eBay's details
 pages have a daily cap and Best Buy's Akamai protection blocks after too
 many requests. What tells an outage from receipts that are truly missing
 is a page that never showed nothing before and now does, so only those
-count, a page whose record holds no day before the run's own, and a
-Download again of a receipt saved before, whose page showed it once. A
+count, a page whose record holds no day before the run's own. A Download
+again counts nothing, since it goes over dates the person chose, often
+past what the provider still shows, and finishes as it always did. A
 receipt that is truly missing shows nothing on every run, so from its
 second day it is known and cannot stop anything, and five of them at the
 head of the list hold a run for one day at most. Any save sets the count
@@ -138,6 +139,16 @@ def _a_day(text: str) -> bool:
     return True
 
 
+def real_days(value) -> list:
+    """The real dates in a days value, from a list only. Where a record is
+    read as set aside, and where Import history brings one, as tried_again
+    reads them, so text, words and dates that do not exist never count as
+    days a receipt page showed nothing."""
+    if not isinstance(value, list):
+        return []
+    return [d for d in value if isinstance(d, str) and _a_day(d)]
+
+
 def _days_so_far(app, rec) -> list:
     """The days that count for this run, each a real date no later than the
     run's own. Words that are no date count for nothing, and so does a day
@@ -219,6 +230,16 @@ class NothingShownListUnread(ListNotRead):
 
 # What a Pilot catches to print its results before the stop goes on.
 STOPS = (NothingShown, NothingShownListUnread)
+
+
+def report_anyway(report, *args) -> None:
+    """A Pilot's results table, printed on the stop. One that fails says so
+    in a line and never takes the stop's place, whose reason and exit code
+    are what the panel reads."""
+    try:
+        report(*args)
+    except Exception:
+        print("\n  The pilot's results could not be shown. The files are in the output folder.")
 
 
 def _streak(app) -> dict:
@@ -322,13 +343,13 @@ def tried_again(app, purchase, why: str) -> bool:
         rec = {}
     if rec.get("downloaded_ok"):
         # Download again, for a receipt saved before. The copy saved then
-        # stands, and no plain run asks for it again. Its page showed the
-        # receipt once, so it counts.
+        # stands, and no plain run asks for it again. Only a Download again
+        # reaches it, which counts nothing toward the stop (_counted).
         app._record_state(purchase, State.FAILED,
                           notes="%s, the receipt saved before is kept" % why)
         app.stats["failed"] += 1
         print("  %s. The receipt saved before is kept." % why)
-        return _counted(app, True)
+        return False
     new = not any(d < _this_day(app) for d in _days_so_far(app, rec))
     days = _days_so_far(app, rec)
     if _this_day(app) not in days:
@@ -380,6 +401,12 @@ def _counted(app, new: bool) -> bool:
     stop the run at the STOP_AFTER-th in a row new to showing nothing. A
     page that showed nothing on an earlier day neither counts nor sets the
     count back. False, nothing was saved."""
+    if getattr(getattr(app, "args", None), "redownload", False):
+        # A Download again, a restore, is over dates the person chose, often
+        # reaching past what the provider still shows, and its pages showed
+        # their receipts once. It finishes as it always did, so it counts
+        # nothing and leaves the count as it was (review of next-1117).
+        return False
     kept = _streak(app)
     if not new:
         kept["known"] += 1
@@ -420,14 +447,20 @@ def _stop(app) -> None:
         app.progress.save(backup=True)
     except Exception:
         pass
+    unread = _list_unread(app)
     again = "Press Continue" if under_panel() else "Run Resume"
     print()
     print("!! The last %d receipt pages this run opened showed nothing, and none of them"
           % STOP_AFTER)
     print("   had shown nothing before. %s may not be showing receipts right now, so"
           % _provider())
-    print("   the run stops here rather than open every purchase. Nothing saved is lost.")
-    print("   %s in a few hours or tomorrow to carry on from here." % again)
+    if unread:
+        # Continue reads no list, so the next step is the unread list's,
+        # said below in its own words once the file is written.
+        print("   the run stops here rather than open every purchase.")
+    else:
+        print("   the run stops here rather than open every purchase. Nothing saved is lost.")
+        print("   %s in a few hours or tomorrow to carry on from here." % again)
     facts = {
         "empty_pages_in_a_row": int(kept["in_a_row"]),
         "purchases_saved": len(kept["saved"]),
@@ -439,7 +472,7 @@ def _stop(app) -> None:
         app.write_failure(STOP_STEP, STOP_REASON, extra=facts)
     except Exception:
         pass
-    if _list_unread(app):
+    if unread:
         from . import listing
         whole_run = listing.say_unread(app).whole_run
         raise NothingShownListUnread(whole_run)
@@ -452,7 +485,10 @@ def set_aside(rec) -> bool:
     in an app that does not hold that state final otherwise (Meijer)."""
     if not isinstance(rec, dict) or rec.get("state") != State.NO_RECEIPT_AVAILABLE.value:
         return False
-    return len(_days(rec)) >= DAYS
+    # Real dates only. A day after today cannot be told here, since there is
+    # no run's day, and tried_again drops such a day before it ever sets a
+    # purchase aside.
+    return len(real_days(rec.get(DAYS_KEY))) >= DAYS
 
 
 def skipped(rec, otherwise: str) -> str:

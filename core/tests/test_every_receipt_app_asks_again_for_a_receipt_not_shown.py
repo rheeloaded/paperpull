@@ -438,9 +438,13 @@ def test_a_purchase_set_aside_is_never_said_to_be_completed(app):
 
 def test_the_words_for_a_purchase_set_aside():
     from paperpull_core import not_shown
-    aside = {"state": State.NO_RECEIPT_AVAILABLE.value, "not_shown_days": ["a", "b", "c"]}
+    # Real days, since words that are no date count for nothing (review of
+    # next-1117).
+    aside = {"state": State.NO_RECEIPT_AVAILABLE.value,
+             "not_shown_days": ["2031-01-02", "2031-01-03", "2031-01-04"]}
     assert "did not show on 3 separate days" in not_shown.skipped(aside, "done")
-    assert not_shown.skipped(dict(aside, not_shown_days=["a", "b"]), "done") == "done"
+    assert not_shown.skipped(dict(aside, not_shown_days=["2031-01-02", "2031-01-03"]),
+                             "done") == "done"
     assert not_shown.skipped(dict(aside, downloaded_ok=True), "done") == "done"
     assert not_shown.skipped({"state": State.COMPLETED.value}, "done") == "done"
     assert not_shown.skipped(None, "done") == "done"

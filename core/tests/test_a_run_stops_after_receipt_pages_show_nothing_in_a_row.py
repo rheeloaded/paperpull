@@ -147,7 +147,9 @@ def test_five_new_in_a_row_stop_at_the_fifth(tmp_path, capsys):
     assert rec[not_shown.DAYS_KEY] == [D]
     assert run.stats["failed"] == 5
     assert not run.rows, "no CSV row for any of them"
-    assert STOP_WORDS in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert STOP_WORDS in out and out.count("in a few hours or tomorrow") == 1, out
+    assert "reads the list first" not in out, out
 
 
 def test_four_in_a_row_never_stop(tmp_path):
@@ -235,22 +237,49 @@ def test_a_record_holding_an_earlier_day_and_this_one_is_known(tmp_path):
     assert empties(run, range(1001, 1007)) is None
 
 
-def test_download_again_of_saved_receipts_counts(tmp_path):
-    """X1.10. Each keeps its saved copy, untouched."""
+def test_download_again_of_saved_receipts_never_counts(tmp_path):
+    """X1.10, as decided after the review (MINOR 3). A Download again, a
+    restore, is over dates the person chose, often past what the provider
+    still shows, and it finishes as before. Each keeps its saved copy,
+    untouched."""
     run = Run(tmp_path)
+    run.args.redownload = True
     files = {}
     for n in range(1001, 1006):
         pdf = tmp_path / ("saved-%d.pdf" % n)
         pdf.write_bytes(b"%PDF-1.4 " + b"0" * 30000)
         files[n] = (pdf, pdf.read_bytes(), pdf.stat().st_mtime_ns)
         run.given(n, state=State.PDF_VERIFIED.value, downloaded_ok=True, pdf_path=str(pdf))
-    assert empties(run, range(1001, 1007)) == 1005
+    assert empties(run, range(1001, 1007)) is None
+    assert streak(run) == 0
     for n, (pdf, data, mtime) in files.items():
         rec = run.record(n)
         assert rec["downloaded_ok"] is True and rec["pdf_path"] == str(pdf)
         assert rec["notes"].endswith("the receipt saved before is kept")
         assert not_shown.DAYS_KEY not in rec
         assert pdf.read_bytes() == data and pdf.stat().st_mtime_ns == mtime
+
+
+def test_a_restore_run_never_counts_any_page(tmp_path):
+    """MINOR 3. Pages new to showing nothing in a Download again run, saved
+    before or not, count for nothing, and leave the count as it was."""
+    run = Run(tmp_path)
+    run.args.redownload = True
+    for n in range(1001, 1004):
+        run.given(n, state=State.PDF_VERIFIED.value, downloaded_ok=True)
+    assert empties(run, range(1001, 1013)) is None
+    assert streak(run) == 0
+    assert run.stats["failed"] == 12 and not run.failures
+
+
+def test_a_saved_receipt_met_outside_a_restore_still_counts_nothing(tmp_path):
+    """A record saved before reaches tried_again only on a Download again,
+    and is never counted either way."""
+    run = Run(tmp_path)
+    for n in range(1001, 1006):
+        run.given(n, state=State.PDF_VERIFIED.value, downloaded_ok=True)
+    assert empties(run, range(1001, 1006)) is None
+    assert streak(run) == 0
 
 
 def test_each_run_keeps_its_own_streak(tmp_path):
@@ -522,7 +551,11 @@ def test_the_stop_gives_way_to_a_list_not_read_whole(tmp_path, capsys):
         empty(run, 1005)
     assert stop.value.code == 0
     out = capsys.readouterr().out
-    assert STOP_WORDS in out and "reads the list first" in out
+    # The unread list's own next step, only. The stop's own "in a few hours
+    # or tomorrow" and "Nothing saved is lost" would send the person to
+    # Continue, which reads no list (review MINOR 1).
+    assert STOP_WORDS in out and out.count("reads the list first") == 1, out
+    assert "in a few hours or tomorrow" not in out and "Nothing saved is lost" not in out, out
     assert len(run.failures) == 1
     assert listing.last(run) == listing.STOPPED
 

@@ -16,6 +16,7 @@ Now only a list of real dates counts, and only those before the run's day.
 A save lets go of any value there. Every date and number is invented.
 """
 import collections
+import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -120,3 +121,57 @@ def test_days_written_as_one_string_never_read_as_set_aside():
     aside = {"state": State.NO_RECEIPT_AVAILABLE.value}
     assert not_shown.set_aside(dict(aside, not_shown_days=["2026-11-14", "2026-11-15", D]))
     assert not not_shown.set_aside(dict(aside, not_shown_days="2026-11-16"))
+
+
+# -- the same rule where a record is read as set aside, and where it moves ------------
+# (review of next-1117, MINOR 2)
+
+
+@pytest.mark.parametrize("days", ["2026-11-16", list("2026-11-16"), ["x", "y", "z"],
+                                  ["2026-13-45", "2026-02-30", "2026-00-01"],
+                                  ["", None, 5, "2026-11-15"]],
+                         ids=["text", "characters", "words", "not a date", "one real day"])
+def test_a_record_is_set_aside_only_by_three_real_days(days):
+    """Meijer holds such a record final through set_aside, and every receipt
+    app's skip line says it did not show on three separate days."""
+    aside = {"state": State.NO_RECEIPT_AVAILABLE.value, "not_shown_days": days}
+    assert not not_shown.set_aside(aside), days
+    assert not_shown.skipped(aside, "done") == "done"
+    assert not_shown.set_aside(dict(aside, not_shown_days=["2026-11-14", "2026-11-15", D]))
+
+
+def _migrate():
+    import importlib
+    import sys as _sys
+    tools = str(Path(__file__).resolve().parents[2] / "tools")
+    if tools not in _sys.path:
+        _sys.path.insert(0, tools)
+    return importlib.import_module("migrate")
+
+
+@pytest.mark.parametrize("days", ["2026-11-16", ["x", "y", "z", "2026-11-16"],
+                                  ["2026-02-30", "2026-11-15"]],
+                         ids=["text", "words", "not a date"])
+def test_an_import_keeps_only_a_list_of_real_days(tmp_path, days):
+    """Import history, both for a purchase new here and for one whose state
+    it takes."""
+    migrate = _migrate()
+    there = {"k": {"state": State.NO_RECEIPT_AVAILABLE.value,
+                   "notes": "Receipt page did not render on 3 separate days, so it is not "
+                            "asked for again", not_shown.DAYS_KEY: days}}
+    added = {}
+    migrate._merge(added, json_copy(there), [], tmp_path, tmp_path, provider="meijer")
+    here = {"k": {"state": State.FAILED.value, "notes": "tried again next run"}}
+    migrate._merge(here, json_copy(there), [], tmp_path, tmp_path, provider="meijer")
+    for rec in (added["k"], here["k"]):
+        kept = rec.get(not_shown.DAYS_KEY)
+        assert isinstance(kept, list), rec
+        for d in kept:
+            assert isinstance(d, str) and len(d) == 10, rec
+            datetime.date.fromisoformat(d)
+        assert not not_shown.set_aside(rec), rec
+
+
+def json_copy(value):
+    import json
+    return json.loads(json.dumps(value))

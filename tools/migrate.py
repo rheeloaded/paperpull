@@ -142,7 +142,7 @@ if (_CORE / "paperpull_core").is_dir():
     sys.path.insert(0, str(_CORE))
 from paperpull_core import countries  # noqa: E402
 from paperpull_core.keys import account_component  # noqa: E402
-from paperpull_core.not_shown import DAYS_KEY, asked_again, set_aside  # noqa: E402
+from paperpull_core.not_shown import DAYS_KEY, asked_again, real_days, set_aside  # noqa: E402
 from paperpull_core.ports import is_example  # noqa: E402
 from paperpull_core.shared_folder import read_plain  # noqa: E402
 from paperpull_core.storage import (  # noqa: E402
@@ -1086,6 +1086,10 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
         cur = target.get(key)
         if cur is None:
             rec = _moved(inc, old_bases, new_base, Path(home or new_base))
+            # Only a list of real days, as the receipt apps read them, never
+            # a value one character at a time.
+            if DAYS_KEY in rec:
+                rec[DAYS_KEY] = real_days(rec[DAYS_KEY])
             rec["imported_at"] = datetime.now().isoformat(timespec="seconds")
             target[key] = rec
             added += 1
@@ -1122,6 +1126,8 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
         if _done(cur) or any(f in cur for f in unfinished):
             lacking = {f: v for f, v in lacking.items() if f not in unfinished}
         if lacking:
+            if DAYS_KEY in lacking:
+                lacking[DAYS_KEY] = real_days(lacking[DAYS_KEY])
             cur.update(lacking)
             changed = True
         if _takes_the_state(cur, inc, Path(home or new_base)):
@@ -1134,7 +1140,7 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
             # again here keeps go, so it is never read as one set aside for
             # pages that showed nothing (review of #225).
             if DAYS_KEY in inc:
-                cur[DAYS_KEY] = list(inc[DAYS_KEY] or [])
+                cur[DAYS_KEY] = real_days(inc[DAYS_KEY])
             elif inc["state"] == "No Receipt Available" and cur.get(DAYS_KEY):
                 cur[DAYS_KEY] = []
             if asked_again(cur):

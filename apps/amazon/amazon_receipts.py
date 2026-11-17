@@ -1692,7 +1692,7 @@ class App:
         except not_shown.STOPS:
             # Five receipt pages in a row showed nothing, and the run stops.
             # The table of what the pilot did comes first all the same.
-            self._pilot_report(selected)
+            not_shown.report_anyway(self._pilot_report, selected)
             raise
         self._pilot_report(selected)
         self._stop_if_cut_short()
