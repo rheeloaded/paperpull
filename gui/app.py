@@ -2275,7 +2275,7 @@ def _not_for_documents(meta: dict, account: str) -> list:
         profile = _config_of(meta, other).get("profile_dir")
         if isinstance(profile, str) and profile.strip():
             path = Path(server_mode.with_home(profile.strip()))
-            out.append(path if path.is_absolute() else install / path)
+            out.extend(_with_brand_folders(path if path.is_absolute() else install / path))
         if other != account:
             try:
                 out.append(_account_root(meta, other))
@@ -5948,8 +5948,19 @@ def _profiles_known(apps: dict) -> list:
             profile = _config_of(meta, account).get("profile_dir")
             if isinstance(profile, str) and profile.strip():
                 path = Path(server_mode.with_home(profile.strip()))
-                out.append(path if path.is_absolute() else install / path)
+                out.extend(_with_brand_folders(path if path.is_absolute() else install / path))
     return out
+
+
+def _with_brand_folders(profile: Path) -> list:
+    """A profile folder and each one beside it that a fallback browser or a
+    brand named in the "browser" setting opens on (#222), all of them
+    signed in."""
+    from paperpull_core import browser
+    try:
+        return [profile] + browser.profile_folders(profile)[1:]
+    except (OSError, RuntimeError, ValueError):
+        return [profile]
 
 
 def _documents_problem(apps: dict, app_name: str, account: str, folder: str):

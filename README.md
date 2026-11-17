@@ -833,6 +833,36 @@ fresh profile of its own, separate from your everyday browsing. If none is
 found, the panel says so. Run from a terminal, the sign-in step offers to
 download a private copy of Chromium instead, and asks first.
 
+### Can I choose the browser it signs in with?
+
+Yes, with the `"browser"` setting in each provider's `config.json`. To sign
+in with Google Chrome on a computer that also has Edge, put this line in it.
+
+```json
+"browser": "chrome"
+```
+
+It takes one of these, in any case.
+
+- `auto`, the usual one. A browser you already have, Edge first, and a
+  private copy of Chromium offered only when there is none.
+- `installed`, only a browser you already have, never a download.
+- `bundled`, only PaperPull's private copy of Chromium.
+- `edge`, `chrome`, `brave`, `vivaldi` or `opera`, only that brand as
+  installed on this computer. On Linux `chrome` also takes the distro's
+  Chromium.
+
+A brand you name opens on a profile folder of its own beside the usual
+one, so the first sign-in after you change it asks you to sign in once
+more. When that brand is not installed, the sign-in says so and opens
+nothing. Any other value is refused with this list. The setting chooses the
+sign-in browser, and Get new and Continue attach to that window as before.
+When a browser is already open on the provider's port, the sign-in uses it.
+Edge can be told from the others there, so with `"browser": "chrome"` and
+Edge on the port the sign-in asks you to close Edge, but Chrome, Brave,
+Vivaldi and Opera all answer alike and are not told apart. On PaperPull
+Server only Chrome is there, so `auto` and `chrome` open the same window.
+
 ### Will it download the same document twice?
 
 No. PaperPull remembers every document it saved by what it is, not by

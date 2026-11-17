@@ -56,7 +56,11 @@ Each app is a generic engine plus **one** provider-specific file:
 - `config.json`, per install, holds the output folder, the browser profile
   folder, the browser to use and a unique CDP port in `cdp_url`.
   `"browser": "auto"` takes the person's own Edge or Chrome and falls back to
-  the bundled Chromium. `config.example.json` is the tracked template.
+  the bundled Chromium. `"installed"` takes only a browser of their own,
+  `"bundled"` only the bundled Chromium, and `"edge"`, `"chrome"`, `"brave"`,
+  `"vivaldi"` or `"opera"` only that brand (README, "Can I choose the browser
+  it signs in with?"). Your app hands the setting to the core as it is.
+  `config.example.json` is the tracked template.
 - `login.bat` opens that browser with a debugging port, and the app attaches
   to it over the Chrome DevTools Protocol.
 

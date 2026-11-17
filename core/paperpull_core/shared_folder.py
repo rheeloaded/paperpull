@@ -411,7 +411,12 @@ _NOWHERE_A_RUN_WRITES = (".venv", "venv", "__pycache__")
 
 
 def _walked(name: str) -> bool:
-    return name not in _NOWHERE_A_RUN_WRITES and not name.endswith("browser-profile")
+    if name in _NOWHERE_A_RUN_WRITES:
+        return False
+    # A profile folder, and the one beside it for a fallback browser or a
+    # brand named in the "browser" setting (browser.PROFILE_ENDS, #222).
+    from .browser import PROFILE_ENDS
+    return not any(name.endswith("browser-profile" + end) for end in ("",) + PROFILE_ENDS)
 
 
 def _download_folder(name: str) -> bool:

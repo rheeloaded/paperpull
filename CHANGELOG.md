@@ -7,6 +7,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **MINOR**, a new app, or a cross-app feature
 - **MAJOR**, breaking changes (repo layout, config format, removing an app)
 
+## [Unreleased]
+
+### Added
+
+- **Choose the browser you sign in with (#222).** The `"browser"` setting in
+  a provider's `config.json` also takes `edge`, `chrome`, `brave`, `vivaldi`
+  or `opera`, in any case. Named, the sign-in window is that brand as
+  installed on your computer and nothing else, on a profile folder of its
+  own, so the first sign-in after the change asks you to sign in once more.
+  A brand that is not installed, another brand already on the provider's
+  port, and a value PaperPull does not know are each said, and nothing is
+  opened. `"Installed"` and `"Bundled"` in any case now mean what they say,
+  where before they were read as `auto`. The README says how to pick Chrome.
+
 ## [0.68.0] - 2026-11-16
 
 Every provider now says which country it is for, in the control panel, in

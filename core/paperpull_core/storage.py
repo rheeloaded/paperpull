@@ -310,6 +310,10 @@ def load_config(path: Optional[Path] = None) -> dict:
     #             download a private copy only if there is none
     #   installed only one you already have, never download anything
     #   bundled   only this tool's own private copy, never touch yours
+    #   edge, chrome, brave, vivaldi or opera
+    #             only that brand as installed here, on a profile folder of
+    #             its own beside profile_dir, and never a download (#222)
+    # Any case is taken. Anything else is refused at sign-in with this list.
     # Whichever is used gets its OWN profile folder, so an everyday browser's
     # history, extensions and logins are never read or altered.
     cfg.setdefault("browser", "auto")
