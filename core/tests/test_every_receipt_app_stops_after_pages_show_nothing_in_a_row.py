@@ -253,13 +253,17 @@ def test_a_pilot_table_that_fails_keeps_the_stop(home, monkeypatch):
 @pytest.mark.parametrize("home", APPS, ids=IDS, indirect=True)
 def test_a_download_again_run_never_stops(home):
     """Review MINOR 3. A restore of receipts saved before, whose pages show
-    nothing now, goes through every one as before."""
-    home.list_these(7)
+    nothing now, goes through every one as before, and so do the six after
+    them that were never saved, which reach the restore's own check of the
+    app's --redownload (review of the repairs, MINOR 1)."""
+    home.list_these(13)
+    saved = {"ORDER-%d" % n for n in range(1001, 1008)}
     progress = {k: dict(r, state=State.COMPLETED.value, downloaded_ok=True)
-                for k, r in home.found.items()}
+                for k, r in home.found.items() if r["order_number"] in saved}
     (home.out / "progress.json").write_text(json.dumps(progress), encoding="utf-8")
     said, result, ended = home.run(*scope.RUN_ALL, "--redownload")
-    assert len(home.fetched) == 7, report(home, said)
+    assert len(home.fetched) == 13, report(home, said)
+    assert said.count("on 1 of 3 separate days") == 6, report(home, said)
     assert STOP_WORDS not in said, report(home, said)
     assert result and "stop" not in result, result
 

@@ -143,10 +143,11 @@ def real_days(value) -> list:
     """The real dates in a days value, from a list only. Where a record is
     read as set aside, and where Import history brings one, as tried_again
     reads them, so text, words and dates that do not exist never count as
-    days a receipt page showed nothing."""
+    days a receipt page showed nothing. A day written more than once is one
+    day, since they are counted as separate days."""
     if not isinstance(value, list):
         return []
-    return [d for d in value if isinstance(d, str) and _a_day(d)]
+    return list(dict.fromkeys(d for d in value if isinstance(d, str) and _a_day(d)))
 
 
 def _days_so_far(app, rec) -> list:
@@ -156,7 +157,7 @@ def _days_so_far(app, rec) -> list:
     ahead in time, which would otherwise bring a purchase closer to being
     set aside on a day that has not come."""
     today = _this_day(app)
-    return [d for d in _days(rec) if _a_day(d) and d <= today]
+    return list(dict.fromkeys(d for d in _days(rec) if _a_day(d) and d <= today))
 
 
 def _holds_days(rec) -> bool:

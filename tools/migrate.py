@@ -1126,6 +1126,9 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
         if _done(cur) or any(f in cur for f in unfinished):
             lacking = {f: v for f, v in lacking.items() if f not in unfinished}
         if lacking:
+            # A guard only. The fields a provider fills in never hold the
+            # days today (DAYS_KEY is in no provider's table), so this is
+            # for one that someday does.
             if DAYS_KEY in lacking:
                 lacking[DAYS_KEY] = real_days(lacking[DAYS_KEY])
             cur.update(lacking)

@@ -175,3 +175,22 @@ def test_an_import_keeps_only_a_list_of_real_days(tmp_path, days):
 def json_copy(value):
     import json
     return json.loads(json.dumps(value))
+
+
+# -- one day written more than once is one day (review of the repairs, MINOR 2) -------
+
+
+def test_one_day_written_three_times_is_one_day():
+    aside = {"state": State.NO_RECEIPT_AVAILABLE.value,
+             "not_shown_days": ["2026-11-16", "2026-11-16", "2026-11-16"]}
+    assert not not_shown.set_aside(aside)
+    assert not_shown.skipped(aside, "done") == "done"
+    assert not_shown.real_days(aside["not_shown_days"]) == ["2026-11-16"]
+
+
+def test_a_day_written_twice_counts_once_toward_setting_aside(tmp_path):
+    """After a save, a record holding one earlier day twice is on its second
+    day, not its third, and is tried again."""
+    run, rec = after_a_save(tmp_path, ["2026-11-16", "2026-11-16"])
+    assert rec["state"] == State.FAILED.value, rec
+    assert rec[not_shown.DAYS_KEY] == ["2026-11-16", D], rec

@@ -112,7 +112,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   its own day and drops a later day when it next writes the record. A
   record reads as set aside, and Meijer holds it final, only with three
   real dates in a list. Import history keeps only a list of real dates. A
-  saved receipt lets go of whatever was there.
+  day written more than once counts once. A saved receipt lets go of
+  whatever was there.
 
 ## [0.68.0] - 2026-11-16
 
