@@ -619,7 +619,9 @@ Documents go into a folder of their kind, `Statements` or `Tax Documents`,
 inside the documents folder. `"kind_folders": false` in a config.json files
 them straight into the documents folder instead, once the file naming
 pattern says which kind each one is, see
-[file naming](docs/file-naming.md#without-a-folder-for-each-kind).
+[file naming](docs/file-naming.md#without-a-folder-for-each-kind). Documents
+filed that way stay where they are once it is set back to kind folders, and
+are still found, but a Move no longer brings them to a new documents folder.
 
 ## Moving to another computer
 

@@ -92,8 +92,10 @@ becomes
 * **The Move brings documents out of their kind folders,** in the
   provider's own folder and in the documents folder alike, keeping the
   folders the pattern made. A folder of a kind it leaves empty in the
-  documents folder is removed. Documents filed this way in a documents
-  folder used before come along to the new one as a whole. The Documents
+  documents folder is removed. When the documents folder changes, each
+  document the account's records name that was filed this way in the one
+  used before comes along to the new one, its pattern's folders kept, and
+  any other file stays. The Documents
   settings count the documents still to move and offer the Move.
 * **Every kind shares one folder, so the name has to say which kind a
   document is.** For a statements provider the pattern needs `{kind}`,
