@@ -361,6 +361,10 @@ def run_discover(tmp_path, attached, capsys):
     return ended, said, whole, sorted(r.get("document_id") for r in listed.values())
 
 
+def failure_files(tmp_path) -> list:
+    return sorted((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+
+
 def their_tab(attached, server, path, title):
     """The person's USAA tab on this page, the only tab open."""
     theirs = testkit.open_tab(attached, address(server, path), title)
@@ -378,6 +382,7 @@ def test_discover_lists_every_document_the_page_was_given(server, attached, tmp_
     assert ended == ("returned", 0) and whole is True, said[-1500:]
     assert "Could not open your USAA documents" not in said, said[-1500:]
     assert listed == sorted(d["documentId"] for d in DOCS[:held]), said[-1500:]
+    assert not failure_files(tmp_path), said[-1500:]
 
 
 def test_discover_stops_on_a_page_that_never_drew(server, attached, tmp_path, capsys):
@@ -387,6 +392,7 @@ def test_discover_stops_on_a_page_that_never_drew(server, attached, tmp_path, ca
     assert ended == ("exit", 0) and whole is False, said[-1500:]
     assert "Could not open your USAA documents" in said, said[-1500:]
     assert listed == []
+    assert len(failure_files(tmp_path)) == 1, said[-1500:]
 
 
 def test_discover_stops_when_the_list_never_arrives(server, attached, tmp_path, capsys):

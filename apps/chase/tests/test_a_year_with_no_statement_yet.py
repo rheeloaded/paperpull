@@ -254,12 +254,17 @@ def their_tab(attached, server, route, title):
     testkit.keep_only(attached, {theirs})
 
 
+def failure_files(tmp_path) -> list:
+    return sorted((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+
+
 def test_discover_on_a_year_with_no_statement_yet_reads_the_list(server, attached,
                                                                   tmp_path, capsys):
     their_tab(attached, server, CENTER_ROUTE, "Statements & documents")
     ended, said, whole = run_discover(tmp_path, attached, capsys)
     assert ended == ("returned", 0) and whole is True, said[-1500:]
     assert "Could not open your Chase statements" not in said, said[-1500:]
+    assert not failure_files(tmp_path), said[-1500:]
 
 
 @pytest.mark.parametrize("route, title", [
@@ -270,8 +275,22 @@ def test_discover_off_the_statements_still_stops(server, attached, tmp_path, cap
                                                   route, title):
     """Nothing here leads to the statements, as a menu would at Chase, so a
     run left on the front page or on the tax documents stops rather than
-    call an empty list read."""
+    call an empty list read. It writes a failure file first, with the
+    page's shape and none of its words, so a tester has something to
+    attach (#228)."""
     their_tab(attached, server, route, title)
     ended, said, whole = run_discover(tmp_path, attached, capsys)
     assert ended == ("exit", 0) and whole is False, said[-1500:]
     assert "Could not open your Chase statements" in said, said[-1500:]
+    found = failure_files(tmp_path)
+    assert len(found) == 1, said[-1500:]
+    assert said.index("This run wrote a file about what went wrong") \
+        < said.index("Could not open your Chase statements"), said[-1500:]
+    text = found[0].read_text(encoding="utf-8")
+    report = json.loads(text)
+    assert report["step"] == "open the statements list", report
+    assert report["reason"] == "the statements page would not open", report
+    assert report["page"], report
+    for made_up in ("glance", "Last 30 days", "EXAMPLE", "0001", "2031", "Dana",
+                    "no documents for this time period"):
+        assert made_up not in text, made_up

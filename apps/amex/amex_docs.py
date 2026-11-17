@@ -446,6 +446,8 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             if not site.goto_documents(page):
+                self.write_failure("open the statements list",
+                                   "the statements page could not be reached")
                 log.info("could not reach the statements page after two tries")
                 print("\n!! Could not reach the statements page. Discovery was not completed.")
                 raise SystemExit(0)

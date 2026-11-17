@@ -769,16 +769,20 @@ def test_has_no_statements_ignores_footer_and_detects_german(browser):
 
 
 def test_cmd_discover_stops_when_statements_page_fails_twice(monkeypatch):
-    """cmd_discover must raise SystemExit(0) when goto_documents fails twice."""
+    """cmd_discover must raise SystemExit(0) when goto_documents fails twice,
+    and write a failure file first (#228)."""
     app = SimpleNamespace()
     app.page = lambda: SimpleNamespace(url="https://global.americanexpress.com/dashboard")
     app.check_session = lambda p: None
+    written = []
+    app.write_failure = lambda step, reason, **_kw: written.append((step, reason))
     monkeypatch.setattr(app_mod.listing, "started", lambda a: None)
     monkeypatch.setattr(site, "goto_documents", lambda p: False)
 
     with pytest.raises(SystemExit) as exc:
         app_mod.App.cmd_discover(app)
     assert exc.value.code == 0
+    assert written == [("open the statements list", "the statements page could not be reached")]
 
 
 def test_cmd_discover_stops_when_card_has_zero_buttons_and_no_message(monkeypatch):

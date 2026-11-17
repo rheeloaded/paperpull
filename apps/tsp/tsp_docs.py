@@ -370,6 +370,7 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the statements list", "my account could not be reached")
                 print("Could not reach My Account. Sign in in the browser (the tab")
                 print("should be on api.rk.tsp.gov), then try again.")
                 # Nothing was listed, so this run stops here rather than finish

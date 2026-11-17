@@ -379,6 +379,8 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the statements list",
+                                   "the customer portal could not be reached")
                 print("Could not reach the customer portal. Sign in in the browser (the tab")
                 print("should be on fwcustomer.org), then try again.")
                 # Nothing was listed, so this run stops here rather than finish

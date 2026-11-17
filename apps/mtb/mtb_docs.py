@@ -378,6 +378,7 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the statements list", "the statements page would not open")
                 print("Could not open your M&T Bank statements. Sign in and open")
                 print("Statements & Documents in the browser, then try again.")
                 # Nothing was listed, so this run stops here rather than finish

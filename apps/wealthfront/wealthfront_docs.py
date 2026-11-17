@@ -412,6 +412,7 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             if not site.goto_documents(page):
+                self.write_failure("open the document list", "the documents page would not open")
                 print("Could not open the Documents page.")
                 # Nothing was listed, so this run stops here rather than finish
                 # clean, as a Resume after it does (paperpull_core.listing).

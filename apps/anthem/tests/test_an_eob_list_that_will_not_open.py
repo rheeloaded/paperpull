@@ -117,13 +117,40 @@ def run(tmp_path, monkeypatch, capsys):
 
 
 NOT_LISTED = "Your EOBs were not listed, so this run stops here"
+FILE_LINE = "This run wrote a file about what went wrong"
 
 
-def test_run_all_reads_the_other_lists_and_then_stops(run):
+def failure_files(tmp_path) -> list:
+    return sorted((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+
+
+def test_run_all_reads_the_other_lists_and_then_stops(run, tmp_path):
+    """The failure file is written where the run stops, after the other
+    lists, and before the line that says why it stopped (#228)."""
     said, result, ended, happened = run("--all", "--yes")
     assert happened == ["process", *OTHER_LISTS], happened
     assert ended == ("exit", 0) and result["stopped"] == 1, said
-    assert said.index("Could not open your Anthem statements") < said.index(NOT_LISTED)
+    assert said.index("Could not open your Anthem statements") < said.index(FILE_LINE) \
+        < said.index(NOT_LISTED), said
+    found = failure_files(tmp_path)
+    assert len(found) == 1, said
+    report = json.loads(found[0].read_text(encoding="utf-8"))
+    assert (report["step"], report["reason"]) == ("open the eob list",
+                                                  "the eob list would not open"), report
+
+
+def test_a_later_failure_in_run_all_keeps_the_one_file_of_the_run(run, tmp_path, monkeypatch):
+    """A run writes one failure file. The EOB list's waits for the run's
+    stop, so a list Run All reads after it that fails is the one kept."""
+    monkeypatch.setattr(app_mod.App, "cmd_claims_summaries", lambda app: app.write_failure(
+        "read the claims summaries", "a claims summary was not read"))
+    said, result, ended, _happened = run("--all", "--yes")
+    assert ended == ("exit", 0) and result["stopped"] == 1, said
+    assert NOT_LISTED in said, said
+    found = failure_files(tmp_path)
+    assert len(found) == 1, said
+    report = json.loads(found[0].read_text(encoding="utf-8"))
+    assert report["step"] == "read the claims summaries", report
 
 
 @pytest.mark.parametrize("args", [("--pilot",), ("--all", "--yes", "--dry-run"),
@@ -142,10 +169,11 @@ def test_discover_alone_stops(run):
     assert NOT_LISTED in said
 
 
-def test_run_all_whose_eob_list_opens_still_finishes_clean(run):
+def test_run_all_whose_eob_list_opens_still_finishes_clean(run, tmp_path):
     """The other side, so the stop is the EOB list's and nothing else's.
     An EOB center that opens with no EOB in it is a list read whole."""
     said, result, ended, happened = run("--all", "--yes", opens=True)
     assert happened == ["process", *OTHER_LISTS], happened
     assert ended == ("returned", 0) and result["stopped"] == 0, said
     assert NOT_LISTED not in said
+    assert not failure_files(tmp_path) and FILE_LINE not in said, said

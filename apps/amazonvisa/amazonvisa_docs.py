@@ -443,6 +443,7 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the documents list", "the portal could not be reached")
                 print("Could not reach the Amazon Visa portal. Sign in in the browser (the tab")
                 print("should be on kunden.openbankpay.com), then try again.")
                 # Nothing was listed, so this run stops here rather than finish

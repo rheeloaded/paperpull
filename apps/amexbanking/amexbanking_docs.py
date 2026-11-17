@@ -432,6 +432,7 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the documents list", "the documents list would not open")
                 print("Could not open your American Express Documents and Statements list.")
                 print("Sign in, open your account's Statements, then try again.")
                 # Nothing was listed, so this run stops here rather than

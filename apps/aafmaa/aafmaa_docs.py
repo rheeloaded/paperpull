@@ -473,6 +473,7 @@ class App:
         if not site.goto_documents(page):
             self.check_session(page)
             if not site.goto_documents(page):
+                self.write_failure("open the documents list", "the documents page would not open")
                 print("Could not open your Armed Forces Mutual documents. Sign in and open your")
                 print("Documents page in the browser, then try again.")
                 # Nothing was listed, so this run stops here rather than finish

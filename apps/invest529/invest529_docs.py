@@ -379,6 +379,7 @@ class App:
         if not site.ensure_statements(page):
             self.check_session(page)
             if not site.ensure_statements(page):
+                self.write_failure("open the statements list", "the account could not be reached")
                 print("Could not reach your Invest529 account. Sign in in the browser (the tab")
                 print("should be on myaccount.invest529.com), then try again.")
                 # Nothing was listed, so this run stops here rather than finish
