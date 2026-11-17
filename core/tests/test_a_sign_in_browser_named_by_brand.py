@@ -14,6 +14,7 @@ of browsers on this computer are stand-ins, and a browser already on the
 port is a small HTTP server on a port of its own.
 """
 import json
+import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -157,7 +158,7 @@ def test_any_case_with_space_around_is_the_brand(value, monkeypatch, tmp_path):
 REFUSED_VALUES = ["google chrome", "msedge", "chromium", "firefox", "safari", "../chrome",
                   "chrome/../../x", "chrome\\..\\x", "chrome\u0000", "ｃｈｒｏｍｅ",
                   "chrome​", "chrome-x", "chrome edge", "-googlechrome", "--no-sandbox",
-                  None, 7, 0, True, False, 1.5, ["chrome"], {}, {"chrome": 1}]
+                  7, 0, True, False, 1.5, ["chrome"], {}, {"chrome": 1}]
 
 
 @pytest.mark.parametrize("value", REFUSED_VALUES, ids=repr)
@@ -564,3 +565,49 @@ def test_on_the_server_a_brand_it_does_not_have_is_refused(word, monkeypatch, tm
     opened = _server(monkeypatch, tmp_path)
     assert browser.open_signin_browser(tmp_path / "profiles" / "Chase", PORT, URL, mode=word) is None
     assert opened == [] and BRAND_TABLE[word][0] in capsys.readouterr().out
+
+
+# -- a brand folder is never the documents folder -----------------------------
+
+EVERY_END = ("-chromium",) + tuple(end for _name, end in BRAND_TABLE.values())
+
+
+@pytest.mark.parametrize("where", ["profile", "inside"])
+@pytest.mark.parametrize("end", EVERY_END)
+def test_a_documents_folder_at_a_brand_or_fallback_profile_is_not_used(end, where, tmp_path,
+                                                                       capsys):
+    """A hand-edited documents_dir naming the folder a brand or a fallback
+    opens on would move documents into a signed-in profile."""
+    from paperpull_core import storage
+    out, profile = tmp_path / "out", tmp_path / "home" / "browser-profile"
+    brand = profile.with_name(profile.name + end)
+    docs = {"profile": brand, "inside": brand / "Default"}[where]
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "config.json").write_text(json.dumps({
+        "output_dir": str(out), "profile_dir": str(profile), "documents_dir": str(docs),
+        "browser": "chrome"}), encoding="utf-8")
+    cfg = storage.load_config(app / "config.json")
+    assert cfg["documents_dir"] == ""
+    assert "browser profile" in capsys.readouterr().out
+
+
+def test_a_folder_beside_the_profile_that_only_starts_the_same_is_used(tmp_path):
+    from paperpull_core import storage
+    out, profile = tmp_path / "out", tmp_path / "home" / "browser-profile"
+    docs = tmp_path / "home" / "browser-profile-spouse"
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "config.json").write_text(json.dumps({
+        "output_dir": str(out), "profile_dir": str(profile), "documents_dir": str(docs)}),
+        encoding="utf-8")
+    assert storage.load_config(app / "config.json")["documents_dir"] == os.path.normpath(str(docs))
+
+
+@pytest.mark.parametrize("value", [None])
+def test_null_is_auto_as_a_missing_value_is(value, monkeypatch, tmp_path):
+    """Nothing PaperPull writes holds null, and a hand-made config with it
+    ran as auto before #222, so it still does."""
+    launched = machine(monkeypatch, [(browser.EDGE, "/x/msedge"), (browser.CHROME, "/x/chrome")])
+    assert browser.open_signin_browser(tmp_path / "p", PORT, URL, mode=value) == browser.EDGE
+    assert folder_of(launched[0]) == (tmp_path / "p").resolve()

@@ -18,8 +18,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   own, so the first sign-in after the change asks you to sign in once more.
   A brand that is not installed, another brand already on the provider's
   port, and a value PaperPull does not know are each said, and nothing is
-  opened. `"Installed"` and `"Bundled"` in any case now mean what they say,
-  where before they were read as `auto`. The README says how to pick Chrome.
+  opened. A value typed with other casing, such as `"Bundled"` or
+  `"Installed"`, now means what it says, where it used to run as `auto`.
+  The README says how to pick Chrome.
 
 ## [0.68.0] - 2026-11-16
 

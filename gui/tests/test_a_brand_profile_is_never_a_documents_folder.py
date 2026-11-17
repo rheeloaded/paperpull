@@ -53,3 +53,21 @@ def test_a_folder_that_only_starts_the_same_is_not_a_profile(bank):
     install, meta = bank
     known = {Path(p).resolve() for p in app_module._profiles_known({"Chase": meta})}
     assert (install / "chase-browser-profile-spouse").resolve() not in known
+
+
+@pytest.mark.parametrize("ending", ("-chromium",) + ENDINGS)
+def test_a_brand_folder_in_documents_dir_is_no_documents_folder_in_use(ending, monkeypatch, tmp_path):
+    """As the run refuses it (storage.set_documents_dir), the panel names no
+    documents folder for it either."""
+    install = tmp_path / "Chase"
+    install.mkdir()
+    docs = install / ("chase-browser-profile" + ending)
+    monkeypatch.setattr(server_mode, "enabled", lambda: False)
+    monkeypatch.setattr(app_module, "_config_of", lambda meta, account: {
+        "profile_dir": "chase-browser-profile", "documents_dir": str(docs)})
+    meta = {"dir": str(install), "accounts": ["primary"]}
+    assert app_module._documents_in_use(meta, "primary", tmp_path / "out") == ""
+    elsewhere = tmp_path / "Watched"
+    monkeypatch.setattr(app_module, "_config_of", lambda meta, account: {
+        "profile_dir": "chase-browser-profile", "documents_dir": str(elsewhere)})
+    assert app_module._documents_in_use(meta, "primary", tmp_path / "out") == str(elsewhere)

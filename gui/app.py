@@ -2250,7 +2250,9 @@ def _documents_in_use(meta: dict, account: str, root: Path) -> str:
     if isinstance(profile, str) and profile.strip():
         held = Path(server_mode.with_home(profile.strip()))
         held = held if held.is_absolute() else Path(meta["dir"]) / held
-        if _within(docs, held) or _within(held, docs):
+        # Each folder beside it a fallback or a named brand opens on too,
+        # as the run refuses them (#222).
+        if any(_within(docs, each) or _within(each, docs) for each in _with_brand_folders(held)):
             return ""
     if _within(root, docs) and not _within(docs, root):
         return ""

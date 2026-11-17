@@ -399,10 +399,14 @@ BROWSER_VALUES = (AUTO, INSTALLED, BUNDLED) + tuple(BRANDS)
 def browser_setting(value) -> Optional[str]:
     """The "browser" setting as one of BROWSER_VALUES, or None when it is
     none of them. Read in any case with spaces around it taken off, and an
-    empty one is auto, as a missing one is. Anything else, a word of
+    empty one or null is auto, as a missing one is. Anything else, a word of
     another browser, a path or a value that is not text, is None, so no
     value typed into a config ever reaches a command line or a folder's
     name. Those come from the table."""
+    if value is None:
+        # Nothing PaperPull writes holds null, and a config made by hand
+        # with it ran as auto before #222, so it still does.
+        return AUTO
     if not isinstance(value, str):
         return None
     word = value.strip(" \t\r\n").lower()
