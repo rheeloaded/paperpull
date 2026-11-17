@@ -74,7 +74,7 @@ STARTERS = {"subprocess", "asyncio", "os"}
 SUBPROCESS_STARTS = {"Popen", "run", "call", "check_call", "check_output",
                      "getoutput", "getstatusoutput"}
 ASYNC_STARTS = {"create_subprocess_exec", "create_subprocess_shell"}
-SKIPPED = ("node_modules", "build", "dist", "__pycache__")
+SKIPPED = ("node_modules", "build", "dist", "site-packages", "__pycache__")
 
 
 def _os_start(name) -> bool:
