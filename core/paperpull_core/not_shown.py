@@ -148,11 +148,22 @@ def let_go_on_save(app, purchase, state, rec: dict) -> None:
     (tried_again). And a purchase set aside before, written over on a
     Download again with another state before its page is looked at (GitHub
     and Meijer note that its receipt was located), is remembered for this
-    run, so a page that shows nothing again leaves it set aside."""
+    run, so a page that shows nothing again leaves it set aside.
+
+    A purchase recorded as having no receipt for what the provider showed,
+    a Target order with only an invoice or a GitHub payment with no receipt
+    link, is final for its own reason, and its days go with it. tried_again
+    writes its own days with the state, so only that write keeps them. Kept
+    on such a record, they read as a purchase set aside for pages that
+    showed nothing, since a purchase now keeps three days while it is tried
+    again (review of #225)."""
     before = app.progress.get(purchase.key) or {}
-    if getattr(state, "value", state) not in SAVED_STATES:
+    value = getattr(state, "value", state)
+    if value not in SAVED_STATES:
         if set_aside(before):
             _set_aside_before(app).add(purchase.key)
+        if value == State.NO_RECEIPT_AVAILABLE.value and DAYS_KEY not in rec and _days(before):
+            rec[DAYS_KEY] = []
         return
     _saved(app)[purchase.purchase_type] = True
     _set_aside_before(app).discard(purchase.key)

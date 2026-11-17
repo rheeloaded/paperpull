@@ -1128,9 +1128,15 @@ def _merge(target: dict, incoming: dict, old_bases, new_base: Path, home=None,
             cur["state"] = inc["state"]
             # The state comes with what it was written with. A receipt set
             # aside is final in Meijer only with its days, and a note an
-            # older version wrote here would have it asked for again.
+            # older version wrote here would have it asked for again. A
+            # purchase recorded there as having no receipt for what the
+            # provider showed carries no days, and the days a purchase tried
+            # again here keeps go, so it is never read as one set aside for
+            # pages that showed nothing (review of #225).
             if DAYS_KEY in inc:
                 cur[DAYS_KEY] = list(inc[DAYS_KEY] or [])
+            elif inc["state"] == "No Receipt Available" and cur.get(DAYS_KEY):
+                cur[DAYS_KEY] = []
             if asked_again(cur):
                 cur["notes"] = _last_note_replaced(cur, inc)
             changed = True
