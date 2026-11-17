@@ -85,6 +85,20 @@ def with_home(value):
     return value if home == value else os.path.normpath(home)
 
 
+def _profile_folders(profile: Path) -> list:
+    """The profile folder and each one beside it a browser of the account's
+    can open, from the core's own list (paperpull_core.browser
+    profile_folders). Copied somewhere without the core, only the folder
+    itself."""
+    try:
+        if str(REPO_CORE.parent) not in sys.path and REPO_CORE.is_dir():
+            sys.path.insert(0, str(REPO_CORE.parent))
+        from paperpull_core.browser import profile_folders
+        return profile_folders(profile)
+    except Exception:
+        return [profile]
+
+
 def _say(line=""):
     """Console-safe, because account labels scraped from bank pages can hold
     characters the Windows console codepage cannot encode."""
@@ -193,7 +207,9 @@ def inspect(install: Path) -> dict | None:
         # else not full from the install, where every run starts.
         pdir = with_home(pdir)
         p = Path(pdir) if os.path.isabs(pdir) else install / pdir
-        if not p.exists():
+        # A brand named in "browser", or a fallback browser, signs in on a
+        # folder beside it (#222), and a sign-in there is a sign-in.
+        if not any(each.exists() for each in _profile_folders(p)):
             report["warnings"].append(
                 "no browser profile yet, so a sign-in will be needed (this is "
                 "normal for an app not used before)")

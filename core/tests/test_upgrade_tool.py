@@ -224,3 +224,22 @@ def test_a_check_does_not_touch_the_core_copy(tmp_path, monkeypatch):
     pkg = _venv_core(d, {"__init__.py": '__version__ = "0.1.5"\n'})
     upgrade.main(["--root", str(tmp_path)])
     assert '"0.1.5"' in (pkg / "__init__.py").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("ending", ["-googlechrome", "-microsoftedge", "-chromium"])
+def test_a_sign_in_on_a_brand_folder_is_a_sign_in(tmp_path, ending):
+    """With "browser": "chrome" the sign-in lives in the folder beside the
+    profile (#222), so finding only that folder is no reason to warn that
+    no sign-in has been made."""
+    d = _install(tmp_path, "Bank", {"cdp_url": "http://127.0.0.1:9222", "browser": "chrome",
+                                    "profile_dir": "bank-browser-profile"}, HISTORY)
+    (d / ("bank-browser-profile" + ending)).mkdir()
+    warnings = upgrade.inspect(d)["warnings"]
+    assert not any("no browser profile yet" in w for w in warnings), warnings
+
+
+def test_no_profile_folder_at_all_is_still_said(tmp_path):
+    d = _install(tmp_path, "Bank", {"cdp_url": "http://127.0.0.1:9222", "browser": "chrome",
+                                    "profile_dir": "bank-browser-profile"}, HISTORY)
+    (d / "bank-browser-profile-spouse").mkdir()
+    assert any("no browser profile yet" in w for w in upgrade.inspect(d)["warnings"])

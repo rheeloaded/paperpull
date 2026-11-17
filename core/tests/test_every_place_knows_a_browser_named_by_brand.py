@@ -136,9 +136,11 @@ def test_every_brand_folder_is_one_the_core_knows(word, ending, tmp_path):
 
 KNOWS_THE_BRAND_FOLDERS = ("profile_folders", "_with_brand_folders", "PROFILE_ENDS",
                            "_FALLBACK_ENDS", "_names_profile", "brand_profile",
-                           "close_signin_browser")
+                           "close_signin_browser",
+                           # tools/upgrade.py's own call of profile_folders, kept
+                           # for a copy of the tool that runs without the core
+                           "_profile_folders")
 NEED_NOT = {
-    "core/paperpull_core/browser.py::_launch": "opens the one folder it is handed",
     "core/paperpull_core/storage.py::load_config": "sets the default profile_dir",
     "core/paperpull_core/storage.py::hold_to_the_server":
         "puts profile_dir on the profiles volume, where a brand keeps the base folder",
@@ -148,27 +150,97 @@ NEED_NOT = {
         'matches "browser-profile" anywhere in a name, which every brand folder holds',
     "gui/app.py::_skip_template_part":
         'matches "browser-profile" anywhere in a name, which every brand folder holds',
-    "server/smoke.py::set_up_provider": "the smoke test's own config",
     "tools/add_account.py::make_config": "names a new account's base folder",
-    "tools/upgrade.py::inspect": "only warns that no sign-in has been made yet",
+    "server/build.py::left_out":
+        "reads tracked paths only, and .gitignore keeps every profile folder untracked",
 }
-SHIPPED = ("core/paperpull_core", "gui", "server", "tools", ".")
+# Each folder is looked through to its last level, the root alone only at
+# its own, and never into tests, a virtual environment or a cache.
+SHIPPED = ("core/paperpull_core", "gui", "server", "tools")
+NOT_SHIPPED = {"tests", ".venv", "venv", "__pycache__", "node_modules"}
 HANDED_TO_THE_CORE = ("open_signin_browser(", "launch_own_browser(")
 APP_NEED_NOT = {"apps/target/target_receipts.py::cmd_login": "only prints the folder"}
+MODULE = "<module>"
+DEFS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
 
-def _names_a_profile(src: str) -> bool:
-    return any(mark in src for mark in ('"profile_dir"', "'profile_dir'", "browser-profile"))
+def _docstrings(tree) -> set:
+    """The ids of the docstring nodes in tree, which say things and do
+    nothing."""
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module,) + DEFS) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) \
+                    and isinstance(first.value.value, str):
+                out.add(id(first.value))
+    return out
+
+
+def _only_constants(node) -> bool:
+    return all(isinstance(n, (ast.Constant, ast.Tuple, ast.List, ast.Set, ast.Load)) for n in ast.walk(node))
+
+
+def _profile_constants(tree) -> set:
+    """Module-level names given a text that holds browser-profile."""
+    out = set()
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign)) and stmt.value is not None:
+            texts = [n.value for n in ast.walk(stmt.value)
+                     if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+            if any("browser-profile" in t for t in texts):
+                targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+                out |= {t.id for t in targets if isinstance(t, ast.Name)}
+    return out
+
+
+def _units(tree):
+    """(name, nodes) for each function, and for the code at module level,
+    a class's own lines included. A module-level constant is data, so it is
+    left out there and followed where it is used instead."""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            yield node.name, list(ast.walk(node))
+    top, stack = [], list(tree.body)
+    while stack:
+        stmt = stack.pop()
+        if isinstance(stmt, ast.ClassDef):
+            stack.extend(stmt.body)
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign)) and stmt.value is not None \
+                and _only_constants(stmt.value):
+            continue
+        else:
+            top.extend(ast.walk(stmt))
+    yield MODULE, top
 
 
 def profile_readers(source: str, where: str):
-    """(function, whether it knows the brand folders) for each function in
-    source that names profile_dir or a browser-profile folder."""
-    for node in ast.walk(ast.parse(source)):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            src = ast.get_source_segment(source, node) or ""
-            if _names_a_profile(src):
-                yield "%s::%s" % (where, node.name), any(k in src for k in KNOWS_THE_BRAND_FOLDERS)
+    """(place, whether it knows the brand folders) for each function, and
+    the module level, that names profile_dir or a browser-profile folder in
+    its code, by a text, an attribute or a constant holding the name.
+    Knowing is a real name or attribute of the core's list, never a word in
+    a comment, a docstring or a text."""
+    tree = ast.parse(source)
+    skip, constants = _docstrings(tree), _profile_constants(tree)
+    for name, nodes in _units(tree):
+        names = knows = False
+        for n in nodes:
+            if id(n) in skip:
+                continue
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                names = names or n.value == "profile_dir" or "browser-profile" in n.value
+            elif isinstance(n, ast.Attribute):
+                names = names or n.attr == "profile_dir"
+                knows = knows or n.attr in KNOWS_THE_BRAND_FOLDERS
+            elif isinstance(n, ast.Name):
+                names = names or n.id in constants
+                knows = knows or n.id in KNOWS_THE_BRAND_FOLDERS
+            elif isinstance(n, ast.alias):
+                knows = knows or n.name in KNOWS_THE_BRAND_FOLDERS
+        if names:
+            yield "%s::%s" % (where, name), knows
 
 
 def forgetful(source: str, where: str) -> list:
@@ -177,9 +249,12 @@ def forgetful(source: str, where: str) -> list:
 
 
 def _shipped_sources():
+    paths = list(ROOT.glob("*.py"))
     for base in SHIPPED:
-        for path in sorted((ROOT / base).glob("*.py")):
-            yield path.read_text(encoding="utf-8"), path.relative_to(ROOT).as_posix()
+        paths += [p for p in (ROOT / base).rglob("*.py")
+                  if not NOT_SHIPPED & set(p.relative_to(ROOT).parts)]
+    for path in sorted(paths):
+        yield path.read_text(encoding="utf-8"), path.relative_to(ROOT).as_posix()
 
 
 def test_every_place_that_knows_a_profile_folder_knows_the_brand_folders():
@@ -193,6 +268,7 @@ def test_every_place_that_knows_a_profile_folder_knows_the_brand_folders():
                  "gui/app.py::_documents_in_use", "gui/app.py::_profiles_known",
                  "gui/app.py::_not_for_documents", "core/paperpull_core/shared_folder.py::_walked"):
         assert must in found, must
+    assert "tools/upgrade.py::inspect" in found and "tools/upgrade.py::inspect" not in NEED_NOT
     assert set(NEED_NOT) <= found, set(NEED_NOT) - found
 
 
@@ -215,6 +291,59 @@ def knows(cfg, docs):
                                                   "gui/sample.py::is_profile"]
 
 
+FOUR_WAYS_TO_SLIP_PAST = {
+    "a mention in a comment or a docstring is not knowing": '''
+def documents_problem(cfg, docs):
+    """Unlike browser.profile_folders, this looks at one folder."""
+    # unlike profile_folders and _with_brand_folders
+    print("PROFILE_ENDS are not looked at")
+    return docs == cfg["profile_dir"]
+''',
+    "a constant holding the name, used later": '''
+BASE = "browser-profile"
+
+
+def is_profile(name):
+    return name.endswith(BASE)
+''',
+    "an attribute named profile_dir": '''
+class Account:
+    def holds(self, docs):
+        return docs == self.profile_dir
+''',
+    "a check at module level": '''
+import sys
+
+if sys.argv[1].endswith("browser-profile"):
+    raise SystemExit("that is a profile")
+''',
+}
+
+
+@pytest.mark.parametrize("why", sorted(FOUR_WAYS_TO_SLIP_PAST))
+def test_the_census_is_not_passed_by_code_that_breaks_its_rule(why):
+    assert forgetful(FOUR_WAYS_TO_SLIP_PAST[why], "gui/sample.py") != [], why
+
+
+def test_the_census_takes_a_real_call_of_the_core_list():
+    sample = '''
+BASE = "browser-profile"
+
+
+def holds(self, docs):
+    from paperpull_core import browser
+    return docs in browser.profile_folders(self.profile_dir)
+'''
+    assert forgetful(sample, "gui/sample.py") == []
+
+
+def test_the_census_looks_in_every_folder_below_the_shipped_ones():
+    where = {w for _source, w in _shipped_sources()}
+    assert "tools/pytest_plugins/core_part.py" in where
+    assert any(w.startswith("server/plugins/paperless/") for w in where)
+    assert not any("/tests/" in w or "/.venv/" in w for w in where)
+
+
 def test_every_app_hands_its_profile_folder_to_the_core():
     """An app names profile_dir only to hand it to the core's sign-in or to
     a browser of its own, so it never decides by name what a profile is."""
@@ -225,8 +354,7 @@ def test_every_app_hands_its_profile_folder_to_the_core():
                 if name in APP_NEED_NOT:
                     continue
                 fn = name.split("::")[1]
-                node = next(n for n in ast.walk(ast.parse(source))
-                            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fn
-                            and _names_a_profile(ast.get_source_segment(source, n) or ""))
-                src = ast.get_source_segment(source, node)
-                assert any(call in src for call in HANDED_TO_THE_CORE), name
+                assert fn != MODULE, name
+                srcs = [ast.get_source_segment(source, n) or "" for n in ast.walk(ast.parse(source))
+                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fn]
+                assert any(call in src for src in srcs for call in HANDED_TO_THE_CORE), name
