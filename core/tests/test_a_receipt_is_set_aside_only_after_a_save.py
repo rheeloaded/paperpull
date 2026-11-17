@@ -2,9 +2,9 @@
 (#225).
 
 A tester's Kroger receipt pages stopped showing the receipt for every one of
-his 244 purchases, most likely a change at Kroger. Each run counted a day
-for each of them, and on the third separate day every one was set aside as
-No Receipt Available, for good, and written into both CSVs. PaperPull
+their 244 purchases, most likely a change at Kroger. Each run counted a day
+for each of them, and a third separate day would have set every one aside
+as No Receipt Available, for good, and written it into both CSVs. PaperPull
 Server has no Download again, so a purchase set aside there is never asked
 for again. A provider whose receipt pages show nothing for every purchase
 has broken pages. It says nothing about whether the purchases have
@@ -437,3 +437,31 @@ def test_every_save_goes_through_the_core(app):
             if any(word in said_there for word in SAVED_WORDS):
                 faults.append("line %d: %s" % (node.lineno, said_there[:80]))
     assert not faults, (app.name, faults)
+
+
+@pytest.mark.parametrize("app, method", TRYING, ids=TRYING_IDS)
+def test_a_receipt_recorded_as_having_none_for_another_reason_lets_its_days_go(
+        app, method, tmp_path, monkeypatch, capsys):
+    """Three days of pages that showed nothing, with nothing saved before
+    them, leave a purchase tried again with its three days. When a later
+    run records it as having no receipt for what the provider showed (a
+    Target order with only an invoice, a GitHub payment with no receipt
+    link), that is final for its own reason, and the days go with it. Kept,
+    they read as a purchase set aside for pages that showed nothing, and
+    every later run said its receipt did not show on 3 separate days
+    (review of #225)."""
+    mod = census.load(app)
+    monkeypatch.setattr(mod, "site", census._SiteThatShowsNothing())
+    p = census.purchase()
+    inst = alone(mod, tmp_path, method, (1, 2, 3))
+    assert_tried_again(inst)
+    capsys.readouterr()
+
+    inst = run(mod, tmp_path, 4)
+    inst._record_state(census.purchase(), State.NO_RECEIPT_AVAILABLE,
+                       notes="No printable receipt available")
+    rec = record(inst, p)
+    assert rec.get("state") == State.NO_RECEIPT_AVAILABLE.value, rec.get("state")
+    assert not (rec.get(not_shown.DAYS_KEY) or []), rec.get(not_shown.DAYS_KEY)
+    assert not not_shown.set_aside(rec), app.name
+    assert not_shown.skipped(rec, "  its own words") == "  its own words"
