@@ -16,12 +16,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   given `--use-mock-keychain`, as Playwright's own launch already was, so
   macOS stops asking to let it use "Chrome Safe Storage". A census reads
   every app's tests and the core's, gui's and server's for the programs a
-  test starts, in the ways their command lines are written today, and fails
-  on a browser started without it. The sign-in window on your own profile never
-  gets it, so its cookies stay under your real Keychain. Contributed by
-  @appchamp. Before merging, the one real Chromium start the first census
-  missed, the sign-in launch test, was given the switch, and the census
-  was made to read the other ways a command line is written.
+  test starts, in the ways their command lines are written today, and
+  fails on a browser started without it. The sign-in window on your own
+  profile never gets it, so its cookies stay under your real Keychain.
+  Contributed by @appchamp. Before merging, the one real Chromium start
+  the first census missed, the sign-in launch test, was given the switch,
+  and the census was made to read more of the ways a command line is
+  written.
 
 ## [0.68.0] - 2026-11-16
 
