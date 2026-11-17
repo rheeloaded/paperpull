@@ -39,6 +39,26 @@ on a run that saved a newer one first. A purchase set aside already stays
 set aside, those an earlier version set aside included. Whether a run
 saved one is kept on the app object, so it is that run's alone.
 
+A run stops after STOP_AFTER receipt pages in a row show nothing that
+had not shown nothing before (threads of 2026-11-16, item 3). During an
+outage, a rate limit or a route change every purchase whose page shows
+nothing was otherwise opened on every run, with no end, and eBay's details
+pages have a daily cap and Best Buy's Akamai protection blocks after too
+many requests. What tells an outage from receipts that are truly missing
+is a page that never showed nothing before and now does, so only those
+count, a page whose record holds no day before the run's own, and a
+Download again of a receipt saved before, whose page showed it once. A
+receipt that is truly missing shows nothing on every run, so from its
+second day it is known and cannot stop anything, and five of them at the
+head of the list hold a run for one day at most. Any save sets the count
+back to nothing. Every other outcome leaves it as it is. The count is
+kept on the app object, so it is that run's alone. The stop records the
+purchase first, as it always was, then saves progress, says why, writes a
+failure file of its own and leaves on NothingShown, a SystemExit with code
+0 that the core reports as a stop of its own kind (run_reporting). A run
+whose list was not read whole leaves the way such a run leaves, on a
+ListNotRead, so the panel offers a run that reads the list first.
+
 asked_again() is for the records the older versions left. A No Receipt
 Available record whose note is one of the words they wrote for a page that
 did not show is not done, so the next run asks for its receipt. The words
@@ -59,6 +79,7 @@ from datetime import date
 
 from .characters import whole_characters
 from .models import State
+from .run_reporting import ListNotRead, under_panel
 
 # Word for word what each receipt app noted with No Receipt Available, up to
 # 0.44.0, when the receipt page did not show the receipt. Wealthfront noted
@@ -164,6 +185,56 @@ def _set_aside_before(app) -> set:
     return keys
 
 
+# How many receipt pages in a row, new to showing nothing, stop a run. More
+# than the three truly missing receipts in a row the follow-up names, with
+# two to spare, and no more than the smallest default Pilot (5 purchases in
+# Amazon, eBay, GitHub and Meijer), so a Pilot during an outage shows the
+# stop rather than a page of failures.
+STOP_AFTER = 5
+
+# Where a run keeps its count, on its own app object, so two accounts in one
+# process keep two.
+STREAK_KEY = "_not_shown_streak"
+
+# The stop's failure file. Its step and reason, and its facts, each a count.
+STOP_STEP = "open the receipt"
+STOP_REASON = "receipt pages showed nothing in a row"
+
+
+class NothingShown(SystemExit):
+    """The run stopping after STOP_AFTER receipt pages in a row, new to
+    showing nothing, showed nothing. A SystemExit with code 0, so no app
+    catches it on its way out (each loop catches Exception), and neither a
+    pressing.Stop, which Best Buy's and Meijer's mains would take, nor a
+    ListNotRead. run_reporting.stop_reason names it not_shown."""
+
+    def __init__(self):
+        super().__init__(0)
+
+
+class NothingShownListUnread(ListNotRead):
+    """The same stop in a run whose list was not read whole, which leaves the
+    way such a run leaves (Changes item 3 of the test plan)."""
+
+
+# What a Pilot catches to print its results before the stop goes on.
+STOPS = (NothingShown, NothingShownListUnread)
+
+
+def _streak(app) -> dict:
+    kept = getattr(app, STREAK_KEY, None)
+    if not isinstance(kept, dict):
+        kept = {"in_a_row": 0, "known": 0, "saved": set()}
+        setattr(app, STREAK_KEY, kept)
+    return kept
+
+
+def streak(app) -> int:
+    """How many receipt pages in a row, new to showing nothing, this run has
+    met since its last save."""
+    return _streak(app)["in_a_row"]
+
+
 def let_go_on_save(app, purchase, state, rec: dict) -> None:
     """Every receipt app's _record_state hands this the record it is about
     to write. When the state says a file was just saved for the purchase,
@@ -199,6 +270,11 @@ def let_go_on_save(app, purchase, state, rec: dict) -> None:
         return
     _saved(app)[purchase.purchase_type] = True
     _set_aside_before(app).discard(purchase.key)
+    # A save of either kind sets the run's count of empty pages back, and is
+    # counted by purchase, not by file, for the stop's facts.
+    kept = _streak(app)
+    kept["in_a_row"] = 0
+    kept["saved"].add(purchase.key)
     if _holds_days(before):
         # The store merges a record into the one it has, so the days are
         # written empty rather than left out.
@@ -230,21 +306,30 @@ def tried_again(app, purchase, why: str) -> bool:
     On its DAYS-th separate day it is set aside only when this run saved a
     receipt of its kind before it, with no page of that kind showing
     nothing in between, or when it was set aside before. This page showed
-    nothing, so the next one of its kind waits for another save."""
+    nothing, so the next one of its kind waits for another save.
+
+    Once the purchase is recorded, a page new to showing nothing counts
+    toward the run's stop, and the STOP_AFTER-th in a row stops the run
+    (_counted). Whether it is new is read from the record as it was before
+    this page, since the record written here holds this run's day."""
     kinds = _saved(app)
     kind = purchase.purchase_type
     after_a_save = kinds.get(kind)          # None when this run saved none
     if kind in kinds:
         kinds[kind] = False
     rec = app.progress.get(purchase.key) or {}
+    if not isinstance(rec, dict):
+        rec = {}
     if rec.get("downloaded_ok"):
         # Download again, for a receipt saved before. The copy saved then
-        # stands, and no plain run asks for it again.
+        # stands, and no plain run asks for it again. Its page showed the
+        # receipt once, so it counts.
         app._record_state(purchase, State.FAILED,
                           notes="%s, the receipt saved before is kept" % why)
         app.stats["failed"] += 1
         print("  %s. The receipt saved before is kept." % why)
-        return False
+        return _counted(app, True)
+    new = not any(d < _this_day(app) for d in _days_so_far(app, rec))
     days = _days_so_far(app, rec)
     if _this_day(app) not in days:
         days.append(_this_day(app))
@@ -257,7 +342,7 @@ def tried_again(app, purchase, why: str) -> bool:
         app.stats["failed"] += 1
         print("  %s, on %d of %d separate days. It is tried again next run."
               % (why, len(days), DAYS))
-        return False
+        return _counted(app, new)
     if not (after_a_save or set_aside(rec) or purchase.key in _set_aside_before(app)):
         app._record_state(purchase, State.FAILED, notes="%s, %s" % (why, TRIED_AGAIN),
                           extra={DAYS_KEY: days})
@@ -271,7 +356,7 @@ def tried_again(app, purchase, why: str) -> bool:
         print("  %s, on %s separate days. It is not set aside, because %s, and it is tried "
               "again next run." % (why, seen if seen <= DAYS else "more than %d" % DAYS,
                                    because))
-        return False
+        return _counted(app, new)
     said = "%s on %d separate days, so it is not asked for again" % (why, len(days))
     # Written down once. An older version that recorded the purchase as
     # having no receipt wrote it down then, and a Download again after it
@@ -287,7 +372,78 @@ def tried_again(app, purchase, why: str) -> bool:
     app.stats["manual_review"] += 1
     print("  %s, on %d of %d separate days. It is set aside for review and not asked "
           "for again." % (why, min(len(days), DAYS), DAYS))
+    return _counted(app, new)
+
+
+def _counted(app, new: bool) -> bool:
+    """Count a page that showed nothing, once its purchase is recorded, and
+    stop the run at the STOP_AFTER-th in a row new to showing nothing. A
+    page that showed nothing on an earlier day neither counts nor sets the
+    count back. False, nothing was saved."""
+    kept = _streak(app)
+    if not new:
+        kept["known"] += 1
+        return False
+    kept["in_a_row"] += 1
+    if kept["in_a_row"] >= STOP_AFTER:
+        _stop(app)
     return False
+
+
+def _provider() -> str:
+    try:
+        from .storage import spec
+        return spec().provider or "The provider"
+    except Exception:
+        return "The provider"
+
+
+def _list_unread(app) -> bool:
+    try:
+        from . import listing
+        return listing.last(app) == listing.STOPPED
+    except Exception:
+        return False
+
+
+def _stop(app) -> None:
+    """Stop the run after STOP_AFTER pages in a row, new to showing nothing,
+    as pressing.stop_run stops one at a press. Progress is saved with a
+    backup, the reason is said in our own words, and a failure file of the
+    stop's own is written, the newest in the folder, with counts only. A
+    save or a file that cannot be written does not keep the run going, and
+    nothing here catches a KeyboardInterrupt."""
+    kept = _streak(app)
+    stats = getattr(app, "stats", None)
+    stats = stats if isinstance(stats, dict) else {}
+    try:
+        app.progress.save(backup=True)
+    except Exception:
+        pass
+    again = "Continue" if under_panel() else "Resume"
+    print()
+    print("!! The last %d receipt pages this run opened showed nothing, and none of them"
+          % STOP_AFTER)
+    print("   had shown nothing before. %s may not be showing receipts right now, so"
+          % _provider())
+    print("   the run stops here rather than open every purchase. Nothing saved is lost.")
+    print("   %s in a few hours or tomorrow carries on from here." % again)
+    facts = {
+        "empty_pages_in_a_row": int(kept["in_a_row"]),
+        "purchases_saved": len(kept["saved"]),
+        "pages_that_showed_nothing_before": int(kept["known"]),
+        "skipped_as_done": int(stats.get("skipped_completed", 0) or 0),
+    }
+    stats.pop("failure_files", None)
+    try:
+        app.write_failure(STOP_STEP, STOP_REASON, extra=facts)
+    except Exception:
+        pass
+    if _list_unread(app):
+        from . import listing
+        whole_run = listing.say_unread(app).whole_run
+        raise NothingShownListUnread(whole_run)
+    raise NothingShown()
 
 
 def set_aside(rec) -> bool:

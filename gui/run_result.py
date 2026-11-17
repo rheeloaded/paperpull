@@ -82,7 +82,7 @@ def _count(value):
 # Why a run stopped, the words core run_reporting.STOP_REASONS sends
 # (core/tests/test_a_stop_says_why.py holds the two to each other). Any
 # other word, or none, is no reason, and the page says only that it stopped.
-STOP_REASONS = ("needs_you", "page", "slow", "error")
+STOP_REASONS = ("needs_you", "page", "slow", "error", "not_shown")
 
 
 def parse(line, mark):

@@ -1241,6 +1241,14 @@ function runOutcome() {
       'which can be a busy site or a page that has changed. ' +
       (left ? left.trim() : downloads ? 'Continue in a little while.' : 'Try again in a little while.'),
     clean: false, resume: downloads, recheck, signin: false};
+  // Receipt pages in a row that had never shown nothing before came back
+  // empty, which an outage or a provider limiting its pages makes. The
+  // run's own words say a few hours or tomorrow, and so does this.
+  if (why === 'not_shown') return {tone: 'info', title: whose(who) + ' receipt pages came back empty',
+    say: 'Nothing already saved is lost. The last receipt pages PaperPull opened showed nothing, so it stopped ' +
+      'rather than open every purchase. ' + who + ' may not be showing receipts right now. ' +
+      (left ? left.trim() : downloads ? 'Continue in a few hours or tomorrow.' : 'Try again in a few hours or tomorrow.'),
+    clean: false, resume: downloads, recheck, signin: false};
   if (why === 'error') return {tone: 'bad', title: 'PaperPull ran into something it did not expect',
     say: 'Nothing already saved is lost. The technical details below say what happened. ' +
       'If it happens again, make a support report with the button below.' + left,

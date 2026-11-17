@@ -208,6 +208,20 @@ def test_the_panel_takes_the_same_words_and_no_others():
     assert panel.parse(line(stopped=1), mark)["stop"] == "", "an app from before sends none"
 
 
+def test_receipt_pages_that_showed_nothing_in_a_row_are_said_as_such(monkeypatch):
+    """not_shown.NothingShown, five receipt pages new to showing nothing in
+    a row. Said as itself even when a question earlier in the run found
+    nobody, and never as a list not read."""
+    from paperpull_core import not_shown
+
+    def stop():
+        raise not_shown.NothingShown()
+    assert _why_leaving_on(stop) == "not_shown"
+    monkeypatch.setattr(browser, "_NOBODY_ANSWERED", True)
+    assert _why_leaving_on(stop) == "not_shown"
+    assert not issubclass(not_shown.NothingShown, (run_reporting.ListNotRead, pressing.Stop))
+
+
 def test_a_list_that_stopped_partway_is_a_page_not_a_sign_out():
     """Each app that has one keeps its own class. A real SDG&E run said to
     sign in again and Continue, neither of which could help."""

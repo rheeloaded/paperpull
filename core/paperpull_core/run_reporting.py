@@ -164,7 +164,11 @@ def list_not_read() -> str:
 #   slow       a wait for the provider's page ran out (a timeout), which a
 #              busy site and a page that has changed both look like
 #   error      anything else the app did not expect
-STOP_REASONS = ("needs_you", "page", "slow", "error")
+#   not_shown  receipt pages in a row, none of which had shown nothing
+#              before, showed nothing (not_shown.NothingShown), which an
+#              outage or a provider limiting its pages makes, so the run
+#              carries on in a few hours or tomorrow
+STOP_REASONS = ("needs_you", "page", "slow", "error", "not_shown")
 
 
 def _timed_out(exc) -> bool:
@@ -181,10 +185,15 @@ def stop_reason() -> str:
     SystemExit raised while handling it (pressing.stop_run), so the stop is
     found on the exception's context as well as in flight."""
     from .browser import nobody_answered
+    from .not_shown import NothingShown
     from .pressing import Stop
     exc = sys.exc_info()[1]
     if exc is None:
         return ""
+    # Before the question nobody answered, which an earlier prompt in the
+    # same run may have noted while the run went on.
+    if isinstance(exc, NothingShown):
+        return "not_shown"
     seen, link = set(), exc
     while link is not None and id(link) not in seen:
         # A list that stopped partway is its provider's page not reading as

@@ -67,6 +67,27 @@ All notable changes to PaperPull are recorded here. Versioning follows
   other lists after the EOBs, writes it where the run stops, so a later
   failure in the same run is the one kept.
 
+- **A receipt run stops after five receipt pages in a row show nothing.**
+  During an outage, a rate limit or a change at the provider, every
+  purchase whose receipt page showed nothing was opened on every run, 244
+  Kroger purchases a run in #225, and eBay's details pages have a daily cap
+  and Best Buy blocks after too many requests. The eleven receipt apps that
+  ask again for such a receipt (Amazon, Best Buy, Costco, eBay, Gap,
+  GitHub, Home Depot, Kroger, Lowe's, Meijer and Target) now stop the run
+  after five pages in a row showed nothing that had never shown nothing on
+  an earlier day, with no receipt saved in between. A receipt that is truly
+  missing shows nothing on every run, so from its second day it neither
+  counts nor resets the count, and three of them in a row never stop a run.
+  The fifth purchase is recorded as before, progress is saved, the run says
+  why and to continue in a few hours or tomorrow, writes a failure file of
+  its own with counts only, and ends with exit code 0 as a stop. The panel
+  says the receipt pages came back empty, in the same words. A run whose
+  list was not read whole still offers Get new rather than Continue, and
+  Pilot still shows its results table. Each run of an outage day opens up
+  to five such pages, plus those that showed nothing on earlier days, so a
+  PaperPull Server schedule that runs every hour still opens many pages a
+  day while an outage lasts.
+
 - **Only real days before the run's own count as days a receipt page showed
   nothing.** A record's days written as one piece of text rather than a
   list, as an edited or imported record can hold them, were read one

@@ -384,6 +384,7 @@ def test_a_run_that_saved_documents_never_says_nothing_new(panel, action, saved)
     ("needs_you", "0", "Citi needed you partway", True, True),
     ("page", "0", "Citi's page was not what PaperPull expected", False, True),
     ("slow", "1", "Citi did not answer in time", False, True),
+    ("not_shown", "0", "Citi's receipt pages came back empty", False, True),
     ("error", "1", "PaperPull ran into something it did not expect", False, True),
     ("", "0", "Stopped before finishing", True, True),
 ])
@@ -408,6 +409,11 @@ def test_a_stop_says_why_and_whose_it_is_to_fix(panel, stop, code, title, signin
     assert "too slow" not in o["title"] and "how it gets fixed" not in o["say"]
     if stop == "page":
         assert "If it stops at the same place again" in o["say"]
+    if stop == "not_shown":
+        # The stop's own words say a few hours or tomorrow, so the panel
+        # never says the site did not answer or to wait a little while.
+        assert "in a few hours or tomorrow" in o["say"], o["say"]
+        assert "did not answer" not in o["say"] and "a little while" not in o["say"]
 
 
 def test_a_page_stop_of_a_check_offers_to_check_again(panel):

@@ -1870,7 +1870,13 @@ class App:
             self._stop_if_cut_short()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
-        self.process_purchases(selected, dry_run=self.args.dry_run)
+        try:
+            self.process_purchases(selected, dry_run=self.args.dry_run)
+        except not_shown.STOPS:
+            # Five receipt pages in a row showed nothing, and the run stops.
+            # The table of what the pilot did comes first all the same.
+            self._pilot_report(selected)
+            raise
         self._pilot_report(selected)
         self._stop_if_cut_short()
 
@@ -2052,7 +2058,7 @@ class App:
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None) -> None:
+                      postmortem: dict = None, extra: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
         Written without anybody having to know to ask for it, because a
@@ -2064,7 +2070,8 @@ class App:
         is still sitting on the thing that broke."""
         if self.stats.get("failure_files"):
             return
-        extra = {"postmortem": postmortem} if postmortem else None
+        # `extra` is a stop's facts, as not_shown hands them on.
+        extra = dict(extra or {}, **({"postmortem": postmortem} if postmortem else {})) or None
         # A checkpoint at the moment it gave up. It is also what makes the
         # journal when nothing had written to it yet, and every tester file
         # sent in on 2026-09-25 came back without one for that reason.

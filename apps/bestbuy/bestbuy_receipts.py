@@ -1032,7 +1032,13 @@ class App:
             self._stop_if_cut_short()
             return
         print(f"\nProcessing {len(selected)} pilot purchase(s)...")
-        self.process_purchases(selected, dry_run=self.args.dry_run)
+        try:
+            self.process_purchases(selected, dry_run=self.args.dry_run)
+        except not_shown.STOPS:
+            # Five receipt pages in a row showed nothing, and the run stops.
+            # The table of what the pilot did comes first all the same.
+            self._pilot_report(selected)
+            raise
         self._pilot_report(selected)
         self._stop_if_cut_short()
 
