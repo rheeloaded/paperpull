@@ -321,7 +321,7 @@ findings reported privately are fixed.
   The Browser Screen's time is renewed only from the panel's own page, where
   any request for one of its pages renewed it. A Server set up with HTTPS
   was not affected, and the desktop still takes a tool that sends no
-  headers at all. Reported privately by @JasperDale420.
+  headers at all. Reported privately by @JasperDale19.
 - **A sign-in window never reads its address as a browser switch.** The
   address a sign-in window opens went last on the browser's command line,
   so a value starting with two hyphens was read as a switch, one that turns
@@ -331,7 +331,7 @@ findings reported privately are fixed.
   address with a host is refused. An imported history keeps UKG's
   `base_url` only when it is an https address on ultipro.com or saashr.com,
   and the import says when it left one out. Reported privately by
-  @JasperDale420.
+  @JasperDale19.
 - **PaperPull Server never writes through a link or waits on a pipe in its
   shared folder.** A link or a named pipe that someone able to write into
   the shared folder put at a name the panel or an app uses could send a
@@ -341,7 +341,7 @@ findings reported privately are fixed.
   moved into place, by the panel, every app, both spreadsheets, the history
   import, adding a person, the Paperless plug-in and the backup recovery.
   On the desktop a link you made is still followed. Reported privately by
-  @JasperDale420.
+  @JasperDale19.
 - **A record's path that leads out of an account's folders is never
   moved.** An imported history kept paths with `..` in them, and AT&T's
   repair of a copy filed under the wrong year, American Family's move of a
@@ -350,13 +350,13 @@ findings reported privately are fixed.
   when it is in one of the account's filing folders once links and `..` are
   followed, and the import keeps a relative path only when it leads into
   your own folder, so a second person's `../` folders still work. Reported
-  privately by @JasperDale420.
+  privately by @JasperDale19.
 - **Anthem draws its letters and ID cards where nothing can run.** A
   letter's own HTML was drawn into its PDF in a tab of the signed-in
   browser with JavaScript on, so a message could open a connection or a
   window from there. It is now drawn where scripts are off and nothing
   reaches out, and the PDFs come out the same. Reported privately by
-  @JasperDale420.
+  @JasperDale19.
 
 ## [0.66.0] - 2026-11-13
 
@@ -656,7 +656,7 @@ list, and a recording keeps a Canadian bank's words for its accounts.
   place when you press **Restart and update**. Elsewhere the panel links to
   the release page. The Microsoft Store edition and PaperPull Server show
   none of it. PRIVACY.md and the README name each request it sends.
-  Contributed by @JasperDale420. Before merging, the requests go only to
+  Contributed by @JasperDale19. Before merging, the requests go only to
   GitHub's own hosts, read by the shared address check, and the Mac's own
   root certificates are added to what the app's Python trusts. Restart and
   update also refuses during a history import, and nothing new starts once
@@ -775,7 +775,7 @@ set's other files by what they are, both reported privately.
   so only one page starts a run, once. A window on a port another
   account's config names too is not watched, since a sign-in there may be
   that account's. Not on PaperPull Server, whose sign-in is in the page.
-  Contributed by @JasperDale420.
+  Contributed by @JasperDale19.
 - **A panel run from a git checkout says which one (#202).** A small badge beside
   the version names the checkout's branch, with a `*` when it has changes,
   and its card and Settings, About PaperPull, add the commit. It never names
@@ -830,7 +830,7 @@ set's other files by what they are, both reported privately.
   window shows only the panel at 127.0.0.1, and any other link opens in
   the default browser. The panel's output goes to
   ~/Library/Logs/PaperPull/panel.log, and Resources/paperpull-panel.sh
-  still runs the panel in a terminal. Contributed by @JasperDale420.
+  still runs the panel in a terminal. Contributed by @JasperDale19.
   Before merging, a quit was made to wait for a Rename, a Move, Review
   Names, the move into the documents folder that ends a download run, or a
   history import that is applying its changes, since one stopped partway
@@ -852,7 +852,7 @@ set's other files by what they are, both reported privately.
   offers a recent failure file first, then the support report with its
   sign-in button, then recording as the next step. What each file holds
   moved under What's in the file?, every word of it kept. Contributed by
-  @JasperDale420. Before merging, Record steps waits while the sign-in the
+  @JasperDale19. Before merging, Record steps waits while the sign-in the
   dialog started is going, as Make the report does, and the failure file
   is offered as one written in the last hour, with what the Run page says
   of it, rather than as the last run's, which may have gone well since.
@@ -863,7 +863,7 @@ set's other files by what they are, both reported privately.
   outcome. Get new for all no longer pulls you back to the Run page at each
   account, and its last line lists each account with what it came to, so
   one that saved documents and set one aside no longer reads as a failure.
-  Contributed by @JasperDale420. Before merging, a run that did not finish
+  Contributed by @JasperDale19. Before merging, a run that did not finish
   is named in the title by its outcome's own words, such as You stopped
   this run or This run did not start, where it read "stopped" for a run
   that never started and for one the page had lost touch with.
@@ -873,7 +873,7 @@ set's other files by what they are, both reported privately.
   person and anyone added, kept in that account's own settings with a copy
   in Backups first. It cannot be changed while that account is running,
   a Rename or a Move of its documents included, and files already saved
-  keep their names until a Rename. Contributed by @JasperDale420.
+  keep their names until a Rename. Contributed by @JasperDale19.
 - **Providers go by their names, and a run's lines by the names on the
   buttons (#184).** The File names picker, the Updated notice and File names'
   Stopped at line said the folder's name instead of the provider's. The
@@ -883,7 +883,7 @@ set's other files by what they are, both reported privately.
   and Continue, and in a terminal they still name Pilot, Run All, Discover
   and Resume. Review names and the line about refused documents count
   "1 receipt" rather than "1 receipt(s)", and the providers' lists read
-  alike. Contributed by @JasperDale420.
+  alike. Contributed by @JasperDale19.
 - **A sign-in window comes to the front, and goes when it is done (#186).** Opening
   one, or reusing one already open, now brings it forward. When Get new
   documents or Continue finishes on a Mac, PaperPull closes that account's
@@ -892,7 +892,7 @@ set's other files by what they are, both reported privately.
   browser may be the other account's. Only a browser PaperPull opened on
   the account's own port and profile folder is ever closed, never an
   everyday one, and `"close_signin_window": false` in settings.json turns
-  closing off. Contributed by @JasperDale420.
+  closing off. Contributed by @JasperDale19.
 - **An account just checked comes off the list, and can be marked done (#187).**
   "Due" came only from the age of the newest document, so a run that found
   nothing new left the account due until its provider sent something. A Get
@@ -901,7 +901,7 @@ set's other files by what they are, both reported privately.
   reads no list, so it is no check, and an account with gaps still shows
   them. **Mark as done** under the three dots takes an account off the list
   until its next run, or for that time at most, and can be undone.
-  Contributed by @JasperDale420.
+  Contributed by @JasperDale19.
 - **The sample can be looked at before the terms (#188).** Somebody only looking
   had to accept the Terms of Use to see invented data. With no accounts yet,
   the dialog offers Just look at the sample, which sets the dialog aside
@@ -911,7 +911,7 @@ set's other files by what they are, both reported privately.
   over, a spreadsheet or a setting saved anywhere but in the sample, so a
   tab still showing the sample after another tab left it, or after the
   panel started again, does nothing real, and has the dialog back the next
-  time it reads the accounts. Contributed by @JasperDale420.
+  time it reads the accounts. Contributed by @JasperDale19.
 - **An account's page names what a run set aside (#193).** Needs a look said
   a run had set documents aside and named none of them, and one that could
   not be captured has no file to find. The account's page now lists each
@@ -924,7 +924,7 @@ set's other files by what they are, both reported privately.
   that failed its check, keeps it.
   Done writes only the account's own note and never moves or deletes a
   document or a record, and neither Done nor Open is taken while a run, a
-  Rename or a Move goes on that account. Contributed by @JasperDale420.
+  Rename or a Move goes on that account. Contributed by @JasperDale19.
 
 ### Fixed
 - **A provider's first shell no longer stops a round of Get new for all.**
@@ -947,7 +947,7 @@ set's other files by what they are, both reported privately.
   failed on every later run, and a press on that control never saved
   anything. Those controls are no longer pressed or listed, and a record of
   that shape left by an older version is set down as No Longer Listed.
-  Contributed by @JasperDale420. Before merging, a list with such a
+  Contributed by @JasperDale19. Before merging, a list with such a
   row was made to read as not whole, since its statement is on the list and
   is not taken. The run says it left that statement out, that the Chase
   Business app takes a business account's statements, and finishes, and a
@@ -958,7 +958,7 @@ set's other files by what they are, both reported privately.
   its text leaves the "Account Number" label's line empty and the number
   read after the label was a transaction's. A statement is now judged by
   the number printed alone at the very top of its text when the label's
-  line and the line after it print none. Contributed by @JasperDale420.
+  line and the line after it print none. Contributed by @JasperDale19.
   Before merging, any other number printed before the label was made never
   to stand for the label's, so another account's statement is not kept for
   a long number that happens to end in the same four digits.
@@ -971,7 +971,7 @@ set's other files by what they are, both reported privately.
   A host that is no host name but words, or a part of one that reads like an
   account's number or a token, is written as its shape, every letter as a
   and every digit as 9. Nothing is asked of the address to name it.
-  Contributed by @JasperDale420.
+  Contributed by @JasperDale19.
 - **On a Mac, an account's documents folder is never another's in other
   letter case (#198).** A Mac tells folder names apart without case, so
   `target receipts/Chase` is inside Target Receipts' folder. The check
@@ -983,7 +983,7 @@ set's other files by what they are, both reported privately.
   and there the two spellings stay two folders. A folder inside an
   account's own Manual Review, Logs, Diagnostics or Backups is refused in
   any letter case, as a run already refused it. Contributed by
-  @JasperDale420.
+  @JasperDale19.
 - **FedEx and Stripe read their list on a computer just started.** Each
   keeps its list with the time it was read and reads it again once it is
   four minutes old, and a list never read was judged by that age alone. On
@@ -1000,7 +1000,7 @@ set's other files by what they are, both reported privately.
   there wrote its log into the git tree. A checkout with no chosen folder
   and no `config.json` in `apps/` now shows the welcome, and somebody
   already running from `apps/` carries on as before. Contributed by
-  @JasperDale420. Before merging, the welcome, Settings and Import history
+  @JasperDale19. Before merging, the welcome, Settings and Import history
   refuse that `apps/` folder, or one inside it, as the PaperPull folder
   until one of its apps has a `config.json`, and Settings no longer names
   it as the folder, fills it in, or lists its templates as accounts.
@@ -1009,7 +1009,7 @@ set's other files by what they are, both reported privately.
   and people attached it. It now ends as Nothing was read, says to sign in
   and leave the window on the documents page, and offers the sign-in window
   and the report again. A report from a signed-in page PaperPull cannot make
-  sense of still reads as saved, since that is the one a repair needs. Contributed by @JasperDale420.
+  sense of still reads as saved, since that is the one a repair needs. Contributed by @JasperDale19.
 - **A list that stopped partway no longer asks you to sign in again
   (#185).** The run ended as "This run ended with a problem", with signing
   in again as its first step, which could not help. It now says the
@@ -1019,7 +1019,7 @@ set's other files by what they are, both reported privately.
   answer refused as signed out, still offers the sign-in first. A run that
   found nobody signed in no longer ends its log saying Continue carries on,
   and the log of Open sign-in window names Try the newest few first under
-  the control panel, for every provider. Contributed by @JasperDale420.
+  the control panel, for every provider. Contributed by @JasperDale19.
 - **Wealthfront never calls its list whole with a kind of statement left
   out (#189, #197).** The Documents page shows statements through a dropdown, and a kind
   it would not choose was logged and passed over, so the list was still
@@ -1031,7 +1031,7 @@ set's other files by what they are, both reported privately.
   else looks like too, since every account has statements. An account
   whose dropdown has no Quarterly Statements has none to read and finishes
   as before, a minute sooner, since asking for that option no longer waits
-  for it twice (#197). Contributed by @JasperDale420. Before merging #197,
+  for it twice (#197). Contributed by @JasperDale19. Before merging #197,
   only a dropdown read whole that lists other kinds and no Quarterly
   Statements at all says the account has none. A Quarterly Statements
   listed and turned off, or a dropdown that lists no kind yet or cannot be
@@ -1044,14 +1044,14 @@ set's other files by what they are, both reported privately.
   statement it reads Statements again and presses the second, once. Each is
   saved only from its own page, whose address and the PDF it asks for name
   its account and date, and never as the same file as the other. Anything
-  else after a press still stops the run. Not yet run on a live account. Contributed by @JasperDale420.
+  else after a press still stops the run. Not yet run on a live account. Contributed by @JasperDale19.
 - **Spectrum reads its Mobile statements again (#194).** Billing's Mobile
   Account Number link and each Mobile statement row now carry
   `unsafe:javascript:void(0)` as their address, the way Angular writes a
   script address it will not follow, so they still lead nowhere. The app
   took that for an address of its own and stopped every Get new on Billing
   after the Internet statements were listed. That one form now passes,
-  and nothing else after `unsafe:` does. Contributed by @JasperDale420 and
+  and nothing else after `unsafe:` does. Contributed by @JasperDale19 and
   run on the contributor's own account. Before merging, the check reads
   its letters as plain ASCII letters only, so an address spelled with a
   look-alike letter, which a browser follows as a path on the site, is
@@ -1063,7 +1063,7 @@ set's other files by what they are, both reported privately.
   with the real account and asked for a port to be changed in the copy. A
   copy that holds only the example's settings is now passed over by the
   panel, by the port check Login makes, by the naming page and by Export
-  history. Contributed by @JasperDale420. Before merging, a copy somebody
+  history. Contributed by @JasperDale19. Before merging, a copy somebody
   filled in, with any setting changed or added, or without the example's
   `cdp_url`, `output_dir` or `profile_dir`, stays their account and is still
   checked for a shared port, and a copy is listed whenever it or the
@@ -1088,7 +1088,7 @@ set's other files by what they are, both reported privately.
   then pressed the link itself. A repo-wide test finds a host compared by
   its ending, or a link joined, the way these were. A provider's cookies
   go only to its own hosts, so they never went with such a request.
-  Reported privately by @JasperDale420.
+  Reported privately by @JasperDale19.
 - **Wealthfront files a form set's other files by what they are.** It
   kept each under the ending the site's file name gave, so a file named to
   run, a .command on a Mac or a .bat on Windows, would have been saved
@@ -1097,7 +1097,7 @@ set's other files by what they are, both reported privately.
   filed by its bytes, a PDF as a .pdf and a ZIP as a ZIP, and anything
   else is kept in Manual Review under the ending .held, which nothing
   opens, and the record says how many were. Reported privately by
-  @JasperDale420.
+  @JasperDale19.
 
 ## [0.62.0] - 2026-11-09
 
@@ -1217,7 +1217,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   own browser, for them to read and send, so PaperPull still sends nothing
   itself. Of where you sign in, only the site goes, never the page's path
   or what follows it, which can hold a username. Settings and the list of
-  providers open the same sheet. Contributed by @JasperDale420.
+  providers open the same sheet. Contributed by @JasperDale19.
 
 ### Changed
 - **The control panel looks and reads like a Mac app (#154).** It is set in the
@@ -1228,7 +1228,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   mode, and every text color is checked to 4.5:1 against what it sits on.
   A status is a colored dot and its words, each provider has the symbol of
   its kind, a bank's building or a shop's bag, instead of a letter, and
-  Settings is drawn in groups the way System Settings draws them. Contributed by @JasperDale420.
+  Settings is drawn in groups the way System Settings draws them. Contributed by @JasperDale19.
 - **Accounts puts what needs you first (#154).** The page has one blue button, the
   one for the next step, and each row's own is gray. Once anything has run,
   the providers never run fold under one Not started line, except one
@@ -1237,7 +1237,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   a search box. Overdue reads in amber, as a new document that is likely
   waiting, instead of a failure's red. Escape gives focus back to the More
   button, and Settings names each provider and person as Accounts does,
-  instead of by folder. Contributed by @JasperDale420.
+  instead of by folder. Contributed by @JasperDale19.
 
 ### Fixed
 - **A run started outside its app's folder keeps to that folder (#165).** An
@@ -1289,7 +1289,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   whose sign-in window is docked in the page itself, the dialog still says
   to sign in first. When the sign-in the dialog started ends, the dialog
   says whether its window opened, and when none did, the app's own words
-  for why are under it. Contributed by @JasperDale420.
+  for why are under it. Contributed by @JasperDale19.
 - **Moving to another computer says what comes with you (#161).** The Move card
   offered only a history file, which brings no PDF and marks every document
   it lists as downloaded, so Get new never fetched them, and nothing said
@@ -1302,7 +1302,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   to the same place and choose it again. The history
   file follows as the way when the folders cannot be copied, and its
   import, on the welcome and in Settings, says the PDFs stay on the other
-  computer and to copy them over or use Restore deleted files. Contributed by @JasperDale420.
+  computer and to copy them over or use Restore deleted files. Contributed by @JasperDale19.
 - **The welcome's folder step says what it thinks of the folder (#160).** A
   folder that could not be used was refused only at Set up, two steps on
   and away from its field. One already holding PaperPull providers, the
@@ -1315,7 +1315,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   sync service it is in before going on. Already have PaperPull folders, in
   Settings, goes on to Accounts once it finds them. A folder slow to
   answer, on a network share that is offline, say, holds up only its own
-  check and never the panel's other tabs. Contributed by @JasperDale420.
+  check and never the panel's other tabs. Contributed by @JasperDale19.
 - **The panel calls each thing by one name, and says what to do next (#159).**
   The same thing went by several names from page to page, and some were
   the command line's. The panel now says provider, account, PaperPull
@@ -1324,7 +1324,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   Scope or Download again, or a folder slug where a provider's name
   belongs. Messages from PaperPull itself start with a capital, end with a
   period and say what to do next, such as "That folder does not exist.
-  Check the path, or create the folder first." Contributed by @JasperDale420.
+  Check the path, or create the folder first." Contributed by @JasperDale19.
 - **A run says where its documents went, and Open folder opens them (#158).** A
   run's page listed the names it saved and never where, and Open folder
   opened the account's own folder, among its script, config and records,
@@ -1339,7 +1339,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   documents folder no run would use. Open what was set aside opens Manual
   Review, as the page says it is there, and when there is no Manual Review
   folder it opens nothing and says so. Accounts names the documents
-  folder once one is set. Contributed by @JasperDale420.
+  folder once one is set. Contributed by @JasperDale19.
 - **Sign in, then get new documents, in one go (#157).** Get new pressed before
   signing in, the likeliest first-run slip, read as a crash ("It exited with
   code 1", "Run login.bat first"), said "Sign in again" to somebody who never
@@ -1359,7 +1359,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   row not started yet offers Sign in, which opens the window, where it
   offered Start, which only opened the account's page, and that page leads
   with signing in while the account has not started or its last run found
-  nobody signed in. Contributed by @JasperDale420.
+  nobody signed in. Contributed by @JasperDale19.
 - **A run that stops says why, and whose it is to fix (#156).** Every stop read
   "may have signed you out partway … Sign in again, then continue",
   whatever had stopped it. The run's result now carries why it stopped,
@@ -1373,7 +1373,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   to make a support report, it has a Make a support report button for it,
   since that page has no More menu. Only a stop a sign-in can
   fix offers one, and a stop with no reason sends you to the technical
-  details instead of guessing a sign-out. Contributed by @JasperDale420.
+  details instead of guessing a sign-out. Contributed by @JasperDale19.
 - **The panel never says something happened that did not (#155).** Open sign-in
   window said "Sign-in window opened" in green when no browser could open
   at all, and Record said "Recording saved", ready to attach, when the
@@ -1388,7 +1388,7 @@ steps, and a run started outside its app's folder keeps to that folder.
   these offers an earlier run's failure file as one it wrote. Recent runs
   says "no sign-in window opened", "nothing was recorded" or, for a run
   that found nobody signed in, "nobody was signed in", never "ended with a
-  problem". Contributed by @JasperDale420.
+  problem". Contributed by @JasperDale19.
 
 ## [0.61.1] - 2026-11-08
 
@@ -1419,7 +1419,7 @@ says it was checked only when its list was read.
   day is there for that. A gap that shows up later still counts, and the
   account's row still says Possible gap and offers Look for them. An account
   that is due is unchanged, since its next document may come any day.
-  Contributed by @JasperDale420. Before merging, the summary's buttons were
+  Contributed by @JasperDale19. Before merging, the summary's buttons were
   made to run a gap row whole, and a gap was made to settle only after two
   such runs on different days whose records show nothing left.
 - **An account's card says it was checked only when its list was read
@@ -1432,7 +1432,7 @@ says it was checked only when its list was read.
   now comes from when a run last read the provider's whole list, which
   every app already notes, so a run over part of the history does not move
   it either, and the card says when the last run ended where it talks about
-  that run. Reported by JasperDale420.
+  that run. Reported by JasperDale19.
 - **A capture that saved nothing no longer reads as a document waiting in
   Manual Review (#152).** Ally's tax forms API lists a 2019 Form 1099-INT
   while its Tax Forms year picker starts at 2020, so its page cannot open it.
@@ -1500,7 +1500,7 @@ says it was checked only when its list was read.
   is read by where each cell sits, and stops the list when its cells do not
   line up. The contributor's own account listed nine bills, the eight the
   app had recorded keeping their ids and dates. Contributed by
-  @JasperDale420. Before merging, since the page no longer says how many
+  @JasperDale19. Before merging, since the page no longer says how many
   bills it holds, the read was made to wait for the rows to settle, and the
   list to stop on anything near the table that looks like a pager or a
   show-more control or says there are more bills than were read, and on
@@ -1576,7 +1576,7 @@ Chromium when it falls behind.
   build it cannot start does not leave you with no window. That window has a
   profile of its own and starts with no sign-ins, since running an older build
   on a profile a newer one used lost that profile's saved site data.
-  Contributed by @JasperDale420.
+  Contributed by @JasperDale19.
 - **City of Tualatin, the 81st app, monthly utility bills (#127).** It
   saves the water, sewer, stormwater, parks and road fee bills of a
   Tualatin Water account from CivicPay Online, about two years of them.
@@ -1599,7 +1599,7 @@ Chromium when it falls behind.
   have. They now say what is missing and that nothing is wrong with the
   account or the receipt, and give the one line that downloads it. The
   Store edition, where that line cannot run, and PaperPull Server each get
-  words that fit them. Contributed by JasperDale420.
+  words that fit them. Contributed by JasperDale19.
 - **American Express reads every card on a sign-in (#134).** With two
   cards, Discover found nothing, because a sign-in that lands on the
   overview page never reached the statements, and a page it never reached
@@ -4639,9 +4639,9 @@ several providers.
 Three new apps. Interactive Brokers is the 63rd, with monthly Activity
 Statements from tylerverry, and Coinbase, with monthly statements and tax
 documents, and Optum Bank, with HSA statements and tax forms, come from
-JasperDale420, each reviewed and repaired before it went in. Robinhood
+JasperDale19, each reviewed and repaired before it went in. Robinhood
 takes its documents page by page and reads the retirement page, also
-from JasperDale420. A checkout runs every app on one environment that
+from JasperDale19. A checkout runs every app on one environment that
 setup-all builds once (#65). A document whose Download the site has
 turned off is left for review while the run goes on, nothing more is
 pressed after a press that may have been made, and a control a press
@@ -4677,7 +4677,7 @@ stopped container left.
   and loss reports, come from the list calls the Taxes page makes and are
   fetched by their short-lived links with nothing pressed, so the page's
   own mark-read and mark-downloaded calls never happen. Contributed by
-  JasperDale420, whose full run on a retail account saved 66 statements and
+  JasperDale19, whose full run on a retail account saved 66 statements and
   2 tax documents, every one a valid PDF. Before merging, a statement is
   filed only when its own text names its month more plainly than the month
   before or after, and a download that could be another press's is never
@@ -4695,7 +4695,7 @@ stopped container left.
   anywhere. A tab that lands on a HealthSafe ID sign-in page stops the
   run, and an Optum pilot exits as a run that stopped unless every
   document it chose was saved as a valid PDF. Contributed by
-  JasperDale420, whose full run saved 21 statements and the 5498-SA.
+  JasperDale19, whose full run saved 21 statements and the 5498-SA.
   Before merging, a document was made to carry its product in its key,
   so a second product appearing later no longer downloads the first
   one's whole history again, and an archive saved before keeps its keys.
@@ -4738,7 +4738,7 @@ stopped container left.
   retirement statement whose file is the individual statement of the same
   month goes to Manual Review as a wrong document, and a retirement page
   that lists one title twice, as two IRAs might, is not read yet, and the
-  run says so. Contributed by JasperDale420, whose account went from 22 to
+  run says so. Contributed by JasperDale19, whose account went from 22 to
   26 seconds a document to 4 to 6, with 136 of 139 documents saved and the
   other three offered by Robinhood only as HTML. Before merging, a
   statement's control is pressed only when its own label or its own card
