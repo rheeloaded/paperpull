@@ -211,3 +211,37 @@ def test_a_receipt_saved_here_keeps_its_record_when_the_old_computer_set_it_asid
     assert said == OTHERWISE, said
     assert (rec["state"], rec["notes"], rec[not_shown.DAYS_KEY]) == (
         state, "Saved by an invented step", []), rec
+
+
+@pytest.mark.parametrize("provider", ["target", "github", "meijer"])
+def test_an_import_recorded_as_having_none_for_another_reason_brings_no_days(provider, tmp_path):
+    """A purchase tried again here keeps three days while no receipt of its
+    kind was saved before it (#225). The old computer recorded the same
+    purchase as having no receipt for what the provider showed, a Target
+    order with only an invoice or a GitHub payment with no receipt link,
+    which carries no days. The import takes that state, and the days here go
+    with the state they belonged to, so the record is never read as one set
+    aside for pages that showed nothing (review of #225)."""
+    days = ["2031-01-02", "2031-01-03", "2031-01-04"]
+    here = {"k": {"state": State.FAILED.value,
+                  "notes": "Neither a receipt nor an invoice showed, tried again next run",
+                  not_shown.DAYS_KEY: list(days)}}
+    there = {"k": {"state": State.NO_RECEIPT_AVAILABLE.value,
+                   "notes": "No printable receipt available"}}
+    migrate._merge(here, there, [], tmp_path, tmp_path, provider=provider)
+    rec = here["k"]
+    assert rec["state"] == State.NO_RECEIPT_AVAILABLE.value, rec
+    assert not (rec.get(not_shown.DAYS_KEY) or []), rec
+    assert not not_shown.set_aside(rec), rec
+    assert not_shown.skipped(rec, OTHERWISE) == OTHERWISE
+
+    # A purchase the old computer set aside for pages that showed nothing
+    # brings its own days, and stays set aside.
+    here = {"k": {"state": State.FAILED.value, "notes": "tried again next run",
+                  not_shown.DAYS_KEY: list(days[:1])}}
+    there = {"k": {"state": State.NO_RECEIPT_AVAILABLE.value,
+                   "notes": "Receipt page did not render on 3 separate days, so it is not "
+                            "asked for again",
+                   not_shown.DAYS_KEY: list(days)}}
+    migrate._merge(here, there, [], tmp_path, tmp_path, provider=provider)
+    assert not_shown.set_aside(here["k"]), here["k"]
