@@ -92,13 +92,16 @@ becomes
 * **The Move brings documents out of their kind folders,** in the
   provider's own folder and in the documents folder alike, keeping the
   folders the pattern made. A folder of a kind it leaves empty in the
-  documents folder is removed. The Documents settings count the documents
-  still in a folder of their kind and offer the Move.
+  documents folder is removed. Documents filed this way in a documents
+  folder used before come along to the new one as a whole. The Documents
+  settings count the documents still to move and offer the Move.
 * **Every kind shares one folder, so the name has to say which kind a
   document is.** For a statements provider the pattern needs `{kind}`,
   which is the document's category, Statement or Tax Document. For a
-  receipts provider it needs `{type}`, Online or In-Store, and `{kind}`
-  too when the provider files invoices apart, as Target and Walmart do.
+  receipts provider it needs `{type}`, the purchase type, such as Online
+  or In-Store, and `{kind}` too when the provider files invoices apart, as
+  Target and Walmart do. A pattern folder named like a folder of a kind,
+  as `{type}` folders are, is left where the pattern puts it.
   The field has to stand on its own, as a folder or in the name, not as
   one of a field's alternatives (`{number|kind}` is the number when there
   is one) and not in an optional section with another field. The usual
@@ -113,8 +116,8 @@ becomes
 * Setting it back to `true` does not move documents back into folders of
   their kind. They stay where they are and are still found.
 * The setting comes along when history is exported and imported, and the
-  documents folder does not, so on the new computer a run asks for a
-  documents folder first.
+  documents folder does not, so on the new computer a run stops and asks
+  for a documents folder to be set first.
 
 **Rename** moves files into the folders a pattern names and back out of
 them, the same way a download would file them now. Changing back to a

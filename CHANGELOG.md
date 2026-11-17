@@ -31,7 +31,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   made to walk every folder of such a documents folder for a link out of
   the data folder, the setting was made to travel with Export history, and
   an earlier documents folder is searched as a whole only when documents
-  were filed in it this way.
+  were filed in it this way. A folder a pattern made that is named like a
+  kind folder, as `{type}` folders are, now keeps its documents, and
+  documents filed this way follow a new documents folder.
 
 ## [0.68.0] - 2026-11-16
 

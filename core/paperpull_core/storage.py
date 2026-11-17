@@ -1075,6 +1075,15 @@ class Paths:
                 target = here / folder.name if self.kind_folders else here
                 if _folder_key(source) != _folder_key(target):
                     moves[source] = target
+        if not self.kind_folders:
+            # A documents folder used before that was filed without kind
+            # folders has none to bring documents from, so it moves as a
+            # whole, the folders of a pattern in it kept. Set back to kind
+            # folders, nothing says which kind such a document is, and it
+            # stays where it is, still found.
+            for root in self.flat_documents_roots():
+                if _folder_key(root) != _folder_key(here):
+                    moves[Path(root)] = here
         return moves
 
     def drop_empty_kind_folders(self) -> None:

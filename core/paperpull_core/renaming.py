@@ -308,6 +308,19 @@ class _Homes:
             return Path(path).parent, str(name)
         if self.is_flat(home):
             return home, str(name)
+        # A documents folder filed without kind folders (#201) is a home and
+        # so is each folder of a kind in it, which a pattern's folder can be
+        # named like, {type} Online or an {account} of any name. A file the
+        # pattern's folders put just where it is, in the outer one, is filed
+        # there, or a Rename would file it a folder deeper every time.
+        folder = getattr(name, "folder", "")
+        real = self._where(path)
+        if folder and real is not None:
+            inner = self._where(home)
+            for outer, where in self._pairs:
+                if inner is not None and where in inner.parents and \
+                        self._where(where / folder) == real.parent:
+                    return outer, name
         return home, name
 
 
@@ -1523,6 +1536,17 @@ def run_for(app, apply_changes: bool = False, say=print,
         say("Moving %s into %s." % ("the documents this run saved" if mode == "new"
                                     else "the documents saved before", app.paths.documents))
 
+    flat_here = documents and getattr(app.paths, "kind_folders", True) is False
+
+    def _one_folder_of(a, b) -> bool:
+        if a is None or b is None:
+            return False
+        try:
+            return os.path.normcase(str(Path(a).resolve())) == \
+                os.path.normcase(str(Path(b).resolve()))
+        except (OSError, RuntimeError, ValueError):
+            return False
+
     def moved_to(home) -> Optional[Path]:
         try:
             return earlier.get(Path(home).resolve())
@@ -1559,6 +1583,16 @@ def run_for(app, apply_changes: bool = False, say=print,
             inside = Path(raw).resolve().relative_to(Path(home).resolve())
         except (OSError, RuntimeError, ValueError):
             return ""
+        if flat_here and _one_folder_of(moved_to(home), app.paths.documents):
+            # Without kind folders (#201) a folder of the documents folder
+            # named like a kind folder may be one a pattern made, {type}
+            # Online or an {account} of any name. A document already where
+            # its pattern files it stays, or every Move would take it out
+            # and every Rename put it back.
+            planned = build_name(row)
+            if planned and _one_folder_of(
+                    filing_folder(Path(app.paths.documents), planned, limit), Path(raw).parent):
+                return ""
         return FileName(Path(raw).name, "/".join(inside.parts[:-1]))
 
     name_for = kept_name if documents else build_name

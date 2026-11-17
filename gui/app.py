@@ -5862,6 +5862,8 @@ DOCUMENTS_ROOT_KEY = "documents_root"
 KEPT_FOLDERS = ("Manual Review", "Logs", "Diagnostics", "Backups")
 # Each documents folder an account's documents were moved to, in its folder.
 DOCUMENTS_FOLDERS = "documents-folders.json"
+# Those of them filed without kind folders (core storage.FLAT_DOCUMENTS_FOLDERS).
+FLAT_DOCUMENTS_FOLDERS = "documents-folders-flat.json"
 # What tells an app's Rename to move documents (core renaming.MOVE_DOCUMENTS_ENV).
 MOVE_DOCUMENTS_ENV = "PAPERPULL_MOVE_DOCUMENTS"
 
@@ -6334,6 +6336,38 @@ def _kind_folders_of(meta: dict, account: str) -> bool:
     return _config_of(meta, account).get("kind_folders", True) is not False
 
 
+def _pattern_folder(meta: dict, account: str, record: dict) -> Optional[str]:
+    """The folders the account's file naming pattern files a record's
+    document in, "Online" or "2026/Checking 1111", as a run builds them
+    (naming.preview, as the File names page shows them), "" for none, or
+    None when that cannot be told. Without kind folders (#201) a pattern's
+    folder can be named like a folder of a kind, {type} Online say, and a
+    document in it is where it belongs."""
+    naming = _naming()
+    if naming is None:
+        return None
+    d = Path(meta["dir"])
+    cfg = _config_of(meta, account)
+    kind = _naming_kind(d)
+    pattern = ""
+    for key in ("filename_pattern", "filename_pattern_" + kind):
+        value = cfg.get(key)
+        if isinstance(value, str) and value.strip():
+            pattern = value.strip()
+            break
+    if not pattern or naming.check(pattern):
+        return ""
+    try:
+        named = naming.preview(
+            pattern, record, provider=_provider_name(d), owner=cfg.get("owner") or "",
+            receipts=(kind == "receipts"),
+            document_type=(str(record.get("document_type") or "Receipt")
+                           if kind == "receipts" else ""))
+    except Exception:
+        return None
+    return named.rpartition("/")[0]
+
+
 def _documents_left(meta: dict, account: str) -> int:
     """How many documents an account's records name that are saved and
     checked, and are in a folder of their kind in its own folder or in a
@@ -6357,6 +6391,15 @@ def _documents_left(meta: dict, account: str) -> int:
     kinds = set()
     if docs and here != home and meta.get("dir") and not _kind_folders_of(meta, account):
         kinds = {os.path.normcase(n) for n in _kind_folder_names(Path(meta["dir"]))}
+    flat_roots = set()
+    if kinds:
+        listed = _read_json(root / FLAT_DOCUMENTS_FOLDERS)
+        for p in listed if isinstance(listed, list) else ():
+            if isinstance(p, str) and Path(p).is_absolute():
+                try:
+                    flat_roots.add(Path(p).resolve())
+                except (OSError, RuntimeError, ValueError):
+                    pass
     data = _read_json(root / "progress.json")
     indexed = _indexed_files(root)
     seen = set()
@@ -6392,13 +6435,21 @@ def _documents_left(meta: dict, account: str) -> int:
             if here in where.parents:
                 parts = where.relative_to(here).parts
                 if len(parts) >= 2 and os.path.normcase(parts[0]) in kinds:
-                    seen.add(os.path.normcase(str(where)))
+                    # Not one a pattern's folder of that name holds, where
+                    # the Move leaves it (core renaming, review of #217).
+                    folder = _pattern_folder(meta, account, rec)
+                    if folder is None or os.path.normcase(folder.replace("\\", "/")) != \
+                            os.path.normcase("/".join(parts[:-1])):
+                        seen.add(os.path.normcase(str(where)))
                 continue
             for top in roots:
                 if top == here or top not in where.parents:
                     continue
                 parts = where.relative_to(top).parts
-                if len(parts) >= 2 and not (top == home and parts[0] in KEPT_FOLDERS):
+                # An earlier documents folder filed without kind folders
+                # moves as a whole while the account still files so.
+                least = 1 if kinds and top in flat_roots else 2
+                if len(parts) >= least and not (top == home and parts[0] in KEPT_FOLDERS):
                     seen.add(os.path.normcase(str(where)))
                 break
     return len(seen)

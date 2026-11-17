@@ -109,3 +109,60 @@ def test_the_panel_reads_each_apps_kind_folders_as_its_spec_declares_them(app, m
     kept = {f.attr for f in INFRASTRUCTURE_FOLDERS}
     declared = [f.name for f in module.SPEC.folders if f.attr not in kept]
     assert gui._kind_folder_names(app) == declared
+
+
+def test_a_document_in_a_patterns_folder_named_like_a_kind_folder_is_not_left(tmp_path,
+                                                                               monkeypatch):
+    """{type} is Online or In-Store, the names of a receipts app's kind
+    folders, and an {account} may be anything. A document its pattern put
+    in Watched/Statements is where it belongs, and the Move leaves it, so
+    counting it offered a Move that never ends (review of #217)."""
+    monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
+    d = tmp_path / "Utilico Statements"
+    d.mkdir()
+    (d / "storage.py").write_text(STORAGE, encoding="utf-8")
+    out, docs = tmp_path / "out", tmp_path / "Watched"
+    placed = docs / "Statements" / "2026-09-12 Monthly Statement.pdf"
+    stray = docs / "Statements" / "Savings 2222" / "2026-09-12 Monthly Statement.pdf"
+    for path in (placed, stray):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(PDF)
+    out.mkdir()
+    (out / "progress.json").write_text(json.dumps({
+        account: {"state": "Completed", "downloaded_ok": True, "pdf_path": str(path),
+                  "date": "2026-09-12", "summary": "Monthly Statement", "account": account,
+                  "category": "Statement"}
+        for account, path in (("Statements", placed), ("Savings 2222", stray))}),
+        encoding="utf-8")
+    (d / "config.json").write_text(json.dumps({
+        "output_dir": str(out), "documents_dir": str(docs), "kind_folders": False,
+        "filename_pattern": "{account}/{date} {summary}"}), encoding="utf-8")
+    meta = {"dir": str(d), "name": d.name, "accounts": ["primary"]}
+    # Savings 2222 belongs in Watched/Savings 2222, so it is still left.
+    assert gui._documents_left(meta, "primary") == 1
+
+
+def test_an_earlier_documents_folder_filed_flat_is_left_as_a_whole(tmp_path, monkeypatch):
+    """Without kind folders, documents in a documents folder used before
+    and filed the same way move to the new one whole (core
+    Paths.documents_moves), a document at its top too."""
+    monkeypatch.delenv("PAPERPULL_SERVER", raising=False)
+    d = tmp_path / "Utilico Statements"
+    d.mkdir()
+    (d / "storage.py").write_text(STORAGE, encoding="utf-8")
+    out, old, docs = tmp_path / "out", tmp_path / "Old", tmp_path / "Watched"
+    files = [old / "2026" / "2026-01-31 Statement.pdf", old / "2026-02-28 Statement.pdf"]
+    for path in files:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(PDF)
+    out.mkdir()
+    (out / "progress.json").write_text(json.dumps({
+        str(n): {"state": "Completed", "downloaded_ok": True, "pdf_path": str(path)}
+        for n, path in enumerate(files)}), encoding="utf-8")
+    (out / "documents-folders.json").write_text(json.dumps([str(old)]), encoding="utf-8")
+    (out / "documents-folders-flat.json").write_text(json.dumps([str(old)]), encoding="utf-8")
+    (d / "config.json").write_text(json.dumps({
+        "output_dir": str(out), "documents_dir": str(docs), "kind_folders": False}),
+        encoding="utf-8")
+    meta = {"dir": str(d), "name": d.name, "accounts": ["primary"]}
+    assert gui._documents_left(meta, "primary") == 2

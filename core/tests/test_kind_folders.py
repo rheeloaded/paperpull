@@ -247,3 +247,44 @@ def test_documents_filed_without_kind_folders_stay_put_when_the_setting_is_taken
     assert "name something other than a PDF" not in said, "each document is still the app's"
     assert office.where() == {body_of(ACCOUNTS[0]): "Watched/" + FIRST,
                               body_of(ACCOUNTS[1]): "Watched/" + SECOND}
+
+
+def test_a_patterns_folder_named_like_a_kind_folder_stays_where_the_pattern_put_it(
+        tmp_path, monkeypatch):
+    """A receipts app's {type} is Online or In-Store, the very names of its
+    kind folders, and an {account} may be anything. A Move without kind
+    folders took Watched/Statements for a folder of a kind and brought its
+    documents up out of the folder their pattern made, and the next Rename
+    put them back, every time. A document already where its pattern files
+    it stays there (review of #217)."""
+    storage.set_filename_patterns({"filename_pattern": "{account}/{date} {summary}"})
+    office = Office(tmp_path)
+    office.saved("Statements")
+    office.saved("Savings 2222")
+    flat(office)
+    moving(monkeypatch)
+    assert office.rename()[0] == 0
+    placed = {body_of("Statements"): "Watched/Statements/2026-09-12 Monthly Statement.pdf",
+              body_of("Savings 2222"): "Watched/Savings 2222/2026-09-12 Monthly Statement.pdf"}
+    assert office.where() == placed
+    code, said = office.rename()
+    assert office.where() == placed, said
+    monkeypatch.delenv(renaming.MOVE_DOCUMENTS_ENV)
+    code, said = office.rename(apply_changes=False)
+    assert "Every file is already named the way this app names them." in said, said
+
+
+def test_documents_filed_without_kind_folders_follow_a_new_documents_folder(
+        office, monkeypatch, tmp_path):
+    """The Move brings documents to where documents_dir points now, from a
+    documents folder used before as well, and one filed without kind
+    folders has no folder of a kind to bring them from (review of #217)."""
+    moving(monkeypatch)
+    assert office.rename()[0] == 0
+    office.docs = tmp_path / "Elsewhere"
+    flat(office)
+    code, said = office.rename()
+    assert code == 0 and "Moved 2 file(s)" in said, said
+    assert office.where() == {body_of(ACCOUNTS[0]): "Elsewhere/" + FIRST,
+                              body_of(ACCOUNTS[1]): "Elsewhere/" + SECOND}
+    office.follows()
