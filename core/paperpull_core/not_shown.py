@@ -83,6 +83,7 @@ DAYS = 3
 DAYS_KEY = "not_shown_days"
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}")
+_ONE_DAY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _this_day(app) -> str:
@@ -98,7 +99,38 @@ def _this_day(app) -> str:
 
 
 def _days(rec) -> list:
-    return [d for d in (rec.get(DAYS_KEY) or []) if isinstance(d, str) and d]
+    """The days a record keeps, from a list only. One string is no list of
+    days, and was read one character at a time, as ten days."""
+    days = rec.get(DAYS_KEY) if isinstance(rec, dict) else None
+    if not isinstance(days, list):
+        return []
+    return [d for d in days if isinstance(d, str) and d]
+
+
+def _a_day(text: str) -> bool:
+    if not _ONE_DAY_RE.fullmatch(text):
+        return False
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        return False
+    return True
+
+
+def _days_so_far(app, rec) -> list:
+    """The days that count for this run, each a real date no later than the
+    run's own. Words that are no date count for nothing, and so does a day
+    after the run's, from a clock set back or a record made on a computer
+    ahead in time, which would otherwise bring a purchase closer to being
+    set aside on a day that has not come."""
+    today = _this_day(app)
+    return [d for d in _days(rec) if _a_day(d) and d <= today]
+
+
+def _holds_days(rec) -> bool:
+    """Whether a record holds anything under DAYS_KEY at all, so a save lets
+    it go whatever it is."""
+    return isinstance(rec, dict) and bool(rec.get(DAYS_KEY))
 
 
 # What a receipt app records the moment it has saved a file for a purchase,
@@ -162,12 +194,12 @@ def let_go_on_save(app, purchase, state, rec: dict) -> None:
     if value not in SAVED_STATES:
         if set_aside(before):
             _set_aside_before(app).add(purchase.key)
-        if value == State.NO_RECEIPT_AVAILABLE.value and DAYS_KEY not in rec and _days(before):
+        if value == State.NO_RECEIPT_AVAILABLE.value and DAYS_KEY not in rec and _holds_days(before):
             rec[DAYS_KEY] = []
         return
     _saved(app)[purchase.purchase_type] = True
     _set_aside_before(app).discard(purchase.key)
-    if _days(before):
+    if _holds_days(before):
         # The store merges a record into the one it has, so the days are
         # written empty rather than left out.
         rec[DAYS_KEY] = []
@@ -213,7 +245,7 @@ def tried_again(app, purchase, why: str) -> bool:
         app.stats["failed"] += 1
         print("  %s. The receipt saved before is kept." % why)
         return False
-    days = _days(rec)
+    days = _days_so_far(app, rec)
     if _this_day(app) not in days:
         days.append(_this_day(app))
     seen = len(days)

@@ -67,6 +67,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   other lists after the EOBs, writes it where the run stops, so a later
   failure in the same run is the one kept.
 
+- **Only real days before the run's own count as days a receipt page showed
+  nothing.** A record's days written as one piece of text rather than a
+  list, as an edited or imported record can hold them, were read one
+  character at a time, so "2026-11-16" counted as ten days and a purchase
+  whose page showed nothing could be set aside as No Receipt Available on
+  its first day of that. Words that are no date counted as days too, and so
+  did a day later than the run's own, from a clock set back or a record
+  made on a computer ahead in time. Now only real dates up to the run's day
+  count, a day after it is dropped when the record is next written, and a
+  saved receipt lets go of whatever was there.
+
 ## [0.68.0] - 2026-11-16
 
 Every provider now says which country it is for, in the control panel, in
