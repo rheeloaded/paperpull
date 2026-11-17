@@ -9,15 +9,24 @@ starts never asked. The browsers a test starts itself with
 subprocess.Popen and a debugging port did not pass it, testkit's
 _start_fresh_browser and the copies of _start_browser in the tests.
 
-This reads testkit and every Python file under a tests folder, of every
-app, core, gui and server, conftest files included, and finds each place
-that starts a program, by subprocess, asyncio.create_subprocess_exec,
-os.spawn or exec, or a name bound to one of them. It reads the command
-line through list and tuple literals, f-strings, + joins, % and format, a
-string split into words, the names of the function and the module, a name
-imported from testkit or a file beside it, and a function that returns
-it. A start inside a string, a sample another census reads, is not code
-and is not a start.
+This reads testkit, the root conftest.py and every Python file under a
+tests folder, of every app, core, gui and server, conftest files included,
+and finds each place that starts a program, by subprocess,
+asyncio.create_subprocess_exec, os.spawn or exec, a name bound to one of
+them, another name for the subprocess module, functools.partial of one,
+and a function or a lambda that hands its argument straight to one. It
+reads the command line through list and tuple literals, f-strings, +
+joins, % and format, a string split into words, the names of the function
+and the module, a name imported from testkit or a file under the same
+tests folder, a function that returns it, and .append and .extend. A list
+changed in place any other way, or handed to another call first, has words
+it cannot read. A start inside a string, a sample another census reads, is
+not code and is not a start.
+
+Not followed, none of them in the tree on 2026-11-17. getattr(subprocess,
+"Popen"), an event loop's subprocess_exec, anyio.open_process, a helper
+that is a method, and a Playwright launch whose ignore_default_args drops
+the switch Playwright adds.
 
 Three kinds of start have to hold --use-mock-keychain, before "--" and
 before any address the browser is given.
@@ -27,7 +36,9 @@ before any address the browser is given.
 - One that stands in for the Popen of a product module that starts a
   browser and hands the real Popen the command line it was given, as
   test_browser_launch does to run browser._launch for real. That module is
-  found by reading the product code for the same switches.
+  found by reading the product code for the same switches. Here the switch
+  also goes before every word handed on after the program, since those
+  end in the product's "--" and address.
 - One whose command line cannot be read whole and whose program is named
   for a browser.
 
@@ -111,15 +122,43 @@ def _is_test_code(path) -> bool:
 
 def files_read():
     yield TESTKIT
+    if (REPO / "conftest.py").is_file():
+        yield REPO / "conftest.py"
     for path in python_files(REPO):
         if path != TESTKIT and _is_test_code(path):
             yield path
 
 
 class Start:
-    def __init__(self, call, kind, name, ways):
+    def __init__(self, call, kind, name, ways, given=None):
         self.call, self.kind, self.name, self.ways = call, kind, name, ways
         self.line = call.lineno
+        if given is None:
+            given = call.args[:1] if kind != "words" else call.args
+            if not given:
+                given = [k.value for k in call.keywords if k.arg == "args"]
+        self.given = list(given)
+
+
+# Calls that only read a list handed to them. Any other call a list name is
+# handed to may change it in place.
+READS_ONLY = {"len", "list", "tuple", "str", "repr", "print", "sorted", "any", "all",
+              "enumerate", "iter", "set", "bool", "isinstance", "type", "id", "hash", "min",
+              "max", "sum", "zip", "map", "filter", "Path", "join", "format", "startswith",
+              "endswith", "index", "count", "fspath", "dumps", "fail", "skip", "parametrize"}
+LIST_CHANGES = {"append", "extend", "insert", "remove", "pop", "clear", "sort", "reverse",
+                "__setitem__", "__iadd__"}
+
+
+class Mutated(ast.expr):
+    """A name changed in place where it was read from, by .append, .extend
+    or another call, read as what it held before and what the change
+    added, which is unread words for any change but .append and .extend."""
+    _fields = ("call",)
+
+    def __init__(self, name, call, how):
+        super().__init__()
+        self.name, self.call, self.how = name, call, how
 
 
 class Module:
@@ -131,7 +170,7 @@ class Module:
         self.path = path
         self.tree = ast.parse(source)
         self.others = others if others is not None else {}
-        self._up, self._starts = None, None
+        self._up, self._starts, self._direct = None, None, None
         self.modules = {m: set() for m in STARTERS}
         self.from_modules, self.imported, self.full = {}, {}, {}
         nodes = list(ast.walk(self.tree))
@@ -159,7 +198,9 @@ class Module:
         for node in nodes:
             if isinstance(node, FUNCTION):
                 self.functions.setdefault(node.name, []).append(node)
-            elif isinstance(node, ast.Assign) and isinstance(node.value, (ast.Attribute, ast.Name)):
+            elif isinstance(node, ast.Assign) and (
+                    isinstance(node.value, (ast.Attribute, ast.Name, ast.Lambda)) or (
+                        isinstance(node.value, ast.Call) and _name(node.value.func) == "partial")):
                 self.may_hold_a_start |= {t.id for t in node.targets if isinstance(t, ast.Name)}
 
     @property
@@ -184,6 +225,13 @@ class Module:
                 owner = next((m for m, names in self.modules.items() if value.id in names), None)
                 if owner is None and value.id in STARTERS and value.id not in self.full:
                     owner = value.id
+                if owner is None and value.id in self.may_hold_a_start:
+                    # sp = subprocess, then sp.Popen(...).
+                    found = self.resolve(value, at)
+                    if found is not None and isinstance(found[1], ast.Name):
+                        module, alias, where = found
+                        owner = next((m for m, names in module.modules.items()
+                                      if alias.id in names), None)
             elif isinstance(value, ast.Attribute) and value.attr in STARTERS:
                 owner = value.attr
             kind = start_kind(owner, func.attr)
@@ -193,19 +241,115 @@ class Module:
                 owner, name = self.from_modules[func.id]
                 kind = start_kind(owner, name)
                 return (kind, name) if kind else None
-            found = self._value_of(func, at) if func.id in self.may_hold_a_start else None
+            found = self.resolve(func, at) if func.id in self.may_hold_a_start else None
             if found is not None:
                 module, value, where = found
                 if isinstance(value, (ast.Attribute, ast.Name)):
                     return module.start_of(value, where, depth + 1)
+                if (isinstance(value, ast.Call) and _name(value.func) == "partial"
+                        and value.args):
+                    # functools.partial(subprocess.Popen, ...), its command line
+                    # still the first argument.
+                    return module.start_of(value.args[0], where, depth + 1)
+        return None
+
+    def resolve(self, node, at):
+        """_value_of past changes in place, for a value that is not a list."""
+        found = self._value_of(node, at)
+        for _ in range(DEEP):
+            if found is None or not isinstance(found[1], Mutated):
+                return found
+            module, value, where = found
+            found = module._value_of(ast.Name(id=value.name, ctx=ast.Load()), value.call)
         return None
 
     def starts(self):
         """Each call here that starts a program, with every command line it
-        can be given, each a tuple of words. A string is split into words,
-        as a shell would."""
+        can be given, each a tuple of words, and each call of a function or
+        a lambda that hands its argument to such a start, read with what the
+        call gives it."""
         if self._starts is not None:
             return self._starts
+        out = list(self.direct_starts())
+        direct = {id(s.call) for s in out}
+        for call in ast.walk(self.tree):
+            if not isinstance(call, ast.Call) or id(call) in direct:
+                continue
+            found = self.launcher_of(call.func, call)
+            if found is None:
+                continue
+            index, param, name = found
+            given = None
+            if index is not None and index < len(call.args) and not any(
+                    isinstance(a, ast.Starred) for a in call.args[:index + 1]):
+                given = call.args[index]
+            else:
+                given = next((k.value for k in call.keywords if k.arg == param), None)
+            if given is None:
+                continue
+            out.append(Start(call, "argv", "via " + name, self.words(given, call), [given]))
+        self._starts = out
+        return out
+
+    def launcher_param(self, fn):
+        """(index, name) of the parameter fn hands straight to a start as its
+        command line, or None. A method is not followed."""
+        if isinstance(self.up.get(fn), ast.ClassDef):
+            return None
+        positional = [a.arg for a in fn.args.posonlyargs + fn.args.args]
+        for start in self.direct_starts():
+            if self.scopes(start.call)[:1] != [fn] or start.kind == "words" or not start.given:
+                continue
+            given = start.given[0]
+            if isinstance(given, ast.Call) and _name(given.func) in ("list", "tuple") and given.args:
+                given = given.args[0]
+            if (isinstance(given, (ast.List, ast.Tuple)) and len(given.elts) == 1
+                    and isinstance(given.elts[0], ast.Starred)):
+                given = given.elts[0].value
+            if (isinstance(given, ast.Name) and given.id in self.params(fn)
+                    and self._last_binding(fn, given.id, start.line) is None):
+                index = positional.index(given.id) if given.id in positional else None
+                return index, given.id
+        return None
+
+    def launcher_of(self, func, at):
+        """(index, parameter, name) when calling func hands an argument to a
+        start as its command line, else None."""
+        targets = []
+        if isinstance(func, ast.Name):
+            if func.id in self.functions:
+                targets = [(self, fn) for fn in self.functions[func.id]]
+            elif func.id in self.imported:
+                last, there = self.imported[func.id]
+                other = self.other(last)
+                if other is not None and there in other.functions:
+                    targets = [(other, fn) for fn in other.functions[there]]
+            elif func.id in self.may_hold_a_start:
+                found = self.resolve(func, at)
+                if found is not None and isinstance(found[1], ast.Lambda):
+                    module, lam, _ = found
+                    body = lam.body
+                    names = [a.arg for a in lam.args.posonlyargs + lam.args.args]
+                    if (isinstance(body, ast.Call) and module.start_of(body.func, body)
+                            and body.args and isinstance(body.args[0], ast.Name)
+                            and body.args[0].id in names):
+                        return names.index(body.args[0].id), body.args[0].id, func.id
+        elif (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+              and func.value.id in self.imported and self.imported[func.value.id][1] is None):
+            other = self.other(self.imported[func.value.id][0])
+            if other is not None and func.attr in other.functions:
+                targets = [(other, fn) for fn in other.functions[func.attr]]
+        for module, fn in targets:
+            found = module.launcher_param(fn)
+            if found is not None:
+                return found[0], found[1], fn.name
+        return None
+
+    def direct_starts(self):
+        """Each call here that starts a program itself. A string is split
+        into words, as a shell would."""
+        if self._direct is not None:
+            return self._direct
         out = []
         for call in ast.walk(self.tree):
             if not isinstance(call, ast.Call):
@@ -231,7 +375,7 @@ class Module:
                         more = [(t,) for t in self.text(arg, call)]
                     ways = _cross(ways, more)
             out.append(Start(call, kind, name, ways))
-        self._starts = out
+        self._direct = out
         return out
 
     # -- reading a command line -----------------------------------------------
@@ -240,6 +384,15 @@ class Module:
         """Every command line node can be, each a tuple of words."""
         if depth > DEEP or node is None:
             return [(MANY,)]
+        if isinstance(node, Mutated):
+            before = self.words(ast.Name(id=node.name, ctx=ast.Load()), node.call, depth + 1)
+            if node.how == "append":
+                added = [(t,) for t in self.text(node.call.args[0], node.call, depth + 1)]
+            elif node.how == "extend":
+                added = self.words(node.call.args[0], node.call, depth + 1)
+            else:
+                added = [(MANY,)]
+            return _cross(before, added)
         if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
             ways = [()]
             for elt in node.elts:
@@ -285,6 +438,9 @@ class Module:
         it, or ONE when none of it can be read."""
         if depth > DEEP:
             return [ONE]
+        if isinstance(node, Mutated):
+            # A string is not changed in place, so this is what it held.
+            return self.text(ast.Name(id=node.name, ctx=ast.Load()), node.call, depth + 1)
         if isinstance(node, ast.Constant):
             return [node.value] if isinstance(node.value, str) else [str(node.value)]
         if isinstance(node, ast.JoinedStr):
@@ -346,12 +502,12 @@ class Module:
     def own_nodes(body):
         """The code of these statements, without the functions and classes
         inside them."""
-        stack = list(body)
+        inner = FUNCTION + (ast.ClassDef, ast.Lambda)
+        stack = [n for n in body if not isinstance(n, inner)]
         while stack:
             node = stack.pop()
             yield node
-            stack.extend(n for n in ast.iter_child_nodes(node)
-                         if not isinstance(n, FUNCTION + (ast.ClassDef, ast.Lambda)))
+            stack.extend(n for n in ast.iter_child_nodes(node) if not isinstance(n, inner))
 
     @staticmethod
     def params(fn) -> set:
@@ -368,8 +524,22 @@ class Module:
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     out.append((target.id, node.value))
+                elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+                    # cmd[1:1] = [...] or cmd[0] = ..., a change in place.
+                    out.append((target.value.id, Mutated(target.value.id, node, "unread")))
                 else:
                     out += [(t.id, ONE) for t in ast.walk(target) if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.Call):
+            f = node.func
+            if (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+                    and f.attr in LIST_CHANGES):
+                how = f.attr if f.attr in ("append", "extend") and len(node.args) == 1 else "unread"
+                out.append((f.value.id, Mutated(f.value.id, node, how)))
+            elif _name(f) not in READS_ONLY:
+                handed = [a.value if isinstance(a, ast.Starred) else a for a in node.args]
+                handed += [k.value for k in node.keywords]
+                out += [(a.id, Mutated(a.id, node, "unread")) for a in handed
+                        if isinstance(a, ast.Name)]
         elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
             name = node.target.id
             out.append((name, ast.BinOp(left=ast.Name(id=name, ctx=ast.Load()), op=ast.Add(),
@@ -472,7 +642,7 @@ class Module:
             return None, set()
         fn = scopes[0]
         params = self.params(fn) - {"self", "cls"}
-        given = start.call.args[:1] if start.kind != "words" else start.call.args
+        given = start.given
         read, seen = set(), set()
         stack = list(given)
         while stack:
@@ -540,11 +710,12 @@ class Module:
 
     def named_for_a_browser(self, start) -> bool:
         """Whether the code naming the start's program says it is a browser."""
-        given = start.call.args[0] if start.call.args else None
-        if given is None:
+        if not start.given:
             return False
-        texts, node, at = [], given, start.call
+        texts, node, at = [], start.given[0], start.call
         for _ in range(4):
+            if isinstance(node, Mutated):
+                node, at = ast.Name(id=node.name, ctx=ast.Load()), node.call
             if isinstance(node, (ast.List, ast.Tuple)) and node.elts:
                 node = node.elts[0]
                 node = node.value if isinstance(node, ast.Starred) else node
@@ -586,13 +757,18 @@ def not_a_browser_program(way) -> bool:
     return bool(way) and way[0] not in UNREAD and not PROGRAM_OF_A_BROWSER.search(way[0])
 
 
-def switch_problem(way) -> str:
-    """Why this command line does not keep off the Keychain, or ""."""
+def switch_problem(way, stand_in=False) -> str:
+    """Why this command line does not keep off the Keychain, or "". A
+    stand-in's words it cannot read after the program are what the product
+    handed it, which end in its "--" and address, so the switch goes before
+    all of them."""
     if MOCK not in way:
         return "no %s" % MOCK
     at = way.index(MOCK)
     if "--" in way[:at]:
         return "%s after the end of the switches" % MOCK
+    if stand_in and (any(w in UNREAD for w in way[1:at]) or (at > 0 and way[0] == MANY)):
+        return "%s after what the product handed on, which ends in its \"--\" and address" % MOCK
     if any(w not in UNREAD and not w.startswith("-") for w in way[1:at]):
         return "%s after an address" % MOCK
     return ""
@@ -623,7 +799,8 @@ def problems(module, name, browser_starts) -> list:
         if not why:
             continue
         ways = [w for w in start.ways if is_a_browser(w)] or start.ways
-        for wrong in sorted({switch_problem(w) for w in ways} - {""}):
+        stand_in = why.startswith("stands in")
+        for wrong in sorted({switch_problem(w, stand_in) for w in ways} - {""}):
             out.append("%s:%d %s, %s" % (name, start.line, why, wrong))
     return out
 
@@ -647,20 +824,37 @@ class Others(dict):
         return self.cache[path]
 
 
-def read_all():
-    """Each file, read with testkit and the files beside it as what it can
-    import."""
-    paths = list(files_read())
-    by_folder = {}
+def _tests_root(path):
+    """The tests folder a file is under, or its own folder."""
+    for parent in path.parents:
+        if parent.name == "tests":
+            return parent
+    return path.parent
+
+
+def importable(paths) -> dict:
+    """{path: {last name: path}} of what each file can import, testkit, a
+    file anywhere under the same tests folder, and one beside it first."""
+    by_folder, by_root = {}, {}
     for path in paths:
         by_folder.setdefault(path.parent, {})[path.stem] = path
-    cache, out = {}, {}
+        by_root.setdefault(_tests_root(path), {}).setdefault(path.stem, path)
+    out = {}
     for path in paths:
-        beside = dict(by_folder[path.parent])
+        beside = dict(by_root.get(_tests_root(path), {}))
+        beside.update(by_folder[path.parent])
         beside.pop(path.stem, None)
         beside["testkit"] = TESTKIT
-        out[path] = Module(path.read_text(encoding="utf-8"), path, Others(beside, cache))
+        out[path] = beside
     return out
+
+
+def read_all():
+    """Each file, read with what it can import."""
+    paths = list(files_read())
+    cache = {}
+    return {path: Module(path.read_text(encoding="utf-8"), path, Others(beside, cache))
+            for path, beside in importable(paths).items()}
 
 
 def product_browser_starts() -> dict:
@@ -976,6 +1170,62 @@ import subprocess
 def start(chromium_exe, args):
     return subprocess.Popen([chromium_exe, {flag}*args])
 ''',
+    # Review of d7a2a3cc, MINOR 1. A list changed in place before the start.
+    "an append and an extend": '''
+import subprocess
+def start(program):
+    cmd = [program]
+    cmd.append("@PORT=0")
+    cmd.extend([{flag}"--no-first-run"])
+    return subprocess.Popen(cmd)
+''',
+    "an insert": '''
+import subprocess
+def start(chromium_exe):
+    cmd = [chromium_exe, {flag}]
+    cmd.insert(1, "@PORT=0")
+    return subprocess.Popen(cmd)
+''',
+    "a slice assignment": '''
+import subprocess
+def start(chromium_exe):
+    cmd = [chromium_exe, {flag}]
+    cmd[1:1] = ["@PORT=0"]
+    return subprocess.Popen(cmd)
+''',
+    "a list handed to another call first": '''
+import subprocess
+def start(chromium_exe):
+    cmd = [chromium_exe, {flag}]
+    add_switches(cmd)
+    return subprocess.Popen(cmd)
+''',
+    # MINOR 3. A start through a name that hands the command line on.
+    "a helper that takes the command line": '''
+import subprocess
+def run_program(argv):
+    return subprocess.Popen(argv)
+def start(program):
+    return run_program([program, "@PORT=0", {flag}])
+''',
+    "functools.partial": '''
+import functools, subprocess
+START = functools.partial(subprocess.Popen, stdout=None)
+def start(program):
+    return START([program, "@PORT=0", {flag}])
+''',
+    "a lambda": '''
+import subprocess
+START = lambda argv, **kw: subprocess.Popen(argv, **kw)
+def start(program):
+    return START([program, "@PORT=0", {flag}])
+''',
+    "another name for the subprocess module": '''
+import subprocess
+sp = subprocess
+def start(program):
+    return sp.Popen([program, "@PORT=0", {flag}])
+''',
 }
 
 # A sample whose own testkit holds the command line, imported from there.
@@ -1032,6 +1282,69 @@ def test_the_switch_after_the_end_of_the_switches_or_an_address_is_found(tail):
     wrong, _ = _found('import subprocess\nsubprocess.Popen([exe, "%s=0", %s])\n'
                       % (PORT_SWITCH, tail))
     assert wrong, tail
+
+
+STAND_IN = '''
+import subprocess
+from paperpull_core import browser
+def test_it(monkeypatch):
+    real = subprocess.Popen
+    def popen(cmd, **kwargs):
+        {line}
+    monkeypatch.setattr(browser.subprocess, "Popen", popen)
+'''
+
+
+@pytest.mark.parametrize("line,found", [
+    ('return real([*cmd, "%s"], **kwargs)' % MOCK, True),
+    ('return real(cmd + ["%s"], **kwargs)' % MOCK, True),
+    ('cmd = list(cmd)\n        cmd.append("%s")\n        return real(cmd, **kwargs)' % MOCK, True),
+    ('return real([cmd[0], "%s", *cmd[1:]], **kwargs)' % MOCK, False),
+], ids=["spread-then-switch", "plus-switch", "append-switch", "switch-after-program"])
+def test_a_stand_in_puts_the_switch_before_what_it_was_handed(line, found):
+    """What _launch hands its Popen ends in "--" and the address, so a
+    switch after it opens as a tab. Review of d7a2a3cc, MINOR 2."""
+    wrong, starts = _found(STAND_IN.replace("{line}", line))
+    assert starts and bool(wrong) is found, wrong
+
+
+HELPER_IN_A_SUBFOLDER = '''
+import subprocess
+def run_program(argv):
+    return subprocess.Popen(argv)
+'''
+CALLS_THE_HELPER = '''
+from helpers.launch import run_program
+from helpers import launch
+def start(program):
+    run_program([program, "@PORT=0", {flag}])
+    launch.run_program([program, "@PORT=0", {flag}])
+'''
+
+
+@pytest.mark.parametrize("flag", [False, True])
+def test_a_helper_in_a_subfolder_of_the_tests_is_followed(flag):
+    helper = Module(HELPER_IN_A_SUBFOLDER, Path("helpers/launch.py"))
+    wrong, starts = _found(_sample(CALLS_THE_HELPER, flag), {"launch": helper})
+    assert len(starts) == 2
+    assert (wrong == []) is flag, wrong
+
+
+def test_a_file_in_a_subfolder_of_a_tests_folder_is_importable():
+    tests = REPO / "apps" / "sample" / "tests"
+    paths = [tests / "test_a.py", tests / "helpers" / "launch.py", tests / "launch.py",
+             REPO / "apps" / "other" / "tests" / "helpers" / "shared.py"]
+    can = importable(paths)
+    assert can[tests / "test_a.py"]["launch"] == tests / "launch.py", "the one beside comes first"
+    assert can[tests / "helpers" / "launch.py"]["test_a"] == tests / "test_a.py"
+    assert "shared" not in can[tests / "test_a.py"], "another app's tests are not importable"
+    assert importable([tests / "test_a.py", tests / "helpers" / "launch.py"])[
+        tests / "test_a.py"]["launch"] == tests / "helpers" / "launch.py"
+
+
+def test_the_root_conftest_is_read():
+    """pytest loads it for every run under the checkout. Review NOTE 4."""
+    assert (REPO / "conftest.py") in MODULES
 
 
 def test_a_start_inside_a_string_is_not_a_start():
