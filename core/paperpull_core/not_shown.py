@@ -420,14 +420,14 @@ def _stop(app) -> None:
         app.progress.save(backup=True)
     except Exception:
         pass
-    again = "Continue" if under_panel() else "Resume"
+    again = "Press Continue" if under_panel() else "Run Resume"
     print()
     print("!! The last %d receipt pages this run opened showed nothing, and none of them"
           % STOP_AFTER)
     print("   had shown nothing before. %s may not be showing receipts right now, so"
           % _provider())
     print("   the run stops here rather than open every purchase. Nothing saved is lost.")
-    print("   %s in a few hours or tomorrow carries on from here." % again)
+    print("   %s in a few hours or tomorrow to carry on from here." % again)
     facts = {
         "empty_pages_in_a_row": int(kept["in_a_row"]),
         "purchases_saved": len(kept["saved"]),
