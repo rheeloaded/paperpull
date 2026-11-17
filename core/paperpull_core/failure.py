@@ -463,6 +463,18 @@ def census(page, selectors: Optional[dict]) -> list:
     return out
 
 
+class PageFacts(dict):
+    """The page and its selectors as page_facts() read them. write_failure
+    takes only these, so what it writes in place of a read of the page has
+    been through the same reads, never a dict made some other way."""
+
+
+def page_facts(page, selectors: Optional[dict]) -> PageFacts:
+    """The page and its selectors, read now as write_failure reads them, to
+    be written later through its page_facts."""
+    return PageFacts(page=page_state(page), selectors=census(page, selectors))
+
+
 def page_state(page) -> dict:
     """The page itself, as counts and enums."""
     state = {}
@@ -604,12 +616,20 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
                   requests=None, identity=None,
                   say=print, kind: str = "paperpull-failure",
                   stem: str = "failure", note: str = "", told=None,
-                  **ignored) -> Optional[str]:
+                  page_facts=None, **ignored) -> Optional[str]:
     """One file, written where the run already writes everything else.
 
     `step` and `reason` are written by the app, in its own source, and
     must never be built from anything the page said. An exception goes
     in `error` and becomes one word.
+
+    `page_facts` is the page as page_facts() read it earlier in the run,
+    written in place of a read of `page` now. Anthem's Run All reads its
+    page where the EOB list would not open, reads its other lists, and
+    writes the file at its end, when the tab shows the last of those. Such
+    facts went through the same reads and leave through the same word list
+    as a read made now. Anything but what page_facts() made is refused, and
+    the page is not read in its place.
 
     Returns the path, or None if even this could not be done, which is
     not a reason to fail a run that was failing anyway."""
@@ -642,7 +662,13 @@ def write_failure(diagnostics_dir, command: str, step: str, reason: str = "",
             report["graphics"] = Fixed(graphics)
         if error is not None:
             report["error"] = error_kind(error)
-        if page is not None:
+        if page_facts is not None:
+            if isinstance(page_facts, PageFacts):
+                if isinstance(page_facts.get("page"), dict):
+                    report["page"] = page_facts["page"]
+                if isinstance(page_facts.get("selectors"), list):
+                    report["selectors"] = page_facts["selectors"]
+        elif page is not None:
             report["page"] = page_state(page)
             report["selectors"] = census(page, selectors)
         if isinstance(extra, dict):

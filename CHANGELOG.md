@@ -88,6 +88,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   PaperPull Server schedule that runs every hour still opens many pages a
   day while an outage lasts.
 
+- **Anthem's failure file for an EOB list that would not open describes
+  that page.** Run All goes on to the member documents, ID cards, letters
+  and claims summaries before it stops, and the failure file written at the
+  stop described whatever the last of those left in the tab. The page is
+  now read where the EOB list would not open, with a journal checkpoint
+  there, and the stop's file carries that read and says so. Discover, Pilot
+  and dry runs, which stop at once, write the same file as before.
+
 - **Only real days before the run's own count as days a receipt page showed
   nothing.** A record's days written as one piece of text rather than a
   list, as an edited or imported record can hold them, were read one

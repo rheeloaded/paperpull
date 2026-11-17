@@ -251,6 +251,10 @@ class App:
         # Set when the EOB list would not open, so a Run All that goes on to
         # the other lists still stops at its end (_stop_if_eobs_unread).
         self._eobs_unread = False
+        # The page as it was where the EOB list would not open, read there by
+        # a Run All that goes on to the other lists, for the EOB stop's
+        # failure file. In memory only, and let go once that file is written.
+        self._eob_page_facts = None
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "discovered": 0, "statements": 0, "tax_documents": 0,
@@ -498,6 +502,14 @@ class App:
                 self._eobs_unread = True
                 if finish:
                     self._stop_if_eobs_unread()
+                    return 0
+                # Run All reads its other lists before it stops, and the tab
+                # then shows the last of them. The page is read here, where
+                # the EOB list would not open, the same two reads a failure
+                # file makes, and the journal notes the moment, so the stop's
+                # file describes this page. Discover, Pilot and the dry runs
+                # stop above and read the page once, as they always did.
+                self._read_where_the_eobs_would_not_open(page)
                 return 0
         self.check_session(page)
 
@@ -917,6 +929,16 @@ class App:
             self.cmd_claims_summaries()
         self._stop_if_eobs_unread()
 
+    def _read_where_the_eobs_would_not_open(self, page) -> None:
+        try:
+            self.journal.checkpoint("where the eob list would not open", page)
+        except Exception:
+            pass
+        try:
+            self._eob_page_facts = failure.page_facts(page, getattr(site, "FALLBACK", None))
+        except Exception:
+            self._eob_page_facts = None
+
     def _stop_if_eobs_unread(self) -> None:
         """A run whose EOB list would not open did not finish, and must not
         read as one that did. It leaves the way a run leaves on a sign-out,
@@ -925,7 +947,16 @@ class App:
             # Written here, where the run stops, rather than where the EOB
             # list would not open, since Run All reads its other lists in
             # between and a run writes one failure file, the first (#228).
-            self.write_failure("open the eob list", "the eob list would not open")
+            # A Run All read the page where the list would not open, and
+            # that page goes in the file, said so by one fact. It is used
+            # once, whether this writes the file or a later failure had.
+            facts, self._eob_page_facts = self._eob_page_facts, None
+            if facts is None:
+                self.write_failure("open the eob list", "the eob list would not open")
+            else:
+                self.write_failure("open the eob list", "the eob list would not open",
+                                   extra={"page_read_where_eob_list_would_not_open": True},
+                                   page_facts=facts)
             print("\nYour EOBs were not listed, so this run stops here rather than finish.")
             raise SystemExit(0)
 
@@ -1337,7 +1368,8 @@ class App:
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None) -> None:
+                      postmortem: dict = None, extra: dict = None,
+                      page_facts: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
         Written without anybody having to know to ask for it, because a
@@ -1349,7 +1381,9 @@ class App:
         is still sitting on the thing that broke."""
         if self.stats.get("failure_files"):
             return
-        extra = {"postmortem": postmortem} if postmortem else None
+        # `extra` is a stop's facts, and `page_facts` the page as it was
+        # read earlier, written in place of the tab as it is now.
+        extra = dict(extra or {}, **({"postmortem": postmortem} if postmortem else {})) or None
         # A checkpoint at the moment it gave up. It is also what makes the
         # journal when nothing had written to it yet, and every tester file
         # sent in on 2026-09-25 came back without one for that reason.
@@ -1366,7 +1400,7 @@ class App:
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
             requests=self._requests,
-            provider='Anthem', text=text, extra=extra)
+            provider='Anthem', text=text, extra=extra, page_facts=page_facts)
         if not path:
             return
         self.stats["failure_files"] = 1
