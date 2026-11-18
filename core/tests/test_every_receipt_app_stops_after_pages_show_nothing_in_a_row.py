@@ -319,8 +319,10 @@ CORE_ON_THE_WAY = ("not_shown", "pressing", "tabs", "listing", "storage", "journ
 # test plan also named a continue in target_site.py, which sits in a for
 # loop inside a finally and drops nothing, so this census does not count it.
 ALLOWED = {
-    # Reading documents-folders.json, not on a receipt run's way out.
-    ("storage.py", "documents_roots"),
+    # Reading documents-folders.json or documents-folders-flat.json, not on
+    # a receipt run's way out. It sat in documents_roots until #217 moved it
+    # into the helper both lists are read through.
+    ("storage.py", "_listed"),
 }
 
 
