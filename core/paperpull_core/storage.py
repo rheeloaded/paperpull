@@ -1199,7 +1199,7 @@ class Paths:
         not there, and None when it is there and cannot be read as written."""
         try:
             with shared_folder.open_to_read(self.filed_flat_json, "r", encoding="utf-8") as f:
-                listed = json.loads(f.read())
+                listed = whole_json(json.loads(f.read()))
         except FileNotFoundError:
             return set(), True
         except (OSError, ValueError, SystemExit):
@@ -1286,7 +1286,7 @@ class Paths:
             return set(), whole
         try:
             with shared_folder.open_to_read(self.progress_json, "r", encoding="utf-8") as f:
-                records = json.loads(f.read())
+                records = whole_json(json.loads(f.read()))
         except FileNotFoundError:
             records = {}
         except (OSError, ValueError, SystemExit):
@@ -1312,12 +1312,18 @@ class Paths:
                     continue
                 if set(where.parents).isdisjoint(real):
                     continue
-                if not where.is_file():
+                try:
+                    there = where.is_file()
                     # Gone, as a file a person deleted is, unless the whole
                     # documents folder it is in is not there now, on a drive
                     # not plugged in say, which is read again once it is.
-                    if any(root in where.parents and not root.is_dir() for root in real):
+                    if not there and any(root in where.parents and not root.is_dir()
+                                         for root in real):
                         whole = False
+                except OSError:
+                    # A folder this run may not search, asked again later.
+                    there, whole = False, False
+                if not there:
                     continue
                 pair = self._digest(where)
                 if pair is None:
