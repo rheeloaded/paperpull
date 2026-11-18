@@ -373,3 +373,22 @@ def test_a_flat_folder_that_lost_what_it_holds_holds_nothing(tmp_path):
     lost = storage.FlatRoot(tmp_path)
     assert renaming.held_document(str(kept), [lost]) is None
     assert renaming.held_document(str(kept), [tmp_path]) is not None
+
+
+def test_a_document_deleted_with_its_folder_does_not_keep_the_records_to_read(
+        office, monkeypatch):
+    """A {year} folder a person deleted never comes back, so the records
+    are read once and the record is whole (re-review of 29c7fdc8)."""
+    moved(office, monkeypatch)
+    storage.set_filename_patterns({"filename_pattern": "{account}/{date} {account}"})
+    flat(office)
+    assert office.rename()[0] == 0
+    record = office.out / storage.FILED_FLAT
+    gone = office.docs / ACCOUNTS[1] / ("2026-09-12 %s.pdf" % ACCOUNTS[1])
+    gone.unlink()
+    gone.parent.rmdir()
+    record.unlink()
+    flat(office)
+    assert not office.paths.filed_here(office.out / "progress.json")
+    written = json.loads(record.read_text(encoding="utf-8"))
+    assert "records_to_read" not in written and len(written["files"]) == 1

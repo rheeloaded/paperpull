@@ -1268,9 +1268,10 @@ class Paths:
         (imported_at) is not the account's own and is left out. The files
         named are the ones the Move takes for a record, its pdf_path, each
         invoice kept, and each other invoice its notes say was saved
-        (renaming._also_saved). A file named in a folder that is not there,
-        on a drive not plugged in say, a file that cannot be read and records
-        that cannot be read each leave it not whole."""
+        (renaming._also_saved). A file named in a documents folder that is
+        not there, on a drive not plugged in say, a file that cannot be read
+        and records that cannot be read each leave it not whole. A file gone
+        from a folder that is there is gone, as one a person deleted is."""
         from .renaming import _also_saved
         roots = [Path(p) for p in self._listed(self.flat_documents_json)]
         if not self.kind_folders:
@@ -1312,8 +1313,10 @@ class Paths:
                 if set(where.parents).isdisjoint(real):
                     continue
                 if not where.is_file():
-                    # Gone, or its folder is not there now.
-                    if not where.parent.is_dir():
+                    # Gone, as a file a person deleted is, unless the whole
+                    # documents folder it is in is not there now, on a drive
+                    # not plugged in say, which is read again once it is.
+                    if any(root in where.parents and not root.is_dir() for root in real):
                         whole = False
                     continue
                 pair = self._digest(where)
