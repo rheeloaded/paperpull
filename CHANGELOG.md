@@ -9,6 +9,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+## [0.69.0] - 2026-11-17
+
+You can choose the browser you sign in with, and file documents straight
+into an account's documents folder with no folder for each kind. A receipt
+run stops after five receipt pages in a row show nothing, and a receipt is
+set aside for good only on a run that saved one of its kind first. Best Buy
+chooses a year again, Wells Fargo waits out a passing cover over its
+documents link, and 31 providers leave a failure file when their list will
+not open.
+
 ### Added
 - **Choose the browser you sign in with (#222).** The `"browser"` setting in
   a provider's `config.json` also takes `edge`, `chrome`, `brave`, `vivaldi`
