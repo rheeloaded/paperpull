@@ -310,6 +310,10 @@ def load_config(path: Optional[Path] = None) -> dict:
     #             download a private copy only if there is none
     #   installed only one you already have, never download anything
     #   bundled   only this tool's own private copy, never touch yours
+    #   edge, chrome, brave, vivaldi or opera
+    #             only that brand as installed here, on a profile folder of
+    #             its own beside profile_dir, and never a download (#222)
+    # Any case is taken. Anything else is refused at sign-in with this list.
     # Whichever is used gets its OWN profile folder, so an everyday browser's
     # history, extensions and logins are never read or altered.
     cfg.setdefault("browser", "auto")
@@ -422,7 +426,14 @@ def set_documents_dir(cfg: dict, path) -> str:
         docs = os.path.normpath(raw.strip())
         profile = str(cfg.get("profile_dir") or "")
         out = str(cfg["output_dir"])
-        if profile and (_inside(docs, profile) or _inside(profile, docs)):
+        # The profile and each folder beside it a fallback browser or a
+        # brand named in "browser" opens on, all of them signed in (#222).
+        from .browser import profile_folders
+        try:
+            profiles = profile_folders(profile) if profile else []
+        except (OSError, RuntimeError, ValueError):
+            profiles = [profile]
+        if any(_inside(docs, held) or _inside(held, docs) for held in profiles):
             why = ("it is the browser profile, inside it or around it, and documents are "
                    "never kept with a signed-in profile")
         elif _inside(out, docs) and not _inside(docs, out):

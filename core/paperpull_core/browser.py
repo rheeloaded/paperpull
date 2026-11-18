@@ -389,6 +389,37 @@ AUTO = "auto"           # use what is installed, fall back to bundled
 INSTALLED = "installed"  # only a browser they already have
 BUNDLED = "bundled"     # only the Playwright build, never touch their own
 
+# The brands the setting can name instead (#222), each with the browser it
+# picks. A named brand is that brand as installed here and nothing else, on
+# a profile folder of its own (brand_profile).
+BRANDS = {"edge": EDGE, "chrome": CHROME, "brave": BRAVE, "vivaldi": VIVALDI, "opera": OPERA}
+BROWSER_VALUES = (AUTO, INSTALLED, BUNDLED) + tuple(BRANDS)
+
+
+def browser_setting(value) -> Optional[str]:
+    """The "browser" setting as one of BROWSER_VALUES, or None when it is
+    none of them. Read in any case with spaces around it taken off, and an
+    empty one or null is auto, as a missing one is. Anything else, a word of
+    another browser, a path or a value that is not text, is None, so no
+    value typed into a config ever reaches a command line or a folder's
+    name. Those come from the table."""
+    if value is None:
+        # Nothing PaperPull writes holds null, and a config made by hand
+        # with it ran as auto before #222, so it still does.
+        return AUTO
+    if not isinstance(value, str):
+        return None
+    word = value.strip(" \t\r\n").lower()
+    if not word:
+        return AUTO
+    return word if word in BROWSER_VALUES else None
+
+
+def _may_fetch(mode: str) -> bool:
+    """Whether a sign-in set to `mode` may be offered the bundled Chromium.
+    Only auto and bundled may. Installed and a named brand never are."""
+    return mode in (AUTO, BUNDLED)
+
 
 def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
     """Browsers to try, best first, as (name, path).
@@ -419,6 +450,10 @@ def browser_candidates(prefer_real: bool = False, mode: str = AUTO):
     real = _real_browsers()
     if mode == INSTALLED:
         return real
+    if mode in BRANDS:
+        # Every install of that brand, Chrome's and the distro Chromium's on
+        # Linux among them, and nothing of another brand or bundled.
+        return [c for c in real if c[0] == BRANDS[mode]]
     # With a bundled copy already present it stays first unless an app asks for
     # a real browser. Reordering that would move existing users onto a
     # different browser, and a profile built by one is not guaranteed to open
@@ -1400,8 +1435,35 @@ def bring_forward(port) -> bool:
 # The ends _try_each gives the profile folder of a browser it falls back to,
 # one for each brand, so a sign-in that opened in another browser is still
 # known as this account's own.
-_FALLBACK_ENDS = tuple("-" + re.sub(r"[^a-z0-9]+", "", name.lower())
-                       for name in (CHROMIUM, EDGE, CHROME, BRAVE, VIVALDI, OPERA))
+def _ending(name: str) -> str:
+    return "-" + re.sub(r"[^a-z0-9]+", "", name.lower())
+
+
+_FALLBACK_ENDS = tuple(_ending(name) for name in (CHROMIUM, EDGE, CHROME, BRAVE, VIVALDI, OPERA))
+# The same ends, for whatever else knows a profile folder by its name. A
+# brand named in the setting opens on its own one too (brand_profile).
+PROFILE_ENDS = _FALLBACK_ENDS
+
+
+def brand_profile(profile_dir, mode: str) -> Path:
+    """The profile folder a sign-in set to `mode` opens on. A named brand's
+    is beside the usual one, with the end a fallback to that brand has
+    always had, so one browser never opens another's profile, and a person
+    whose auto setup already fell back to it keeps that sign-in. The end
+    comes from the table, never from what was typed. Every other mode, and
+    PaperPull Server, whose image has Chrome alone and has always opened it
+    on the account's folder, keeps profile_dir."""
+    if mode not in BRANDS or os.environ.get("PAPERPULL_SERVER") == "1":
+        return Path(profile_dir)
+    base = profile_folder(profile_dir)
+    return base.with_name(base.name + _ending(BRANDS[mode]))
+
+
+def profile_folders(profile_dir) -> List[Path]:
+    """profile_dir in full and every folder beside it a browser of this
+    account's can open, a fallback's or a named brand's."""
+    base = profile_folder(profile_dir)
+    return [base] + [base.with_name(base.name + end) for end in PROFILE_ENDS]
 
 
 def _names_profile(command: str, real: str) -> bool:
@@ -1541,6 +1603,13 @@ def open_signin_browser(profile_dir, port: str, url: str,
     first, since a sign-in there joins whichever browser holds the port,
     the other person's included (ports.say_at_sign_in).
     """
+    # A setting that is none of the values PaperPull knows stops here,
+    # before the port is asked or anything is opened (#222).
+    setting = browser_setting(mode)
+    if setting is None:
+        _say_unknown_setting()
+        return None
+    mode = setting
     # Space around an address typed into a config is taken off, as a
     # browser would, never anything else.
     if isinstance(url, str):
@@ -1555,6 +1624,9 @@ def open_signin_browser(profile_dir, port: str, url: str,
         if not held:
             _say_port_silent(port)
             return None
+    if held and _another_brand(held, mode):
+        _say_another_brand(port, held, mode)
+        return None
     if held:
         print("A browser is already listening on port %s (%s)." % (port, held))
         print("Runs attach to that browser, so it is the one to sign in with. It is")
@@ -1566,11 +1638,13 @@ def open_signin_browser(profile_dir, port: str, url: str,
         return ALREADY_ON_PORT
     candidates = browser_candidates(prefer_real=prefer_real, mode=mode)
 
-    if not candidates and allow_fetch and mode != INSTALLED:
+    if not candidates and allow_fetch and _may_fetch(mode):
         if fetch_bundled_chromium():
             candidates = browser_candidates(prefer_real=prefer_real, mode=mode)
     if not candidates:
-        if mode == INSTALLED:
+        if mode in BRANDS:
+            _say_brand_missing(BRANDS[mode])
+        elif mode == INSTALLED:
             print("No Chrome, Edge or other Chromium-based browser was found,")
             print("and this app is set to use only a browser you already have.")
         else:
@@ -1611,6 +1685,10 @@ def open_signin_browser(profile_dir, port: str, url: str,
     if older:
         candidates = [candidates[0], older] + candidates[1:]
 
+    if mode in BRANDS:
+        folder = brand_profile(profile_dir, mode)
+        if folder != Path(profile_dir) and not folder.exists():
+            _say_first_with_brand(BRANDS[mode])
     opened = _try_each(candidates, profile_dir, port, url, fallback=keep_off_profile, mode=mode)
     if opened:
         bring_forward(port)
@@ -1624,7 +1702,7 @@ def open_signin_browser(profile_dir, port: str, url: str,
     # never fits, and the launch has said what went wrong (#110).
     if os.environ.get("PAPERPULL_SERVER") == "1":
         return None
-    if allow_fetch and mode != INSTALLED and not bundled_chromium_present():
+    if allow_fetch and _may_fetch(mode) and not bundled_chromium_present():
         print()
         print("None of the browsers on this computer would open a debugging")
         print("port, which is what this tool needs to attach to.")
@@ -1634,6 +1712,55 @@ def open_signin_browser(profile_dir, port: str, url: str,
             if fresh:
                 return _try_each(fresh, profile_dir, port, url, fallback=True, mode=mode)
     return None
+
+
+def _say_unknown_setting() -> None:
+    """What a "browser" setting that is none of BROWSER_VALUES is told. The
+    value itself is not printed, since it can hold anything."""
+    print('The "browser" setting in this account\'s settings is not one PaperPull')
+    print("knows, so no browser was opened. It takes one of these.")
+    print("    " + ", ".join(BROWSER_VALUES))
+    print('auto is the usual one. Put "browser": "chrome" in config.json to sign')
+    print("in with Google Chrome, or name another brand the same way.")
+
+
+def _another_brand(held: str, mode: str) -> bool:
+    """Whether the browser answering on the port, by the name its own
+    /json/version gave (debug_port_holder, which reads Browser and never
+    User-Agent), is of another brand than the one named. Edge says Edg/,
+    and Chrome, Brave, Vivaldi, Opera and Chromium all say Chrome/, so
+    only Edge against the rest can be told. Anything else is taken as
+    the brand, and used as it always was."""
+    if mode not in BRANDS:
+        return False
+    is_edge = "Edg/" in held
+    return not is_edge if BRANDS[mode] == EDGE else is_edge
+
+
+def _say_another_brand(port, held: str, mode: str) -> None:
+    """A browser of another brand holds the port. It is neither used nor
+    closed, and nothing is launched beside it."""
+    named = BRANDS[mode]
+    other = EDGE if "Edg/" in held else "A browser that is not %s" % EDGE
+    print("%s is already listening on port %s (%s), and this" % (other, port, held))
+    print('account\'s "browser" setting names %s. Runs attach to the browser' % named)
+    print("on that port, so a sign-in would not be in %s. Close that window," % named)
+    print("then sign in again. Nothing was opened or closed.")
+
+
+def _say_brand_missing(named: str) -> None:
+    print('%s is not installed on this computer, and this account\'s "browser"' % named)
+    print("setting names it, so no browser was opened. Install %s, or set" % named)
+    print('"browser" to "auto" to sign in with whichever browser PaperPull finds.')
+
+
+def _say_first_with_brand(named: str) -> None:
+    """Said the first time a named brand opens for this account, before its
+    folder exists."""
+    print()
+    print("Signing in with %s opens on a profile folder of its own, so this" % named)
+    print("first time you sign in once more there. Your sign-in in the browser")
+    print("used before is kept as it was.")
 
 
 def _say_shared_port(port) -> None:
@@ -1716,7 +1843,11 @@ def _try_each(candidates, profile_dir, port, url, fallback: bool = False, mode: 
         # browser brand is not guaranteed to open cleanly in another, and two
         # brands sharing one folder can leave it locked or damaged.
         target = Path(profile_dir)
-        if fallback or index > 0:
+        if mode in BRANDS:
+            # A named brand's own folder for every install of it, the end
+            # given once and never twice (brand_profile).
+            target = brand_profile(profile_dir, mode)
+        elif fallback or index > 0:
             target = target.with_name(
                 target.name + "-" + re.sub(r"[^a-z0-9]+", "", name.lower()))
         opened = _launch(exe, name, target, port, url, explain_failure=last, mode=mode)

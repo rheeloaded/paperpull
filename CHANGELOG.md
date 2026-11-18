@@ -9,6 +9,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Choose the browser you sign in with (#222).** The `"browser"` setting in
+  a provider's `config.json` also takes `edge`, `chrome`, `brave`, `vivaldi`
+  or `opera`, in any case. Named, the sign-in window is that brand as
+  installed on your computer and nothing else, on a profile folder of its
+  own, so the first sign-in after the change asks you to sign in once more.
+  A brand that is not installed, another brand already on the provider's
+  port, and a value PaperPull does not know are each said, and nothing is
+  opened. A value typed with other casing, such as `"Bundled"` or
+  `"Installed"`, now means what it says, where it used to run as `auto`.
+  The README says how to pick Chrome.
+
 ### Fixed
 - **Best Buy chooses a year again on a history whose range menu sits inside
   wrappers (#226).** The menu's button was drawn inside two wrappers of its
