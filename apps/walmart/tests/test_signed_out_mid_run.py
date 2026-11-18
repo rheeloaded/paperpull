@@ -170,7 +170,7 @@ def _start_browser(exe, profile):
     address, or None for the address when it opened no port."""
     proc = subprocess.Popen(
         [exe, "--headless=new", "--remote-debugging-port=0",
-         "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check",
+         "--user-data-dir=%s" % profile, "--no-first-run", "--no-default-browser-check", "--use-mock-keychain",
          NO_HOSTS, "about:blank"],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     port, deadline = "", time.monotonic() + 30

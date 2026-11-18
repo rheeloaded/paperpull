@@ -170,6 +170,23 @@ def test_on_the_server_the_graphics_switches_stay_switches(monkeypatch, tmp_path
     assert args[end + 1:] == ["https://example.ultipro.com"]
 
 
+@pytest.mark.parametrize("name", [browser.EDGE, browser.CHROME, browser.CHROMIUM])
+@pytest.mark.parametrize("gpu", [False, True], ids=["desktop", "server-gpu"])
+def test_the_sign_in_browser_keeps_its_cookies_in_the_real_keychain(
+        monkeypatch, tmp_path, no_waiting, name, gpu):
+    """The person signs in on this profile and it is kept. Given
+    --use-mock-keychain, as the browsers tests start are, Chromium on a Mac
+    would keep its cookies under a key that is not in their Keychain, and a
+    later start without it could not read them. So _launch never gives it."""
+    seen = recording_popen(monkeypatch)
+    if gpu:
+        monkeypatch.setattr(browser, "server_gpu", lambda: (browser.SERVER_GPU_SWITCHES, None))
+    browser._launch("/x/chrome", name, tmp_path / "p", "9231", "https://example.ultipro.com")
+    assert len(seen) == 1
+    assert "--use-mock-keychain" not in seen[0]
+    assert not any("mock-keychain" in arg for arg in seen[0])
+
+
 def test_a_sign_in_with_such_an_address_opens_nothing_and_says_why(monkeypatch, tmp_path, capsys):
     """Refused before a port is looked at or a browser is fetched."""
     monkeypatch.setattr(browser, "debug_port_holder",
@@ -240,6 +257,11 @@ def test_the_bundled_chromium_opens_the_address_after_the_end_of_its_switches(
     real = subprocess.Popen
 
     def popen(cmd, **kwargs):
+        # A fresh profile asks a Mac's Keychain for its key unless this is
+        # given (test_every_browser_a_test_starts_keeps_off_the_keychain).
+        # It is added here, before "--", since _launch keeps it from the
+        # person's own browser.
+        cmd = [cmd[0], "--use-mock-keychain", *cmd[1:]]
         started.append(real(cmd, **kwargs))
         return started[-1]
     monkeypatch.setattr(browser.subprocess, "Popen", popen)
