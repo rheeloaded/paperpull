@@ -90,11 +90,11 @@ def said(capsys):
 def save_another(app):
     """The run saves another order's receipt, through the app's own
     _finish_pdf."""
-    other = Purchase(purchase_type=ONLINE, purchase_date="2026-09-03", order_number="102000333",
+    other = Purchase(purchase_type=ONLINE, purchase_date="2026-09-02", order_number="102000333",
                      total="$23.45", status="Delivered", store_info="Target",
                      details_url="https://www.target.com/orders/102000333",
                      items=[Item(name="Invented other thing", quantity="1", line_total="$23.45")])
-    filed = file_a_receipt(app, other, ["Order #102000333", "Placed Sep 3, 2026",
+    filed = file_a_receipt(app, other, ["Order #102000333", "Placed Sep 2, 2026",
                                         "Invented other thing  1  $23.45", "Total $23.45"],
                            listed=other.to_dict())
     assert filed.kept and filed.path.exists(), filed
