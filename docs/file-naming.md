@@ -126,8 +126,10 @@ becomes
   anything, so a document is still known after Rename gives it a new
   name. Any other file there is left alone, even when a record names it.
   An exact copy of a filed document counts as filed, and a filed document
-  you edit no longer does. A document in a folder of a kind inside the
-  documents folder is handled as before.
+  you edit no longer does. A folder named like a folder of a kind,
+  `Statements` or `Tax Documents` say, inside the documents folder is
+  still the account's as before, whoever made it, so keep files of your
+  own out of those.
 * A folder of a kind that is a link or a junction is never removed when
   the Move empties it, only a real empty folder.
 * Setting it back to `true` does not move documents back into folders of

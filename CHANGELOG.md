@@ -21,8 +21,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and only those are touched there, under any name Rename gives them
   later. If that file cannot be written or read, nothing is moved.
   Documents 0.69.0 filed this way are written down once from the
-  account's own saved records, never from imported ones. Found in the
-  0.69.0 release review.
+  account's own saved records, never from imported ones, and not until
+  every one of them can be read. A folder named like a folder of a kind
+  inside the documents folder is still the account's as before. Found in
+  the 0.69.0 release review.
 - **The cleanup after a Move without kind folders never removes a link or
   a junction (#201).** A folder of a kind in the documents folder that a
   person made a junction or a link was removed by itself on Windows,

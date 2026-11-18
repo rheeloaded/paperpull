@@ -248,3 +248,88 @@ def test_an_empty_record_is_not_written_again_from_the_records(office, monkeypat
     assert renaming.held_document(str(office.docs / FIRST), office.paths.filing_folders()) is None
     assert json.loads((office.out / storage.FILED_FLAT).read_text(encoding="utf-8")) == \
         {"files": []}
+
+
+# -- repairs after the independent review ------------------------------------------------------
+
+def test_a_document_that_cannot_be_read_now_is_not_left_out_of_the_first_record(
+        office, monkeypatch):
+    """A file synced on demand, offline, cannot be read the first time the
+    record is made. It is not written down without it, and the Move stops,
+    so once it can be read it is held again."""
+    from paperpull_core import intake
+    moved(office, monkeypatch)
+    record = office.out / storage.FILED_FLAT
+    record.unlink()
+    real = intake.sha256_of
+    monkeypatch.setattr(intake, "sha256_of",
+                        lambda path, limit=None: "" if Path(path).name == SECOND else real(path, limit))
+    flat(office)
+    folders = office.paths.filing_folders()
+    assert renaming.held_document(str(office.docs / FIRST), folders) is not None
+    assert renaming.held_document(str(office.docs / SECOND), folders) is None
+    assert not record.exists(), "never written down without it"
+    office.saved("Brokerage 3333")
+    flat(office)
+    before = office.where()
+    moving(monkeypatch)
+    code, said = office.rename()
+    assert code == 1 and "Nothing was moved" in said, said
+    assert office.where() == before
+    monkeypatch.setattr(intake, "sha256_of", real)
+    monkeypatch.delenv(renaming.MOVE_DOCUMENTS_ENV)
+    flat(office)
+    folders = office.paths.filing_folders()
+    for name in (FIRST, SECOND):
+        assert renaming.held_document(str(office.docs / name), folders) is not None
+    assert record.exists()
+
+
+def test_the_first_record_takes_the_other_invoices_an_orders_notes_name(office, monkeypatch):
+    moved(office, monkeypatch)
+    other = office.docs / "2026-09-12 Testco Monthly Statement invoice 2.pdf"
+    other.write_bytes(b"%PDF-1.4\n% the second invented invoice\n%%EOF\n")
+    office.progress.data[ACCOUNTS[0]]["notes"] = "Also saved: %s" % other.name
+    office.progress.save()
+    (office.out / storage.FILED_FLAT).unlink()
+    flat(office)
+    assert renaming.held_document(str(other), office.paths.filing_folders()) is not None
+
+
+def test_a_record_that_could_not_be_written_first_is_written_by_the_move(office, monkeypatch):
+    moved(office, monkeypatch)
+    record = office.out / storage.FILED_FLAT
+    record.unlink()
+    real = storage.atomic_write_text
+    refused = []
+
+    def once(path, text, encoding="utf-8", **how):
+        if Path(path).name == storage.FILED_FLAT and not refused:
+            refused.append(path)
+            raise PermissionError("locked")
+        return real(path, text, encoding, **how)
+
+    monkeypatch.setattr(storage, "atomic_write_text", once)
+    office.saved("Brokerage 3333")
+    flat(office)
+    moving(monkeypatch)
+    code, said = office.rename()
+    assert code == 0 and refused and record.exists(), said
+    assert len(json.loads(record.read_text(encoding="utf-8"))["files"]) == 3
+
+
+def test_rename_says_when_the_record_cannot_be_read(office, monkeypatch):
+    moved(office, monkeypatch)
+    (office.out / storage.FILED_FLAT).write_text("{not json", encoding="utf-8")
+    flat(office)
+    storage.set_filename_patterns({"filename_pattern": "{year}/{date} {account}"})
+    code, said = office.rename(apply_changes=False)
+    assert storage.FILED_FLAT + " in out could not be read" in said, said
+
+
+def test_a_flat_folder_that_lost_what_it_holds_holds_nothing(tmp_path):
+    kept = tmp_path / "a.pdf"
+    kept.write_bytes(FOREIGN)
+    lost = storage.FlatRoot(tmp_path)
+    assert renaming.held_document(str(kept), [lost]) is None
+    assert renaming.held_document(str(kept), [tmp_path]) is not None

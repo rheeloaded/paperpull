@@ -71,7 +71,7 @@ from typing import Callable, Iterable, List, Optional
 from . import shared_folder
 from .characters import whole_json
 from .models import State
-from .storage import (FileName, build_pdf_filename, filing_folder, fitted_name,
+from .storage import (FileName, FlatRoot, build_pdf_filename, filing_folder, fitted_name,
                       flat_root, free_to_write, name_length, path_length, remove_empty,
                       sanitize_component, title_case, unique_path)
 
@@ -202,8 +202,8 @@ def _real(folders) -> List[Path]:
             where = Path(folder).resolve()
         except (OSError, RuntimeError, ValueError):
             continue
-        holds = getattr(folder, "holds", None)
-        real.append(flat_root(where, holds) if callable(holds) else where)
+        real.append(flat_root(where, getattr(folder, "holds", None))
+                    if _flat(folder) else where)
     return real
 
 
@@ -214,9 +214,15 @@ def _in_held_folder(path: Path, real_folders: List[Path]) -> bool:
     record naming another file in a broad folder never reaches it."""
     parents = set(path.parents)
     within = [f for f in real_folders if f in parents]
-    if any(not callable(getattr(f, "holds", None)) for f in within):
+    if any(not _flat(f) for f in within):
         return True
-    return any(f.holds(path) for f in within)
+    return any(callable(f.holds) and f.holds(path) for f in within)
+
+
+def _flat(folder) -> bool:
+    """Whether a folder is a documents folder filed without kind folders,
+    one with its `holds` lost included, which then holds nothing."""
+    return isinstance(folder, FlatRoot) or callable(getattr(folder, "holds", None))
 
 
 def _held(text: str, real_folders: List[Path], staged: bool = False,
@@ -1516,6 +1522,11 @@ def run_for(app, apply_changes: bool = False, say=print,
     before = tuple(told_apart_before)
     limit = app.config.get("max_path_length", 240)
     folders = app.paths.filing_folders()
+    if any(_flat(f) for f in folders) and getattr(app.paths, "filed_unreadable", bool)():
+        say("%s in %s could not be read, so no document in a documents folder filed "
+            "without kind folders is renamed or moved. Take it out, and the next run "
+            "writes it again from this account's records."
+            % (storage_filed_name(app.paths), Path(app.paths.root).name))
     # Manual Review keeps a file put aside with no folders of a pattern's.
     flat = [f for f in (getattr(app.paths, "manual_review", None),) if f is not None]
     homes = _Homes(folders, flat)
