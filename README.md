@@ -967,7 +967,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 - ✅ All **ninety-five** apps pass their tests, the eighty-six that are
   supported, the five still waiting for a tester and the Scalable Capital,
-  Consorsbank, CIBC and MBNA shells, 45,483 of them
+  Consorsbank, CIBC and MBNA shells, 46,567 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
