@@ -114,12 +114,27 @@ becomes
   not `true` or `false`, when the account has no documents folder of its
   own (documents would sit loose beside its records), or when the pattern
   does not say which kind a document is. The message names the kinds and
-  the field the pattern needs.
+  the field the pattern needs. Login and the Support report still run,
+  with documents in folders of their kind, and say why the setting was
+  not taken.
+* **Only what PaperPull filed there is touched.** The documents folder
+  may be a broad one, such as your Documents folder, so Rename, the Move
+  and a repair touch a file in it only when the Move filed it there.
+  The Move writes down each document it files, by its size and a
+  fingerprint of its bytes and never by its name, in
+  `documents-filed-flat.json` in the provider's own folder, before it moves
+  anything, so a document is still known after Rename gives it a new
+  name. Any other file there is left alone, even when a record names it.
+  An exact copy of a filed document counts as filed, and a filed document
+  you edit no longer does. A document in a folder of a kind inside the
+  documents folder is handled as before.
+* A folder of a kind that is a link or a junction is never removed when
+  the Move empties it, only a real empty folder.
 * Setting it back to `true` does not move documents back into folders of
   their kind. They stay where they are and are still found.
-* The setting comes along when history is exported and imported, and the
-  documents folder does not, so on the new computer a run stops and asks
-  for a documents folder to be set first.
+* Import history leaves `"kind_folders": false` out, and says so, since
+  the documents folder it needs is not carried to the new computer. Set
+  a documents folder there first, then set it again.
 
 **Rename** moves files into the folders a pattern names and back out of
 them, the same way a download would file them now. Changing back to a

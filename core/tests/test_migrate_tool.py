@@ -950,8 +950,30 @@ def test_kind_folders_travels_as_true_or_false_only(tmp_path):
     migrate.export(old, archive)
     assert _manifest(archive)["apps"][0]["settings"]["kind_folders"] is False
     inst = _app(tmp_path / "new")
+    own = dict(EXAMPLE, documents_dir=str(tmp_path / "Watched"))
     for value in (False, True):
-        assert migrate.settings_to_apply(inst, dict(EXAMPLE), {"kind_folders": value}) == \
+        assert migrate.settings_to_apply(inst, own, {"kind_folders": value}) == \
             {"kind_folders": value}
+    assert migrate.settings_to_apply(inst, dict(EXAMPLE), {"kind_folders": True}) == \
+        {"kind_folders": True}
     for value in ("false", 0, None, []):
-        assert migrate.settings_to_apply(inst, dict(EXAMPLE), {"kind_folders": value}) == {}, value
+        assert migrate.settings_to_apply(inst, own, {"kind_folders": value}) == {}, value
+
+
+@pytest.mark.parametrize("documents", [None, "", "."], ids=["none", "empty", "the output folder"])
+def test_kind_folders_false_is_left_out_without_a_documents_folder_and_said(tmp_path, documents):
+    """documents_dir names this computer's folders and never travels, so a
+    config an import makes has none, and with kind_folders false every run
+    that saves or moves documents there would stop until one is set. It is
+    left out, and the import says so (follow-up of the 0.69.0 review)."""
+    inst = _app(tmp_path / "new")
+    cfg = dict(EXAMPLE)
+    if documents is not None:
+        cfg["documents_dir"] = documents
+    left = []
+    got = migrate.settings_to_apply(inst, cfg, {"kind_folders": False, "owner": "Pat"},
+                                    left_out=left)
+    assert got == {"owner": "Pat"} and left == [migrate.KIND_FOLDERS_LEFT_OUT]
+    left = []
+    assert migrate.settings_to_apply(inst, cfg, {"kind_folders": True}, left_out=left) == \
+        {"kind_folders": True} and left == []

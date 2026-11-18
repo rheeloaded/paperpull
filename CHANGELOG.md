@@ -9,6 +9,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **A documents folder filed without kind folders holds only what
+  PaperPull filed there (#201).** With `"kind_folders": false` the
+  documents folder can be a broad one, and any PDF in it that a record
+  named, from an imported history or an edited index, counted as the
+  account's own, so Rename could rename it, the Move could move it and
+  AT&T's wrong-year repair could put it in Manual Review. The Move now
+  writes down each document it files there, by its size and SHA-256 and
+  never its name, in `documents-filed-flat.json` before it moves anything,
+  and only those are touched there, under any name Rename gives them
+  later. If that file cannot be written or read, nothing is moved.
+  Documents 0.69.0 filed this way are written down once from the
+  account's own saved records, never from imported ones. Found in the
+  0.69.0 release review.
+- **The cleanup after a Move without kind folders never removes a link or
+  a junction (#201).** A folder of a kind in the documents folder that a
+  person made a junction or a link was removed by itself on Windows,
+  whatever it led to. Only a real empty folder is removed now. No file
+  was ever removed.
+- **A refused `kind_folders` setting no longer stops Login or the Support
+  report (#201).** It stopped every run for that account, so a person
+  could not even sign in. Login and the Support report now go on with
+  documents in folders of their kind and say why the setting was not
+  taken, and any run that saves or moves documents still stops with the
+  same message. Import history leaves `"kind_folders": false` out of a
+  provider it sets up and says so, since the documents folder it needs
+  is not carried from another computer.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight
