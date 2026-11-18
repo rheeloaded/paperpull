@@ -125,6 +125,9 @@ becomes
   `documents-filed-flat.json` in the provider's own folder, before it moves
   anything, so a document is still known after Rename gives it a new
   name. Any other file there is left alone, even when a record names it.
+  Documents filed this way by 0.69.0, before that file existed, are
+  written down from the account's own saved records, and again on each
+  run until every one of them could be read.
   An exact copy of a filed document counts as filed, and a filed document
   you edit no longer does. A folder named like a folder of a kind,
   `Statements` or `Tax Documents` say, inside the documents folder is

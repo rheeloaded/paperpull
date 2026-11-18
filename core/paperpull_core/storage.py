@@ -979,7 +979,7 @@ class Paths:
         # What the Move filed in them (FILED_FLAT), read once when first asked.
         self.filed_flat_json = self.root / FILED_FLAT
         self._filed = None
-        self._whole = True
+        self._to_read = False
         self._digests = {}
         for folder in self._spec.folders:
             setattr(self, folder.attr, self.root / folder.name)
@@ -1194,23 +1194,24 @@ class Paths:
                 pass
 
     def _read_filed(self):
-        """The (size, digest) pairs FILED_FLAT holds, an empty set when it
-        is not there, and None when it is there and cannot be read as
-        written."""
+        """(the (size, digest) pairs FILED_FLAT holds, whether the account's
+        own records are still to be read into it), (set(), True) when it is
+        not there, and None when it is there and cannot be read as written."""
         try:
             with shared_folder.open_to_read(self.filed_flat_json, "r", encoding="utf-8") as f:
                 listed = json.loads(f.read())
         except FileNotFoundError:
-            return set()
+            return set(), True
         except (OSError, ValueError, SystemExit):
             return None
         files = listed.get("files") if isinstance(listed, dict) else None
         if not isinstance(files, list):
             return None
-        return {(item[0], item[1]) for item in files
-                if isinstance(item, list) and len(item) == 2
-                and isinstance(item[0], int) and not isinstance(item[0], bool)
-                and isinstance(item[1], str) and re.fullmatch(r"[0-9a-f]{64}", item[1])}
+        pairs = {(item[0], item[1]) for item in files
+                 if isinstance(item, list) and len(item) == 2
+                 and isinstance(item[0], int) and not isinstance(item[0], bool)
+                 and isinstance(item[1], str) and re.fullmatch(r"[0-9a-f]{64}", item[1])}
+        return pairs, listed.get("records_to_read") is True
 
     def _digest(self, path) -> Optional[tuple]:
         """(size, SHA-256) of the plain file at `path`, or None."""
@@ -1227,51 +1228,61 @@ class Paths:
 
     def _filed_set(self) -> set:
         """What the Move filed in a documents folder without kind folders,
-        read once. A file that cannot be read holds nothing, so nothing in
-        such a folder is touched until it can be. With none written yet, as
-        for documents 0.69.0 filed so, it is written once from the
-        account's own records (_first_filed)."""
+        read once a run. One that cannot be read holds nothing, so nothing
+        in such a folder is touched until it can be. With none written yet,
+        as for documents 0.69.0 filed so, the account's own records are read
+        into it (_from_records), and again on each run until every document
+        they name there could be read, a folder on a drive not plugged in
+        or a file synced on demand say, so none of them is left out for
+        good."""
         if self._filed is not None:
             return self._filed
-        if os.path.lexists(self.filed_flat_json):
-            self._filed = self._read_filed() or set()
+        read = self._read_filed()
+        if read is None:
+            self._filed = set()
             return self._filed
-        # Not written down when a file it names could not be read, so the
-        # next run asks again, and the Move stops until then (remember_filed).
-        self._filed, self._whole = self._first_filed()
-        return self._filed
+        filed, to_read = read
+        whole = True
+        if to_read:
+            found, whole = self._from_records()
+            if found - filed or whole or not os.path.lexists(self.filed_flat_json):
+                try:
+                    self._write_filed(filed | found, records_to_read=not whole)
+                except OSError:
+                    pass
+            filed = filed | found
+        self._to_read = to_read and not whole
+        self._filed = filed
+        return filed
 
     def filed_unreadable(self) -> bool:
         """Whether FILED_FLAT is there and cannot be read, so nothing in a
         documents folder filed without kind folders is held."""
         return os.path.lexists(self.filed_flat_json) and self._read_filed() is None
 
-    def _first_filed(self):
+    def _from_records(self):
         """Each document the account's own records name, saved and checked,
-        in a documents folder filed without kind folders, the first time
-        FILED_FLAT is asked for, since 0.69.0 filed documents so without
-        writing it. A record an import brought (imported_at) is not the
-        account's own and is left out. Written down once, and when it cannot
-        be written, asked again on the next run. Each file a record names
-        that cannot be read now, a file synced on demand say, has it asked
-        again on the next run too, and not written down, since one written
-        down without it would leave that document out for good. The files
+        in a documents folder filed without kind folders, as (size, digest)
+        pairs, and whether every one of them could be read. 0.69.0 filed
+        documents so without writing FILED_FLAT. A record an import brought
+        (imported_at) is not the account's own and is left out. The files
         named are the ones the Move takes for a record, its pdf_path, each
         invoice kept, and each other invoice its notes say was saved
-        (renaming._also_saved). Returns (what it found, whether every file
-        it names was read)."""
+        (renaming._also_saved). A file named in a folder that is not there,
+        on a drive not plugged in say, a file that cannot be read and records
+        that cannot be read each leave it not whole."""
         from .renaming import _also_saved
         roots = [Path(p) for p in self._listed(self.flat_documents_json)]
         if not self.kind_folders:
             roots.append(self.documents)
-        real = []
+        real, whole = [], True
         for root in roots:
             try:
                 real.append(Path(root).resolve())
             except (OSError, RuntimeError, ValueError):
-                continue
+                whole = False
         if not real:
-            return set(), True
+            return set(), whole
         try:
             with shared_folder.open_to_read(self.progress_json, "r", encoding="utf-8") as f:
                 records = json.loads(f.read())
@@ -1279,7 +1290,7 @@ class Paths:
             records = {}
         except (OSError, ValueError, SystemExit):
             return set(), False
-        filed, unread = set(), False
+        filed = set()
         for rec in records.values() if isinstance(records, dict) else ():
             if not isinstance(rec, dict) or "imported_at" in rec or not (
                     rec.get("downloaded_ok") is True
@@ -1301,23 +1312,22 @@ class Paths:
                 if set(where.parents).isdisjoint(real):
                     continue
                 if not where.is_file():
+                    # Gone, or its folder is not there now.
+                    if not where.parent.is_dir():
+                        whole = False
                     continue
                 pair = self._digest(where)
                 if pair is None:
-                    unread = True
+                    whole = False
                     continue
                 filed.add(pair)
-        if unread:
-            return filed, False
-        try:
-            self._write_filed(filed)
-        except OSError:
-            pass
-        return filed, True
+        return filed, whole
 
-    def _write_filed(self, filed: set) -> None:
-        atomic_write_text(self.filed_flat_json, json.dumps(
-            {"files": [list(pair) for pair in sorted(filed)]}, indent=1))
+    def _write_filed(self, filed: set, records_to_read: bool = False) -> None:
+        written = {"files": [list(pair) for pair in sorted(filed)]}
+        if records_to_read:
+            written["records_to_read"] = True
+        atomic_write_text(self.filed_flat_json, json.dumps(written, indent=1))
 
     def filed_here(self, path) -> bool:
         """Whether the file at `path` is one the Move filed in a documents
@@ -1333,23 +1343,22 @@ class Paths:
         folder without kind folders, before it moves them, so each is held
         there after it moves, under any name. Raises OSError, and nothing
         is to be moved, when one cannot be read or the list cannot be read
-        or written, since a file moved then would not be held there."""
+        or written, since a file moved then would not be held there. The
+        account's records still to be read into it stay so."""
         filed = self._filed_set()
-        if os.path.lexists(self.filed_flat_json) and self._read_filed() is None:
+        read = self._read_filed()
+        if read is None:
             raise OSError("%s could not be read" % self.filed_flat_json.name)
-        if not self._whole:
-            # Written down now without a document the account's records name
-            # there that could not be read, that one would be left out for
-            # good (_first_filed).
-            raise OSError("a document already in the documents folder could not be read")
         more = set()
         for path in files:
             pair = self._digest(path)
             if pair is None:
                 raise OSError("%s could not be read" % Path(path).name)
             more.add(pair)
-        if more - filed or not os.path.lexists(self.filed_flat_json):
-            self._write_filed(filed | more)
+        # Measured against what is written, which is nothing when the file
+        # is not there, so a record that could not be written before is.
+        if more - read[0]:
+            self._write_filed(filed | more, records_to_read=self._to_read)
             self._filed = filed | more
 
     def remember_documents(self) -> None:

@@ -255,8 +255,8 @@ def test_an_empty_record_is_not_written_again_from_the_records(office, monkeypat
 def test_a_document_that_cannot_be_read_now_is_not_left_out_of_the_first_record(
         office, monkeypatch):
     """A file synced on demand, offline, cannot be read the first time the
-    record is made. It is not written down without it, and the Move stops,
-    so once it can be read it is held again."""
+    record is made. The record says the account's records are still to be
+    read, a Move goes on, and once the file can be read it is held again."""
     from paperpull_core import intake
     moved(office, monkeypatch)
     record = office.out / storage.FILED_FLAT
@@ -268,21 +268,61 @@ def test_a_document_that_cannot_be_read_now_is_not_left_out_of_the_first_record(
     folders = office.paths.filing_folders()
     assert renaming.held_document(str(office.docs / FIRST), folders) is not None
     assert renaming.held_document(str(office.docs / SECOND), folders) is None
-    assert not record.exists(), "never written down without it"
+    assert json.loads(record.read_text(encoding="utf-8"))["records_to_read"] is True
     office.saved("Brokerage 3333")
     flat(office)
-    before = office.where()
     moving(monkeypatch)
     code, said = office.rename()
-    assert code == 1 and "Nothing was moved" in said, said
-    assert office.where() == before
+    assert code == 0 and "Moved 1 file(s)" in said, said
+    assert json.loads(record.read_text(encoding="utf-8"))["records_to_read"] is True
     monkeypatch.setattr(intake, "sha256_of", real)
     monkeypatch.delenv(renaming.MOVE_DOCUMENTS_ENV)
     flat(office)
     folders = office.paths.filing_folders()
     for name in (FIRST, SECOND):
         assert renaming.held_document(str(office.docs / name), folders) is not None
-    assert record.exists()
+    written = json.loads(record.read_text(encoding="utf-8"))
+    assert "records_to_read" not in written and len(written["files"]) == 3
+
+
+def test_a_documents_folder_not_there_now_is_read_again_once_it_is(office, monkeypatch, tmp_path):
+    """A documents folder on a drive not plugged in at the first run of
+    this version. Its documents are read into the record once it is back."""
+    moved(office, monkeypatch)
+    record = office.out / storage.FILED_FLAT
+    record.unlink()
+    away = tmp_path / "unplugged"
+    office.docs.rename(away)
+    flat(office)
+    assert not office.paths.filed_here(office.out / "progress.json")
+    assert json.loads(record.read_text(encoding="utf-8")) == {"files": [], "records_to_read": True}
+    away.rename(office.docs)
+    flat(office)
+    for name in (FIRST, SECOND):
+        assert renaming.held_document(str(office.docs / name), office.paths.filing_folders())
+
+
+def test_a_move_whose_files_are_known_still_writes_a_record_not_written_before(
+        office, monkeypatch, tmp_path):
+    moved(office, monkeypatch)
+    record = office.out / storage.FILED_FLAT
+    record.unlink()
+    real = storage.atomic_write_text
+    refused = []
+
+    def once(path, text, encoding="utf-8", **how):
+        if Path(path).name == storage.FILED_FLAT and not refused:
+            refused.append(path)
+            raise PermissionError("locked")
+        return real(path, text, encoding, **how)
+
+    monkeypatch.setattr(storage, "atomic_write_text", once)
+    office.docs = tmp_path / "Elsewhere"
+    flat(office)
+    moving(monkeypatch)
+    code, said = office.rename()
+    assert code == 0 and "Moved 2 file(s)" in said and refused, said
+    assert len(json.loads(record.read_text(encoding="utf-8"))["files"]) == 2
 
 
 def test_the_first_record_takes_the_other_invoices_an_orders_notes_name(office, monkeypatch):
