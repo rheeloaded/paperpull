@@ -938,3 +938,20 @@ def test_chase_business_ids_never_leave_this_computer(tmp_path, minimal):
     if not minimal:
         assert got[key].get("account_digest") == "0a1b2c3d4e5f", \
             "a full export keeps the digest Rename reads"
+
+
+def test_kind_folders_travels_as_true_or_false_only(tmp_path):
+    """Whether documents go into a folder of their kind (#201) is a choice
+    of the person's, so it comes across like owner_in_filename, and only as
+    true or false, a run refusing anything else."""
+    old = tmp_path / "old"
+    _app(old, records={}, config={"kind_folders": False})
+    archive = tmp_path / "h.ppz"
+    migrate.export(old, archive)
+    assert _manifest(archive)["apps"][0]["settings"]["kind_folders"] is False
+    inst = _app(tmp_path / "new")
+    for value in (False, True):
+        assert migrate.settings_to_apply(inst, dict(EXAMPLE), {"kind_folders": value}) == \
+            {"kind_folders": value}
+    for value in ("false", 0, None, []):
+        assert migrate.settings_to_apply(inst, dict(EXAMPLE), {"kind_folders": value}) == {}, value

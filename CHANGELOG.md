@@ -21,6 +21,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
   `"Installed"`, now means what it says, where it used to run as `auto`.
   The README says how to pick Chrome.
 
+- **Documents without a folder for each kind (#201).** `"kind_folders":
+  false` in an account's config.json files its documents straight into its
+  documents folder, in the folders a naming pattern makes, with no
+  `Statements` or `Tax Documents` folder between. Downloads are still
+  written and checked in the provider's own folder, Manual Review, Logs and
+  the records stay there, and the Move brings documents out of their kind
+  folders, offered on the Documents settings page. Since every kind then
+  shares one folder, a run stops before saving or moving anything unless
+  the pattern says which kind a document is, `{kind}` for a statements
+  provider and `{type}` for a receipts one, and the message names the
+  kinds. It stops as well with no documents folder of the account's own.
+  Contributed by @appchamp. Before merging, the check was made to ask
+  whether the name really carries the kind, since the usual names leave it
+  out for every statements provider and two kinds of one day got one name,
+  and to refuse a provider that files some kinds by name, as Anthem does.
+  The Documents settings were made to count documents still in a kind
+  folder of the documents folder, PaperPull Server's start-of-run check was
+  made to walk every folder of such a documents folder for a link out of
+  the data folder, the setting was made to travel with Export history, and
+  an earlier documents folder is searched as a whole only when documents
+  were filed in it this way. A folder a pattern made that is named like a
+  kind folder, as `{type}` folders are, now keeps its documents, and
+  documents filed this way follow a new documents folder.
+
 ### Fixed
 - **Best Buy chooses a year again on a history whose range menu sits inside
   wrappers (#226).** The menu's button was drawn inside two wrappers of its

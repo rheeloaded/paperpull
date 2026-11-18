@@ -1345,3 +1345,19 @@ def test_a_statement_refused_for_a_limit_is_named_and_read_again_by_the_next_exp
     finally:
         pdf_reader.stop()
         pdf_reader.forget()
+
+
+def test_a_statement_filed_without_kind_folders_is_named_with_every_folder(tmp_path):
+    """A documents folder the Move filed without kind folders (#201) has a
+    pattern's folders at its first level, so none of them is taken for the
+    folder of a kind and left out of the name."""
+    bank, docs = tmp_path / "A Bank", tmp_path / "Watched"
+    bank.mkdir()
+    index = bank / "A Bank Document Index.csv"
+    (bank / "documents-folders.json").write_text(json.dumps([str(docs)]), encoding="utf-8")
+    pdf = docs / "2026" / "Checking 1111" / "2026-07-15 Statement.pdf"
+    assert xt.statement_name(index, pdf) == "Checking 1111/2026-07-15 Statement.pdf"
+    (bank / "documents-folders-flat.json").write_text(json.dumps([str(docs)]), encoding="utf-8")
+    assert xt.statement_name(index, pdf) == "2026/Checking 1111/2026-07-15 Statement.pdf"
+    assert xt.statement_name(index, docs / "2026-07-15 Statement.pdf") == \
+        "2026-07-15 Statement.pdf"

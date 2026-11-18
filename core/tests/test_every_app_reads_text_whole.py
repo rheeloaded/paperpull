@@ -38,7 +38,7 @@ OWN = {
     ("browser.py", "_install_takes_no_remove"): "Playwright's own package.json, packaged with it",
     ("classification.py", "load_rules"): "rules packaged with the app",
     ("doc_types.py", "load_rules"): "rules packaged with the app",
-    ("export_transactions.py", "statement_name"): "a list of folders the core wrote itself",
+    ("export_transactions.py", "listed"): "a list of folders the core wrote itself",
     ("host_sandbox.py", "probe"): "the host check's own child, which asks the kernel, "
                                   "never a provider",
     ("export_transactions.py", "__init__"): "the tool's own cache, whose paths stay as the "
@@ -51,7 +51,7 @@ OWN = {
     ("listing.py", "_whole_at"): "the note this core wrote itself",
     ("storage.py", "load_config"): "the person's own config.json",
     ("storage.py", "ensure_owner"): "the person's own config.json",
-    ("storage.py", "documents_roots"): "a list of folders this core wrote itself",
+    ("storage.py", "_listed"): "a list of folders this core wrote itself",
     ("storage.py", "load"): "the JsonStore's own file, made whole as it is read",
     ("storage.py", "_recover_from_backup"): "the JsonStore's own backup, made whole as it is read",
     ("testkit.py", "*"): "the local test browser's own answers",
