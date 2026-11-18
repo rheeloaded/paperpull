@@ -127,10 +127,10 @@ becomes
   name. Any other file there is left alone, even when a record names it.
   Documents filed this way by 0.69.0, before that file existed, are
   written down from the account's own saved records, and again on each
-  run until each one there is read or found gone. Until then a filed
-  document you edit is still known.
+  run until each one there is read or found gone.
   An exact copy of a filed document counts as filed, and a filed document
-  you edit no longer does. A folder named like a folder of a kind,
+  you edit no longer does, except while those records are still being
+  read. A folder named like a folder of a kind,
   `Statements` or `Tax Documents` say, inside the documents folder is
   still the account's as before, whoever made it, so keep files of your
   own out of those.
