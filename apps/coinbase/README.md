@@ -3,7 +3,7 @@
 Downloads your Coinbase monthly account statements and your tax documents
 as PDFs, from a browser where you sign in yourself. Passwords and
 verification codes are never handled by the downloader. Contributed by
-[@JasperDale420](https://github.com/JasperDale420).
+[@JasperDale19](https://github.com/JasperDale19).
 
 Read-only, delete-safe, part of [PaperPull](../../README.md).
 
