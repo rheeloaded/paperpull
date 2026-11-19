@@ -1595,7 +1595,7 @@ def _wait_for_personal_card_rows(page, account: str, year: str) -> bool:
     """Wait for evidence that this card's table has reached the chosen year."""
     header = page.get_by_role("button", name=account, exact=True)
     card = page.locator("mds-accordion-item").filter(has=header)
-    date_in_year = re.compile(rf",\s*{re.escape(year)}\s+Download\s*$", re.I)
+    date_in_year = re.compile(rf",\s*{escape_for_locator(year)}\s+Download\s*$", re.I)
     buttons = card.get_by_role("button", name=DOWNLOAD_BUTTON_RE).and_(
         card.get_by_role("button", name=date_in_year))
     try:
