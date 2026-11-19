@@ -1611,7 +1611,10 @@ def _wait_for_personal_card_rows(page, account: str, year: str) -> bool:
 
 # A control that would show more of a card's table, read and never pressed.
 _PAGER_RE = re.compile(
-    r"^\s*(next(\s+page)?|(show|load|view|see)\s+more|older|page\s+\d+)\b", re.I)
+    r"\bnext\s+page\b|^\s*next\s*$|^\s*(show|load|view|see)\s+(more|all)\b|"
+    r"^\s*older\b|^\s*page\s+\d+\b", re.I)
+# A pager that is turned off shows no more rows.
+_ON = ":not([disabled]):not([aria-disabled='true'])"
 
 
 def _card_table_pages(page, account: str) -> bool:
@@ -1623,10 +1626,15 @@ def _card_table_pages(page, account: str) -> bool:
         card = page.locator("mds-accordion-item").filter(has=header)
         if card.count() != 1:
             return True
-        pagers = (card.get_by_role("button", name=_PAGER_RE)
-                  .or_(card.get_by_role("link", name=_PAGER_RE))
-                  .or_(card.locator("mds-pagination, [role='navigation']")))
-        return pagers.count() > 0
+        # In the card's own item, or in the action bar every card shares
+        # with the year button.
+        for where in (card, page.locator("mds-data-table-action-bar")):
+            pagers = (where.get_by_role("button", name=_PAGER_RE).and_(where.locator("button" + _ON))
+                      .or_(where.get_by_role("link", name=_PAGER_RE))
+                      .or_(where.locator("mds-pagination, [role='navigation']")))
+            if pagers.count() > 0:
+                return True
+        return False
     except Exception as exc:
         log.info("could not look for a pager on %s: %s", shape_label(account), error_kind(exc))
         return True

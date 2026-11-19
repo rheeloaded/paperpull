@@ -264,3 +264,28 @@ def test_the_older_route_with_a_card_and_no_picker_does_not_count(open_view):
     assert not site.on_documents_page(page)
     page = open_view(card(0, "", expanded=False), PERSONAL)
     assert site.on_documents_page(page), "the newer route keeps the contributor's rule"
+
+
+@pytest.mark.parametrize("pager, where", [
+    ('<button type="button" aria-label="Go to next page"></button>', "card"),
+    ('<button type="button">Next page</button>', "action bar"),
+], ids=["named anywhere", "in the shared action bar"])
+def test_a_pager_named_or_placed_otherwise_is_still_seen(open_view, pager, where):
+    """Re-check RC1, a pager whose name holds "next page" anywhere, or one
+    in the action bar the cards share with the year button."""
+    if where == "card":
+        body = YEAR_BUTTON + card(0, row(0) + f"<tr><td>{pager}</td></tr>")
+    else:
+        body = YEAR_BUTTON.replace("</mds-data-table-action-bar>",
+                                   pager + "</mds-data-table-action-bar>") + card(0, row(0))
+    page = open_view(body)
+    got = site.chase_collect_via_api(page, keep=lambda year: year == "2031")
+    assert got.passed_over == ("statement rows",)
+
+
+def test_a_turned_off_pager_on_a_one_page_table_passes_nothing_over(open_view):
+    pager = '<tr><td><button type="button" disabled>Next page</button></td></tr>'
+    page = open_view(YEAR_BUTTON + card(0, row(0) + pager))
+    got = site.chase_collect_via_api(page, keep=lambda year: year == "2031")
+    assert [(d["account"], d["date"]) for d in got] == [(CARDS[0], DATE)]
+    assert got.passed_over == ()
