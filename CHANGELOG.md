@@ -17,11 +17,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   whose accordion holds its button, so two cards with a statement on the
   same day each keep their own. A button it cannot tie to exactly one card,
   two buttons for one card and date, and a year whose rows never draw are
-  passed over, and the list is not noted as read whole. Nor is a view whose
-  year could not be read, on the older route as well. A card with no
-  statement in a year looks the same as one whose rows have not drawn, so
-  such a run also ends with the list not read whole until a Chase page of
-  that shape is seen. Contributed by @solkennedy.
+  passed over, and the list is not noted as read whole. So is a card table
+  that shows a pager, and a view whose year could not be read, on the older
+  route as well. A card with no statement in a year looks the same as one
+  whose rows have not drawn, so a run that meets one, such as a run in
+  January or one with a card newer than the oldest year, also ends with
+  the list not read whole. Everything it read is kept and downloaded, and
+  the run says so and stops at its end. On the older route, a statement
+  and a corrected statement of one card on one date no longer keep each
+  other from downloading. Contributed by @solkennedy.
 
 ## [0.69.0] - 2026-11-17
 

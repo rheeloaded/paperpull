@@ -206,3 +206,61 @@ def test_the_log_holds_no_card_name_or_last_four(open_view, tmp_path, caplog):
     said = "\n".join(r.getMessage() for r in caplog.records)
     for secret in ("SECRETNAME", "4321", "8765"):
         assert secret not in said, secret
+
+
+# -- review of the branch ----------------------------------------------------------
+
+def test_a_card_table_that_pages_is_not_a_whole_list(open_view):
+    """A card's table with a pager in it shows one page of the year. The
+    app never presses a pager, so the rest of the year is not read and the
+    list is not noted whole (review R1)."""
+    pager = '<tr><td><button type="button">Next page</button></td></tr>'
+    page = open_view(YEAR_BUTTON + card(0, row(0) + pager))
+    got = site.chase_collect_via_api(page, keep=lambda year: year == "2031")
+    assert [(d["account"], d["date"]) for d in got] == [(CARDS[0], DATE)]
+    assert got.passed_over == ("statement rows",)
+
+
+VIEW_PICKER = '<input id="filterstyledselect-year" aria-label="View:" value="2031" readonly>'
+
+
+def legacy_link(index, title):
+    return (f'<li><a href="#" data-pdf="{index}">Mar 9, 2031 {title} {CARDS[0]} '
+            f'Saves document</a></li>')
+
+
+def test_the_older_route_takes_the_row_of_the_asked_title(open_view, tmp_path):
+    """Two rows of one card on one date, a statement and a corrected one.
+    Discover lists the statement, whose row names the card right after its
+    type, and the download presses that row, rather than give up on two
+    matches or press whichever came first (review R5)."""
+    rows = legacy_link(1, "Corrected Statement") + legacy_link(0, "Statement")
+    body = (VIEW_PICKER + f'<mds-accordion-item><button type="button" aria-expanded="true">'
+            f'{CARDS[0]}</button><div><ul>{rows}</ul></div></mds-accordion-item>')
+    page = open_view(body, LEGACY)
+    got = site.chase_collect_via_api(page, keep=lambda year: year == "2031")
+    assert [(d["account"], d["date"], d["title"]) for d in got] == [(CARDS[0], DATE, "Statement")]
+    out = tmp_path / "s.pdf"
+    assert site.chase_download(page, page.context, CARDS[0], DATE, out, title="Statement")
+    assert page.evaluate("window.presses") == ["0"]
+
+
+def test_the_older_route_with_two_rows_of_one_title_presses_neither(open_view, tmp_path):
+    rows = legacy_link(1, "Statement") + legacy_link(0, "Statement")
+    body = (VIEW_PICKER + f'<mds-accordion-item><button type="button" aria-expanded="true">'
+            f'{CARDS[0]}</button><div><ul>{rows}</ul></div></mds-accordion-item>')
+    page = open_view(body, LEGACY)
+    assert not site.chase_download(page, page.context, CARDS[0], DATE, tmp_path / "s.pdf",
+                                   title="Statement")
+    assert page.evaluate("window.presses") == []
+
+
+def test_the_older_route_with_a_card_and_no_picker_does_not_count(open_view):
+    """The older center is told by its "View:" picker, as at 0.69.0. A page
+    under its route with an expandable card and no picker and no statement
+    button may be the dashboard's own page, and Discover stops there with
+    the failure file (review R6)."""
+    page = open_view(card(0, "", expanded=False), LEGACY)
+    assert not site.on_documents_page(page)
+    page = open_view(card(0, "", expanded=False), PERSONAL)
+    assert site.on_documents_page(page), "the newer route keeps the contributor's rule"

@@ -366,7 +366,6 @@ def on_documents_page(page) -> bool:
 # The document center's route, as the live probe found it
 # (#/dashboard/documents/myDocs/index).
 DOCUMENT_CENTER_ROUTE = "/dashboard/documents/"
-STATEMENTS_CENTER_PATH = "/dashboard/documents/mydocs/index"
 PERSONAL_STATEMENTS_PATH = "/dashboard/mydocs/documents/statements"
 # The center's tabs, named in its address by the same probe, of which
 # this app collects STATEMENTS alone.
@@ -414,8 +413,11 @@ def document_center_drawn(page) -> bool:
     all year for a card with no statement in it, that view can hold no row,
     and a test of rows alone took the center for a page that never opened,
     so Discover listed nothing and a download gave up. The center is told
-    by its route, a card accordion and its "View:" year picker, or by its
-    own statements route and rendered card expanders when the picker is absent.
+    by its route, a card accordion and its "View:" year picker, or by the
+    newer statements route and its rendered card expanders when the picker
+    is absent. On either route a statement button bound to its card counts.
+    The older route with a card and no picker does not, as at 0.69.0
+    (review of #232).
     The route alone is not enough, since the dashboard ignores a route
     pasted into its address and may keep it there while it draws its own
     front page, and a page that merely says Documents, or has a picker of
@@ -426,7 +428,7 @@ def document_center_drawn(page) -> bool:
             return False
         if _view_picker_shows_a_year(page):
             return bool(card_accordions(page))
-        if (path == STATEMENTS_CENTER_PATH or path.startswith(PERSONAL_STATEMENTS_PATH)) and any(
+        if path.startswith(PERSONAL_STATEMENTS_PATH) and any(
             header.get_attribute("aria-expanded") in {"true", "false"}
             for header, _ in card_accordions(page)
         ):
@@ -950,7 +952,7 @@ def chase_download(page, ctx, account: str, date: str, out_path,
     page.on("response", _note)
     try:
         if year_selected:
-            ok = _click_row_and_capture(page, ctx, account, date, out_path)
+            ok = _click_row_and_capture(page, ctx, account, date, out_path, title=title)
         else:
             ok = _click_row_and_capture(page, ctx, account, date, out_path, allow_legacy=False)
     finally:
@@ -972,9 +974,24 @@ def chase_download(page, ctx, account: str, date: str, out_path,
     return True
 
 
+def _row_reads_as(handle, account: str, title: str) -> bool:
+    """The older route's row link reads as this card's row of this title."""
+    try:
+        m = ROW_NAME_RE.search(" ".join((handle.inner_text() or "").split()))
+    except Exception:
+        return False
+    return (bool(m) and " ".join(m.group("card").split()) == account
+            and ((m.group("type") or "").strip() or "Statement") == title)
+
+
 def _click_row_and_capture(page, ctx, account: str, date: str,
-                           out_path: Path, *, allow_legacy=True) -> bool:
-    """Click this row's save control and keep whatever PDF it produces."""
+                           out_path: Path, *, allow_legacy=True, title: str = "") -> bool:
+    """Click this row's save control and keep whatever PDF it produces.
+
+    On the older route two rows of one card and date (a statement and a
+    corrected one) both match the date and card. The row is then the one
+    whose type and card read as Discover read them (ROW_NAME_RE), and with
+    none or more than one such row nothing is pressed (review of #232)."""
     buttons, _ = _statement_buttons(page)
     matches = buttons.get((account, date), [])
     if len(matches) > 1:
@@ -987,6 +1004,8 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
         try:
             loc = page.get_by_role("link", name=row_label_re(date, account, action))
             links = loc.element_handles()
+            if len(links) > 1 and title:
+                links = [h for h in links if _row_reads_as(h, account, title)]
             if len(links) > 1:
                 log.info("multiple document links match %s on %s", shape_label(account), date)
                 return False
@@ -1590,6 +1609,29 @@ def _wait_for_personal_card_rows(page, account: str, year: str) -> bool:
         return False
 
 
+# A control that would show more of a card's table, read and never pressed.
+_PAGER_RE = re.compile(
+    r"^\s*(next(\s+page)?|(show|load|view|see)\s+more|older|page\s+\d+)\b", re.I)
+
+
+def _card_table_pages(page, account: str) -> bool:
+    """Whether this card's table shows a pager, so the rows on screen may be
+    one page of the year (review of #232). A card that cannot be asked
+    answers yes, so its list is not noted whole."""
+    try:
+        header = page.get_by_role("button", name=account, exact=True)
+        card = page.locator("mds-accordion-item").filter(has=header)
+        if card.count() != 1:
+            return True
+        pagers = (card.get_by_role("button", name=_PAGER_RE)
+                  .or_(card.get_by_role("link", name=_PAGER_RE))
+                  .or_(card.locator("mds-pagination, [role='navigation']")))
+        return pagers.count() > 0
+    except Exception as exc:
+        log.info("could not look for a pager on %s: %s", shape_label(account), error_kind(exc))
+        return True
+
+
 def read_card_rows(page, label: str, *, year: str = "") -> List[dict]:
     """The documents Chase is showing for one card, read from the rows.
 
@@ -1619,6 +1661,9 @@ def read_card_rows(page, label: str, *, year: str = "") -> List[dict]:
         out.append({"documentId": "", "date": date, "title": "Statement",
                     "account": account, "kind": "statement",
                     "occurrence": 0, "ambiguous": False})
+    if out and _card_table_pages(page, label):
+        # One page of the year is on screen, and no pager is ever pressed.
+        incomplete = True
     try:
         links = page.get_by_role("link", name=re.compile(r"Saves document", re.I))
         n = min(links.count(), 400)
