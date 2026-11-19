@@ -1128,18 +1128,17 @@ class App:
         needed = site.REFUSED_RUNS_FOR_RECORD
         if len(runs) >= needed:
             return self._save_purchase_record(page, purchase, rec, runs, quiet)
-        self._record_state(purchase, State.FAILED,
+        self._record_state(purchase, State.FAILED if asked else State.DISCOVERED,
                            notes=("Apple refused its receipt" if asked else
                                   "Not asked, Apple had refused this account's newer purchases "
                                   "before it in this run"),
                            extra={"refused_runs": runs, "not_asked_runs": quiet})
-        self.stats["failed"] += 1
         if not asked:
             print(f"  Not asked. In this run Apple refused {site.REFUSAL_STREAK} of this "
-                  f"account's newer purchases in a row, each older than any receipt it had given "
-                  f"the account, so this counts as refused, on {len(runs)} of {needed} separate "
-                  f"runs. It is asked on the run that would make its record.")
+                  "account's newer purchases in a row. This purchase stays pending and "
+                  "will be checked directly on the next download run that includes it.")
             return False
+        self.stats["failed"] += 1
         self.stats["no_receipt"] += 1
         self.write_failure("fetch the receipt", "Apple refused the receipt")
         self.journal.result("could not save the document")
@@ -1162,7 +1161,8 @@ class App:
     # refusal. The newest purchase of each older year is still asked, and a
     # receipt Apple gives there takes the line away, so a line in the wrong
     # place does not hold for the run, and the next run starts from the older
-    # receipt. --redownload asks every purchase, as it always has.
+    # receipt. A purchase deferred earlier is also asked on the next run,
+    # even if that run learns the same line. --redownload asks every purchase.
 
     def _line_state(self) -> dict:
         return self.__dict__.setdefault(
@@ -1219,8 +1219,9 @@ class App:
         if st["streak"][account] >= site.REFUSAL_STREAK and account not in st["line"]:
             st["line"][account] = when
             print(f"  Apple has refused the last {site.REFUSAL_STREAK} of this account's "
-                  f"purchases, each older than any receipt it has given it. Older ones are not "
-                  f"asked this run, but for the newest of each year, and each counts as refused.")
+                  "purchases, each older than any receipt it has given it. Some older checks "
+                  "may be deferred after a refusal in their year. Previously deferred "
+                  "purchases are checked directly.")
         # A year's purchases past the line go unasked only once Apple has
         # refused one of them. One that got no answer leaves its year to be
         # asked (review).
@@ -1242,7 +1243,13 @@ class App:
         line = st["line"].get(account)
         if not line or purchase.purchase_date > line:
             return False
-        return purchase.purchase_date[:4] == st["year"].get(account)
+        if purchase.purchase_date[:4] != st["year"].get(account):
+            return False
+        # A yearly probe cannot tell us whether a different purchase in
+        # that year still has a receipt. Give previously deferred purchases
+        # a direct check even when that probe still comes back refused.
+        previous = self.progress.get(purchase.key) or {}
+        return not previous.get("not_asked_runs")
 
     def _would_make_a_record(self, purchase: Purchase) -> bool:
         """Whether a refusal on this run would make the purchase's record. It
@@ -1840,6 +1847,9 @@ class App:
             if new_files:
                 print(f"\n{len(new_files)} NEW file(s) downloaded this run "
                       f"(listed in new-this-run.txt).")
+        if s.get("not_asked"):
+            print(f"\n{s['not_asked']} older App Store purchases were left pending. "
+                  "A download run covering those dates will ask Apple for their receipts.")
         report_run_result(s)
 
 
