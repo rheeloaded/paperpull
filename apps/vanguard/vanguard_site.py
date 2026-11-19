@@ -757,6 +757,9 @@ def _download_workplace(page, plan: str, end: str, document_id: str, out_path) -
     row = next((row for row in _workplace_rows(page, plan)
                 if row.document_id == document_id and row.end == end), None)
     if row is None:
+        # Said in words alone. The plan number and the PDF's address stay
+        # out of the log, which a person may attach to a report.
+        log.info("workplace statement not in the plan's list now, nothing asked for")
         return False
     response = None
     try:
@@ -764,18 +767,22 @@ def _download_workplace(page, plan: str, end: str, document_id: str, out_path) -
                                             headers={"Accept": "application/pdf"})
         content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         if response.status != 200 or content_type != "application/pdf":
+            log.info("workplace statement answer was not a PDF (status %s)", response.status)
             return False
         data = intake.body(response)
         if not data.startswith(b"%PDF-"):
+            log.info("workplace statement answer was not a PDF")
             return False
         pages = pdf_reader.page_texts(data, pages=2)
-    except Exception:
+    except Exception as e:
+        log.info("workplace statement could not be read (%s)", type(e).__name__)
         return False
     finally:
         if response is not None:
             response.dispose()
     if (not pages or not re.search(rf"\b{re.escape(plan)}\b", " ".join(pages))
             or not _printed_workplace_period(pages[0], row)):
+        log.info("workplace statement PDF did not print the plan or period it was asked for, not saved")
         return False
     shared_folder.write_bytes(out_path, data)
     return True
