@@ -9,6 +9,30 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Wells Fargo reads only the accounts you name (#221).** Put the last four
+  digits of the accounts to read in `"only_accounts"` in Wells Fargo's
+  `config.json`, for example `["2222"]`, and every run, the Pilot, Run All,
+  Continue, Download again and the support report, chooses only those
+  accounts in the picker and never opens, scrolls or reads another
+  account's list. Empty, the default, reads every account as before.
+  Records already saved for other accounts are kept as they are. A last
+  four the picker does not hold, two accounts sharing it, a sign-in of one
+  account, and a value that is not a list of last fours stop the run
+  before anything is read. Existing installs get the empty setting when
+  the panel next starts.
+
+### Fixed
+- **Wells Fargo checks the account again just before it takes a document
+  (#221).** The account picker had to show the document's account before
+  the list was read, and nothing checked it again between finding the
+  document and fetching or pressing it. A picker that moved by itself then
+  could save one account's statement under another's name. It is read
+  again just before the fetch and the press, and a picker showing another
+  account, or no account at all, takes nothing, leaves the document for the
+  next run and stops the run. A picker showing no account is no longer
+  taken as showing the right one while a list is read either.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight

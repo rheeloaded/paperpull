@@ -159,6 +159,23 @@ def drop_unaccounted(records: dict, listed, done) -> int:
     return dropped
 
 
+def read_only_accounts(value) -> list:
+    """The last fours only_accounts names, each once, in the order given,
+    or [] for every account, the setting missing or empty (#221). Anything
+    but a list of last fours stops the run before the browser is asked
+    anything, in words that never repeat what the setting holds."""
+    if value is None:
+        return []
+    tails = [site.only_account(v) for v in value] if isinstance(value, list) else [""]
+    if not all(tails):
+        raise pressing.Stop("read the settings", "the setting is not a list of last fours", [
+            "only_accounts in this app's config.json has to be a list of the last four "
+            "digits of the accounts to read, written like [\"1234\"] or [\"...1234\"], or "
+            "empty, [], to read every account.",
+            "Nothing was read. Put it right in config.json, then run this again."])
+    return list(dict.fromkeys(tails))
+
+
 class App:
     _journal = None
     _requests = None
@@ -365,9 +382,18 @@ class App:
             print("open your Documents/Statements page in it, then run --diagnose.")
         self.close()
 
+    def _only_accounts(self) -> list:
+        """The last fours only_accounts names, [] for every account."""
+        return read_only_accounts(self.config.get("only_accounts"))
+
     def _in_scope(self, doc: Document) -> bool:
         a = self.args
         if not doc_types.wanted(doc.category, self.config):
+            return False
+        # An account only_accounts leaves out, and a document of no account,
+        # are not this install's to take while it is set (#221).
+        only = self._only_accounts()
+        if only and site.account_tail(doc.account or "") not in only:
             return False
         if a.type and doc.category.lower() != a.type.lower():
             return False
@@ -461,6 +487,9 @@ class App:
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
+        # The setting is read before anything else, so one that is not a
+        # list of last fours stops the run with nothing asked of the browser.
+        only = self._only_accounts()
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, for Resume (paperpull_core.listing).
         listing.started(self)
@@ -472,13 +501,15 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         self.check_session(page)
-        docs = site.collect_download_docs(page)
+        docs = site.collect_download_docs(page, only=self._only_accounts())
         self._listed = []
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         listed = [d for d in getattr(self, "_listed", []) if d.account]
-        dropped = drop_unaccounted(self.discovery.data, listed,
-                                   lambda rec: self._already_done(Document.from_dict(rec)))
+        # A listing of some accounts cannot say whose a record of no
+        # account was, so none is dropped while only_accounts is set (#221).
+        dropped = 0 if only else drop_unaccounted(
+            self.discovery.data, listed, lambda rec: self._already_done(Document.from_dict(rec)))
         if dropped:
             log.info("%d documents listed before with no account are each account's own now",
                      dropped)
@@ -604,9 +635,18 @@ class App:
             self.check_session(page)
             site.goto_documents(page)
         trace: list = []
-        saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
-                                   title=doc.title, trace=trace, rows=doc.rows,
-                                   account=doc.account)
+        try:
+            saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
+                                       title=doc.title, trace=trace, rows=doc.rows,
+                                       account=doc.account, only=self._only_accounts())
+        except site.PickerMoved:
+            # Nothing was taken. The document waits for the next run, and the
+            # run stops, since a picker that moved by itself makes every next
+            # press suspect (#221).
+            self._record(doc, State.FAILED, notes="The account picker moved before the download")
+            self._write_row(doc, "Capture failed", State.FAILED.value)
+            self.stats["failed"] += 1
+            raise
         # A capture that failed must not leave a convincing empty file behind.
         # A ZIP the capture took stays, for the branch below that opens it.
         if out_path.exists() and not (saved and receipt_pdf.is_zip(out_path)) and (
@@ -777,6 +817,7 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "resume"
+        self._only_accounts()
         # Resume reads no list of its own. With nothing listed, or after a
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished
@@ -912,6 +953,9 @@ class App:
         says which menu was opened to reach the link and whether it showed.
         """
         way = getattr(self, "_diagnose_way", None)
+        accounts = getattr(self, "_diagnose_accounts", None)
+        extra = {**({"way": dict(way)} if way else {}),
+                 **({"only_accounts": dict(accounts)} if accounts else {})}
         failure.write_survey(
             self.paths.diagnostics,
             page=getattr(self, "_work_page", None),
@@ -919,7 +963,7 @@ class App:
             journal=self._journal,
             requests=self._requests,
             provider='Wells Fargo',
-            extra={"way": dict(way)} if way else None,
+            extra=extra or None,
             stopped=stopped or getattr(self, "_diagnose_stopped", None))
 
     def cmd_diagnose(self):
@@ -934,6 +978,9 @@ class App:
         wrote anything, so a tester on the accounts summary had no file
         naming the controls to send (#27)."""
         self.stats["mode"] = "diagnose"
+        # A setting that is not a list of last fours stops here, before the
+        # browser is asked anything, as it stops every run.
+        only = self._only_accounts()
         words = words_for('Wells Fargo', site)
         page = self.page()
         info = {"timestamp": now_iso(), "unverified": True,
@@ -965,8 +1012,15 @@ class App:
                 "accounts_buttons_shown": len(site._accounts_buttons(page) or ()),
                 "way": dict(way)}
             site.set_private_words([self.config.get("owner", "")])
-            info["survey"] = site.survey(page, max_follow=0 if stopped is not None else 6)
-            if found:
+            # With only_accounts set, the chosen accounts are read first and
+            # no link is followed, so what is surveyed, counted and sampled
+            # is a chosen account's list, never the one the page shows
+            # first (#221).
+            found_docs = None
+            if found and only:
+                found_docs = site.collect_download_docs(page, only=self._only_accounts())
+            info["survey"] = site.survey(page, max_follow=0 if stopped is not None or only else 6)
+            if found and not only:
                 site.expand_all(page)
                 site.scroll_full_page(page)
             info["row_counts"] = {}
@@ -978,7 +1032,12 @@ class App:
                     info["row_counts"][name] = page.locator(sel).count()
                 except Exception as e:
                     info["row_counts"][name] = f"ERR {e}"
-            found_docs = site.collect_download_docs(page) if found else []
+            if found_docs is None:
+                found_docs = site.collect_download_docs(page, only=self._only_accounts()) if found else []
+            # How many accounts the picker held and how many were read,
+            # counts only, never a label or a digit (#221).
+            info["only_accounts"] = self._diagnose_accounts = dict(
+                getattr(found_docs, "accounts", None) or {"only_accounts": bool(only)})
             # A document whose date and kind more than one row holds is one
             # the download refuses, a control that would not answer is one
             # nothing was learned from, and a control read two ways that
