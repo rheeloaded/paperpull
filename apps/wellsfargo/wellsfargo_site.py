@@ -1339,11 +1339,9 @@ class RawDoc:
 
 class _Found(list):
     """The documents discovery found, with counts of the document controls
-    that would not answer and of those whose two readings disagree, and
-    the counts of the picker's entries and of those read (#221)."""
+    that would not answer and of those whose two readings disagree."""
     unread = 0
     unsure = 0
-    accounts: Optional[dict] = None
 
 
 # What a document is, read from the control that fetches it. Discovery
@@ -1863,7 +1861,7 @@ def _collect_chosen(page, only: list) -> List[RawDoc]:
     is read. Stops and the log say counts only, never a label or a digit."""
     box, labels = account_picker(page)
     if len(labels) <= 1:
-        raise pressing.Stop("read the accounts", "the setting is set and the page shows one account", [
+        raise pressing.Stop("read the accounts", "the page showed no picker of several accounts", [
             "only_accounts in this app's config.json is set, and no account picker of "
             "several accounts could be read on the Wells Fargo page, so nothing was read.",
             "If the window shows several accounts, the picker could not be read, so look "
@@ -1873,7 +1871,7 @@ def _collect_chosen(page, only: list) -> List[RawDoc]:
     _no_twins(labels)
     tails = [account_tail(label) for label in labels]
     if any(tails.count(want) != 1 for want in only):
-        raise pressing.Stop("read the accounts", "the setting names an account the picker does not hold", [
+        raise pressing.Stop("read the accounts", "the picker has no account ending in a number given in the settings", [
             "only_accounts in this app's config.json names a last four that no account in "
             "the Wells Fargo picker ends in, so no account was chosen and nothing was read.",
             "Look at the picker in the browser window, put the last four digits of each "
@@ -1933,7 +1931,7 @@ _REFUSALS = (
     "the document names no account and the page lists several",
     "the document's account is not in the picker",
     "the picker moved to another account",
-    "the document's account is not one the setting chose",
+    "the document account is not in the settings",
 )
 
 
@@ -2260,7 +2258,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     run stops, since a picker that moved by itself makes every next press
     suspect (#221)."""
     if only and account_tail(account) not in only:
-        _refuse(trace, "the document's account is not one the setting chose", iso_date)
+        _refuse(trace, "the document account is not in the settings", iso_date)
         return False
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

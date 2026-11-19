@@ -228,8 +228,9 @@ def test_a_malformed_setting_stops_before_the_browser_is_asked_anything(
                       and p.suffix in (".json", ".log", ".txt"))
     for word in ("98765", "Zebra"):
         assert word not in said and word not in written
-    # No listing was begun, and nothing was recorded.
-    assert not (tmp_path / "out" / "last-listing.json").exists()
+    # Nothing was listed, and a listing begun is noted as one that stopped.
+    note = tmp_path / "out" / "last-listing.json"
+    assert not note.exists() or json.loads(note.read_text(encoding="utf-8"))["complete"] is False
     for name in ("discovery.json", "progress.json"):
         held = tmp_path / "out" / name
         assert not held.exists() or json.loads(held.read_text(encoding="utf-8") or "{}") == {}
@@ -305,7 +306,7 @@ def test_an_account_the_picker_does_not_hold_stops_before_any_list(open_site, sp
     pg = open_site(fake)
     assert site.goto_documents(pg)
     stop = _stops_before_any_list(fake, pg, spies, ["4444"])
-    assert stop.reason == "the setting names an account the picker does not hold"
+    assert stop.reason == "the picker has no account ending in a number given in the settings"
 
 
 def test_a_last_four_two_entries_share_stops_before_any_list(open_site, spies):
@@ -340,7 +341,7 @@ def test_the_setting_on_a_sign_in_of_one_account_stops_with_a_sentence(open_site
         pg.evaluate("document.getElementById('box').remove()")
     with pytest.raises(pressing.Stop) as stop:
         site.collect_download_docs(pg, only=["2222"])
-    assert stop.value.reason == "the setting is set and the page shows one account"
+    assert stop.value.reason == "the page showed no picker of several accounts"
     assert "leave only_accounts empty" in " ".join(stop.value.lines)
     assert "could not be read" in " ".join(stop.value.lines)
     assert spies["survey"] == []
@@ -585,7 +586,7 @@ def test_a_document_of_an_account_not_chosen_is_refused_before_the_page(open_sit
                               title="Account Statement - 2026-09-30", trace=trace, account=A,
                               only=("2222",)) is False
     assert went == [] and calls == []
-    assert trace[-1]["why"] == "the document's account is not one the setting chose"
+    assert trace[-1]["why"] == "the document account is not in the settings"
 
 
 @pytest.mark.parametrize("accounts", [[base._account(A, ["09/30/26"])]], ids=["one account"])

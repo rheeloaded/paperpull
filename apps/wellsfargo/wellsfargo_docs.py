@@ -168,7 +168,7 @@ def read_only_accounts(value) -> list:
         return []
     tails = [site.only_account(v) for v in value] if isinstance(value, list) else [""]
     if not all(tails):
-        raise pressing.Stop("read the settings", "the setting is not a list of last fours", [
+        raise pressing.Stop("read the settings", "the settings could not be read", [
             "only_accounts in this app's config.json has to be a list of the last four "
             "digits of the accounts to read, written like [\"1234\"] or [\"...1234\"], or "
             "empty, [], to read every account.",
@@ -487,12 +487,12 @@ class App:
         return 0
 
     def cmd_discover(self, quiet: bool = False) -> int:
-        # The setting is read before anything else, so one that is not a
-        # list of last fours stops the run with nothing asked of the browser.
-        only = self._only_accounts()
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, for Resume (paperpull_core.listing).
         listing.started(self)
+        # The setting is read before the browser is asked anything, so one
+        # that is not a list of last fours stops the run there.
+        only = self._only_accounts()
         page = self.page()
         n_new = 0
         # Open the Statements & Documents page and read the date from every control that
