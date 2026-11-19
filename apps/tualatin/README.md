@@ -8,6 +8,7 @@ portal has no PDF of a bill, so each bill's print page is drawn as one.
 Activity keeps a rolling window of about two years, and older bills drop
 off it. A bill that has dropped off can't be downloaded, so run this at
 least once a year to keep every bill.
+
 This reads from a browser where you sign in yourself, with your password,
 on the port named in `config.json` (see `config.example.json`, port 9302).
 Passwords are never handled by the downloader.
@@ -37,28 +38,36 @@ site is never used.
   page. A pager or a control loading more, a count that is not the rows
   read, a filtered view, a date filter, a choice of accounts or service
   locations, a second transaction table, or a table with no bills stops
-  the list rather than being called whole. The table is read once its
-  rows have stopped arriving. So does a row of a type other than Billing or
-  Payment, named in what the run prints (any name in it shows as its
-  shape), a Billing row with no single bill
-  link, a date that is not a calendar date, or one bill number twice.
+  the list rather than being called whole. So does a row of a type other
+  than Billing or Payment, named in what the run prints (any name in it
+  shows as its shape), a Billing row with no single bill link, a date that
+  is not a calendar date, or one bill number twice. The table is read once
+  its rows have stopped arriving.
+- **Once a bill.** Activity is read again for each bill. When that read
+  stops the list, the run stops there once, saying why, and nothing goes
+  to Manual Review. The list is then noted as not read whole, so the next
+  run reads it first.
 - **The bill.** Each bill's print page, `/secure/MyBill/<bill
   number>/Print`, is fetched from inside the signed-in page, no redirect
   followed. Its own text, read before anything is written into it, must
   carry Bill Details, Billing Date and Total Amount Due, and its Billing
   Date must be the date its Activity row gives. Its stylesheets and images
   from the portal's own host are written into it: an `@import` is dropped,
-  a `<` in a stylesheet is escaped, and a stylesheet keeps its `media`, so
-  one for the screen never shapes the printed bill. The page is then drawn
+  a `<` in a stylesheet is escaped, a stylesheet keeps its `media`, so one
+  for the screen never shapes the printed bill, and an alternate or
+  disabled stylesheet is not written in. The page is then drawn
   as a PDF with every script, frame and form taken out, offline, so it
   loads nothing. The PDF's own text is then read for the same words and
   Billing Date, and a PDF that doesn't carry them isn't kept.
 - **A budget.** The page, each stylesheet as written in and each image as
   its data address count against one 5 MB budget. Each answer is read
-  through PaperPull's bounded reader no further than what is left, and one
-  that does not fit is left out of the page and noted in the run's trace.
-  After it, nothing more is asked for. The page as written out is measured
-  again before it is drawn. Each fetch gives up after 30 seconds.
+  through PaperPull's bounded reader no further than what is left, and
+  after the first that does not fit, nothing more is asked for. The page
+  as written out is measured again before it is drawn. Each fetch gives up
+  after 30 seconds, and after the first that does, nothing more is asked
+  for either. A bill with a stylesheet left out, for any of these reasons
+  or an answer that is not one, is not kept, so the next run asks for it
+  again. An image left out is named in the log, and the bill is kept.
 - **Signing out.** A redirect, a 401 or 403, or a print page asking for a
   password has Activity read again. When Activity goes to the sign-in page
   too, the run stops and keeps what it saved. Sign in again and run Resume.

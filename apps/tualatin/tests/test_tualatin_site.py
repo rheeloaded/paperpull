@@ -230,7 +230,8 @@ class Rows(unittest.TestCase):
 
     def test_a_row_of_a_type_it_does_not_know_stops_the_list_and_is_named(self):
         """Named through the app's words, so a name in it never prints."""
-        for kind, named in (("Late Fee", "'Late Fee'"), ("Final Bill", "'aaaaa Bill'"),
+        for kind, named in (("Late Fee", "'Late Fee'"), ("Final Bill", "'Final Bill'"),
+                            ("Adjustment", "'Adjustment'"), ("Fee for Dana", "'Fee for aaaa'"),
                             ("Refund to Dana Smith", "'Refund to aaaa aaaaa'"), ("$9 <b>", "")):
             with self.assertRaises(site.ListStopped) as stop:
                 site.bills_of(HEADS, ROWS + [{"cells": ["06/30/2026", kind, "", "$1", "$1"], "bills": []}])
@@ -279,6 +280,40 @@ class ListReady(unittest.TestCase):
     def test_a_table_that_never_draws_stops(self):
         with self.assertRaises(site.ListStopped):
             site.collect_download_docs(Page(table=False))
+
+    def test_a_count_that_fails_or_a_tab_that_goes_away_is_not_settled(self):
+        """A first count that could not be taken was once a table that had
+        settled, and a tab closed during the wait raised past the stops."""
+        class Uncounted(Page):
+            def evaluate(self, js, arg=None):
+                if js == site._ROW_COUNT_JS:
+                    raise RuntimeError("Target closed")
+                return super().evaluate(js, arg)
+
+        class Gone(Page):
+            def wait_for_timeout(self, ms):
+                raise RuntimeError("Target closed")
+        for page in (Uncounted(), Gone()):
+            with self.assertRaises(site.ListStopped):
+                site.collect_download_docs(page)
+
+    def test_login_gives_why_unless_the_table_never_drew(self):
+        class Drawing(Page):
+            def evaluate(self, js, arg=None):
+                if js == site._ROW_COUNT_JS:
+                    self.n = getattr(self, "n", 0) + 1
+                    return self.n
+                return super().evaluate(js, arg)
+        self.assertEqual(site.bill_list_state(Drawing()), (False, "the Activity table was still drawing rows"))
+        self.assertEqual(site.bill_list_state(Page(table=False)), (False, ""))
+
+        class NotOpened(Page):
+            def goto(self, url, **k):
+                raise TimeoutError("net::ERR_CONNECTION_RESET")
+        self.assertEqual(site.bill_list_state(NotOpened()), (False, ""))
+        signed_out = Page(settled="https://tualatin.merchanttransact.com/LoginRedirect.aspx")
+        self.assertEqual(site.bill_list_state(signed_out), (False, ""))
+        self.assertEqual(site.bill_list_state(Page()), (True, ""))
 
     def test_bill_list_opens(self):
         self.assertTrue(site.bill_list_opens(Page()))
@@ -399,13 +434,19 @@ class Download(unittest.TestCase):
         self.assertTrue(ok)
 
     def test_what_was_left_out_of_the_page_is_in_the_trace(self):
-        trace = []
-        with mock.patch("paperpull_core.receipt_pdf.print_html_inert_to_pdf", side_effect=drawn):
-            ok = site.download_bill(Page(dropped=[{"kind": "stylesheet", "why": "over the budget"}]), None,
-                                    "2026-08-31", self.out, trace=trace, href="/secure/MyBill/10000002",
-                                    document_id="10000002")
-        self.assertTrue(ok)
-        self.assertIn({"note": "left out", "kind": "stylesheet", "why": "over the budget"}, trace)
+        """An image left out is noted and the bill kept. A stylesheet left
+        out is noted and the bill is not kept, so the next run asks again."""
+        for kind, kept in (("image", True), ("stylesheet", False)):
+            self.out.unlink(missing_ok=True)
+            trace = []
+            with mock.patch("paperpull_core.receipt_pdf.print_html_inert_to_pdf", side_effect=drawn) as draw:
+                ok = site.download_bill(Page(dropped=[{"kind": kind, "why": "timed out"}]), None,
+                                        "2026-08-31", self.out, trace=trace, href="/secure/MyBill/10000002",
+                                        document_id="10000002")
+            self.assertIs(ok, kept, kind)
+            self.assertIs(draw.called, kept, kind)
+            self.assertIs(self.out.exists(), kept, kind)
+            self.assertIn({"note": "left out", "kind": kind, "why": "timed out"}, trace)
 
 
 def make_app(tmp, *args):
