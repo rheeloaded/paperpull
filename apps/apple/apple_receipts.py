@@ -1847,9 +1847,14 @@ class App:
             if new_files:
                 print(f"\n{len(new_files)} NEW file(s) downloaded this run "
                       f"(listed in new-this-run.txt).")
-        if s.get("not_asked"):
+        # The purchases passed over past the line are not counted failed
+        # (#237), so the end of the run says how many wait for the next.
+        if s.get("not_asked") == 1:
+            print("\n1 older App Store purchase was left pending. A download run covering "
+                  "its date will ask Apple for its receipt.")
+        elif s.get("not_asked"):
             print(f"\n{s['not_asked']} older App Store purchases were left pending. "
-                  "A download run covering those dates will ask Apple for their receipts.")
+                  "A download run covering their dates will ask Apple for their receipts.")
         report_run_result(s)
 
 

@@ -262,6 +262,67 @@ def test_the_line_is_learned_anew_each_run(tmp_path, monkeypatch):
     assert all(_prog(app, p.order_number)["state"] == State.COMPLETED.value for p, _r in rows)
 
 
+def test_receipts_apple_never_gives_end_in_records_on_the_third_run_and_are_asked_no_more(
+        tmp_path, monkeypatch):
+    """Asking a purchase passed over on the run before has a cost Apple
+    pays every run it is not bounded (#55). A purchase is passed over at
+    most once, so a history Apple never gives is asked on three runs at
+    most, ends as records on the third, and the fourth asks nothing. Every
+    ask is paced, and a receipt saved on the first run is never asked again
+    (review of #237)."""
+    rows, answers = _rows(given=3, refused=25)
+    app, spy, asked, run, delays = _app(tmp_path, monkeypatch, rows, answers)
+    app._already_done = type(app)._already_done.__get__(app)
+    orders = [p.order_number for p, _rec in rows]
+    per_run = []
+    for key in ("run-1", "run-2", "run-3", "run-4"):
+        before, paced = len(asked), len(delays)
+        run(key)
+        per_run.append(len(asked) - before)
+        assert len(delays) - paced == per_run[-1], key
+        assert not set(orders[:3]) & set(_orders(asked[before:])) or key == "run-1", key
+    assert per_run == [14, 25, 25, 0], per_run
+    for order in orders[3:]:
+        done = _prog(app, order)
+        assert done["state"] == State.COMPLETED.value, order
+        assert done["document_type"] == site.RECORD_TYPE, order
+        assert done["refused_runs"] == ["run-1", "run-2", "run-3"], order
+        assert len(done["not_asked_runs"]) <= 1, order
+        assert set(done["refused_runs"]) - set(done["not_asked_runs"]), order
+    for order in orders[:3]:
+        assert _prog(app, order)["document_type"] == "Receipt"
+    assert app.stats["purchase_records"] == 25
+
+
+def _summary(app, tmp_path, monkeypatch, capsys):
+    app.paths.run_summary = tmp_path / "run-summary.txt"
+    monkeypatch.setattr(harness.app_mod, "report_run_result", lambda stats: None)
+    capsys.readouterr()
+    app.write_run_summary()
+    return capsys.readouterr().out
+
+
+def test_the_end_of_the_run_says_how_many_were_left_pending(tmp_path, monkeypatch, capsys):
+    """The purchases passed over are no longer counted failed, so the end of
+    the run says how many wait for the next, in words that fit one as well
+    as many (review of #237)."""
+    rows, answers = _rows(given=3, refused=11)
+    app, spy, asked, run, _delays = _app(tmp_path, monkeypatch, rows, answers)
+    run("run-1")
+    assert app.stats["not_asked"] == 1 and app.stats["failed"] == 10
+    out = _summary(app, tmp_path, monkeypatch, capsys)
+    assert ("1 older App Store purchase was left pending. A download run covering "
+            "its date will ask Apple for its receipt.") in out, out
+    assert "Older, not asked:          1" in (tmp_path / "run-summary.txt").read_text()
+
+    rows, answers = _rows(given=3, refused=25)
+    app, spy, asked, run, _delays = _app(tmp_path / "many", monkeypatch, rows, answers)
+    run("run-1")
+    out = _summary(app, tmp_path, monkeypatch, capsys)
+    assert ("14 older App Store purchases were left pending. A download run covering "
+            "their dates will ask Apple for their receipts.") in out, out
+
+
 def test_a_record_of_a_purchase_not_asked_says_so():
     purchase = Purchase(purchase_type="App Store", purchase_date="2015-03-01",
                         order_number="MLF0TEST09", total="$6.99")
