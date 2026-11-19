@@ -50,11 +50,11 @@ from dataclasses import dataclass
 from datetime import date as calendar_date
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 from paperpull_core import delivery, identity, intake, pdf_reader, pressing
 from paperpull_core.words import words_for as _words_for
-from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.urls import is_safe_url as _host_allows, join as _join_link
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.capture import set_download_dir as _set_download_dir
 from paperpull_core.capture import growing as _growing
@@ -321,7 +321,7 @@ class WorkplaceRow:
 def _workplace_pdf_url(value) -> str:
     if not isinstance(value, str):
         return ""
-    u = urlsplit(urljoin(WORKPLACE_SERVICE, value))
+    u = urlsplit(_join_link(WORKPLACE_SERVICE, value))
     if (u.scheme, u.netloc, u.path, u.fragment) != (
             "https", "retirementplans.vanguard.com", WORKPLACE_PDF_PATH, ""):
         return ""
@@ -343,7 +343,7 @@ def _workplace_rows(page, plan: str) -> list[WorkplaceRow]:
         response = page.context.request.get(
             WORKPLACE_LIST, params={"SelectedPlanId": plan}, max_redirects=0,
             timeout=20000, headers={"Accept": "application/json"})
-        payload = json.loads(intake.text_of(response)) if response.status == 200 else {}
+        payload = whole_json(json.loads(intake.text_of(response))) if response.status == 200 else {}
         listing = payload["statementData"]
         if str(payload["statementPlan"]["planId"]) != plan or not isinstance(listing, list):
             raise ValueError("workplace plan or statement list did not match")
