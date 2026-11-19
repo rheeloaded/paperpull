@@ -809,7 +809,16 @@ CLOSED = """<!doctype html><meta charset="utf-8"><span id="lbl">Account</span>
     ("", "Business Checking B", None),
     ("", "", None),
     ("", A + " " + B, None),
-], ids=["as drawn", "in capitals", "spaced", "nickname alone", "nothing", "two accounts"])
+    ("", "<div>Business Checking B</div><div>...2222</div>", B),
+    ("", B + '<select style="display:none"><option>' + A + "</option><option>" + P
+         + "</option></select>", B),
+    ("", B + '<ul style="display:none"><li>' + A + "</li><li>" + P + "</li></ul>", B),
+    ("", B + '<span hidden>' + A + "</span>", B),
+    ("", B + '<span style="visibility:hidden">' + A + "</span>", B),
+    ("", "Business Checking B...2222", B),
+], ids=["as drawn", "in capitals", "spaced", "nickname alone", "nothing", "two accounts",
+        "in two blocks", "a hidden select", "a hidden list", "a hidden part",
+        "an invisible part", "no space before the digits"])
 def test_the_closed_picker_names_its_account_however_it_is_drawn(browser, style, words,  # noqa: F811
                                                                  shown):
     """Shapes a real closed picker could take. Its entries kept inside it,

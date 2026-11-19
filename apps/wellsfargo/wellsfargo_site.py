@@ -1049,21 +1049,38 @@ def _open_picker(page, box):
     return None
 
 
-# What a closed picker says of the account it shows, its own words with
-# its entries left out, since a picker can keep its list of entries inside
-# itself, hidden, where every label would be read.
+# What a closed picker says of the account it shows. The box's own text,
+# read node by node in the live page, leaving out a list of entries it
+# keeps inside itself (a listbox, its options, a select) and any part
+# hidden by display, visibility or the hidden attribute, since a hidden
+# list would name every account. Each piece is read apart, so a nickname
+# and its masked digits drawn in two blocks are still both read.
 _SHOWN_WORDS_JS = """(el) => {
-  const own = el.cloneNode(true);
-  own.querySelectorAll('[role=listbox], [role=option]').forEach(n => n.remove());
-  return [own.textContent, el.getAttribute('aria-label'),
-    ...(el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean)
-       .map(id => (document.getElementById(id) || {}).textContent)]
-    .filter(Boolean).join(' ');
+  const left_out = (e) => {
+    for (let n = e; n && n !== el.parentElement; n = n.parentElement) {
+      if (n.matches('[role=listbox], [role=option], select, option, datalist, [hidden]')) return true;
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return true;
+    }
+    return false;
+  };
+  const parts = [];
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+    if (t.parentElement && !left_out(t.parentElement)) parts.push(t.nodeValue);
+  }
+  const named = (el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean)
+    .map(id => (document.getElementById(id) || {}).textContent);
+  return [parts.join(' '), el.getAttribute('aria-label'), ...named].filter(Boolean).join(' ');
 }"""
 
 
 def _plain(words: str) -> str:
-    return " ".join((words or "").split()).casefold()
+    """Words compared with no spacing at all and in one case, so a label
+    drawn in pieces, spaced or in capitals still reads as itself. Two
+    labels that only spacing would tell apart end in the same last four,
+    which discovery refuses before anything is chosen."""
+    return "".join((words or "").split()).casefold()
 
 
 def _picker_reading(page, box, labels):
@@ -1111,14 +1128,24 @@ def _close_picker(page, box) -> None:
     _let_go_of_focus(page)
 
 
+def _unproven(page, box, labels, label: str) -> str:
+    """"" when the closed picker shows `label` as chosen, or when the page
+    has no picker, else what it showed in fixed words, another account,
+    no account, several accounts, open or unread. A picker that is open,
+    or that shows no account's words, proves nothing, and the list it
+    shows could be another account's (#221)."""
+    if box is None:
+        return ""
+    state, shown = _picker_reading(page, box, labels)
+    if shown == label:
+        return ""
+    return "another account" if shown else state
+
+
 def _still_shows(page, box, labels, label: str) -> bool:
     """Whether the closed picker still shows `label` as chosen, True for a
-    page with no picker. A picker that is open, or that shows no account's
-    words, proves nothing, and the list it shows could be another
-    account's, so it is not taken as showing `label` (#221)."""
-    if box is None:
-        return True
-    return _shown_account(page, box, labels) == label
+    page with no picker."""
+    return not _unproven(page, box, labels, label)
 
 
 class PickerMoved(pressing.Stop):
@@ -1126,15 +1153,14 @@ class PickerMoved(pressing.Stop):
     know which account's list it was reading or taking a document from."""
 
 
-def _picker_moved(page, box, labels, label: str, step: str = "read the accounts") -> PickerMoved:
-    """The stop for a picker that does not show `label`, saying in fixed
-    words what it showed instead, another account, none, more than one, or
-    that it was open, never which account (#221)."""
-    state, shown = _picker_reading(page, box, labels)
+def _picker_moved(showed: str, step: str = "read the accounts") -> PickerMoved:
+    """The stop for a picker that did not show the account, with what it
+    showed, from the reading that failed, in fixed words and never which
+    account (#221)."""
     return PickerMoved(step, "the picker moved to another account", [
         "The Wells Fargo picker did not show the account whose statements were being "
         "read, so nothing of them was filed under the wrong account.",
-        pressing.AGAIN], {"picker_showed": "another account" if shown else state})
+        pressing.AGAIN], {"picker_showed": showed})
 
 
 # The forms a last four may be written in for only_accounts, the masked
@@ -1814,15 +1840,18 @@ def _read_account(page, docs: _Found, box, labels, label: str) -> None:
     """The list of the account `label`, just chosen, added to `docs`. The
     picker has to show that account before the list is expanded, before it
     is read and after, or nothing of that look is kept (#221)."""
-    if not _still_shows(page, box, labels, label):
-        raise _picker_moved(page, box, labels, label)
+    showed = _unproven(page, box, labels, label)
+    if showed:
+        raise _picker_moved(showed)
     expand_all(page)
     scroll_full_page(page)
-    if not _still_shows(page, box, labels, label):
-        raise _picker_moved(page, box, labels, label)
+    showed = _unproven(page, box, labels, label)
+    if showed:
+        raise _picker_moved(showed)
     look = _survey(page)
-    if not _still_shows(page, box, labels, label):
-        raise _picker_moved(page, box, labels, label)
+    showed = _unproven(page, box, labels, label)
+    if showed:
+        raise _picker_moved(showed)
     _add_documents(docs, look, label)
 
 
@@ -2278,9 +2307,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
 def _shows_still(page, box, labels, account: str, iso: str, trace: Optional[list]) -> None:
     """Stop, with nothing taken, unless the picker shows the document's
     account, strictly. A page of one account has no picker to read."""
-    if account and not _still_shows(page, box, labels, account):
+    showed = _unproven(page, box, labels, account) if account else ""
+    if showed:
         _refuse(trace, "the picker moved to another account", iso)
-        raise _picker_moved(page, box, labels, account, "take the document")
+        raise _picker_moved(showed, "take the document")
 
 
 # ---------------------------------------------------------------------------
