@@ -38,8 +38,14 @@ list, message details and PDF endpoints. It leaves the portal's separate
 mark-as-read action alone. Messages without PDF attachments are reported.
 The session and request headers stay in the browser.
 
-One contributor's account listed 26 PDFs across two pages, including six
-account statements. Three PDFs were saved and verified. A repeated pilot
-skipped all three. Standalone correspondence PDFs are covered by an
-automated test. A full download, additional accounts and other product
-types have yet to be tested.
+Live validation on 2026-11-19 found 24 PDFs across two pages in one
+contributor's account. Discover completed without errors; the local catalogue
+still held 26 entries from earlier runs. The first pilot selected five
+PDFs, saved and verified two new files, and skipped three already saved.
+The second pilot saved no new files. Both pilots reported zero failures,
+validation failures, manual reviews and stopped runs.
+
+All 24 current PDFs were delivered inline. Message attachments delivered
+as links and standalone correspondence PDFs are covered by automated tests;
+the linked-message case still needs a live example. A full download,
+additional accounts and other product types have yet to be tested.

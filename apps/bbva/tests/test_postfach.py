@@ -19,7 +19,7 @@ global.window = {};
 const api = "https://de-net.bbva.com";
 const list = api + "/notifications/v0/virtual-mails";
 global.performance = {getEntriesByType: () => [
-  {name: location.origin + "/js/icon-grTest.js"},
+  {name: location.origin + "/js/icon-currentTest.js"},
   {name: list + "?customerId=invented"}
 ]};
 const pdf = Buffer.from("%PDF-1.4\nInvented").toString("base64");
@@ -41,13 +41,17 @@ const mockClient = {aso: {request: async ({url, method, isDownload}) => {
       model = {data: [row(mode === "duplicate" ? "one" : "two", "CORRESPONDENCE")]};
     }
   } else if (u.pathname === "/announcements/V01/one/") {
-    model = {attachments: [{name: "statement.pdf", contentFile: pdf}]};
+    model = {attachments: [mode === "linked" || mode === "foreign-link"
+      ? {name: "statement.pdf", file: (mode === "foreign-link" ? "https://example.invalid" : api) + "/announcements/V01/one/pdf/"}
+      : {name: "statement.pdf", contentFile: pdf}]};
+  } else if (u.pathname === "/announcements/V01/one/pdf/" && isDownload) {
+    model = {tmpFile: {blob: new Blob([Buffer.from(pdf, "base64")], {type:"application/pdf"})}};
   } else if (u.pathname === "/bankingVirtualMails/V02/document-two/bankingVirtualDocument/" && isDownload) {
     model = new Blob([Buffer.from(pdf, "base64")], {type:"application/pdf"});
   } else throw Error("unexpected route");
   return {xhr: {status: 200}, model};
 }}};
-const bridge = eval("(" + source.replace("await import(module.pathname)", "({r: mockClient, i: () => {}})") + ")");
+const bridge = eval("(" + source.replace("await import(module.pathname)", "({r: mode === 'legacy' ? mockClient : mockClient.aso, i: () => {}})") + ")");
 (async () => {
   const listing = await bridge({op: "collect"});
   let downloads = [];
@@ -68,17 +72,41 @@ def run(mode):
     return json.loads(result.stdout)
 
 
-def test_reads_all_pages_and_downloads_inline_and_standalone_pdfs():
-    result = run("collect")
+@pytest.mark.parametrize("mode", ["collect", "legacy", "linked"])
+def test_reads_all_pages_and_downloads_inline_and_standalone_pdfs(mode):
+    result = run(mode)
     assert [row["item_id"] for row in result["listing"]["rows"]] == ["message:one:0", "document:document-two"]
     assert len(result["downloads"]) == 2
     assert all(pdf["data"].startswith("JVBERi0") for pdf in result["downloads"])
 
 
-@pytest.mark.parametrize("mode", ["foreign", "duplicate", "expired"])
+@pytest.mark.parametrize("mode", ["foreign", "duplicate", "expired", "foreign-link"])
 def test_refuses_incomplete_or_off_host_lists(mode):
     result = run(mode)
     assert not result["listing"]["ok"]
     assert result["listing"]["expired"] == (mode == "expired")
     assert not any("example.invalid" in url for url in result["sent"])
     assert not result["downloads"]
+
+
+def test_reloads_portal_once_with_larger_resource_timing_buffer(monkeypatch):
+    from unittest.mock import Mock
+    page = Mock(url="https://web.bbva.de/index.html#inbox/messages")
+    page.wait_for_function.side_effect = [TimeoutError(), None]
+    monkeypatch.setattr(site, "looks_signed_out", lambda _: False)
+    assert site.goto_documents(page)
+    page.add_init_script.assert_called_once_with("performance.setResourceTimingBufferSize(5000);")
+    page.reload.assert_called_once_with(wait_until="domcontentloaded", timeout=15000)
+    assert page.wait_for_function.call_count == 2
+
+
+def test_does_not_reload_if_tab_left_portal(monkeypatch):
+    from unittest.mock import Mock
+    page = Mock(url="https://web.bbva.de/index.html#inbox/messages")
+    def left_portal(*args, **kwargs):
+        page.url = "https://example.invalid/"
+        raise TimeoutError()
+    page.wait_for_function.side_effect = left_portal
+    monkeypatch.setattr(site, "looks_signed_out", lambda _: False)
+    assert not site.goto_documents(page)
+    page.reload.assert_not_called()

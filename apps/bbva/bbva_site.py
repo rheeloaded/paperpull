@@ -287,11 +287,16 @@ async (args) => {
       fail("Open the signed-in BBVA portal");
     const assets = performance.getEntriesByType("resource").map(entry => new URL(entry.name));
     const module = assets.find(url => url.origin === portal && !url.search &&
-      /^\/js\/icon-gr[A-Za-z0-9_-]+\.js$/.test(url.pathname));
+      /^\/js\/icon-[A-Za-z0-9_-]+\.js$/.test(url.pathname));
     if (!module) fail("The BBVA portal client is unavailable");
-    const {r: client, i: init} = await import(module.pathname);
-    init();
-    if (typeof client?.aso?.request !== "function") fail("The BBVA portal client is unavailable");
+    const portalModule = await import(module.pathname);
+    if (typeof portalModule.i !== "function") fail("The BBVA portal client is unavailable");
+    portalModule.i();
+    const client = portalModule.r;
+    // Current builds export the request client directly; older builds wrapped
+    // it in `aso`. Keep the portal's own authenticated request pipeline.
+    const requestClient = client?.aso ?? client;
+    if (typeof requestClient?.request !== "function") fail("The BBVA portal client is unavailable");
 
     const allowed = url => url.origin === api && !url.username && !url.password && !url.hash &&
       (url.pathname === listPath ||
@@ -299,7 +304,7 @@ async (args) => {
     const ask = async (url, isDownload = false) => {
       if (!allowed(url)) fail("The Postfach request is outside the allowed endpoints");
       try {
-        const answer = await client.aso.request({url: url.href, method: "GET", isDownload});
+        const answer = await requestClient.request({url: url.href, method: "GET", isDownload});
         if (answer?.xhr?.status !== 200) fail("The Postfach did not return the requested data");
         return answer.model;
       } catch (error) {
@@ -455,7 +460,17 @@ def goto_documents(page):
         current = page.url.split("#", 1)[0]
         if page.url.partition("#")[2] != "inbox/messages":
             page.goto(current + "#inbox/messages", wait_until="domcontentloaded", timeout=15000)
-        page.wait_for_function(_MAILBOX_READY, timeout=12000)
+        try:
+            page.wait_for_function(_MAILBOX_READY, timeout=12000)
+        except Exception:
+            # The portal loads more than the browser's default 250 resource
+            # timings before its list request. Preserve that request when
+            # reloading the same signed-in portal tab once.
+            if not is_portal(page.url) or looks_signed_out(page):
+                return False
+            page.add_init_script("performance.setResourceTimingBufferSize(5000);")
+            page.reload(wait_until="domcontentloaded", timeout=15000)
+            page.wait_for_function(_MAILBOX_READY, timeout=12000)
         return not looks_signed_out(page)
     except Exception:
         return False
