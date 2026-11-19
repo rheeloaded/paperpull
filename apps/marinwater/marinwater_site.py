@@ -734,7 +734,8 @@ REFUSED_AFTER_A_FRESH_LIST = "the bill was refused right after the list was read
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None, href: str = "",
-                  document_id: str = "", *, viewer=None, split_dates=()) -> bool:
+                  document_id: str = "", *, viewer=None, split_dates=(),
+                  read_again: bool = True) -> bool:
     """Save the bill discovery recorded for `iso_date`. The list this run
     read is used when there is one; it is read again when there is none,
     and once more when the bill is not in it or is not answered with a PDF,
@@ -760,7 +761,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     known = set(split_dates)
     if identity.group("digest"):
         known.add(iso_date)
-    for fresh in ((False, True) if _RUN.get("bills") is not None else (True,)):
+    # With read_again False, as once the viewer has refused bills right after
+    # fresh lists, a list this run read already is used and not read again.
+    passes = (False, True) if _RUN.get("bills") is not None else (True,)
+    if not read_again and _RUN.get("bills") is not None:
+        passes = (False,)
+    for fresh in passes:
         if fresh:
             # Read for this bill, or again after a View address the run read
             # earlier was refused. A history that does not answer, or shows

@@ -518,10 +518,12 @@ class App:
                 self.progress.update(new_key, {**previous, "document_id": new_id,
                                                "pdf_sha256": digest, "ambiguous": False}, save=False)
                 self.progress.data.pop(old_key, None)
+                # Saved only when a record moved, so a Discover that changes
+                # nothing leaves no backup behind.
+                self.progress.save(backup=True)
             # With that bill saved already under its own identity, as after
             # Restore deleted files, the date-only record stays, since it
             # is the one that names the file it saved.
-            self.progress.save(backup=True)
         self.discovery.data.pop(old_key, None)
         return True
 
@@ -786,7 +788,8 @@ class App:
             saved = site.download_bill(page, None, doc.date, out_path,
                                        title=doc.title, trace=trace, href=doc.href,
                                        document_id=doc.document_id, viewer=viewer,
-                                       split_dates=self._split_dates())
+                                       split_dates=self._split_dates(),
+                                       read_again=not getattr(self, "_viewer_refusing", False))
         finally:
             viewer.dispose()
         # A capture that failed must not leave a convincing empty file behind.
@@ -808,20 +811,20 @@ class App:
             self.stats["failed"] += 1
             print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             # A bill refused by the PDF viewer right after Bill History was
-            # read again is that bill's alone. Two such bills in a row say the
-            # viewer is refusing every bill, so the run stops rather than
-            # read the list again and ask the viewer for each one left.
+            # read again is that bill's alone. After two such bills in a row,
+            # each bill left is asked for once from the list already read,
+            # and the list is not read again for it, so a bill the viewer
+            # serves is still saved and each costs one request.
             refused_fresh = any(isinstance(t, dict) and t.get("why") == site.REFUSED_AFTER_A_FRESH_LIST
                                 for t in trace)
             self._viewer_refused = getattr(self, "_viewer_refused", 0) + 1 if refused_fresh else 0
-            if self._viewer_refused >= 2:
-                tabs.stop(self, [
-                    "Marin Water's bill viewer refused two bills in a row right after Bill History",
-                    "was read again, so this run stops here rather than ask it for every bill.",
-                    "Everything saved so far is kept. Try again later with Resume.",
-                ])
+            if self._viewer_refused >= 2 and not getattr(self, "_viewer_refusing", False):
+                self._viewer_refusing = True
+                print("  The bill viewer refused two bills in a row right after Bill History was")
+                print("  read again, so each bill left is asked for once, without reading it again.")
             return
         self._viewer_refused = 0
+        self._viewer_refusing = False
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         self._record(doc, State.PDF_SAVED)
