@@ -284,6 +284,14 @@ DOWNLOAD_RECEIPT_RE = re.compile(
     r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+\d{1,2},\s+\d{4},\s+\d{1,2}:\d{2}\s*[ap]m$", re.I)
 RECEIPT_LINK_RE = re.compile(r"^\s*view\s+receipt(\s+pdf)?\s*$", re.I)
+# The date and time a row of the current page prints, "September 13, 2026,
+# 11:41 am" (#236). Two purchases of one day differ only by it.
+_WHEN = (r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|"
+         r"Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2}),?\s+(\d{4}),?\s+"
+         r"(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\b\.?")
+WHEN_RE = re.compile(r"(?<![A-Za-z])" + _WHEN, re.I)
+# A row's line that says only when, "In-Store: September 13, 2026, 11:41 am".
+WHEN_LINE_RE = re.compile(r"^\s*(?:(?:in-?store|online)\s*:\s*)?" + _WHEN + r"\s*$", re.I)
 TAB_ONLINE_RE = re.compile(r"^\s*online(?:\s+orders?)?\s*$", re.I)
 IN_STORE_ROW_RE = re.compile(r"\bin-?store\b\s*:", re.I)
 
@@ -627,7 +635,9 @@ _ROW_CONTROLS_JS = r"""([text, money, dates]) => {
   // January purchase of the same store and amount (review).
   const esc = (s) => s.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
   const dateRes = (dates || []).map(d => new RegExp('(^|[^0-9])' + esc(d) + '(?![0-9])'));
-  const dated = (t) => !dateRes.length || dateRes.some(r => r.test(t));
+  // Read with its spaces as one plain space each, as the date and time
+  // it is held to are (own_when), since a page can print a no-break space.
+  const dated = (t) => !dateRes.length || dateRes.some(r => r.test(t.replace(/\s+/g, ' ')));
   const walk = (el) => {
     for (const c of el.children) {
       const t = (c.innerText || '').trim();
@@ -674,7 +684,10 @@ _ROW_CONTROLS_JS = r"""([text, money, dates]) => {
       const looksPdf = /pdf|receipt|download/i.test(
         label + ' ' + cls + ' ' + (c.getAttribute('href') || '') + ' ' + (c.innerText || '').slice(0, 40));
       if (clickable || looksPdf) {
-        out.push({el: c, text: (c.innerText || '').trim().slice(0, 40), label: label.slice(0, 160),
+        // Words and name whole enough to hold a date and a time, "Download
+        // receipt from September 13, 2026, 11:41 am", which forty
+        // characters cut before its time (#236).
+        out.push({el: c, text: (c.innerText || '').trim().slice(0, 160), label: label.slice(0, 160),
                   href: c.getAttribute('href') || '', pdf: looksPdf, interactive,
                   shown: !!c.getClientRects().length && cs.visibility !== 'hidden',
                   holdsControl: !!c.querySelector(CTL)});
@@ -1010,14 +1023,82 @@ def show_list_for(page, purchase_type: str, wait_ms: Optional[int] = None,
             return {"opened": opened, "rows": rows, "none": none}
 
 
+def when_of(text: str) -> Optional[tuple]:
+    """The date and time words print, as (YYYY-MM-DD, HH:MM on a 24-hour
+    clock), from the first WHEN_RE finds in them. None when they print
+    none, or a day or a time that does not exist."""
+    m = WHEN_RE.search(" ".join((text or "").split()))
+    if not m:
+        return None
+    mon, d, y, h, mi, ap = m.groups()
+    from datetime import date
+    try:
+        day = date(int(y), _MONTHS[mon[:3].lower()], int(d))
+    except (ValueError, KeyError):
+        return None
+    h, mi = int(h), int(mi)
+    if not (1 <= h <= 12 and mi < 60):
+        return None
+    h = h % 12 + (12 if ap.lower() == "p" else 0)
+    return day.isoformat(), f"{h:02d}:{mi:02d}"
+
+
+def own_when(page, purchase) -> tuple:
+    """The date and time the purchase's own row prints, as (the words as the
+    row prints them, when_of them, whether any row on the page prints a
+    time). Its own row is the one whose words give the purchase's own key,
+    as discovery read it.
+
+    Two purchases of one day, store and amount differ on the current page
+    only by their time, and its row was looked for by the date alone, so
+    each fit both rows and neither was pressed. A purchase whose row had
+    gone would have been given its twin's (#236)."""
+    timed = False
+    for card in collect_cards(page):
+        m = WHEN_RE.search(" ".join((card.text or "").split()))
+        if not m:
+            continue
+        timed = True
+        p = card_to_purchase(card)
+        if p is not None and p.key == purchase.key:
+            return m.group(0), when_of(m.group(0)), True
+    return "", None, timed
+
+
+def names_another(c: dict, purchase_date: str, when=None) -> bool:
+    """Whether a receipt control names a purchase other than this one. The
+    current page's button says whose receipt it is, "Download receipt from
+    September 13, 2026, 11:41 am", in its words or its name for a screen
+    reader, and it must name this purchase's day, and its time when its row
+    gave one (#236)."""
+    for words in (c.get("text"), c.get("label")):
+        words = " ".join((words or "").split())
+        if not DOWNLOAD_RECEIPT_RE.fullmatch(words):
+            continue
+        named = when_of(words)
+        if named is None or named[0] != purchase_date or (when and named != tuple(when)):
+            return True
+    return False
+
+
 def row_controls(page, purchase, facts: Optional[dict] = None):
     """(candidates, handles) for the row this purchase came from, the PDF
     icon first. None when the row is not on the page, or when more than one
-    row fits it, which `facts` then says as "ambiguous"."""
+    row fits it, which `facts` then says as "ambiguous".
+
+    On a page whose rows print a time, the row is held to the date and time
+    its own row printed (own_when), which `facts` gives as "when", and a
+    purchase none of whose rows is there is not on the page."""
     money = purchase.total or ""
     text = (purchase.items[0].name if purchase.items else "") or purchase.purchase_date or ""
     try:
-        h = page.evaluate_handle(_ROW_CONTROLS_JS, [text, money, row_dates(purchase.purchase_date)])
+        printed, when, timed = own_when(page, purchase)
+        if facts is not None:
+            facts["when"] = when
+        if timed and not printed:
+            return None
+        dates = [printed] if printed else row_dates(purchase.purchase_date)
+        h = page.evaluate_handle(_ROW_CONTROLS_JS, [text, money, dates])
         props = h.get_properties()
         if "els" not in props:
             if facts is not None and "ambiguous" in props:
@@ -1088,6 +1169,12 @@ def card_to_purchase(card: RawCard, purchase_type: str = "", base_url: str = BAS
     description = ""
     for ln in lines:
         if parse_date(ln) and len(ln) < 24:
+            continue
+        # The current page's date line carries the time as well, and at 39
+        # characters it became the purchase's name, its file's name, and
+        # the words its row was looked for by, which every row of that
+        # month shares (#236).
+        if WHEN_LINE_RE.match(ln):
             continue
         if _DESCRIPTION_SKIP_RE.match(ln) or MONEY_RE.fullmatch(ln.replace(" ", "")):
             continue
@@ -1214,7 +1301,8 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
     # tried (review).
     picked = next(((c, el) for c, el in zip(cands, els)
                    if el is not None and c.get("interactive") and c.get("shown", True)
-                   and not c.get("holdsControl") and is_receipt_control(c)), None)
+                   and not c.get("holdsControl") and is_receipt_control(c)
+                   and not names_another(c, purchase.purchase_date, fit.get("when"))), None)
     if picked is None:
         said["outcome"] = NO_RECEIPT_CONTROL
         if trace is not None:
@@ -1228,7 +1316,7 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
         if body:
             if trace is not None:
                 trace.append({"note": "the receipt came from the row's control",
-                              "control": mask_text(label)[:40],
+                              "control": control_words(label),
                               "how": "its own address, fetched from the page"})
             return body
     ctx = page.context
@@ -1306,7 +1394,7 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
                 trace.append({"note": "the control is turned off on the page, so nothing was pressed"})
             return None
         if outcome.error is not None and trace is not None:
-            trace.append({"note": "click failed", "control": mask_text(label)[:40],
+            trace.append({"note": "click failed", "control": control_words(label),
                           "error": type(outcome.error).__name__})
         if outcome.how == pressing.GONE:
             # The row was drawn anew before the press, so nothing was pressed
@@ -1393,7 +1481,7 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
                 trace.append({"note": "download save failed", "error": type(e).__name__})
     if got.get("body"):
         if trace is not None:
-            trace.append({"note": "the receipt came from the row's control", "control": mask_text(label)[:40],
+            trace.append({"note": "the receipt came from the row's control", "control": control_words(label),
                           "how": got.get("how", "")})
         return got["body"]
     said["outcome"] = NO_PDF
@@ -1632,6 +1720,16 @@ def mask_text(s: str) -> str:
     s = _EMAIL_RE.sub("<email>", s or "")
     s = _HANDLE_RE.sub("@<user>", s)
     return _DIGITS_RE.sub(lambda m: "#" * len(m.group(0)), s)
+
+
+def control_words(label: str) -> str:
+    """A pressed control's words for the trace. The current page's button
+    names its purchase's date and time, and masking only runs of digits left
+    the month and a one-digit hour in the file a tester attaches, so words
+    that name a date are said in fixed words (#236)."""
+    if WHEN_RE.search(" ".join((label or "").split())) or parse_date(label or ""):
+        return "the receipt control, which names its date"
+    return mask_text(label)[:40]
 
 
 def mask_href(h: str) -> str:

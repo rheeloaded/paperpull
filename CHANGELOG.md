@@ -9,6 +9,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Meijer finds and saves receipts on its current orders page (#220,
+  #236).** Meijer moved its orders to /shopping/orders, renamed the tabs
+  Online and In-Store, and gave each row a button named "Download receipt
+  from" its date and time. Both the new page and the old one are read.
+  Contributed by @cmcculloh. Before merging, each purchase was tied to its
+  own row by the date and time that row prints, so two purchases of one day
+  each get their own receipt, a button naming another purchase is never
+  pressed, the date line no longer becomes the purchase's name, a button
+  that shows its whole label is read whole, and the file a tester attaches
+  names the button in fixed words.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight
