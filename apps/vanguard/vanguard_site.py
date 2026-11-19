@@ -42,13 +42,17 @@ Site truth (verified live 2026-09-28 against the signed-in pages):
 # Site layer verified working against the live site: 2026-09-28
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sys
+from dataclasses import dataclass
+from datetime import date as calendar_date
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
-from paperpull_core import intake, pressing
+from paperpull_core import identity, intake, pdf_reader, pressing, shared_folder
 from paperpull_core.words import words_for as _words_for
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
@@ -68,9 +72,18 @@ def _words():
     return _words_for("Vanguard", sys.modules[__name__])
 
 
+WORKPLACE_HOST = "ownyourfuture.vanguard.com"
+WORKPLACE_MANAGE = "/main/manage"
+WORKPLACE_STATEMENTS = "/main/manage/statements"
+WORKPLACE_STATEMENTS_URL = f"https://{WORKPLACE_HOST}{WORKPLACE_STATEMENTS}"
+WORKPLACE_STATEMENT = "Workplace Statement"
+WORKPLACE_SERVICE = "https://retirementplans.vanguard.com"
+WORKPLACE_LIST = WORKPLACE_SERVICE + "/VGApp/pe/employee/statement"
+WORKPLACE_PDF_PATH = "/VGApp/pe/employee/openpdf"
+
 ALLOWED_HOSTS = {'investor.vanguard.com', 'logon.vanguard.com',
                  'statements.web.vanguard.com', 'personal1.vanguard.com',
-                 'vanguard.com', 'secure.vanguard.com'}
+                 'vanguard.com', 'secure.vanguard.com', WORKPLACE_HOST}
 
 
 def is_safe_url(url: str) -> bool:
@@ -92,6 +105,7 @@ DOCUMENT_URL_CANDIDATES = [URLS["documents"], DOCUMENTS_SHELL]
 STATEMENTS_API_RE = re.compile(
     r"personal1\.vanguard\.com/usa/api/lah-statements-consumer"
     r"/statements/consumer", re.I)
+
 
 LOGIN_URL_MARKERS = ["/logon", "/login", "/signin", "/sign-in", "/mfa",
                      "sessiontimeout=", "logon.vanguard.com"]
@@ -213,10 +227,16 @@ def parse_date(text: str) -> str:
 
 # ---------------------------------------------------------------- navigation
 
+def _brokerage_statements_portal(page) -> bool:
+    u = urlsplit(page.url or "")
+    return (u.scheme, u.netloc) == ("https", "statements.web.vanguard.com")
+
+
 def on_documents_page(page) -> bool:
     try:
-        url = (page.url or "").lower()
-        if "statements.web.vanguard.com" not in url:
+        if is_workplace_page(page):
+            return bool(workplace_plan(page))
+        if not _brokerage_statements_portal(page):
             return False
         # The table is the statements area's structural marker; the page
         # shell renders around it. A year/empty view still shows the table
@@ -230,6 +250,8 @@ def goto_documents(page) -> bool:
     """Reach the statements app. Direct navigation to the app host works
     when the session cookie carries; the portal shell is the fallback (it
     spawns the app). Verified live: both land on the statements table."""
+    if is_workplace_page(page):
+        return bool(workplace_plan(page))
     for url in DOCUMENT_URL_CANDIDATES:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
@@ -251,6 +273,106 @@ def ensure_statements(page) -> bool:
 
 
 # ---------------------------------------------------------------- collection
+
+class ListStopped(RuntimeError):
+    """The page did not return a readable statement list."""
+
+
+def is_workplace_page(page) -> bool:
+    u = urlsplit(page.url or "")
+    return u.scheme == "https" and u.netloc == WORKPLACE_HOST
+
+
+def workplace_plan(page) -> str:
+    """Stay with the plan selected in this tab, including after the Statements SPA route."""
+    if not is_workplace_page(page):
+        return ""
+    u = urlsplit(page.url)
+    if u.path.rstrip("/") == WORKPLACE_STATEMENTS and not u.query:
+        previous = page.evaluate(
+            "() => window.navigation?.entries()[window.navigation.currentEntry.index - 1]?.url || ''")
+        u = urlsplit(previous)
+        if u.path.rstrip("/") != WORKPLACE_MANAGE:
+            return ""
+    if (u.scheme, u.netloc) != ("https", WORKPLACE_HOST):
+        return ""
+    if u.path.rstrip("/") not in (WORKPLACE_MANAGE, WORKPLACE_STATEMENTS):
+        return ""
+    plans = parse_qs(u.query).get("planId", [])
+    return plans[0] if len(plans) == 1 and re.fullmatch(r"[0-9]{4,16}", plans[0]) else ""
+
+
+@dataclass(frozen=True)
+class WorkplaceRow:
+    start: str
+    end: str
+    pdf_url: str
+
+    @property
+    def document_id(self) -> str:
+        return f"workplace-{self.start}-{self.end}"
+
+
+def _workplace_pdf_url(value) -> str:
+    if not isinstance(value, str):
+        return ""
+    u = urlsplit(urljoin(WORKPLACE_SERVICE, value))
+    if (u.scheme, u.netloc, u.path, u.fragment) != (
+            "https", "retirementplans.vanguard.com", WORKPLACE_PDF_PATH, ""):
+        return ""
+    params = parse_qs(u.query, keep_blank_values=True)
+    indexes = params.get("index", [])
+    if (set(params) != {"documentType", "index"} or params["documentType"] != ["statement"]
+            or len(indexes) != 1 or not re.fullmatch(r"[0-9]{1,4}", indexes[0])):
+        return ""
+    return WORKPLACE_SERVICE + WORKPLACE_PDF_PATH + "?" + urlencode(
+        {"documentType": "statement", "index": indexes[0]})
+
+
+def _workplace_rows(page, plan: str) -> list[WorkplaceRow]:
+    """Read the document-list route used by the workplace Statements page."""
+    if not plan or workplace_plan(page) != plan:
+        raise ListStopped("Open Statements for the selected Vanguard workplace plan")
+    response = None
+    try:
+        response = page.context.request.get(
+            WORKPLACE_LIST, params={"SelectedPlanId": plan}, max_redirects=0,
+            timeout=20000, headers={"Accept": "application/json"})
+        payload = json.loads(intake.text_of(response)) if response.status == 200 else {}
+        listing = payload["statementData"]
+        if str(payload["statementPlan"]["planId"]) != plan or not isinstance(listing, list):
+            raise ValueError("workplace plan or statement list did not match")
+        rows = []
+        seen = set()
+        for entry in listing:
+            start = calendar_date.fromisoformat(entry["startDate"]).isoformat()
+            end = calendar_date.fromisoformat(entry["endDate"]).isoformat()
+            pdf_url = _workplace_pdf_url(entry["statementViewPDFURL"])
+            row = WorkplaceRow(start, end, pdf_url)
+            if not pdf_url or end < start or row.document_id in seen:
+                raise ValueError("unrecognized or ambiguous workplace statement")
+            seen.add(row.document_id)
+            rows.append(row)
+        return rows
+    except Exception:
+        raise ListStopped("Vanguard did not return a readable workplace statement list") from None
+    finally:
+        if response is not None:
+            response.dispose()
+
+
+def _collect_workplace(page, years, keep) -> List[dict]:
+    plan = workplace_plan(page)
+    docs = []
+    for row in _workplace_rows(page, plan):
+        year = row.end[:4]
+        if (years and year not in years) or (keep is not None and not keep(year)):
+            continue
+        docs.append({"accountId": plan, "accountNumber": plan,
+                     "statementDescription": f"Vanguard Workplace Plan {plan}",
+                     "endDate": row.end, "statementId": row.document_id, "workplace": True})
+    return docs
+
 
 def _year_select(page):
     """The year picker as a native <select> (verified). The chooser is
@@ -323,16 +445,24 @@ def collect_statements_json(page, years: Optional[List[str]] = None,
     keep, when given, says which picker options a scoped run wants; years
     it refuses are not selected at all, which is the round trips a scoped
     run should not spend (adding-a-provider.md Tips, the Chase pattern)."""
-    import json as _json
+    if is_workplace_page(page):
+        return _collect_workplace(page, years, keep)
+    if not _brokerage_statements_portal(page):
+        return []
     batches: List[dict] = []
+    answered_years: set[str] = set()
 
     def on_resp(r):
         try:
-            if not STATEMENTS_API_RE.search(r.url or ""):
+            if not STATEMENTS_API_RE.search(r.url or "") or not r.ok:
                 return
-            data = whole_json(_json.loads(r.text()))
-            if isinstance(data, dict) and isinstance(data.get("statements"), list):
+            data = whole_json(json.loads(intake.text_of(r)))
+            rows = data.get("statements") if isinstance(data, dict) else None
+            if isinstance(rows, list) and all(isinstance(row, dict) for row in rows):
                 batches.append(data)
+                requested = parse_qs(urlsplit(r.url).query).get("year", [])
+                if len(requested) == 1:
+                    answered_years.add(requested[0])
         except Exception:
             pass
 
@@ -350,14 +480,24 @@ def collect_statements_json(page, years: Optional[List[str]] = None,
         if keep is not None:
             walk = [y for y in walk if keep(y)]
         for yr in walk:
+            if yr in answered_years:
+                continue
             if not select_year(page, yr):
                 continue
             page.wait_for_timeout(1500)
+        if set(walk) - answered_years:
+            # The last answer can arrive after the picker has rendered.
+            page.wait_for_timeout(8000)
     finally:
         try:
             page.remove_listener("response", on_resp)
         except Exception:
             pass
+
+    if not batches:
+        raise ListStopped("Vanguard did not return a readable statements list")
+    if set(walk) - answered_years:
+        raise ListStopped("Vanguard did not return a readable list for every requested year")
 
     by_id: Dict[str, dict] = {}
     for b in batches:
@@ -421,12 +561,14 @@ def list_documents(page, accounts: Optional[List[dict]] = None,
     """Every statement currently known to the app, shaped for the engine:
     {account, account_id, last4, date, period, title, category,
     statement_id, doc_type, occurrence, ambiguous}."""
+    if not (is_workplace_page(page) or _brokerage_statements_portal(page)):
+        raise ListStopped("Vanguard statements page is no longer open")
     stmts = collect_statements_json(page, keep=keep)
     out: List[dict] = []
     for s in stmts:
         cat, date_iso, period, title = classify_document(s)
         num = s.get("accountNumber") or ""
-        out.append({
+        doc = {
             "account": account_label_from_statement(s),
             "account_id": s.get("accountId", ""),
             "last4": num[-4:] if num else "",
@@ -444,7 +586,12 @@ def list_documents(page, accounts: Optional[List[dict]] = None,
             "doc_type": "Statement",
             "occurrence": 0,
             "ambiguous": False,
-        })
+        }
+        if s.get("workplace"):
+            # Unlike the brokerage API's opaque ID, this identity comes
+            # from the period and the plan in the archived record.
+            doc.update(doc_type=WORKPLACE_STATEMENT, document_id=s["statementId"])
+        out.append(doc)
     return out
 
 
@@ -595,6 +742,45 @@ def _row_account_key(title: str, account_id: str) -> str:
 EVENT_WAIT_MS = 90000
 
 
+def _printed_workplace_period(text: str, row: WorkplaceRow) -> bool:
+    """Match the printed range, so dates elsewhere cannot validate a different PDF."""
+    start = "|".join(map(re.escape, identity.date_variants(row.start)))
+    end = "|".join(map(re.escape, identity.date_variants(row.end)))
+    separator = r"(?:\s+(?:to|through)\s+|\s*[-–—]\s*)"
+    return bool(re.search(rf"(?<!\d)(?:{start}){separator}(?:{end})(?!\d)",
+                          " ".join(text.split()), re.I))
+
+
+def _download_workplace(page, plan: str, end: str, document_id: str, out_path) -> bool:
+    # The PDF URL's index is positional. Bind it to the selected plan and
+    # exact period in a fresh list, and verify the downloaded file as well.
+    row = next((row for row in _workplace_rows(page, plan)
+                if row.document_id == document_id and row.end == end), None)
+    if row is None:
+        return False
+    response = None
+    try:
+        response = page.context.request.get(row.pdf_url, max_redirects=0, timeout=25000,
+                                            headers={"Accept": "application/pdf"})
+        content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        if response.status != 200 or content_type != "application/pdf":
+            return False
+        data = intake.body(response)
+        if not data.startswith(b"%PDF-"):
+            return False
+        pages = pdf_reader.page_texts(data, pages=2)
+    except Exception:
+        return False
+    finally:
+        if response is not None:
+            response.dispose()
+    if (not pages or not re.search(rf"\b{re.escape(plan)}\b", " ".join(pages))
+            or not _printed_workplace_period(pages[0], row)):
+        return False
+    shared_folder.write_bytes(out_path, data)
+    return True
+
+
 def download_document(page, account_id: str, charitable: bool,
                       doc_type: str, title: str, date: str, out_path,
                       occurrence: int = 0, document_id_hint: str = "",
@@ -628,6 +814,10 @@ def download_document(page, account_id: str, charitable: bool,
     is taken. When the late one lands alone, first, it cannot be told from
     this press's, the one case left open here as in every app. No run has
     shown a download that late."""
+    if doc_type == WORKPLACE_STATEMENT:
+        return _download_workplace(page, account_id, date, document_id_hint, out_path)
+    if is_workplace_page(page):
+        raise ListStopped("Open the Vanguard brokerage statements for this document")
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(dl_dir).resolve() if dl_dir else None
