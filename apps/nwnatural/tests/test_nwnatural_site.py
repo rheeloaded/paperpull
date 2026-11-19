@@ -353,6 +353,23 @@ class Download(unittest.TestCase):
             fetch(page, self.out)
         self.assertEqual(lists(page), 2)
 
+    def test_refusals_in_a_row_stop_the_run_and_a_bill_taken_starts_the_count_again(self):
+        """One bill refused right after a list that answered fails alone.
+        REFUSED_IN_A_ROW of them with no bill taken between is the portal
+        refusing every bill, so the run stops once."""
+        dates = ["2026-10-21", "2026-09-22", "2026-08-21"]
+        page = Page(pdf_status=403)
+        site.collect_download_docs(page)
+        for i in range(site.REFUSED_IN_A_ROW - 1):
+            self.assertFalse(fetch(page, self.out, dates[i % 3]))
+        page.pdf_status = 200
+        self.assertTrue(fetch(page, self.out, dates[0]))
+        page.pdf_status = 403
+        for i in range(site.REFUSED_IN_A_ROW - 1):
+            self.assertFalse(fetch(page, self.out, dates[i % 3]))
+        with self.assertRaises(site.BillsRefused):
+            fetch(page, self.out, dates[2])
+
     def test_a_signed_out_list_read_for_a_bill_ends_the_session(self):
         page = Page(pdf_status=403)
         site.collect_download_docs(page)
@@ -477,6 +494,27 @@ class Orchestrator(unittest.TestCase):
             self.assertNotIn("signed out", said, how)
             self.assertNotIn("Timeout 30000ms", said, how)
             self.assertEqual(len(page.bills_asked()), 1, how)
+
+    def test_bills_refused_in_a_row_stop_the_run_and_record_nothing(self):
+        app = make_app(self.tmp, "--all")
+        for r in site.bills_of(HEADS, ROWS):
+            app._record_rawdoc(r, site.BILLING_URL)
+        app.check_session = lambda page: None
+        app._on_its_site = lambda: Page()
+        app._delay = lambda *a, **k: None
+
+        def refused(*a, **k):
+            raise site.BillsRefused("3 bills in a row were refused")
+        original = site.download_bill
+        site.download_bill = refused
+        try:
+            with redirect_stdout(io.StringIO()) as said, self.assertRaises(SystemExit):
+                app.process(app._select())
+        finally:
+            site.download_bill = original
+        self.assertIn("refused bills one after another", " ".join(said.getvalue().split()))
+        self.assertNotIn("signed out", said.getvalue())
+        self.assertEqual(app.progress.data, {})
 
     def test_discover_names_several_accounts_and_lists_nothing(self):
         app = make_app(self.tmp, "--discover")

@@ -380,20 +380,28 @@ def test_login_says_to_answer_the_bot_protection(attached, server, tmp_path, cap
 
     assert "asked to check the browser" in folded(out), folded(out)
     assert "re-run --login" in folded(out), folded(out)
+    assert "this run stops" not in folded(out), folded(out)
     assert "Success" not in out
 
 
-def test_bills_refused_right_after_the_list_answered_fail_alone(attached, server, tmp_path, capsys):
+def test_bills_refused_right_after_the_list_answered_fail_alone_until_a_run_of_them(
+        attached, server, tmp_path, capsys):
     """The list answers, so the session works, and every bill is refused.
-    Each fails alone and the run goes on, so a Resume never loops on the
-    first."""
+    One such bill fails alone, so a Resume never loops on it, but
+    REFUSED_IN_A_ROW of them stop the run, rather than a read of the whole
+    history for every bill after."""
+    assert site.REFUSED_IN_A_ROW == len(BILLS)
     SITE.instead = "refused"
     their_tab(attached, server)
 
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
     assert "signed out" not in out, folded(out)
-    assert out.count("Nothing was saved, and the next run tries it again") == len(BILLS), folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == site.REFUSED_IN_A_ROW - 1, \
+        folded(out)
+    assert "refused bills one after another" in folded(out), folded(out)
+    # Discover's read, then one more for each bill refused.
+    assert lists_read() == 1 + site.REFUSED_IN_A_ROW, SITE.seen
     assert saved(tmp_path) == []
 
 

@@ -63,7 +63,7 @@ from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("nwnatural_docs")
 
-# What a run and Login say when the portal's bot protection answers.
+# What a run says when the portal's bot protection answers.
 CHALLENGED = [
     "NW Natural's payment portal asked to check the browser, so this run stops here.",
     "Everything saved so far is kept. Answer it yourself in the open browser",
@@ -396,8 +396,9 @@ class App:
         try:
             listed = site.bill_list_opens(page)
         except site.Challenged:
-            print("!! " + CHALLENGED[0])
-            print("   Answer it yourself in the open browser window, then re-run --login.")
+            print("!! NW Natural's payment portal asked to check the browser, so Login could")
+            print("   not read Bill History. Answer it yourself in the open browser window,")
+            print("   then re-run --login.")
             self.close()
             return
         challenge = site.detect_security_challenge(page)
@@ -623,6 +624,8 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
+            except site.BillsRefused as refused:
+                self.bills_refused(refused)
             except site.SessionExpired:
                 # The portal answered a bill as a signed-out session. Every
                 # bill after it would get the same answer, so the run stops
@@ -646,6 +649,19 @@ class App:
             "nwnatural.com answered as signed out, so this run stops here.",
             "Everything saved so far is kept. Sign in again in the open browser",
             "window, then run Resume to carry on from where this stopped.",
+        ])
+
+    def bills_refused(self, refused) -> None:
+        """Stop the run because the portal refused bill after bill right
+        after the list answered. The bills before this one failed alone;
+        this one has nothing recorded against it, and the list was read
+        whole, so the run ends as one that stopped (tabs.stop)."""
+        log.info("bills refused in a row: %s", refused)
+        tabs.stop(self, [
+            f"The NW Natural payment portal refused bills one after another ({refused}),",
+            "so this run stops here rather than read the whole history again for each.",
+            "Everything saved so far is kept. Look at the open browser window, sign in",
+            "again if it asks, then run Resume to carry on from where this stopped.",
         ])
 
     def challenged(self) -> None:
