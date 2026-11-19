@@ -1135,8 +1135,8 @@ class App:
                            extra={"refused_runs": runs, "not_asked_runs": quiet})
         if not asked:
             print(f"  Not asked. In this run Apple refused {site.REFUSAL_STREAK} of this "
-                  "account's newer purchases in a row. This purchase stays pending and "
-                  "will be checked directly on the next download run that includes it.")
+                  "account's newer purchases in a row. This purchase stays pending, and a "
+                  "later download run that covers its date asks Apple for it.")
             return False
         self.stats["failed"] += 1
         self.stats["no_receipt"] += 1
@@ -1232,7 +1232,8 @@ class App:
     def _past_the_line(self, purchase: Purchase) -> bool:
         """Whether this App Store purchase is past the line this run has
         learned for its account, and so is not asked. A year's purchases
-        are asked until Apple refuses one of them, and --redownload asks
+        are asked until Apple refuses one of them, a purchase passed over
+        on an earlier run is always asked (#237), and --redownload asks
         every purchase."""
         if purchase.purchase_type != APP_STORE or not purchase.purchase_date:
             return False
@@ -1850,11 +1851,11 @@ class App:
         # The purchases passed over past the line are not counted failed
         # (#237), so the end of the run says how many wait for the next.
         if s.get("not_asked") == 1:
-            print("\n1 older App Store purchase was left pending. A download run covering "
-                  "its date will ask Apple for its receipt.")
+            print("\n1 older App Store purchase was left pending. A later download run "
+                  "covering its date asks Apple for its receipt.")
         elif s.get("not_asked"):
             print(f"\n{s['not_asked']} older App Store purchases were left pending. "
-                  "A download run covering their dates will ask Apple for their receipts.")
+                  "A later download run covering their dates asks Apple for their receipts.")
         report_run_result(s)
 
 

@@ -121,14 +121,18 @@ Where Apple's refusals start differs by account. A tester's ended in May
 2015, and another's covers anything older than eighteen months (#55).
 Purchases are asked newest first, and once Apple has refused ten of an
 account's purchases in a row, each older than any receipt it has given that
-account, checks for older purchases may be deferred after Apple refuses
-one in their year. Deferred purchases stay pending in the run summary.
-The next download run covering their dates asks Apple for each one's
-receipt, even if the newer receipts are refused again.
+account, older purchases in a year where Apple has refused one are
+deferred for the rest of the run. The newest purchase of each older year
+is still asked. A deferred purchase is left pending, not counted failed,
+and the run summary counts it under "Older, not asked". A later download
+run covering its date asks Apple for that receipt itself, even if the
+newer receipts are refused again, so a purchase is deferred at most once.
+That run takes longer, since it asks each deferred purchase in turn.
 
-The purchase-record fallback still waits for three separate runs and
-requires Apple to refuse that receipt on the run that makes its record.
-The record says how many runs did not ask. When Apple provides a receipt
+The purchase-record fallback still waits for three separate runs, and the
+run that deferred a purchase counts as one of them. It requires Apple to
+refuse that receipt on the run that makes its record. The record says how
+many runs did not ask. When Apple provides a receipt
 past the refusal line, the run also asks for older purchases again.
 `--redownload` asks every purchase in scope.
 
