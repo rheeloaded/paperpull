@@ -9,6 +9,21 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Marin Water (#231, #233).** Water bills from Marin Water's Paymentus
+  portal, for a sign-in with one account. Sign in with Open sign-in window,
+  then Try the newest few first and Get new documents. The app reads Bill
+  History from the signed-in tab and fetches each bill's PDF from its own
+  View Bill link in a request of its own, with none of the portal's
+  cookies, and presses nothing. Two bills that share a date are told apart
+  by their PDFs, and a bill saved before its date gained a second keeps its
+  record when its file matches. Port 9318. Contributed by @solkennedy.
+
+### Fixed
+- **PROVIDERS.md counts the supported providers right.** Its heading said
+  84 where the list held 86, and with Marin Water it holds 87, as the
+  README says.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight

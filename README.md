@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-six providers are supported today, all built on the same pattern.
+Eighty-seven providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -120,7 +120,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`github`](apps/github) | GitHub | United States, may work elsewhere | Payment receipts (Pro, Copilot, Actions, Sponsors and the rest) | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#43](https://github.com/rheeloaded/paperpull/issues/43).** Receipt links fetched or printed, nothing clicked |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | United States | Statements, tax forms | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every statement on both of his accounts, a credit card's named as one ([#35](https://github.com/rheeloaded/paperpull/issues/35)) |
 | [`ibkr`](apps/ibkr) | Interactive Brokers | United States, may work elsewhere | Monthly Activity Statements | **Contributed by [@tylerverry](https://github.com/tylerverry), 60 of 61 months saved on a full run.** The Statements page's own Activity Statement dialog, Monthly chosen and each month's own Download PDF button pressed once, and nothing else is clicked. Regional hosts `.com`, `.co.uk` and `.ie` |
-| [`marinwater`](apps/marinwater) | Marin Water (CA) | United States | Water bill PDFs | Paymentus Bill History for one account. Bills sharing a date are identified by their PDFs. Tested on a contributor account. |
+| [`marinwater`](apps/marinwater) | Marin Water (CA) | United States | Water bills | **Contributed by [@solkennedy](https://github.com/solkennedy), run on the contributor's own account** ([#233](https://github.com/rheeloaded/paperpull/pull/233)). Bill History read on Marin Water's Paymentus portal for a sign-in with one account, nothing clicked, and each bill's PDF fetched from its own View Bill link without the portal's cookies. Bills that share a date are told apart by their PDFs. Requested in [#231](https://github.com/rheeloaded/paperpull/issues/231) |
 | [`mbna`](apps/mbna) | MBNA (Canada, credit cards) | Canada | Credit card statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/mbna/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a statement. Requested in [#205](https://github.com/rheeloaded/paperpull/issues/205) |
 | [`meijer`](apps/meijer) | Meijer | United States | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked but its two tabs and an in-store receipt's own icon |
 | [`myecp`](apps/myecp) | MILITARY STAR (Exchange Credit Program) | United States | Card statements | **Built on the maintainer's own account, 25 statements back to 2023.** The MyECP statements list and download from inside the page, nothing clicked |
@@ -966,7 +966,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-five** apps pass their tests, the eighty-six that are
+- ✅ All **ninety-six** apps pass their tests, the eighty-seven that are
   supported, the five still waiting for a tester and the Scalable Capital,
   Consorsbank, CIBC and MBNA shells, 46,567 of them
   across the repo. Most are in regular use by the author. The rest were built or
@@ -1051,6 +1051,8 @@ found a bug and diagnosed it to the line.
   and run against five accounts back to 2020, the Nelnet app, run against
   a student loan account back to 2019, and the Interactive Brokers app,
   run against five years of monthly statements.
+- [@solkennedy](https://github.com/solkennedy), the Marin Water app, built and run on their own account,
+  bills that share a date told apart by their PDFs.
 - [@JasperDale19](https://github.com/JasperDale19), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County
