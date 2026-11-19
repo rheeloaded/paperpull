@@ -198,8 +198,8 @@ class _Handler(BaseHTTPRequestHandler):
                     "isLastPage": answer[2]}}})
                 kind = "application/json"
         elif url.path.startswith(site.RECEIPT_PATH) and \
-                url.path[len(site.RECEIPT_PATH):] in RECEIPTS:
-            body, kind = receipt_page(url.path[len(site.RECEIPT_PATH):]), "text/html; charset=utf-8"
+                any(url.path == site.RECEIPT_PATH + site.page_key(k) for k in RECEIPTS):
+            body, kind = receipt_page(next(k for k in RECEIPTS if url.path == site.RECEIPT_PATH + site.page_key(k))), "text/html; charset=utf-8"
         elif url.path == "/":
             body, kind = HOME, "text/html; charset=utf-8"
         else:
