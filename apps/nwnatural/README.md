@@ -63,7 +63,8 @@ stops the run once.
   neither, so the run stops there with nothing recorded for that bill, and
   the panel offers a run that reads the list first. Refused right after a
   list that answered, it fails that one bill, since the session plainly
-  works. A 403 from the portal's bot protection (DataDome) stops the run
+  works. Three of those with no bill taken between stop the run, rather
+  than read the whole history again for each bill after. A 403 from the portal's bot protection (DataDome) stops the run
   too, or Login, saying so, so you can answer it in the browser. Any other
   answer that is not a PDF, an HTML page among them, fails that one bill.
 

@@ -236,6 +236,15 @@ class SessionExpired(Exception):
     run stops for the account holder."""
 
 
+class BillsRefused(Exception):
+    """Bills were refused right after a list that answered, REFUSED_IN_A_ROW
+    of them with no bill taken between. Each refusal was weighed against
+    the list, which still reads, so none is a sign-out and each fails
+    alone. But a run of them is the portal refusing every bill, so the run
+    stops once rather than read the whole history again for each bill
+    after. The list was read whole, so the run is one to carry on from."""
+
+
 class Challenged(Exception):
     """The portal's bot protection (DataDome) answered in place of the
     portal. The account holder answers it in the browser, so the run stops
@@ -632,6 +641,10 @@ def expand_all(page) -> None:
 # table. In memory for the run only.
 _RUN: dict = {}
 
+# Bills refused right after a list that answered, with no bill taken
+# between, before the run stops (BillsRefused).
+REFUSED_IN_A_ROW = 3
+
 
 def _read(page) -> List[RawDoc]:
     """Read the bill history and keep it for the run. A read that fails
@@ -736,7 +749,8 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     answering raises ListStopped too, since it says neither that the
     session ended nor that it holds (refused.list_again). A refusal of the
     bill itself right after the list was read and answered fails this bill
-    alone, since the session plainly works."""
+    alone, since the session plainly works, until REFUSED_IN_A_ROW of them
+    come with no bill taken between, which raises BillsRefused."""
     out_path = Path(out_path)
     if href != DOWNLOAD_PATH or not BILL_ID_RE.fullmatch(document_id or "") \
             or document_id != f"bill-{iso_date}":
@@ -763,6 +777,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             continue
         try:
             if _fetch(page, found[0], out_path, trace):
+                _RUN["refused"] = 0
                 return True
             why = "the bill was not answered with a PDF"
         except SessionExpired:
@@ -771,6 +786,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             # right after a list that answered, it is this bill's alone.
             why = "the bill was refused right after the list was read" if fresh \
                 else "the bill was refused"
+            if fresh:
+                _RUN["refused"] = _RUN.get("refused", 0) + 1
+                if _RUN["refused"] >= REFUSED_IN_A_ROW:
+                    raise BillsRefused(
+                        f"{_RUN['refused']} bills in a row were refused right after the list was read")
     log.info("the bill dated %s was not taken: %s", iso_date, why)
     if trace is not None:
         trace.append({"note": "not taken", "why": why})
