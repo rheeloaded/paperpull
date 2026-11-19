@@ -12,9 +12,11 @@ purchases in a row, each older than any receipt it has given that account,
 the older ones are not asked for the rest of the run, but for one a year
 until Apple refuses it, and each counts as refused on that run, so a record
 still waits for three separate runs. The run that would make a purchase's
-record asks it, so every record rests on Apple's own refusal. A receipt
-Apple gives past the line takes it away, and --redownload asks everything. Apple's own process_purchases() is run end to end here, on the
-harness of test_download_path.py. Every order and name is invented.
+record asks it, so every record rests on Apple's own refusal. Pending
+purchases are checked on the next run that includes them. A receipt Apple
+gives past the line takes it away, and --redownload asks everything.
+Apple's process_purchases() runs on the harness of test_download_path.py.
+Every order and name is invented.
 """
 import sys
 from pathlib import Path
@@ -78,36 +80,75 @@ def test_past_ten_refusals_older_than_any_receipt_the_older_ones_are_not_asked(t
     assert _month(3 + 10 + 5) == "2024-12-15"
     assert _orders(asked) == orders[:13] + [probe], _orders(asked)
     assert app.stats["not_asked"] == 14 and len(delays) == 14
+    assert app.stats["failed"] == app.stats["no_receipt"] == 11
     for order in orders[3:]:
         done = _prog(app, order)
-        assert done["state"] == State.FAILED.value and done["refused_runs"] == ["run-1"], order
         quiet = order not in orders[:13] + [probe]
+        assert done["state"] == (State.DISCOVERED.value if quiet else State.FAILED.value), order
+        assert done["refused_runs"] == ["run-1"], order
         assert done["not_asked_runs"] == (["run-1"] if quiet else []), order
     assert spy.calls and all(c.arguments["expect"].number in orders[:3] for c in spy.calls)
 
 
 def test_a_record_still_waits_for_three_runs_and_rests_on_apples_own_refusal(tmp_path,
                                                                              monkeypatch):
-    """The first two runs ask fourteen of the twenty-eight. The third would
-    make a record of each refused one, so it asks every one of them, and no
-    record is made without Apple refusing that receipt itself (review)."""
+    """On the second run the same refusal line comes back, but every
+    deferred purchase is asked. A third run still makes the record only
+    when Apple refuses the individual receipt."""
     rows, answers = _rows(given=3, refused=25)
     app, spy, asked, run, _delays = _app(tmp_path, monkeypatch, rows, answers)
     orders = [p.order_number for p, _rec in rows]
-    for key in ("run-1", "run-2"):
-        run(key)
+    run("run-1")
+    assert len(asked) == 14
+    # The same fallback metadata was marked Failed in older versions.
+    for order in orders[3:]:
+        record = _prog(app, order)
+        if record.get("not_asked_runs"):
+            record["state"] = State.FAILED.value
+    run("run-2")
     assert all(_prog(app, o)["state"] == State.FAILED.value for o in orders[3:])
-    assert len(asked) == 2 * 14
+    assert set(_orders(asked[14:])) == set(orders)
+    assert not app.stats.get("purchase_records")
     run("run-3")
-    assert set(orders) <= set(_orders(asked[2 * 14:])), "the third run asks every one"
+    assert set(_orders(asked[14 + len(orders):])) == set(orders)
     for order in orders[3:]:
         done = _prog(app, order)
         assert done["state"] == State.COMPLETED.value, order
         assert done["document_type"] == site.RECORD_TYPE, order
         assert done["refused_runs"] == ["run-1", "run-2", "run-3"], order
-    assert _prog(app, orders[-1])["not_asked_runs"] == ["run-1", "run-2"]
+    assert _prog(app, orders[-1])["not_asked_runs"] == ["run-1"]
     assert _prog(app, orders[3])["not_asked_runs"] == []
-    assert len(asked) == 2 * 14 + 28
+
+
+def test_a_deferred_purchase_can_get_its_receipt_even_when_the_same_refusals_continue(
+        tmp_path, monkeypatch):
+    rows, answers = _rows(given=3, refused=25)
+    app, spy, asked, run, _delays = _app(tmp_path, monkeypatch, rows, answers)
+    target = rows[15][0].order_number
+    run("run-1")
+    assert target not in _orders(asked)
+    assert _prog(app, target)["state"] == State.DISCOVERED.value
+
+    fetch = site.fetch_invoice
+
+    def answer_one(page, order_number, dsid):
+        if order_number != target:
+            return fetch(page, order_number, dsid)
+        asked.append((order_number, dsid))
+        return {"kind": site.ANSWERED, "status": 200, "html": harness.RECEIPT_HTML % target}
+
+    monkeypatch.setattr(site, "fetch_invoice", answer_one)
+    app._already_done = lambda purchase: type(app)._already_done(app, purchase)
+    checked = len(asked)
+    run("run-2")
+    rechecked = _orders(asked[checked:])
+    assert target in rechecked
+    assert all(p.order_number in rechecked for p, _ in rows[3:13])
+    assert not any(p.order_number in rechecked for p, _ in rows[:3])
+    saved = _prog(app, target)
+    assert saved["state"] == State.COMPLETED.value and saved["downloaded_ok"]
+    assert saved["document_type"] == "Receipt"
+    assert any(c.arguments["expect"].number == target for c in spy.calls)
 
 
 def test_a_receipt_given_past_the_line_takes_it_away(tmp_path, monkeypatch, capsys):
