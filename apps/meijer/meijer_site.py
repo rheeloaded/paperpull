@@ -2,6 +2,11 @@
 
 When Meijer changes its website, repair this file only.
 
+Current orders UI (November 2026) uses /shopping/orders, Online and
+In-Store tabs, written-out month names, and buttons labelled
+"Download receipt from <date>, <time>". The older labels below are still
+accepted for accounts using that layout.
+
 STATUS: round two (#42), repaired from a tester's survey and screenshots.
 Written without a Meijer account, so what follows is what his own pages
 showed.
@@ -83,7 +88,7 @@ log = logging.getLogger("meijer_receipts.site")
 # ---------------------------------------------------------------------------
 
 BASE = "https://www.meijer.com"
-ORDERS_URL = f"{BASE}/shopping/orders.html"
+ORDERS_URL = f"{BASE}/shopping/orders"
 # GUESS at everything but the first. The orders page the requester named,
 # then the places in-store digital receipts are likely to live, then the
 # account page whose own links name the real ones.
@@ -269,13 +274,17 @@ def orders_url(page_no: int = 1) -> str:
 
 
 # The two tabs, and the folder a purchase from each belongs in.
-TAB_IN_STORE_RE = re.compile(r"^\s*in-?store\s+receipts?\s*$", re.I)
+TAB_IN_STORE_RE = re.compile(r"^\s*in-?store(?:\s+receipts?)?\s*$", re.I)
 # A row's receipt control, as a recording found it. It is a LINK reading
 # "view receipt pdf", and pressing it opens a tab rather than downloading
 # anything, which is what the page's own pop-up blocker warning is about.
 # Round two guessed a PDF icon carrying no text at all (#42).
+DOWNLOAD_RECEIPT_RE = re.compile(
+    r"^download\s+receipt\s+from\s+"
+    r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4},\s+\d{1,2}:\d{2}\s*[ap]m$", re.I)
 RECEIPT_LINK_RE = re.compile(r"^\s*view\s+receipt(\s+pdf)?\s*$", re.I)
-TAB_ONLINE_RE = re.compile(r"^\s*online\s+orders?\s*$", re.I)
+TAB_ONLINE_RE = re.compile(r"^\s*online(?:\s+orders?)?\s*$", re.I)
 IN_STORE_ROW_RE = re.compile(r"\bin-?store\b\s*:", re.I)
 
 
@@ -665,7 +674,7 @@ _ROW_CONTROLS_JS = r"""([text, money, dates]) => {
       const looksPdf = /pdf|receipt|download/i.test(
         label + ' ' + cls + ' ' + (c.getAttribute('href') || '') + ' ' + (c.innerText || '').slice(0, 40));
       if (clickable || looksPdf) {
-        out.push({el: c, text: (c.innerText || '').trim().slice(0, 40), label: label.slice(0, 40),
+        out.push({el: c, text: (c.innerText || '').trim().slice(0, 40), label: label.slice(0, 160),
                   href: c.getAttribute('href') || '', pdf: looksPdf, interactive,
                   shown: !!c.getClientRects().length && cs.visibility !== 'hidden',
                   holdsControl: !!c.querySelector(CTL)});
@@ -689,7 +698,13 @@ def row_dates(iso: str) -> List[str]:
     if not m:
         return []
     y, mo, d = m.groups()
-    return sorted({f"{mo}/{d}/{y}", f"{int(mo)}/{int(d)}/{y}", iso})
+    from datetime import date
+    try:
+        day = date(int(y), int(mo), int(d))
+    except ValueError:
+        return []
+    return sorted({f"{mo}/{d}/{y}", f"{int(mo)}/{int(d)}/{y}", iso,
+                   day.strftime("%B") + f" {int(d)}, {y}"})
 
 
 def show_tab_for(page, purchase_type: str) -> bool:
@@ -1441,9 +1456,10 @@ def is_receipt_control(c: dict) -> bool:
         return False
     if SENDS_CONTROL_RE.search(text) or SENDS_CONTROL_RE.search(label):
         return False
-    if text:
-        return bool(RECEIPT_LINK_RE.match(text))
-    return bool(RECEIPT_LINK_RE.match(label) or RECEIPT_PDF_LABEL_RE.match(label))
+    if text and re.search(r"[a-z0-9]", text, re.I):
+        return bool(RECEIPT_LINK_RE.match(text) or DOWNLOAD_RECEIPT_RE.fullmatch(text))
+    return bool(RECEIPT_LINK_RE.match(label) or RECEIPT_PDF_LABEL_RE.match(label)
+                or DOWNLOAD_RECEIPT_RE.fullmatch(label))
 
 
 def control_says(c: dict) -> str:
