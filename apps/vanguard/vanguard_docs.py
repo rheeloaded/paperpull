@@ -222,7 +222,15 @@ class App:
             # matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
             vanguard = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = vanguard[0] if vanguard else tabs.new_tab(ctx)
+            ready = [p for p in vanguard if site.on_documents_page(p)]
+            # A workplace tab should not take over a brokerage run when
+            # both portals are open in the same PaperPull browser.
+            brokerage = next((p for p in ready if not site.is_workplace_page(p)), None)
+            if brokerage is None and len(ready) > 1:
+                raise SystemExit("Leave only the desired Vanguard workplace plan's Statements tab open.")
+            self._work_page = brokerage or next(iter(ready or vanguard), None)
+            if self._work_page is None:
+                self._work_page = tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # A file in the download folder that is an exact copy of a document
@@ -376,16 +384,18 @@ class App:
         if d.get("occurrence"):
             full_summary = f"{full_summary} ({int(d['occurrence']) + 1})"
         account_id = d.get("account_id") or ""
+        doc_type = d.get("doc_type") or ""
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, period=d.get("period") or "",
                        confidence=confidence, account=account,
                        account_id=account_id, last4=account_id[-4:],
                        charitable=account_id in charitable_ids,
-                       doc_type=d.get("doc_type") or "",
+                       doc_type=doc_type,
                        on_demand_type=d.get("on_demand_type") or "",
                        document_id=d.get("document_id") or "",
                        occurrence=int(d.get("occurrence", 0) or 0),
-                       href=site.URLS["documents"])
+                       href=(site.WORKPLACE_STATEMENTS_URL if doc_type == site.WORKPLACE_STATEMENT
+                             else site.URLS["documents"]))
         existing = self.discovery.get(doc.key)
         if existing is None:
             rec = doc.to_dict()
@@ -430,8 +440,14 @@ class App:
         # every account), and asking it walked every year of the picker a
         # second time before the walk that reads the statements.
         charitable_ids: set = set()
-        raw = site.collect_documents(
-            page, keep=scope.period_filter(self.args, self.config))
+        try:
+            raw = site.collect_documents(
+                page, keep=scope.period_filter(self.args, self.config))
+        except site.ListStopped:
+            self.write_failure("read the statements list", "the statements list did not answer")
+            print("Vanguard did not return a readable statements list. "
+                  "Open Statements in the signed-in window and try again.")
+            raise SystemExit(0)
         log.info("Vanguard: %d document(s) across all accounts", len(raw))
         n_new = 0
         # Which of several documents sharing a type, a title, a date and an
@@ -476,9 +492,25 @@ class App:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
 
-    def _select(self, limit: Optional[int] = None) -> List[Document]:
+    def _select(self, limit: Optional[int] = None, *, pending_only: bool = False) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
+        has_workplace = any(d.doc_type == site.WORKPLACE_STATEMENT for d in docs)
         docs = [d for d in docs if self._in_scope(d)]
+        if pending_only:
+            docs = [d for d in docs if not self._already_done(d)]
+        page = self._work_page
+        # A Resume from a mixed archive needs the active portal only when
+        # there is work in scope. A dry run can still plan files offline.
+        if page is None and docs and has_workplace and not self.args.dry_run:
+            page = self.page()
+        if page is not None:
+            if site.is_workplace_page(page):
+                plan = site.workplace_plan(page)
+                if not plan:
+                    listing.read_again_stopped(self, "Open Statements for the selected Vanguard workplace plan.")
+                docs = [d for d in docs if d.doc_type == site.WORKPLACE_STATEMENT and d.account_id == plan]
+            else:
+                docs = [d for d in docs if d.doc_type != site.WORKPLACE_STATEMENT]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
@@ -546,6 +578,9 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
+            except site.ListStopped:
+                self.write_failure("read the statements list", "the statements list did not answer")
+                listing.read_again_stopped(self, "Vanguard did not return the statement list for this plan.")
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -753,7 +788,7 @@ class App:
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished
         # (paperpull_core.listing).
-        docs = [d for d in self._select() if not self._already_done(d)]
+        docs = self._select(pending_only=True)
         listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run))
 
 
