@@ -53,6 +53,10 @@ from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 # A key a record did not have, so a preview can put a record back exactly.
 _MISSING = object()
+# What a purchase whose receipt key is in a shape this version cannot open
+# says, in its record and on the console. It names no key.
+UNKNOWN_KEY = ("Kroger's receipt key for this purchase is in a shape this version cannot "
+               "open, so it was not opened and is tried again next run")
 
 log = logging.getLogger("kroger_receipts")
 
@@ -642,6 +646,16 @@ class App:
             print("  Order still pending - no receipt yet, will be revisited next run.")
             return
 
+        # ---- a receipt key this version cannot turn into a route ----
+        # Its old route shows no receipt, and three days of empty pages would
+        # set it aside for good, so it is not opened and tried again next run
+        # (#235).
+        if site.unknown_receipt_key(purchase.order_number):
+            self._record_state(purchase, State.FAILED, notes=UNKNOWN_KEY)
+            self.stats["failed"] += 1
+            print("  " + UNKNOWN_KEY + ".")
+            return
+
         # ---- open the receipt page (retry once, per spec 22) ----
         for attempt in (1, 2):
             try:
@@ -747,7 +761,7 @@ class App:
                 return False
 
         # Make sure we are on this purchase's receipt page.
-        if not site.on_receipt_page(page) or site.page_key(purchase.order_number) not in (page.url or ""):
+        if not site.on_purchase_receipt(page, purchase):
             site.goto_receipt(page, purchase)
         site.scroll_full_page(page)
 

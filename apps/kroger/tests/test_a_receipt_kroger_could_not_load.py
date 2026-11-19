@@ -401,3 +401,78 @@ def test_a_purchase_left_without_a_receipt_for_another_reason_stays_so(attached,
 
     assert downloaded(tmp_path) == [STORE]
     assert receipts_opened() == [], said
+
+
+# Two purchases at one store on one day, the second's transaction the first's
+# with a digit more, so one route starts with the other (#235).
+SAME_DAY_KEY = "705~00331~2026-05-24~016~310"
+SAME_DAY_LONGER_KEY = "705~00331~2026-05-24~016~3104"
+SAME_DAY = "In-Store:" + SAME_DAY_KEY
+SAME_DAY_LONGER = "In-Store:" + SAME_DAY_LONGER_KEY
+# A receipt key in a shape this version does not know, its date without
+# dashes.
+ODD_KEY = "705~00331~20260520~012~5510"
+ODD = "In-Store:" + ODD_KEY
+RECEIPTS.update({
+    SAME_DAY_KEY: ("May 24, 2026", "$5.13", "Invented Sourdough Loaf"),
+    SAME_DAY_LONGER_KEY: ("May 24, 2026", "$62.40", "Invented Laundry Detergent"),
+    ODD_KEY: ("May 20, 2026", "$9.99", "Invented Green Tea"),
+})
+
+
+def test_two_receipts_of_one_day_at_one_store_each_save_their_own(attached, tmp_path, capsys):
+    from paperpull_core.receipt_pdf import pdf_text
+    SITE.newer = [record(SAME_DAY_KEY, "2026-05-24T10:00:00Z", "USD 5.13"),
+                  record(SAME_DAY_LONGER_KEY, "2026-05-24T18:00:00Z", "USD 62.40")]
+    said, panel = run_all(tmp_path, attached, capsys)
+    assert downloaded(tmp_path) == sorted([STORE, OTHER, SAME_DAY, SAME_DAY_LONGER]), said
+    assert sorted(set(receipts_opened())) == sorted([STORE_KEY, OTHER_KEY, SAME_DAY_KEY,
+                                                     SAME_DAY_LONGER_KEY])
+    for key, total, item in ((SAME_DAY, "$5.13", "Sourdough"), (SAME_DAY_LONGER, "$62.40", "Detergent")):
+        text = pdf_text(Path(progress(tmp_path)[key]["pdf_path"]))
+        assert total in text and item in text, (key, text[:300])
+    for key in (SAME_DAY, SAME_DAY_LONGER):
+        assert key in progress(tmp_path), "the purchase keeps the API's key"
+    assert not any(k.startswith("In-Store:2026-") for k in progress(tmp_path)), "no route form key"
+
+
+def test_resume_opens_a_receipt_saved_in_the_old_route_at_the_new_one(attached, server, tmp_path,
+                                                                     capsys):
+    """A run before the route change saved its receipt addresses in the
+    API's form. Resume reads them from discovery without the history, and
+    the receipt opens at the new route."""
+    SITE.failing = {OTHER_KEY: COULD_NOT_LOAD}
+    run_all(tmp_path, attached, capsys)
+    path = tmp_path / "out" / "discovery.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data[OTHER]["receipt_url"] = server + site.RECEIPT_PATH + OTHER_KEY
+    path.write_text(json.dumps(data), encoding="utf-8")
+
+    SITE.failing = {}
+    SITE.seen.clear()
+    assert app_mod.main(["--resume", "--yes", "--config", str(config_for(tmp_path, attached))]) == 0
+    said = " ".join(capsys.readouterr().out.split())
+    assert downloaded(tmp_path) == sorted([STORE, OTHER]), said
+    assert receipts_opened() == [OTHER_KEY]
+    assert site.RECEIPT_PATH + OTHER_KEY not in SITE.seen, "the old route is not asked for"
+
+
+def test_a_key_of_a_shape_not_known_is_never_set_aside(attached, tmp_path, capsys, monkeypatch):
+    """Opened at a route that cannot show it, its empty page would count
+    toward a set-aside, and the third day, after a save of its kind, would
+    set it aside for good. It is not opened, and stays Failed, tried again
+    next run, with the purchase's key kept."""
+    SITE.newer = [record(ODD_KEY, "2026-05-20T11:00:00Z", "USD 9.99")]
+    for n in (1, 2, 3):
+        if n == 3:
+            SITE.newer.append(record(NEWER_KEY, "2026-05-25T09:05:00Z", "USD 8.47"))
+        said, panel = run_all(tmp_path, attached, capsys, day=n, monkeypatch=monkeypatch)
+        rec = progress(tmp_path)[ODD]
+        assert not any("20260520" in p for p in SITE.seen), SITE.seen
+        assert "not_shown_days" not in rec, rec
+        assert "set aside" not in said, said
+        assert rec["state"] == "Failed", (n, rec, said)
+        assert app_mod.UNKNOWN_KEY in rec["notes"], rec
+        assert panel["failed"] == 1, panel
+    assert NEWER in downloaded(tmp_path)
+    assert rows_naming(tmp_path, ODD) == {"receipt_index_csv": 0, "order_history_csv": 0}

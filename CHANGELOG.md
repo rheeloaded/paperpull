@@ -9,6 +9,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Kroger opens its receipts again (#225, #235).** Kroger's receipt pages
+  moved to an address that puts the purchase date first, so every receipt
+  page went back to the purchase history and each receipt was said not to
+  render. The app now opens the new address, built from the key Kroger's
+  history gives. That key still names the purchase in your records, so
+  receipts saved before are neither renamed nor downloaded again, and a
+  Resume opens an address saved before the move at the new one. Two
+  receipts from one store on one day are each saved from their own page,
+  and a receipt key in a shape the app does not know is not opened and is
+  tried again next run, so it is never set aside. Contributed by
+  @cmcculloh.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight
