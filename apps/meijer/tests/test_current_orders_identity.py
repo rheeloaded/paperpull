@@ -216,3 +216,31 @@ def test_the_attempt_never_names_the_purchases_date(browse, tmp_path):
     for words in ("September", "Invented", "11:41"):
         assert words not in said, said
     assert json.loads(said)
+
+
+def test_the_diagnose_file_names_a_dated_control_in_fixed_words():
+    """Diagnose wrote the first row's controls with only their digits
+    masked, and at 160 characters a button's name kept its month and its am
+    or pm (review)."""
+    assert site.control_words(f"Download receipt from {WHEN}") == \
+        "the receipt control, which names its date"
+    assert site.control_words("view receipt pdf") == "view receipt pdf"
+    import inspect
+    import meijer_receipts
+    src = inspect.getsource(meijer_receipts.App.cmd_diagnose)
+    assert '"text": site.control_words(x["text"])' in src
+    assert '"label": site.control_words(x["label"])' in src
+
+
+def test_a_row_past_the_collectors_cap_is_still_pressed(browse):
+    """The collector reads at most ROWS_CAP rows, and a purchase's own row
+    was looked for among those only, so one further down the list was never
+    found (review)."""
+    mine = row(WHEN, button(WHEN, "mine"))
+    pg = browse(page_of(mine))
+    purchase = purchases(pg)[0]
+    filler = [row(f"January {1 + i % 28}, {2020 + i // 28}, 9:05 am", button("x", "filler"),
+                  amount=f"${10 + i}.00") for i in range(site.ROWS_CAP + 4)]
+    pg = browse(page_of(*filler, mine))
+    _body, outcome, pressed, _trace = press(pg, purchase)
+    assert pressed == ["mine"], outcome

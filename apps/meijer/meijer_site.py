@@ -279,11 +279,14 @@ TAB_IN_STORE_RE = re.compile(r"^\s*in-?store(?:\s+receipts?)?\s*$", re.I)
 # "view receipt pdf", and pressing it opens a tab rather than downloading
 # anything, which is what the page's own pop-up blocker warning is about.
 # Round two guessed a PDF icon carrying no text at all (#42).
+RECEIPT_LINK_RE = re.compile(r"^\s*view\s+receipt(\s+pdf)?\s*$", re.I)
+# The current page's receipt control is a button whose name for a screen
+# reader says whose receipt it is (#236). Only these words are taken, and
+# any other spelling of the date is refused rather than guessed at.
 DOWNLOAD_RECEIPT_RE = re.compile(
     r"^download\s+receipt\s+from\s+"
     r"(?:January|February|March|April|May|June|July|August|September|October|November|December)"
     r"\s+\d{1,2},\s+\d{4},\s+\d{1,2}:\d{2}\s*[ap]m$", re.I)
-RECEIPT_LINK_RE = re.compile(r"^\s*view\s+receipt(\s+pdf)?\s*$", re.I)
 # The date and time a row of the current page prints, "September 13, 2026,
 # 11:41 am" (#236). Two purchases of one day differ only by it.
 _WHEN = (r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|"
@@ -473,7 +476,7 @@ ROWS_CAP = 400
 # Every row inside the frame that holds a money amount, with its links.
 # GUESS at what a row is, so anything list-like is tried, smallest first,
 # and a row that contains another matching row is dropped.
-_COLLECT_ROWS_JS = r"""
+_COLLECT_ROWS_TEMPLATE = r"""
 (rowSel) => {
   const cands = Array.from(document.querySelectorAll(rowSel));
   const money = /\$\s*-?[\d,]+\.\d{2}/;
@@ -537,7 +540,11 @@ _COLLECT_ROWS_JS = r"""
   }
   return out;
 }
-""".replace("ROWS_CAP", str(ROWS_CAP))
+"""
+_COLLECT_ROWS_JS = _COLLECT_ROWS_TEMPLATE.replace("ROWS_CAP", str(ROWS_CAP))
+# The same, with no cap, for finding one purchase's own row (own_when). A
+# row past ROWS_CAP is still a row its receipt can be pressed on (review).
+_EVERY_ROW_JS = _COLLECT_ROWS_TEMPLATE.replace("ROWS_CAP", "1000000")
 
 
 def collect_both_tabs(page, facts: Optional[dict] = None) -> List[RawCard]:
@@ -1054,7 +1061,13 @@ def own_when(page, purchase) -> tuple:
     each fit both rows and neither was pressed. A purchase whose row had
     gone would have been given its twin's (#236)."""
     timed = False
-    for card in collect_cards(page):
+    try:
+        raw = page.evaluate(_EVERY_ROW_JS, FALLBACK["row"]) or []
+    except Exception as e:
+        log.info("rows for a purchase's own: %s", e)
+        raw = []
+    for card in (RawCard(text=r.get("text") or "", links=r.get("links") or [])
+                 for r in raw if r.get("shown")):
         m = WHEN_RE.search(" ".join((card.text or "").split()))
         if not m:
             continue
