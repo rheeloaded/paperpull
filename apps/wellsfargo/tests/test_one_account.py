@@ -341,7 +341,8 @@ def test_the_setting_on_a_sign_in_of_one_account_stops_with_a_sentence(open_site
     with pytest.raises(pressing.Stop) as stop:
         site.collect_download_docs(pg, only=["2222"])
     assert stop.value.reason == "the setting is set and the page shows one account"
-    assert "Leave it empty" in " ".join(stop.value.lines)
+    assert "leave only_accounts empty" in " ".join(stop.value.lines)
+    assert "could not be read" in " ".join(stop.value.lines)
     assert spies["survey"] == []
 
 
@@ -740,3 +741,103 @@ def test_an_unfiltered_diagnose_reads_every_account_as_before(run, monkeypatch, 
         encoding="utf-8"))
     assert found["only_accounts"] == {"only_accounts": False, "picker_entries": 3,
                                       "chosen": 3}
+
+
+# -- after the review of the first build ----------------------------------------------
+
+def test_a_moved_picker_says_what_it_showed_and_never_which_account(open_site):
+    for move, showed in ((0, "another account"), (-1, "no account")):
+        pg = open_site(_three(move_after={"a2222": move} if move < 0 else {}))
+        assert site.goto_documents(pg)
+        if move == 0:
+            # Chosen, then moved by the page itself during the survey.
+            survey = site._survey
+
+            def look_then_move(p, survey=survey):
+                got = survey(p)
+                p.evaluate("() => window.moveTo(0)")
+                return got
+            site_survey, site._survey = site._survey, look_then_move
+        try:
+            with pytest.raises(pressing.Stop) as stop:
+                site.collect_download_docs(pg, only=["2222"])
+        finally:
+            if move == 0:
+                site._survey = site_survey
+        assert stop.value.facts == {"picker_showed": showed}
+
+
+def test_the_account_is_proven_before_its_list_is_expanded_at_download(open_site, monkeypatch,
+                                                                       tmp_path):
+    """A picker showing no account once its entry was chosen. Nothing in
+    the list is pressed, Show older included."""
+    monkeypatch.setattr(site, "expand_all", REAL_EXPAND)
+    calls = _catch(monkeypatch)
+    pg = open_site(_three(older=True, move_after={"a2222": -1}))
+    with pytest.raises(pressing.Stop):
+        site.download_bill(pg, tmp_path, "2026-09-30", tmp_path / "out.pdf",
+                           title="Account Statement - 2026-09-30", trace=[], account=B)
+    assert pg.evaluate("window.olderPresses") == []
+    assert calls == [] and pg.evaluate("window.pressed") == []
+
+
+def test_a_run_leaves_the_record_of_an_account_not_chosen_alone(run):
+    app, pg = run(only_accounts=["2222"])
+    key, rec = _record(A, "2026-09-30", "Failed")
+    app.discovery.update(key, dict(rec))
+    app.progress.update(key, dict(rec))
+    before = json.dumps(app.progress.data, sort_keys=True)
+    app.download_one(pg, app_mod.Document.from_dict(rec), "a.pdf")
+    assert json.dumps(app.progress.data, sort_keys=True) == before
+    assert pg.evaluate("window.pressed") == []
+    assert not list(app.paths.diagnostics.glob("failure-*.json"))
+
+
+CLOSED = """<!doctype html><meta charset="utf-8"><span id="lbl">Account</span>
+<div role="combobox" id="box" aria-expanded="false" aria-labelledby="lbl" style="%s">
+  <span>%s</span>
+  <ul role="listbox" style="position:absolute;clip:rect(0 0 0 0);width:1px;height:1px;overflow:hidden">
+    <li role="option">Business Checking A ...1111</li>
+    <li role="option">Business Checking B ...2222<span>Selected</span></li>
+    <li role="option">Personal Checking ...3333</li></ul></div>"""
+
+
+@pytest.mark.parametrize("style, words, shown", [
+    ("", B, B),
+    ("text-transform:uppercase", B, B),
+    ("", "Business   Checking B\n...2222", B),
+    ("", "Business Checking B", None),
+    ("", "", None),
+    ("", A + " " + B, None),
+], ids=["as drawn", "in capitals", "spaced", "nickname alone", "nothing", "two accounts"])
+def test_the_closed_picker_names_its_account_however_it_is_drawn(browser, style, words,  # noqa: F811
+                                                                 shown):
+    """Shapes a real closed picker could take. Its entries kept inside it,
+    clipped rather than hidden, are never read as what it shows."""
+    pg = browser.new_page()
+    try:
+        pg.set_content(CLOSED % (style, words))
+        assert site._shown_account(pg, pg.locator("#box"), [A, B, P]) == shown
+    finally:
+        pg.close()
+
+
+def test_a_filtered_diagnose_writes_no_account_word_in_either_file(run, monkeypatch):
+    app, pg = run(only_accounts=["2222"])
+    monkeypatch.setattr(site, "survey", lambda pg, **k: {})
+    app.cmd_diagnose()
+    app.write_survey()
+    written = " ".join(p.read_text(encoding="utf-8") for p in app.paths.diagnostics.glob("*.json"))
+    assert len(list(app.paths.diagnostics.glob("*.json"))) >= 2
+    for word in ("1111", "2222", "3333", "Business", "Personal", "Checking"):
+        assert word not in written, word
+    assert '"chosen": 1' in written and '"picker_entries": 3' in written
+
+
+def test_the_selection_holds_only_the_chosen_accounts_documents(run):
+    """What Pilot, Run All and Continue take, before any download is tried."""
+    app, pg = run(only_accounts=["2222"])
+    _seed(app)
+    picked = app._select()
+    assert [d.account for d in picked] == [B]
+    assert all(app_mod.site.account_tail(d.account) == "2222" for d in picked)

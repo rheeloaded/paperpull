@@ -619,6 +619,13 @@ class App:
         """Save one document. The site layer fetches the row's PDF link from
         inside the page when there is one, and otherwise clicks the row's
         own control and catches what arrives."""
+        # A document of an account only_accounts leaves out is not this
+        # run's, and its record is left as it is. The selection already
+        # leaves it out (_in_scope), so this is the second guard (#221).
+        only = self._only_accounts()
+        if only and site.account_tail(doc.account or "") not in only:
+            log.info("left alone a document of an account only_accounts does not name")
+            return
         self.check_session(page)
         folder = self.paths.folder_for(doc.category)
         # The last of the document id, used only if the name is taken.
@@ -638,7 +645,7 @@ class App:
         try:
             saved = site.download_bill(page, self._dl_dir, doc.date, out_path,
                                        title=doc.title, trace=trace, rows=doc.rows,
-                                       account=doc.account, only=self._only_accounts())
+                                       account=doc.account, only=only)
         except site.PickerMoved:
             # Nothing was taken. The document waits for the next run, and the
             # run stops, since a picker that moved by itself makes every next

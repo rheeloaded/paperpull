@@ -1049,18 +1049,46 @@ def _open_picker(page, box):
     return None
 
 
-def _shown_account(page, box, labels) -> Optional[str]:
-    """Which of `labels` the closed picker shows as chosen, or None when it
-    is open or shows no one of them. Two labels one inside the other end in
-    the same last four, which discovery refuses before anything is chosen."""
+# What a closed picker says of the account it shows, its own words with
+# its entries left out, since a picker can keep its list of entries inside
+# itself, hidden, where every label would be read.
+_SHOWN_WORDS_JS = """(el) => {
+  const own = el.cloneNode(true);
+  own.querySelectorAll('[role=listbox], [role=option]').forEach(n => n.remove());
+  return [own.textContent, el.getAttribute('aria-label'),
+    ...(el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean)
+       .map(id => (document.getElementById(id) || {}).textContent)]
+    .filter(Boolean).join(' ');
+}"""
+
+
+def _plain(words: str) -> str:
+    return " ".join((words or "").split()).casefold()
+
+
+def _picker_reading(page, box, labels):
+    """What the closed picker shows, in fixed words, with the one of
+    `labels` it shows or None. "open" for a picker left open, "no account"
+    and "several accounts" for words naming none or more than one, read
+    whatever their case and spacing (#221). Two labels one inside the other
+    end in the same last four, which discovery refuses before anything is
+    chosen."""
     try:
         if (box.get_attribute("aria-expanded") or "").lower() == "true":
-            return None
+            return "open", None
+        said = _plain(box.evaluate(_SHOWN_WORDS_JS, timeout=_READ_MS) or "")
     except Exception:
-        return None
-    said = _picker_words(page, box)
-    found = [label for label in labels if label and label in said]
-    return found[0] if len(found) == 1 else None
+        return "unread", None
+    found = [label for label in labels if label and _plain(label) in said]
+    if len(found) == 1:
+        return "one account", found[0]
+    return ("several accounts" if found else "no account"), None
+
+
+def _shown_account(page, box, labels) -> Optional[str]:
+    """Which of `labels` the closed picker shows as chosen, or None when it
+    is open, could not be read or shows no one of them."""
+    return _picker_reading(page, box, labels)[1]
 
 
 def _let_go_of_focus(page) -> None:
@@ -1098,11 +1126,15 @@ class PickerMoved(pressing.Stop):
     know which account's list it was reading or taking a document from."""
 
 
-def _picker_moved(step: str = "read the accounts") -> PickerMoved:
+def _picker_moved(page, box, labels, label: str, step: str = "read the accounts") -> PickerMoved:
+    """The stop for a picker that does not show `label`, saying in fixed
+    words what it showed instead, another account, none, more than one, or
+    that it was open, never which account (#221)."""
+    state, shown = _picker_reading(page, box, labels)
     return PickerMoved(step, "the picker moved to another account", [
-        "The Wells Fargo picker showed another account while its statements were "
-        "being read, so none of them was filed under the wrong account.",
-        pressing.AGAIN])
+        "The Wells Fargo picker did not show the account whose statements were being "
+        "read, so nothing of them was filed under the wrong account.",
+        pressing.AGAIN], {"picker_showed": "another account" if shown else state})
 
 
 # The forms a last four may be written in for only_accounts, the masked
@@ -1783,14 +1815,14 @@ def _read_account(page, docs: _Found, box, labels, label: str) -> None:
     picker has to show that account before the list is expanded, before it
     is read and after, or nothing of that look is kept (#221)."""
     if not _still_shows(page, box, labels, label):
-        raise _picker_moved()
+        raise _picker_moved(page, box, labels, label)
     expand_all(page)
     scroll_full_page(page)
     if not _still_shows(page, box, labels, label):
-        raise _picker_moved()
+        raise _picker_moved(page, box, labels, label)
     look = _survey(page)
     if not _still_shows(page, box, labels, label):
-        raise _picker_moved()
+        raise _picker_moved(page, box, labels, label)
     _add_documents(docs, look, label)
 
 
@@ -1803,10 +1835,11 @@ def _collect_chosen(page, only: list) -> List[RawDoc]:
     box, labels = account_picker(page)
     if len(labels) <= 1:
         raise pressing.Stop("read the accounts", "the setting is set and the page shows one account", [
-            "only_accounts in this app's config.json is set, and the Wells Fargo page shows "
-            "one account, or no account picker, so nothing was read.",
-            "only_accounts is for a sign-in of several accounts. Leave it empty, [], for "
-            "a sign-in of one, then run this again."],
+            "only_accounts in this app's config.json is set, and no account picker of "
+            "several accounts could be read on the Wells Fargo page, so nothing was read.",
+            "If the window shows several accounts, the picker could not be read, so look "
+            "at the window and run this again. For a sign-in of one account, leave "
+            "only_accounts empty, []."],
             {"picker_entries": len(labels)})
     _no_twins(labels)
     tails = [account_tail(label) for label in labels]
@@ -2208,6 +2241,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     shown, box, labels = _account_shown(page, account, iso_date, trace)
     if not shown:
         return False
+    _shows_still(page, box, labels, account, iso_date, trace)
     expand_all(page)
     _shows_still(page, box, labels, account, iso_date, trace)
 
@@ -2246,7 +2280,7 @@ def _shows_still(page, box, labels, account: str, iso: str, trace: Optional[list
     account, strictly. A page of one account has no picker to read."""
     if account and not _still_shows(page, box, labels, account):
         _refuse(trace, "the picker moved to another account", iso)
-        raise _picker_moved("take the document")
+        raise _picker_moved(page, box, labels, account, "take the document")
 
 
 # ---------------------------------------------------------------------------
