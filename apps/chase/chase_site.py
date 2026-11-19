@@ -395,6 +395,17 @@ def _statements_path(url: str) -> str:
     return ""
 
 
+def _view_picker_shows_a_year(page) -> bool:
+    """The older center's "View:" year picker is on the page showing a year.
+    A page that cannot be asked answers no."""
+    try:
+        pickers = page.locator(YEAR_PICKER_SEL)
+        return any(re.fullmatch(r"20\d{2}", (pickers.nth(i).get_attribute("value") or "").strip())
+                   for i in range(min(pickers.count(), 5)))
+    except Exception:
+        return False
+
+
 def document_center_drawn(page) -> bool:
     """The document center on screen, even with no row in its view.
 
@@ -413,9 +424,7 @@ def document_center_drawn(page) -> bool:
         path = _statements_path(page.url or "")
         if not path or looks_signed_out(page):
             return False
-        pickers = page.locator(YEAR_PICKER_SEL)
-        if any(re.fullmatch(r"20\d{2}", (pickers.nth(i).get_attribute("value") or "").strip())
-               for i in range(min(pickers.count(), 5))):
+        if _view_picker_shows_a_year(page):
             return bool(card_accordions(page))
         if (path == STATEMENTS_CENTER_PATH or path.startswith(PERSONAL_STATEMENTS_PATH)) and any(
             header.get_attribute("aria-expanded") in {"true", "false"}
@@ -1655,9 +1664,14 @@ def chase_collect_via_api(page, keep=None) -> Listed:
         log.info("documents page not reachable")
         return _listed([])
     years = year_options(page)
-    personal = _statements_path(getattr(page, "url", "") or "").startswith(PERSONAL_STATEMENTS_PATH)
-    if not years and personal:
-        passed_over.add("year picker")
+    route = _statements_path(getattr(page, "url", "") or "")
+    personal = route.startswith(PERSONAL_STATEMENTS_PATH)
+    # With no year picker on the page, the cards show the year on screen
+    # alone. On either statements route that is a part of the list, never
+    # the whole of it (review of #232, the older route drawn without its
+    # "View:" picker was noted whole from one year). The older center with
+    # its picker showing a year is read as it always was.
+    no_year_read = not years and bool(route) and not _view_picker_shows_a_year(page)
     years = years or [""]
     if keep is not None:
         # A scoped run does not select years it will throw away. Each
@@ -1671,6 +1685,8 @@ def chase_collect_via_api(page, keep=None) -> Listed:
     if not cards:
         log.info("no card accordions found")
         return _listed([])
+    if no_year_read:
+        passed_over.add("year picker")
     log.info("Chase: %d card(s) x %d year(s)", len(cards), len(years))
 
     for year in years:

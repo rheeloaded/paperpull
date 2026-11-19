@@ -9,6 +9,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Chase reads the newer personal statements view (#228, #232).** Chase
+  now draws a card's statements under one year button shared by every card,
+  with a Download button named only by its date. The app chooses each year
+  there, opens one card at a time, and files a statement under the card
+  whose accordion holds its button, so two cards with a statement on the
+  same day each keep their own. A button it cannot tie to exactly one card,
+  two buttons for one card and date, and a year whose rows never draw are
+  passed over, and the list is not noted as read whole. Nor is a view whose
+  year could not be read, on the older route as well. A card with no
+  statement in a year looks the same as one whose rows have not drawn, so
+  such a run also ends with the list not read whole until a Chase page of
+  that shape is seen. Contributed by @solkennedy.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight
