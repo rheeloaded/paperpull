@@ -9,6 +9,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Vanguard workplace retirement plan statements (#234).** With a plan's
+  Statements open in Vanguard's workplace portal, Vanguard lists that
+  plan's statements and saves each one only when the PDF prints the plan
+  number and the statement's own date range. Each download reads the
+  plan's list again first, since the link to a statement can point at
+  another one once the list changes. A brokerage Statements tab is used
+  when both portals are open, and Resume works on the open portal's
+  statements only. Brokerage discovery now stops when a year it asked for
+  never answers, where it used to list that year as empty. Contributed by
+  @solkennedy.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight
