@@ -202,17 +202,27 @@ class Challenged(Exception):
     once and says so rather than calling the session signed out."""
 
 
+# The password fields that make a page a sign-in page, here and for the
+# core's recorder. The contributor's signed-in Paymentus landing page keeps a
+# password field it never draws, so only the fields the page draws count, as
+# for Consorsbank (#178). The core takes this value and no other
+# (recorder.DRAWN_PASSWORD_FIELD). Login never rests on it, since it says
+# signed in only once Bill History is read whole.
+PASSWORD_FIELD = "input[type='password']:visible"
+
+
 def looks_signed_out(page) -> bool:
-    """The sign-in page by its address or a password field. A page whose
-    address cannot be read raises, and is never called signed in."""
+    """The sign-in page by its address or a drawn password field. A page
+    whose address cannot be read raises, and a page whose fields cannot be
+    counted is called signed out, the safe answer."""
     path = urlsplit(page.url or "").path.lower()
     if any(m in path for m in LOGIN_URL_MARKERS):
         return True
     try:
-        if page.locator("input[type='password']:visible").count() > 0:
+        if page.locator(PASSWORD_FIELD).count() > 0:
             return True
     except Exception:
-        pass
+        return True
     return False
 
 
@@ -717,6 +727,11 @@ def _fetch(page, bill: RawDoc, out_path: Path, trace: Optional[list], viewer) ->
     return True
 
 
+# What the trace says of a bill the viewer refused right after Bill History
+# was read again, which the run counts (marinwater_docs.App.download_one).
+REFUSED_AFTER_A_FRESH_LIST = "the bill was refused right after the list was read"
+
+
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None, href: str = "",
                   document_id: str = "", *, viewer=None, split_dates=()) -> bool:
@@ -768,8 +783,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             # A refusal of a View address this run read earlier may be its
             # token running out, so the list is read again first. Refused
             # right after a list that answered, it is this bill's alone.
-            why = "the bill was refused right after the list was read" if fresh \
-                else "the bill was refused"
+            why = REFUSED_AFTER_A_FRESH_LIST if fresh else "the bill was refused"
     log.info("the selected bill was not downloaded")
     if trace is not None:
         trace.append({"note": "not taken", "why": why})

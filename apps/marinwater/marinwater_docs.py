@@ -50,7 +50,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import List, Optional
 
-from paperpull_core import doc_types, intake, receipt_pdf
+from paperpull_core import doc_types, intake, receipt_pdf, shared_folder
 from paperpull_core import browser as browser_launcher
 import marinwater_site as site
 from paperpull_core.models import State
@@ -499,7 +499,10 @@ class App:
             digest = previous.get("pdf_sha256")
             if not digest:
                 path = self.paths.root / Path(previous.get("pdf_path") or "")
-                if not path.is_file():
+                # Asked inside a try, so a folder the run may not search is
+                # an unmatched file rather than a Discover that stops
+                # (shared_folder.file_there).
+                if not shared_folder.file_there(path):
                     return False
                 try:
                     digest = sha256(intake.read_file(path, limit=site.MAX_PDF_BYTES)).hexdigest()
@@ -514,7 +517,10 @@ class App:
                     State.COMPLETED.value, State.PDF_VERIFIED.value)):
                 self.progress.update(new_key, {**previous, "document_id": new_id,
                                                "pdf_sha256": digest, "ambiguous": False}, save=False)
-            self.progress.data.pop(old_key, None)
+                self.progress.data.pop(old_key, None)
+            # With that bill saved already under its own identity, as after
+            # Restore deleted files, the date-only record stays, since it
+            # is the one that names the file it saved.
             self.progress.save(backup=True)
         self.discovery.data.pop(old_key, None)
         return True
@@ -598,6 +604,12 @@ class App:
         self.discovery.save()
         log.info("bill history: %d bills, %d new", len(docs), n_new)
         for day in sorted(held):
+            # Once Restore deleted files has saved every bill the date now
+            # lists, there is nothing left to ask for, so it is not said again.
+            listed = {r.document_id for r in docs if r.date_text == day}
+            if listed and all((self.progress.get(f"id:{i}") or {}).get("downloaded_ok")
+                              for i in listed):
+                continue
             print(f"\n!! The archived bill for {day} could not be matched to a PDF in Bill History.")
             print("   The existing archive is preserved. Use Restore deleted files for this date")
             print("   to save the individually identified PDFs.")
@@ -795,7 +807,21 @@ class App:
             self.write_failure('capture the document', 'the document would not render')
             self.stats["failed"] += 1
             print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
+            # A bill refused by the PDF viewer right after Bill History was
+            # read again is that bill's alone. Two such bills in a row say the
+            # viewer is refusing every bill, so the run stops rather than
+            # read the list again and ask the viewer for each one left.
+            refused_fresh = any(isinstance(t, dict) and t.get("why") == site.REFUSED_AFTER_A_FRESH_LIST
+                                for t in trace)
+            self._viewer_refused = getattr(self, "_viewer_refused", 0) + 1 if refused_fresh else 0
+            if self._viewer_refused >= 2:
+                tabs.stop(self, [
+                    "Marin Water's bill viewer refused two bills in a row right after Bill History",
+                    "was read again, so this run stops here rather than ask it for every bill.",
+                    "Everything saved so far is kept. Try again later with Resume.",
+                ])
             return
+        self._viewer_refused = 0
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
         self._record(doc, State.PDF_SAVED)
