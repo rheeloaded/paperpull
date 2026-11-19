@@ -169,6 +169,9 @@ ITS_OWN = {
         "a refusal of a View address read earlier in this run, which reads the list "
         "again once, or of one right after a list that answered, which is that bill's "
         "alone. A refusal of the list itself reaches the run",
+    ("cloudflare", "download_bill", ("_fetch_invoice",)):
+        "an invoice PDF refusal, which reads the selected account's history again. "
+        "A sign-out or unreadable list reaches the run",
     ("verizonmobile", "download_bill", ("_fetch", "pdf_url")):
         "a refusal of one bill's PDF, after which the history is read again. A sign-out "
         "or a list that stops shows there and reaches the run, and a history that still "
