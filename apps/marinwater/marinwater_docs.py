@@ -371,7 +371,7 @@ class App:
         saved session - so nothing is duplicated in the launcher scripts. You
         sign in; the tool attaches afterwards.
         """
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9317")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9318")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         # A real Edge or Chrome first, which is also what the site's own
@@ -470,6 +470,13 @@ class App:
         self.discovery.update(doc.key, fields, save=False)
         return 0
 
+    def _viewer(self):
+        """The request context a bill's PDF is asked for in, made fresh by
+        Playwright itself and never the browser's own. It holds no cookie,
+        header or storage of the signed-in Paymentus tab, so the PDF viewer
+        never sees the portal's session. The caller disposes of it."""
+        return self._pw.request.new_context()
+
     def _split_dates(self) -> set[str]:
         dates = set()
         for store in (self.discovery, self.progress):
@@ -483,7 +490,10 @@ class App:
         """Replace a date-only record after identifying any PDF it already saved."""
         old_id = f"bill-{day}"
         old_key = f"id:{old_id}"
-        previous = self.progress.get(old_key)
+        # The saved records are gone through rather than asked for one key,
+        # so the census of what Export history carries sees what this reads
+        # (core/tests/test_a_minimal_history_skips_what_the_app_did.py).
+        previous = next((rec for key, rec in self.progress.data.items() if key == old_key), None)
         if previous and (previous.get("downloaded_ok") or previous.get("state") in (
                 State.COMPLETED.value, State.PDF_VERIFIED.value)):
             digest = previous.get("pdf_sha256")
@@ -509,6 +519,39 @@ class App:
         self.discovery.data.pop(old_key, None)
         return True
 
+    def _record_listed(self, docs) -> tuple:
+        """Record the bills a list read, whole or stopped partway, and return
+        how many are new and the dates held for Restore deleted files.
+
+        A bill saved under its date alone, whose date now shows bills told
+        apart by their PDFs, moves to the identity its saved PDF matches
+        (_replace_date_record). When none matches, it and its date's bills
+        are held, so nothing saves that bill a second time. A stopped list
+        goes through this too, since Resume carries on from what it kept.
+        A bill read under its date alone on a date already told apart by
+        PDFs is one a stopped list read before its date was settled, and it
+        is not recorded, since no such bill can be fetched."""
+        variants: dict[str, set[str]] = {}
+        for raw in docs:
+            match = site.BILL_ID_RE.fullmatch(raw.document_id)
+            if match and match.group("digest"):
+                variants.setdefault(raw.date_text, set()).add(raw.document_id)
+        held = {day for day, ids in variants.items() if not self._replace_date_record(day, ids)}
+        for day in held:
+            old_key = f"id:bill-{day}"
+            if self.discovery.get(old_key):
+                self.discovery.update(old_key, {"ambiguous": True}, save=False)
+        split = self._split_dates()
+        n_new = 0
+        for r in docs:
+            match = site.BILL_ID_RE.fullmatch(r.document_id or "")
+            if match and not match.group("digest") and r.date_text in split:
+                continue
+            # An existing completed date-only record may need manual matching
+            # when its original PDF cannot be identified.
+            n_new += self._record_rawdoc(r, site.BILLING_URL, ambiguous=r.date_text in held)
+        return n_new, held
+
     def cmd_discover(self, quiet: bool = False) -> int:
         # A listing that stops on the way, however it stops, is noted as one
         # that stopped, for Resume (paperpull_core.listing).
@@ -522,7 +565,7 @@ class App:
         # sign-out anywhere on the way reaches the boundary below and stops
         # the run, rather than a prompt to sign in again.
         self.check_session(page)
-        viewer = self._pw.request.new_context()
+        viewer = self._viewer()
         try:
             docs = site.collect_download_docs(page, viewer=viewer, split_dates=self._split_dates())
         except site.SessionExpired:
@@ -538,8 +581,10 @@ class App:
         except site.ListStopped as stop:
             # What was listed is kept, and the listing stays noted as one
             # that stopped, so neither this run nor a Resume calls it whole.
-            for r in stop.docs:
-                self._record_rawdoc(r, site.BILLING_URL)
+            # A bill saved under its date alone is matched to what was
+            # read here as on a whole list, since Resume carries on from
+            # these records (_record_listed).
+            self._record_listed(stop.docs)
             self.discovery.save()
             print(f"\n!! The Marin Water bill history stopped partway, since {stop}.")
             print(f"   The {len(stop.docs)} bill(s) listed before it stopped are kept,")
@@ -549,20 +594,7 @@ class App:
         finally:
             viewer.dispose()
 
-        variants: dict[str, set[str]] = {}
-        for raw in docs:
-            match = site.BILL_ID_RE.fullmatch(raw.document_id)
-            if match and match.group("digest"):
-                variants.setdefault(raw.date_text, set()).add(raw.document_id)
-        held = {day for day, ids in variants.items() if not self._replace_date_record(day, ids)}
-        for day in held:
-            old_key = f"id:bill-{day}"
-            if self.discovery.get(old_key):
-                self.discovery.update(old_key, {"ambiguous": True}, save=False)
-        for r in docs:
-            # An existing completed date-only record may need manual matching
-            # when its original PDF cannot be identified.
-            n_new += self._record_rawdoc(r, site.BILLING_URL, ambiguous=r.date_text in held)
+        n_new, held = self._record_listed(docs)
         self.discovery.save()
         log.info("bill history: %d bills, %d new", len(docs), n_new)
         for day in sorted(held):
@@ -737,7 +769,7 @@ class App:
 
         # The site layer finds this bill and fetches it.
         trace: list = []
-        viewer = self._pw.request.new_context()
+        viewer = self._viewer()
         try:
             saved = site.download_bill(page, None, doc.date, out_path,
                                        title=doc.title, trace=trace, href=doc.href,

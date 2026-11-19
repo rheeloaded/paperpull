@@ -1192,7 +1192,7 @@ def test_another_app_does_not_carry_a_providers_own_fields():
     for provider, (_which, fields) in migrate.PROVIDER_KIND_FIELDS.items():
         own.setdefault(provider, set()).update(fields)
     assert {"Robinhood", "American Family", "AT&T", "Optum Bank", "Target",
-            "NetBenefits", "American Express Banking"} <= set(own)
+            "NetBenefits", "American Express Banking", "Marin Water"} <= set(own)
     for provider, fields in own.items():
         assert fields <= set(migrate._skip_fields(rec, provider)), provider
     every = set().union(*own.values())
