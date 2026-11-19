@@ -747,7 +747,7 @@ class App:
                 return False
 
         # Make sure we are on this purchase's receipt page.
-        if not site.on_receipt_page(page) or purchase.order_number not in (page.url or ""):
+        if not site.on_receipt_page(page) or site.page_key(purchase.order_number) not in (page.url or ""):
             site.goto_receipt(page, purchase)
         site.scroll_full_page(page)
 

@@ -29,7 +29,12 @@ Diagnose file confirms or corrects.
   record with a receiptKey, or a cancelled one, links to
   ``/mypurchases/detail/<key>``, a pending order to
   ``/mypurchases/pending/<orderNumber>``.
-* The **receipt page is** ``/mypurchases/image/<receiptKey>``, titled
+* Current detail and receipt routes use
+  ``date_division_store_terminal_transaction`` rather than the API's
+  tilde-separated identity (verified against a signed-in account in
+  November 2026). ``page_key`` converts only the navigation key, keeping
+  discovery and progress identities unchanged.
+* The **receipt page is** ``/mypurchases/image/<pageKey>``, titled
   "Receipt", rendered by the page from the purchase details into
   ``#receipt-print-area`` (``data-testid="POT-original-receipt"``) inside
   ``.max-receipt-content``, 635px wide, with a Print button of its own
@@ -99,12 +104,21 @@ LOGIN_URL_MARKERS = ["/signin", "/sign-in", "/login", "login.kroger", "/account/
 PURCHASE_KEY_RE = re.compile(r"^[0-9A-Za-z]+(?:[~-][0-9A-Za-z]+)*$")
 
 
+def page_key(key: str) -> str:
+    """The API identity stays stable; the site's routes use date first."""
+    m = re.fullmatch(r"(\d+)~(\d+)~(\d{4}-\d{2}-\d{2})~(\d+)~(\d+)", key)
+    if not m:
+        return key
+    division, store, date, terminal, transaction = m.groups()
+    return "_".join((date, division, store, terminal, transaction))
+
+
 def receipt_url(key: str) -> str:
-    return f"{BASE}{RECEIPT_PATH}{key}"
+    return f"{BASE}{RECEIPT_PATH}{page_key(key)}"
 
 
 def detail_url(key: str) -> str:
-    return f"{BASE}{DETAIL_PATH}{key}"
+    return f"{BASE}{DETAIL_PATH}{page_key(key)}"
 
 
 def orders_url(page_no: int = 1) -> str:
@@ -507,6 +521,10 @@ def on_receipt_page(page) -> bool:
 
 def goto_receipt(page, purchase: Purchase) -> None:
     url = purchase.receipt_url if is_safe_url(purchase.receipt_url or "") else receipt_url(purchase.order_number)
+    # Resume can carry URLs saved before the route format changed.
+    prefix, separator, key = url.rpartition(RECEIPT_PATH)
+    if separator:
+        url = prefix + separator + page_key(key)
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     wait_for_receipt(page)
 

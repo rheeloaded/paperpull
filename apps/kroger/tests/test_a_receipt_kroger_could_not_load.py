@@ -134,7 +134,8 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         url = urlsplit(self.path)
         SITE.seen.append(url.path)
-        key = url.path[len(site.RECEIPT_PATH):] if url.path.startswith(site.RECEIPT_PATH) else ""
+        route = url.path[len(site.RECEIPT_PATH):] if url.path.startswith(site.RECEIPT_PATH) else ""
+        key = next((k for k in RECEIPTS if site.page_key(k) == route), "")
         if url.path == HISTORY:
             body, kind = LISTED, "text/html; charset=utf-8"
         elif url.path == site.SEARCH_API:
@@ -269,7 +270,7 @@ def rows_naming(tmp_path, key):
 
 
 def receipts_opened():
-    return sorted({p[len(site.RECEIPT_PATH):] for p in SITE.seen if p.startswith(site.RECEIPT_PATH)})
+    return sorted({k for k in RECEIPTS if site.RECEIPT_PATH + site.page_key(k) in SITE.seen})
 
 
 @pytest.mark.parametrize("shown, why", list(FAILING.values()), ids=list(FAILING))
