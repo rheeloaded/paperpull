@@ -1613,8 +1613,6 @@ def _wait_for_personal_card_rows(page, account: str, year: str) -> bool:
 _PAGER_RE = re.compile(
     r"\bnext\s+page\b|^\s*next\s*$|^\s*(show|load|view|see)\s+(more|all)\b|"
     r"^\s*older\b|^\s*page\s+\d+\b", re.I)
-# A pager that is turned off shows no more rows.
-_ON = ":not([disabled]):not([aria-disabled='true'])"
 
 
 def _card_table_pages(page, account: str) -> bool:
@@ -1629,7 +1627,7 @@ def _card_table_pages(page, account: str) -> bool:
         # In the card's own item, or in the action bar every card shares
         # with the year button.
         for where in (card, page.locator("mds-data-table-action-bar")):
-            pagers = (where.get_by_role("button", name=_PAGER_RE).and_(where.locator("button" + _ON))
+            pagers = (where.get_by_role("button", name=_PAGER_RE, disabled=False)
                       .or_(where.get_by_role("link", name=_PAGER_RE))
                       .or_(where.locator("mds-pagination, [role='navigation']")))
             if pagers.count() > 0:

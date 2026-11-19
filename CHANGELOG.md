@@ -19,8 +19,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   two buttons for one card and date, and a year whose rows never draw are
   passed over, and the list is not noted as read whole. The same holds for
   a card table that shows a pager the app does not press, and for a view
-  whose year could not be read, on the older route as well. A card with no statement in a year looks the same as one
-  whose rows have not drawn, so a run that meets one, such as a run in
+  whose year could not be read, on the older route as well. A card with no
+  statement in a year looks the same as one whose rows have not drawn, so
+  a run that meets one, such as a run in
   January or one with a card newer than the oldest year, also ends with
   the list not read whole. Everything it read is kept and downloaded, and
   the run says so and stops at its end. On the older route, where a card

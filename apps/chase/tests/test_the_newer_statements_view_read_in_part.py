@@ -269,7 +269,8 @@ def test_the_older_route_with_a_card_and_no_picker_does_not_count(open_view):
 @pytest.mark.parametrize("pager, where", [
     ('<button type="button" aria-label="Go to next page"></button>', "card"),
     ('<button type="button">Next page</button>', "action bar"),
-], ids=["named anywhere", "in the shared action bar"])
+    ('<div role="button" tabindex="0">Next page</div>', "card"),
+], ids=["named anywhere", "in the shared action bar", "a button by its role"])
 def test_a_pager_named_or_placed_otherwise_is_still_seen(open_view, pager, where):
     """Re-check RC1, a pager whose name holds "next page" anywhere, or one
     in the action bar the cards share with the year button."""
