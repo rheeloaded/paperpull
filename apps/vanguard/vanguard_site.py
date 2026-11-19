@@ -52,7 +52,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 
-from paperpull_core import identity, intake, pdf_reader, pressing, shared_folder
+from paperpull_core import delivery, identity, intake, pdf_reader, pressing
 from paperpull_core.words import words_for as _words_for
 from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import checked as _checked_date
@@ -289,9 +289,14 @@ def workplace_plan(page) -> str:
         return ""
     u = urlsplit(page.url)
     if u.path.rstrip("/") == WORKPLACE_STATEMENTS and not u.query:
-        previous = page.evaluate(
-            "() => window.navigation?.entries()[window.navigation.currentEntry.index - 1]?.url || ''")
-        u = urlsplit(previous)
+        try:
+            previous = page.evaluate(
+                "() => window.navigation?.entries()[window.navigation.currentEntry.index - 1]?.url || ''")
+        except Exception:
+            # A tab that moved while it was read has no plan this run can
+            # be sure of, and its list is then one that did not answer.
+            return ""
+        u = urlsplit(previous if isinstance(previous, str) else "")
         if u.path.rstrip("/") != WORKPLACE_MANAGE:
             return ""
     if (u.scheme, u.netloc) != ("https", WORKPLACE_HOST):
@@ -415,6 +420,19 @@ def year_options(page) -> List[str]:
         return []
 
 
+def _shown_year(page) -> str:
+    """The year the picker shows now, or "" when it cannot be read."""
+    s = _year_select(page)
+    if s is None:
+        return ""
+    try:
+        shown = s.evaluate("el => (el.options[el.selectedIndex] || {}).text || ''")
+    except Exception:
+        return ""
+    shown = shown.strip() if isinstance(shown, str) else ""
+    return shown if re.fullmatch(r"\d{4}", shown) else ""
+
+
 def select_year(page, year: str) -> bool:
     s = _year_select(page)
     if s is None:
@@ -451,6 +469,11 @@ def collect_statements_json(page, years: Optional[List[str]] = None,
         return []
     batches: List[dict] = []
     answered_years: set[str] = set()
+    # An answer naming no year that came while the page loaded, before any
+    # year was chosen. It is the year the picker shows, which choosing again
+    # may not ask for, so it counts for that year once the picker is read,
+    # before the walk. One that comes during the walk counts for no year.
+    unnamed_on_load = [False]
 
     def on_resp(r):
         try:
@@ -463,6 +486,8 @@ def collect_statements_json(page, years: Optional[List[str]] = None,
                 requested = parse_qs(urlsplit(r.url).query).get("year", [])
                 if len(requested) == 1:
                     answered_years.add(requested[0])
+                elif not requested:
+                    unnamed_on_load[0] = True
         except Exception:
             pass
 
@@ -475,6 +500,10 @@ def collect_statements_json(page, years: Optional[List[str]] = None,
         except Exception as e:
             log.info("reload during capture failed (continuing): %s", e)
         page.wait_for_timeout(5000)
+        if unnamed_on_load[0]:
+            shown = _shown_year(page)
+            if shown:
+                answered_years.add(shown)
 
         walk = years or year_options(page)
         if keep is not None:
@@ -784,7 +813,16 @@ def _download_workplace(page, plan: str, end: str, document_id: str, out_path) -
             or not _printed_workplace_period(pages[0], row)):
         log.info("workplace statement PDF did not print the plan or period it was asked for, not saved")
         return False
-    shared_folder.write_bytes(out_path, data)
+    # Staged beside the statement and moved into place whole, so a write
+    # that stops half way leaves nothing under the statement's name.
+    try:
+        placed = delivery.place(data, out_path)
+    except OSError as e:
+        log.info("workplace statement could not be written (%s)", type(e).__name__)
+        return False
+    if not placed.ok:
+        log.info("workplace statement could not be put in place (%s)", placed.outcome)
+        return False
     return True
 
 
