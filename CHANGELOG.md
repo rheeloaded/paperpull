@@ -18,9 +18,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   receipts saved before are neither renamed nor downloaded again, and a
   Resume opens an address saved before the move at the new one. Two
   receipts from one store on one day are each saved from their own page,
-  and a receipt key in a shape the app does not know is not opened and is
-  tried again next run, so it is never set aside. Contributed by
-  @cmcculloh.
+  and a receipt key in a shape the app does not know is not opened by a
+  run and is tried again next run, so it is never set aside. Contributed
+  by @cmcculloh.
 
 ## [0.69.0] - 2026-11-17
 

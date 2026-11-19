@@ -436,11 +436,15 @@ def test_two_receipts_of_one_day_at_one_store_each_save_their_own(attached, tmp_
     assert not any(k.startswith("In-Store:2026-") for k in progress(tmp_path)), "no route form key"
 
 
-def test_resume_opens_a_receipt_saved_in_the_old_route_at_the_new_one(attached, server, tmp_path,
+def test_resume_opens_the_new_route_in_place_of_an_old_saved_address(attached, server, tmp_path,
                                                                      capsys):
     """A run before the route change saved its receipt addresses in the
     API's form. Resume reads them from discovery without the history, and
-    the receipt opens at the new route."""
+    the receipt opens at the new route, built from the purchase's own key.
+    The made-up site is plain http, which the app never follows as a saved
+    address, so this checks the address Resume builds. A saved https
+    address on Kroger in the old form is checked without a browser, in
+    test_current_receipt_routes and test_a_route_opens_its_own_purchase."""
     SITE.failing = {OTHER_KEY: COULD_NOT_LOAD}
     run_all(tmp_path, attached, capsys)
     path = tmp_path / "out" / "discovery.json"
