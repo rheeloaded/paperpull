@@ -169,6 +169,12 @@ ITS_OWN = {
         "a refusal of a View address read earlier in this run, which reads the list "
         "again once, or of one right after a list that answered, which is that bill's "
         "alone. A refusal of the list itself reaches the run",
+    ("marinwater", "download_bill", ("_fetch",)):
+        "a refusal of a signed PDF link reads Bill History again. A refusal of the list "
+        "reaches the run, and a refusal of one PDF after a fresh list fails that bill alone",
+    ("marinwater", "_resolve_bill_ids", ("_pdf_bytes",)):
+        "a separate PDF viewer refusing a link immediately after Bill History answered. "
+        "The unresolved date group is held and its partial list stops the run",
     ("verizonmobile", "download_bill", ("_fetch", "pdf_url")):
         "a refusal of one bill's PDF, after which the history is read again. A sign-out "
         "or a list that stops shows there and reaches the run, and a history that still "
@@ -360,6 +366,8 @@ NOT_A_LIST = {
     ("nwnatural", "Challenged"):
         "the portal's bot protection answering in place of the list or a bill, which "
         "the person answers in the browser before Continue",
+    ("marinwater", "Challenged"):
+        "the Paymentus browser check, which the person answers before continuing",
     ("verizonmobile", "OtherAccountShown"):
         "another account shown in My Verizon than the one a bill was listed under, "
         "which the person chooses again before Continue",

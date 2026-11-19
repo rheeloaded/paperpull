@@ -100,6 +100,9 @@ account and the last four digits its account switcher showed, so after the
 move a config still refuses a list of another account rather than save its
 statements under this one. The token is the page's own word for the
 account, not its number, and no sign-in.
+Marin Water keeps the document identity and saved PDF digest so moves
+preserve distinct bills with a shared date and can identify a previously
+saved bill whose date later gains another PDF.
 A record still under a key that left out its account's
 last four, as the apps did past forty characters until 0.34.0 and Chase did
 at any length until 0.17.1, also keeps what its key is built from
@@ -216,7 +219,8 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # the last four digits the account switcher shows,
                         # and stops when the window shows another
                         # (amexbanking_docs.App._held_accounts).
-                        "American Express Banking": ("account_token", "account_digits")}
+                        "American Express Banking": ("account_token", "account_digits"),
+                        "Marin Water": ("document_id", "pdf_sha256")}
 
 
 def _optum_form(rec: dict) -> bool:
