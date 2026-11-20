@@ -216,7 +216,9 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # the last four digits the account switcher shows,
                         # and stops when the window shows another
                         # (amexbanking_docs.App._held_accounts).
-                        "American Express Banking": ("account_token", "account_digits")}
+                        "American Express Banking": ("account_token", "account_digits"),
+                        # SimpliSafe keys monitoring bills by an invoice ID digest.
+                        "SimpliSafe": ("document_id",)}
 
 
 def _optum_form(rec: dict) -> bool:

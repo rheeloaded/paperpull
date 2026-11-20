@@ -47,7 +47,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     American Family, Apple Card, AT&T, Bank of America, Best Buy, Bilt, Chase, Chase Business,
     Coinbase, Costco, Discover, Discover Bank, Dominion, eBay, E*TRADE, Fairfax Water, First
     Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Nelnet, Newrez,
-    PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD,
+    PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SimpliSafe, SMUD,
     Sparkasse Pforzheim Calw, Spectrum,
     State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
     Wells Fargo) decide which of the page's controls may be
@@ -59,6 +59,9 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Bank, First Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo
     narrow the allowlist to the whole labels they press, and all of them but
     TreasuryDirect give each control a guard of its own built the same way.
+    SimpliSafe opens a verified Monitoring Payments invoice row and closes
+    its invoice dialog. It scopes the history request to the web app's
+    observed billing GET and renders the invoice in an isolated context.
     Best Buy presses only its year menu and a year in it. Discover Bank
     presses only the keep-alive button of Discover's inactivity dialog, a
     button whose whole name is I'm still here, Stay signed in, Continue
