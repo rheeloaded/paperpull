@@ -100,6 +100,9 @@ LIST_NOT_READ = ("ListNotRead", "run_reporting.ListNotRead", "listing.ListNotRea
 # A handler in a download path that turns a stop into the one document's
 # failure, by (app, function, the functions its try calls), and why.
 ITS_OWN = {
+    ("mercury", "download_bill", ("_take_pdf",)):
+        "a PDF refusal checked against the refreshed statement list. A sign-out "
+        "or unreadable list still stops the run",
     ("venmo", "download_bill", ("_open_month", "ready_to_print", "show_all")):
         "a month's own statement page, opened by its own address, that does not show as "
         "asked is that month's matter. Statements itself is opened before this try "

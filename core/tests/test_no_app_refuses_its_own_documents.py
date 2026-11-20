@@ -57,6 +57,9 @@ ALLOWED_TO = {
     "spectrum": {"Internet Statement", "Mobile Statement"},
     # The card statement's PDF button is pressed by its own label, "PDF".
     "coinbase": {"One Card Statement"},
+    # Mercury's active controls are a guarded row checkbox and the exact
+    # Download link Mercury generates for that row.
+    "mercury": {"Checking Statement", "Savings Statement", "Statement"},
 }
 
 
