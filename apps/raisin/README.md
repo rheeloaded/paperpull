@@ -77,7 +77,8 @@ under each.
    there. Your own Edge or Chrome opens with a separate profile. Sign in to
    Raisin yourself, answer any code it sends, open your dashboard (the page
    that lists your deposits) and leave the window open.
-4. Click **Login**. It says Success only when your deposits list answered.
+4. Once you are signed in, PaperPull checks the sign-in by reading your
+   deposits list. It says signed in only when that list answered.
 5. In Get help, click **Make the report**. This support report reads the
    lists and writes two files in the Raisin folder's `Diagnostics`.
    `survey-diagnose-<time>.json` is the one to send. It holds counts and
@@ -90,8 +91,8 @@ under each.
    it can be sent too. If a list stopped, you may be asked to name one or
    two field names from your browser yourself. Diagnose downloads nothing, clicks
    nothing and takes no screenshot.
-6. Run a **Pilot**. It saves the three newest documents, or says why each
-   was not saved.
+6. Click **Back to Raisin**, then **Try the newest few first**. It saves
+   the three newest documents, or says why each was not saved.
 7. Open the files you will send in Notepad and look through them. If
    anything in one looks personal, delete that line.
 8. Open an issue titled Raisin on

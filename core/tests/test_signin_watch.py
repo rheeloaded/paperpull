@@ -136,8 +136,11 @@ def test_a_provider_with_no_way_to_tell_has_no_plan():
 # the site's root, which says nothing (a first shell, #204). Cloudflare's
 # window opens at the Dashboard's root, and its Invoices page sits under an
 # account id only the person's own session knows, so it names no page to
-# tell a sign-in by (#238).
-CANNOT_TELL = {"applecard", "bofa", "cibc", "cloudflare", "fairfaxwater", "mypay", "paylocity", "ukg"}
+# tell a sign-in by (#238). Raisin's window opens at www.raisin.com's root,
+# and its dashboard is known only by the customer number in its address,
+# which no setting names, so it names no page to tell a sign-in by either.
+CANNOT_TELL = {"applecard", "bofa", "cibc", "cloudflare", "fairfaxwater", "mypay", "paylocity",
+               "raisin", "ukg"}
 # What each provider's own documents address reads as, of the ones with one,
 # when it is not an account page.
 DOCUMENTS_NOT_AN_ACCOUNT_PAGE = {"ibkr", "simmons"}
