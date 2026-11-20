@@ -205,11 +205,16 @@ def adopt_old_layout(discovery: dict, progress: dict, listed, whole_kinds, floor
       are fetched under their own keys, which saves nothing twice, and the
       records are retired from discovery, since no row gives their keys.
 
+    A purchase of the current page that discovery listed before and does not
+    list now (its record marked ROW_PRINTS_TIME) counts as one of its group,
+    so it is never "one purchase" while its twin's row is gone.
+
     For a kind not read whole nothing moves or is retired, and each purchase
     with no progress record that fits a record of the earlier page is held.
     Holds on the records of a kind read whole are cleared first and worked
-    out again. A group dated before `floor` is left as it is, since nothing
-    before it is recorded or fetched.
+    out again, except those dated before `floor`. A group dated before
+    `floor` is left as it is, since nothing before it is recorded or
+    fetched.
 
     Returns the counts and the keys to hold once discovery has recorded
     them, {"adopted", "retired", "hold" (keys), "progress", "discovery"
@@ -226,10 +231,15 @@ def adopt_old_layout(discovery: dict, progress: dict, listed, whole_kinds, floor
         if not isinstance(rec, dict) or not rec.get(ADOPTED_FROM):
             continue
         was = f"{rec.get('purchase_type')}:{rec.get(ADOPTED_FROM)}"
-        if was != key and isinstance(discovery.get(was), dict) and was not in progress:
+        if (was != key and was not in listed_keys and was not in progress
+                and isinstance(discovery.get(was), dict)):
             out["discovery"] |= _move(discovery, was, key, rec.get("order_number", ""))
+    # A hold before the start date stays, since its group is not judged
+    # again on a run that starts later, and a Resume with no start date
+    # would otherwise press what was held (review).
     for rec in discovery.values():
-        if isinstance(rec, dict) and rec.get(HELD) and rec.get("purchase_type") in whole_kinds:
+        if (isinstance(rec, dict) and rec.get(HELD) and rec.get("purchase_type") in whole_kinds
+                and not (floor and str(rec.get("purchase_date") or "") < floor)):
             del rec[HELD]
             out["discovery"] = True
     old = _old_layout_records(discovery, progress, listed_keys)
@@ -237,11 +247,19 @@ def adopt_old_layout(discovery: dict, progress: dict, listed, whole_kinds, floor
     for p, timed in listed:
         facts = fit_facts(p.to_dict()) if timed else None
         if facts is not None:
-            groups.setdefault(facts, ([], []))[0].append(p)
+            groups.setdefault(facts, ([], [], []))[0].append(p)
     for key, facts in sorted(old.items()):
         if facts in groups:
             groups[facts][1].append(key)
-    for facts, (new, olds) in groups.items():
+    # A purchase of the current page listed before and not now still counts.
+    # Its twin was the reason both were held, and with one row gone the
+    # other would look like the only one and take a receipt that may be
+    # the gone one's (review).
+    for key, rec in sorted(discovery.items(), key=lambda kv: str(kv[0])):
+        if (isinstance(rec, dict) and rec.get(ROW_PRINTS_TIME) and key not in listed_keys
+                and fit_facts(rec) in groups):
+            groups[fit_facts(rec)][2].append(key)
+    for facts, (new, olds, gone) in groups.items():
         kind, date = facts[0], facts[1]
         if not olds or (floor and date < floor):
             continue
@@ -249,15 +267,22 @@ def adopt_old_layout(discovery: dict, progress: dict, listed, whole_kinds, floor
         if kind not in whole_kinds:
             out["hold"].update(p.key for p in fresh)
             continue
-        if len(new) == 1 and len(olds) == 1 and fresh:
+        if len(new) == 1 and not gone and len(olds) == 1 and fresh:
             p, old_key = fresh[0], olds[0]
-            out["progress"] |= _move(progress, old_key, p.key, p.order_number)
-            out["discovery"] |= _move(discovery, old_key, p.key, p.order_number)
+            # A record never saved takes the row's own words, which the row
+            # is looked for by when it is pressed. One saved keeps its own,
+            # which its file is named by (review).
+            words = ({} if holds_something(progress.get(old_key), discovery.get(old_key))
+                     else {"items": p.to_dict()["items"]})
+            for store in (progress, discovery):
+                if _move(store, old_key, p.key, p.order_number):
+                    store[p.key].update(words)
+                    out["progress" if store is progress else "discovery"] = True
             out["adopted"] += 1
             continue
         if any(holds_something(progress.get(k), discovery.get(k)) for k in olds):
             out["hold"].update(p.key for p in fresh)
-            out["hold"].update(k for k in olds if isinstance(discovery.get(k), dict)
+            out["hold"].update(k for k in olds + gone if isinstance(discovery.get(k), dict)
                                and not holds_something(progress.get(k), discovery.get(k)))
             continue
         for k in olds:
@@ -702,6 +727,7 @@ class App:
 
         cards = []
         seen_texts = set()
+        paged = False
         for page_no in range(1, 60):
             if page_no == 1:
                 found = self._read_both_tabs(page)
@@ -723,6 +749,7 @@ class App:
             for c in fresh:
                 seen_texts.add(c.text)
             cards.extend(fresh)
+            paged = page_no > 1
         listed = []
         for card in cards:
             purchase = site.card_to_purchase(card)
@@ -732,7 +759,7 @@ class App:
         # orders page moves to the key the current page gives its purchase,
         # so its state comes along, a No Longer Listed one included, which
         # _listed_again then puts back (review of #236).
-        held = self._adopt_old_layout(listed, floor)
+        held = self._adopt_old_layout(listed, floor, paged)
         seen_keys = set()
         for purchase, timed in listed:
             seen_keys.add(purchase.key)
@@ -763,6 +790,8 @@ class App:
         if held:
             print(f"\n{len(held)} purchase(s) may each be a receipt saved from Meijer's earlier "
                   "orders page, and which one cannot be told, so they are held and not downloaded.")
+            print("To download one anyway, run with --redownload --order-number and its number "
+                  "from the run's list.")
         dropped = self._drop_undated_leftovers(seen_keys)
         if dropped:
             log.info("Dropped %d undated purchase(s) an earlier version recorded "
@@ -810,15 +839,20 @@ class App:
             print("than finish. Run it again later to read the rest.")
             raise SystemExit(0)
 
-    def _adopt_old_layout(self, listed, floor) -> set:
+    def _adopt_old_layout(self, listed, floor, paged: bool = False) -> set:
         """Records kept from Meijer's earlier orders page moved to the keys
         the current page gives their purchases (adopt_old_layout), on the
         tabs this discovery read whole, progress and discovery alike, each
         store backed up before anything in it changes, progress first, so a
         run stopped between the two has its saved receipts done under their
         new keys. The keys to hold once they are recorded. The log says how
-        many, never a date, a store, an amount or a key."""
-        whole = set() if self._list_cut_short else set(self._kinds_read)
+        many, never a date, a store, an amount or a key.
+
+        A list that went on past its first page is never taken as whole. A
+        later page that did not load ends the reading as a last page does,
+        so a twin on it would be missed and the other taken for the only one
+        (review)."""
+        whole = set() if (self._list_cut_short or paged) else set(self._kinds_read)
         done = adopt_old_layout(self.discovery.data, self.progress.data, listed, whole, floor)
         if done["progress"]:
             self.progress.save(backup=True)
@@ -1405,12 +1439,18 @@ class App:
         Meijer no longer listed it, before the rows of its saved receipt go
         in, so that it stays one purchase there. Only rows of this purchase
         that say it was no longer listed are taken out, and each file is
-        backed up before it is rewritten."""
+        backed up before it is rewritten. A record kept from Meijer's earlier
+        orders page wrote its rows under the number it had then
+        (adopt_old_layout), so those are its rows too (review)."""
+        numbers = {purchase.order_number}
+        was = (self.progress.get(purchase.key) or {}).get(ADOPTED_FROM)
+        if was:
+            numbers.add(was)
         for book in (self.order_csv, self.index_csv):
             rows = book.read_all()
             kept = [r for r in rows if not (
                 r.get("Purchase Type") == purchase.purchase_type
-                and r.get("Order or Receipt Number") == purchase.order_number
+                and r.get("Order or Receipt Number") in numbers
                 and r.get("Processing Status") == State.NO_LONGER_LISTED.value)]
             if len(kept) != len(rows):
                 book.rewrite(kept)
@@ -1759,6 +1799,8 @@ class App:
             # record as it was, so it is said here (paperpull_core.saved_copy).
             if saved_copy.tried(self, p.key):
                 problems.append(f"{p.key}: {saved_copy.tried(self, p.key)}")
+            if (self.discovery.get(p.key) or {}).get(HELD):
+                problems.append(f"{p.key}: held, {HELD_REASON}")
             if state in (State.NEEDS_MANUAL_REVIEW.value, State.FAILED.value,
                          State.NO_RECEIPT_AVAILABLE.value):
                 problems.append(f"{p.key}: {state} - {rec.get('notes','')}")
@@ -2068,6 +2110,7 @@ class App:
             f"Canceled purchases:        {s['canceled']}",
             f"No printable receipt:      {s['no_receipt']}",
             f"No longer listed:          {s.get('no_longer_listed', 0)}",
+            f"Held (maybe saved before): {s.get('held', 0)}",
             f"Needs manual review:       {s['manual_review']}",
             f"Failed:                    {s['failed']}",
             f"Duplicate filenames (#'d): {s['duplicate_filenames']}",

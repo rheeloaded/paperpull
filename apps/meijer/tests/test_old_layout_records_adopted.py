@@ -417,15 +417,120 @@ def test_an_unread_tab_holds_only_its_own_kind(tmp_path, monkeypatch):
     assert app.progress.data[NEW_KEY]["downloaded_ok"] is True
 
 
-def test_holds_are_cleared_and_worked_out_again_on_a_whole_read(tmp_path, monkeypatch):
+def test_a_twin_whose_row_has_gone_still_counts_so_the_other_is_never_adopted(tmp_path, monkeypatch):
+    """Review. Twins were held, then the 4:02 row went. The saved record
+    may be the gone twin's, so the 11:41 purchase must not take it."""
     app = make_app(tmp_path)
     put_saved(app, tmp_path)
     discover(app, monkeypatch, [NEW_1141, NEW_0402])
     assert is_held(app, NEW_KEY) and is_held(app, TWIN_KEY)
     discover(app, monkeypatch, [NEW_1141])
-    assert app.progress.data[NEW_KEY]["downloaded_ok"] is True
+    assert OLD_KEY in app.progress.data and NEW_KEY not in app.progress.data
+    assert is_held(app, NEW_KEY) and is_held(app, TWIN_KEY)
+    assert run_all(app, monkeypatch) == []
+
+
+def test_holds_are_cleared_and_worked_out_again_on_a_whole_read(tmp_path, monkeypatch):
+    """Twins of an unsaved old record and a saved one were held. Once the
+    saved one is gone from the group (its record holds nothing now), the
+    next whole read clears the holds and the twins download."""
+    app = make_app(tmp_path)
+    saved, _ = put_saved(app, tmp_path)
+    discover(app, monkeypatch, [NEW_1141, NEW_0402])
+    assert is_held(app, NEW_KEY) and is_held(app, TWIN_KEY)
+    for store in (app.progress.data, app.discovery.data):
+        for f in ("downloaded_ok", "pdf_path", "pdf_filename"):
+            store[saved].pop(f, None)
+        store[saved]["state"] = "Failed"
+    discover(app, monkeypatch, [NEW_1141, NEW_0402])
     assert not is_held(app, NEW_KEY) and not is_held(app, TWIN_KEY)
-    assert TWIN_KEY not in app.progress.data
+    assert saved not in app.discovery.data
+    assert sorted(run_all(app, monkeypatch)) == sorted([NEW_KEY, TWIN_KEY])
+
+
+def test_a_hold_before_a_later_start_date_stays(tmp_path, monkeypatch):
+    """Review. A run scoped to start after the held day must not clear the
+    hold, or a Resume with no start date presses both twins."""
+    app = make_app(tmp_path)
+    put_saved(app, tmp_path)
+    discover(app, monkeypatch, [NEW_1141, NEW_0402])
+    app.args.start_date = "2026-09-20"
+    discover(app, monkeypatch, [NEW_1141, NEW_0402])
+    assert is_held(app, NEW_KEY) and is_held(app, TWIN_KEY)
+    app.args.start_date = None
+    assert run_all(app, monkeypatch) == []
+
+
+def test_an_adopted_unsaved_record_takes_the_rows_words(tmp_path, monkeypatch):
+    """Review. The row is looked for by its store's words as printed, so a
+    record never saved takes them. A saved one keeps its own."""
+    app = make_app(tmp_path)
+    put_unsaved(app, row="In-Store: 09/19/2026\n1600 INVENTED ROAD\n$31.23  6 items")
+    discover(app, monkeypatch, [NEW_1141])
+    assert app.discovery.data[NEW_KEY]["items"][0]["name"] == "1600 Invented Road"
+    app2 = make_app(tmp_path / "saved")
+    put_saved(app2, tmp_path / "saved", row="In-Store: 09/19/2026\n1600 INVENTED ROAD\n$31.23  6 items")
+    discover(app2, monkeypatch, [NEW_1141])
+    assert app2.progress.data[NEW_KEY]["items"][0]["name"] == "1600 INVENTED ROAD"
+
+
+def test_a_list_past_its_first_page_is_never_read_whole(tmp_path, monkeypatch):
+    """Review. A later page that did not load ends the list as a last page
+    does, so a list that went on past its first page moves nothing."""
+    app = make_app(tmp_path)
+    put_saved(app, tmp_path)
+    pages = {2: [card(ELSEWHERE)]}
+    discover(app, monkeypatch, [NEW_1141])
+    app2 = make_app(tmp_path / "paged")
+    put_saved(app2, tmp_path / "paged")
+    calls = {"n": 1}
+
+    def later(page, *a, **k):
+        calls["n"] += 1
+        return pages.get(calls["n"], [])
+
+    monkeypatch.setattr(mr.App, "page", lambda self: object())
+    monkeypatch.setattr(mr.App, "_open_orders", lambda self, page: None)
+    monkeypatch.setattr(mr.App, "check_session", lambda self, page: False)
+
+    def both(page, facts=None):
+        facts.update({"read": [IN_STORE, ONLINE], "unsettled": [], "unread": []})
+        return [card(NEW_1141)]
+
+    monkeypatch.setattr(site, "collect_both_tabs", both)
+    monkeypatch.setattr(site, "goto_orders", lambda page, n=1: True)
+    monkeypatch.setattr(site, "collect_cards", later)
+    app2._list_cut_short = False
+    app2.cmd_discover(quiet=True, finish=False)
+    assert app.progress.data[NEW_KEY]["downloaded_ok"] is True
+    assert OLD_KEY in app2.progress.data and is_held(app2, NEW_KEY)
+
+
+def test_csv_rows_under_the_old_number_go_when_an_adopted_record_is_saved(tmp_path, monkeypatch):
+    """Review. A record no longer listed wrote its rows under the number it
+    had on the earlier page, and they are its rows after it moves."""
+    app = make_app(tmp_path)
+    put_unsaved(app, progress={"state": "No Longer Listed", mr.UNLISTED_ROWS: True})
+    old_no = OLD_KEY.split(":", 1)[1]
+    for book in (app.order_csv, app.index_csv):
+        book.rewrite([{"Purchase Type": IN_STORE, "Order or Receipt Number": old_no,
+                       "Processing Status": "No Longer Listed"}])
+    discover(app, monkeypatch, [NEW_1141])
+    app._forget_unlisted_rows(Purchase.from_dict(app.discovery.data[NEW_KEY]))
+    for book in (app.order_csv, app.index_csv):
+        assert book.read_all() == []
+
+
+def test_an_old_key_listed_again_is_never_moved_by_the_repair(tmp_path, monkeypatch):
+    """Review. The repair of a move a stopped run left half done only ever
+    finishes a move, never takes a record whose own row is listed."""
+    app = make_app(tmp_path)
+    put_saved(app, tmp_path)
+    discover(app, monkeypatch, [NEW_1141])
+    app.discovery.data[OLD_KEY] = old_record(state="Discovered")
+    discover(app, monkeypatch, [OLD_ROW, NEW_1141])
+    assert app.discovery.data[OLD_KEY]["order_number"] == OLD_KEY.split(":", 1)[1]
+    assert app.discovery.data[NEW_KEY]["downloaded_ok"] is True
 
 
 def test_a_hold_from_a_list_read_in_part_is_adopted_on_the_next_whole_read(tmp_path, monkeypatch):
