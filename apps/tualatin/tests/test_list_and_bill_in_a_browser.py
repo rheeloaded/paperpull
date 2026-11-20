@@ -174,7 +174,8 @@ class _Handler(BaseHTTPRequestHandler):
             return self._redirect("/css/bill.css")
         if path == "/css/breakout.css":
             return self._send(200, b'@import url("/css/imported.css"); @\\69mport url("/css/imported.css");'
-                                   b' @i\\6dport url("/css/imported.css");'
+                                   b' @i\\6dport url("/css/imported.css"); @imp@import;ort url("/css/imported.css");'
+                                   b' @imp@x\\;ort url("/css/imported.css");'
                                    b' p { margin: 0 } </style><h1>BROKE OUT</h1><style>', "text/css")
         if path in ("/css/screen.css", "/css/print.css"):
             return self._send(200, SHORT_BOX, "text/css")
@@ -376,7 +377,7 @@ def stylesheet_left_out(caplog):
 def test_a_stylesheet_over_the_budget_fails_the_bill(attached, server, tmp_path, capsys,
                                                     monkeypatch, caplog, drawn):
     """Two stylesheets each well under the limit, which together are over
-    it: the second is left out, so the bill is not drawn or kept and the
+    it. The second is left out, so the bill is not drawn or kept and the
     next run asks for it again, and the run's log says so. Nothing is asked
     for after it."""
     monkeypatch.setattr(site, "MAX_PAGE_BYTES", 60_000)
@@ -599,7 +600,7 @@ def test_a_stylesheet_that_stalls_is_given_up_on_and_fails_the_bill(attached, se
 @pytest.mark.parametrize("how", ["stall", "silent"])
 def test_after_the_first_image_that_stalls_nothing_more_is_asked_for(attached, server, tmp_path, capsys,
                                                                      monkeypatch, caplog, how):
-    """Images are best effort: six that stall, sending their headers and
+    """Images are best effort. Six that stall, sending their headers and
     then nothing or nothing at all, leave a bill kept without them, and
     after the first runs out of time the rest are not asked for, so the
     limits never add up one after another."""
@@ -623,7 +624,7 @@ def test_nothing_more_is_asked_for_after_the_first_that_does_not_fit(attached, s
     left of the budget, and after the first nothing more is asked for. A
     stylesheet first spends all but about 90 KB of a 3 MB budget, so the
     one huge sheet asked for is read no further than that and not to the
-    3 MB the bounded reader alone would allow: the server gets well under
+    3 MB the bounded reader alone would allow. The server gets well under
     3 MB of it out for each bill, so the reading itself stopped."""
     monkeypatch.setattr(site, "MAX_PAGE_BYTES", 3 * 1024 * 1024)
     SITE.fill = 3 * 1024 * 1024 - 100_000
@@ -643,7 +644,7 @@ def test_nothing_more_is_asked_for_after_the_first_that_does_not_fit(attached, s
 def test_a_stylesheet_the_browser_does_not_apply_is_not_written_in(attached, server, tmp_path, capsys,
                                                                     drawn):
     """An alternate stylesheet, or one marked disabled, that would hide
-    the bill's lines: neither is asked for, and the bill is whole."""
+    the bill's lines. Neither is asked for, and the bill is whole."""
     SITE.extra_links = ('<link rel="alternate stylesheet" href="/css/print.css" title="Short">'
                         '<link rel="stylesheet" href="/css/print.css" disabled>')
     their_tab(attached, server)

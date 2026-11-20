@@ -312,7 +312,15 @@ class ListReady(unittest.TestCase):
             def wait_for_timeout(self, ms):
                 self.url = "https://tualatin.merchanttransact.com/LoginRedirect.aspx"
                 raise RuntimeError("Execution context was destroyed")
-        for page in (SignedOutWhileCounted(), SignedOutWhileWaiting()):
+        class SignedOutOnceSettled(Page):
+            # Both counts read the same, then the rows are read on the
+            # sign-in page, which has no transaction table.
+            def evaluate(self, js, arg=None):
+                if js == site._ROWS_JS:
+                    self.url = "https://tualatin.merchanttransact.com/LoginRedirect.aspx"
+                    return {"table": False}
+                return super().evaluate(js, arg)
+        for page in (SignedOutWhileCounted(), SignedOutWhileWaiting(), SignedOutOnceSettled()):
             with self.assertRaises(site.SessionExpired):
                 site.collect_download_docs(page)
 

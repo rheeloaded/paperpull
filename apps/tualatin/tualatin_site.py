@@ -441,8 +441,8 @@ NOT_DRAWN = "the Activity table did not finish loading"
 
 def _signed_out_meanwhile(page) -> None:
     """Raise SessionExpired when the portal went to its sign-in page while
-    Activity's rows were counted. A tab that cannot say where it is says
-    nothing, so the caller's ListStopped follows."""
+    Activity's rows were counted or read. A tab that cannot say where it is
+    says nothing, so the caller's ListStopped follows."""
     try:
         out = looks_signed_out(page)
     except Exception:
@@ -481,7 +481,7 @@ def _open(page, timeout_ms: int = 30000) -> dict:
     # A count that could not be taken, or a tab closed while waiting, is a
     # table that was not read, never one that settled. When the portal has
     # gone to its sign-in page meanwhile, that is the session ending.
-    before = _UNCOUNTED = object()
+    before = object()
     for _ in range(SETTLE_ROUNDS):
         try:
             now = page.evaluate(_ROW_COUNT_JS)
@@ -501,8 +501,10 @@ def _open(page, timeout_ms: int = 30000) -> dict:
     try:
         seen = page.evaluate(_ROWS_JS) or {}
     except Exception as e:
+        _signed_out_meanwhile(page)
         raise ListStopped(f"the Activity table could not be read ({type(e).__name__})")
     if not seen.get("table"):
+        _signed_out_meanwhile(page)
         raise ListStopped("Activity shows no transaction table")
     _keep_private(seen.get("account"))
     return seen
@@ -761,9 +763,11 @@ _PRINT_JS = r"""async ([url, origin, limit, ms]) => {
     const got = await take(at, /css/i);
     // An @import, written plainly or with an escape in its name, would
     // reach past what was checked, and a "<" could close the style element
-    // and draw markup into the bill, so none of them stays.
+    // and draw markup into the bill, so none of them stays. Each at-rule
+    // dropped leaves a space, so the text on either side never joins into
+    // another @import.
     const css = got.buf ? new TextDecoder().decode(got.buf)
-      .replace(/@import[^;]*;?/gi, '').replace(/@[\w-]*\\[^;{]*;?/g, '').replace(/</g, '\\3c ') : '';
+      .replace(/@import[^;]*;?/gi, ' ').replace(/@[\w-]*\\[^;{]*;?/g, ' ').replace(/</g, '\\3c ') : '';
     if (!got.buf || size(css) > left()) {
       if (got.buf) full = true;
       dropped.push({kind: 'stylesheet', why: got.why || 'over the budget'});

@@ -67,7 +67,7 @@ site is never used.
   after 30 seconds, and after the first that does, nothing more is asked
   for either. A bill with a stylesheet left out, for any of these reasons
   or an answer that is not one, is not kept, so the next run asks for it
-  again. An image left out is named in the log, and the bill is kept.
+  again. The log says how many images were left out, and the bill is kept.
 - **Signing out.** A redirect, a 401 or 403, or a print page asking for a
   password has Activity read again. When Activity goes to the sign-in page
   too, the run stops and keeps what it saved. Sign in again and run Resume.
