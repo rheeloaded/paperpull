@@ -67,6 +67,10 @@ NAMED = {
     "sparkassepc": "The signed-in Postfach keeps a password field in hidden sign-in UI. "
                    "The contributor's live session had the Postfach form and document rows "
                    "but no visible password field (#216).",
+    "marinwater": "The contributor's signed-in Paymentus landing page keeps a password field it "
+                  "never draws, as the app's own browser test models it. Login says signed in "
+                  "only once Bill History is read whole, and the list's own check counts every "
+                  "password field of the page it fetched (#233).",
 }
 
 # A drawn-only check that is not the count of the page's own password

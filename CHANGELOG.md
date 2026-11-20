@@ -21,6 +21,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account, and a value that is not a list of last fours stop the run
   before anything is read. Existing installs get the empty setting when
   the panel next starts.
+- **Marin Water (#231, #233).** Water bills from Marin Water's Paymentus
+  portal, for a sign-in with one account. Sign in with Open sign-in window,
+  then Try the newest few first and Get new documents. The app reads Bill
+  History from the signed-in tab and fetches each bill's PDF from its own
+  View Bill link in a request of its own, with none of the portal's
+  cookies, and presses nothing. Two bills that share a date are told apart
+  by their PDFs, and a bill saved before its date gained a second keeps its
+  record when its file matches. Port 9318. Contributed by @solkennedy.
 
 ### Fixed
 - **A documents folder filed without kind folders holds only what
@@ -52,7 +60,6 @@ All notable changes to PaperPull are recorded here. Versioning follows
   same message. Import history leaves `"kind_folders": false` out of a
   provider it sets up and says so, since the documents folder it needs
   is not carried from another computer.
-
 - **Wells Fargo checks the account again just before it takes a document
   (#221).** The account picker had to show the document's account before
   the list was read, and nothing checked it again between finding the
@@ -62,7 +69,6 @@ All notable changes to PaperPull are recorded here. Versioning follows
   account, or no account at all, takes nothing, leaves the document for the
   next run and stops the run. A picker showing no account is no longer
   taken as showing the right one while a list is read either.
-
 - **Chase reads the newer personal statements view (#228, #232).** Chase
   now draws a card's statements under one year button shared by every card,
   with a Download button named only by its date. The app chooses each year
@@ -81,6 +87,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   has a statement and a corrected one on the same date, the statement's own
   row is pressed, rather than whichever came first. Contributed by
   @solkennedy.
+- **PROVIDERS.md counts the supported providers right.** Its heading said
+  84 where the list held 86, and with Marin Water it holds 87, as the
+  README says.
 
 ## [0.69.0] - 2026-11-17
 
