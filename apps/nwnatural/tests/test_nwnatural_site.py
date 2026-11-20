@@ -245,6 +245,25 @@ class ListFailsAfterTheRefusal(Page):
         return [u for u in self.asked if "view-external-bill" in u]
 
 
+class RefusesSome(Page):
+    """Refuses the bills whose View address carries one of `refused`'s
+    numbers, and serves the others."""
+
+    def __init__(self, refused=(), **kw):
+        super().__init__(**kw)
+        self.refused, self.refused_asks, self.served = set(refused), set(), 0
+
+    def evaluate(self, js, arg=None):
+        if arg is not None and "view-external-bill" in arg[0]:
+            n = int(arg[0].split("docRef=")[1].split("/")[0])
+            if n in self.refused:
+                self.asked.append(arg[0])
+                self.refused_asks.add(n)
+                return {"status": 403, "type": "text/html"}
+            self.served += 1
+        return super().evaluate(js, arg)
+
+
 UNREAD = ("500", "timeout", "empty")
 
 
@@ -494,6 +513,67 @@ class Orchestrator(unittest.TestCase):
             self.assertNotIn("signed out", said, how)
             self.assertNotIn("Timeout 30000ms", said, how)
             self.assertEqual(len(page.bills_asked()), 1, how)
+
+    def test_bills_that_failed_on_an_earlier_run_do_not_count_toward_the_stop(self):
+        """The three newest bills failed before and are refused again, the
+        two older ones are served. Bills retried newest first would
+        otherwise stop every run and every Continue at the third, and the
+        older bills would never be asked for. So only a bill with no failure
+        recorded before counts, as core not_shown counts only a page that
+        had not shown nothing before."""
+        site._RUN.clear()
+        rows = [row(d, n) for n, d in enumerate(
+            ("Dec 21, 2026", "Nov 21, 2026", "Oct 21, 2026", "Sep 22, 2026", "Aug 21, 2026"), 1)]
+        app = make_app(self.tmp, "--all")
+        for r in site.bills_of(HEADS, rows):
+            app._record_rawdoc(r, site.BILLING_URL)
+        selected = app._select()
+        for doc in selected[:3]:
+            app._record(doc, docs.State.FAILED, notes="Could not capture the document PDF")
+        page = RefusesSome(rows=rows, refused=(1, 2, 3))
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        app._delay = lambda *a, **k: None
+
+        with redirect_stdout(io.StringIO()) as out:
+            app.process(app._select())
+
+        said = " ".join(out.getvalue().split())
+        self.assertNotIn("refused bills one after another", said)
+        # Each of the two older bills is asked for and served.
+        self.assertEqual(page.served, 2, said)
+        states = [app.progress.get(d.key)["state"] for d in selected]
+        self.assertEqual(states[:3], [docs.State.FAILED.value] * 3, said)
+        self.assertNotIn(docs.State.FAILED.value, states[3:], said)
+
+    def test_a_continue_after_the_stop_takes_up_bills_not_asked_before(self):
+        """Every bill is refused. The run stopped at the third, so the first
+        two failed alone. A Continue asks those two again, each alone, then
+        stops at the third bill never refused before, the fifth, so each
+        Continue moves on and none loops on one bill."""
+        site._RUN.clear()
+        rows = [row(d, n) for n, d in enumerate(
+            ("Dec 21, 2026", "Nov 21, 2026", "Oct 21, 2026", "Sep 22, 2026", "Aug 21, 2026"), 1)]
+        app = make_app(self.tmp, "--all")
+        for r in site.bills_of(HEADS, rows):
+            app._record_rawdoc(r, site.BILLING_URL)
+        selected = app._select()
+        for doc in selected[:2]:
+            app._record(doc, docs.State.FAILED, notes="Could not capture the document PDF")
+        page = RefusesSome(rows=rows, refused=(1, 2, 3, 4, 5))
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        app._delay = lambda *a, **k: None
+
+        with redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit):
+            app.process(app._select())
+
+        said = " ".join(out.getvalue().split())
+        self.assertIn("refused bills one after another", said)
+        self.assertEqual(page.refused_asks, {1, 2, 3, 4, 5}, said)
+        self.assertEqual(app.progress.get(selected[2].key)["state"], docs.State.FAILED.value, said)
+        self.assertEqual(app.progress.get(selected[3].key)["state"], docs.State.FAILED.value, said)
+        self.assertIsNone(app.progress.get(selected[4].key), said)
 
     def test_bills_refused_in_a_row_stop_the_run_and_record_nothing(self):
         app = make_app(self.tmp, "--all")

@@ -653,7 +653,7 @@ class App:
 
     def bills_refused(self, refused) -> None:
         """Stop the run because the portal refused bill after bill right
-        after the list answered. The bills before this one failed alone;
+        after the list answered. The bills before this one failed alone,
         this one has nothing recorded against it, and the list was read
         whole, so the run ends as one that stopped (tabs.stop)."""
         log.info("bills refused in a row: %s", refused)
@@ -696,11 +696,14 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # The site layer finds this bill and fetches it.
+        # The site layer finds this bill and fetches it. A bill that failed
+        # on an earlier run is not counted toward a stop for refusals in a
+        # row (site.BillsRefused).
         trace: list = []
+        failed_before = (self.progress.get(doc.key) or {}).get("state") == State.FAILED.value
         saved = site.download_bill(page, None, doc.date, out_path,
                                    title=doc.title, trace=trace, href=doc.href,
-                                   document_id=doc.document_id)
+                                   document_id=doc.document_id, failed_before=failed_before)
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (
                 out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):

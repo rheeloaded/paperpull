@@ -9,6 +9,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **NW Natural stops after three bills in a row are refused (#240).** When
+  the portal refuses bill after bill right after Bill History answers, the
+  run stops at the third with nothing recorded against it, rather than read
+  the whole history again for every bill left. A bill taken in between
+  starts the count again, and a bill that failed on an earlier run does not
+  count, so Resume moves on to the bills not asked for yet. Login has a line
+  of its own for the portal's bot check. Contributed by @crazyhorse90210.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight

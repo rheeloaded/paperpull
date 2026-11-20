@@ -64,8 +64,11 @@ stops the run once.
   the panel offers a run that reads the list first. Refused right after a
   list that answered, it fails that one bill, since the session plainly
   works. Three of those with no bill taken between stop the run, rather
-  than read the whole history again for each bill after. A 403 from the portal's bot protection (DataDome) stops the run
-  too, or Login, saying so, so you can answer it in the browser. Any other
+  than read the whole history again for each bill after. A bill that
+  failed on an earlier run fails alone again and does not count, so Resume
+  moves on to the bills not asked for yet. A 403 from the portal's bot
+  protection (DataDome) stops the run too, or Login, saying so, so you can
+  answer it in the browser. Any other
   answer that is not a PDF, an HTML page among them, fails that one bill.
 
 ## Validation status

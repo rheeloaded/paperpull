@@ -642,7 +642,8 @@ def expand_all(page) -> None:
 _RUN: dict = {}
 
 # Bills refused right after a list that answered, with no bill taken
-# between, before the run stops (BillsRefused).
+# between and none of them failed on an earlier run, before the run stops
+# (BillsRefused).
 REFUSED_IN_A_ROW = 3
 
 
@@ -735,7 +736,7 @@ def _fetch(page, bill: RawDoc, out_path: Path, trace: Optional[list]) -> bool:
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None, href: str = "",
-                  document_id: str = "") -> bool:
+                  document_id: str = "", failed_before: bool = False) -> bool:
     """Save the bill discovery recorded for `iso_date`. The list this run
     read is used when there is one; it is read again when there is none,
     and once more when the bill is not in it or is not answered with a PDF,
@@ -750,7 +751,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     session ended nor that it holds (refused.list_again). A refusal of the
     bill itself right after the list was read and answered fails this bill
     alone, since the session plainly works, until REFUSED_IN_A_ROW of them
-    come with no bill taken between, which raises BillsRefused."""
+    come with no bill taken between, which raises BillsRefused. A bill that
+    `failed_before` on an earlier run is not counted, so bills retried
+    newest first never stop every run at the same few, and each Continue
+    after the stop moves on to bills not asked for before."""
     out_path = Path(out_path)
     if href != DOWNLOAD_PATH or not BILL_ID_RE.fullmatch(document_id or "") \
             or document_id != f"bill-{iso_date}":
@@ -786,7 +790,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             # right after a list that answered, it is this bill's alone.
             why = "the bill was refused right after the list was read" if fresh \
                 else "the bill was refused"
-            if fresh:
+            if fresh and not failed_before:
                 _RUN["refused"] = _RUN.get("refused", 0) + 1
                 if _RUN["refused"] >= REFUSED_IN_A_ROW:
                     raise BillsRefused(
