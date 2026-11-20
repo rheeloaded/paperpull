@@ -18,6 +18,7 @@ check. Every account and id is invented."""
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -64,7 +65,7 @@ def home(tmp_path, monkeypatch):
 
     def build():
         app = docs.App(docs.build_parser().parse_args(["--config", str(cfg)]))
-        app.page = lambda: None
+        app.page = lambda: SimpleNamespace(url=site.URLS["documents"])
         app.check_session = lambda *_a, **_kw: None
         return app
     return build

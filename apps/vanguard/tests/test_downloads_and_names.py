@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import storage
@@ -43,12 +45,13 @@ class _Store:
 def _app(tmp_path=None):
     app = docs.App.__new__(docs.App)
     app.args = SimpleNamespace(start_date=None, end_date=None, year=None, type=None,
-                               account=None, max_docs=None, redownload=False)
+                               account=None, max_docs=None, redownload=False, dry_run=False)
     app.config = {"document_types": list(storage.ALL_CATEGORIES), "account_labels": {},
                   "default_start_date": ""}
     app.rules = doc_types.load_rules()
     app.stats = {"skipped_out_of_scope": 0, "discovered": 0}
     app.discovery, app.progress = _Store(), _Store()
+    app._work_page = None
     app._journal = app._requests = None
     if tmp_path is not None:
         app.paths = storage.Paths(tmp_path)
@@ -141,6 +144,158 @@ def test_discover_walks_the_year_picker_once(monkeypatch):
                         lambda p, keep=None: walks.append("documents") or [_listed()])
     assert app.cmd_discover(quiet=True) == 1
     assert walks == ["documents"]
+
+
+@pytest.mark.parametrize("plan", [None, "900001", "900002"])
+def test_resume_with_both_portals_in_the_archive_uses_only_the_selected_plan_or_brokerage(
+        tmp_path, monkeypatch, plan):
+    app = _app(tmp_path)
+    app.args.max_docs = 1
+    legacy_row = _listed()
+    app._record_vanguard_doc(legacy_row, set())
+    legacy = next(iter(app.discovery.data.values()))
+    for number in ("900001", "900002"):
+        app._record_vanguard_doc({**legacy_row, "doc_type": site.WORKPLACE_STATEMENT,
+                                  "account_id": number, "account": f"Example Workplace Plan {number}",
+                                  "date": "2034-12-31", "title": "Account Statement - Example Workplace"}, set())
+    app.page = lambda: SimpleNamespace(
+        url=f"https://ownyourfuture.vanguard.com/main/manage?planId={plan}" if plan
+        else site.URLS["documents"])
+    selected = []
+    monkeypatch.setattr(docs.listing, "resume", lambda _app, remaining, _process: selected.extend(remaining))
+
+    app.cmd_resume()
+    assert [d.account_id for d in selected] == [plan or legacy["account_id"]]
+    assert selected[0].doc_type == (site.WORKPLACE_STATEMENT if plan else legacy["doc_type"])
+    assert len(app.discovery.data) == 3
+
+
+def test_brokerage_statements_tab_keeps_priority_with_workplace_open(monkeypatch):
+    app = _app()
+    app.config["output_dir"] = "."
+    workplace_page = SimpleNamespace(is_closed=lambda: False,
+        url="https://ownyourfuture.vanguard.com/main/manage?planId=900001")
+    brokerage_page = SimpleNamespace(is_closed=lambda: False, url=site.URLS["documents"])
+    app.browser = lambda: SimpleNamespace(pages=[workplace_page, brokerage_page])
+    app._cdp_mode = True
+    app._requests = object()
+    monkeypatch.setattr(docs.capture, "clear_archived_copies", lambda *_: None)
+    monkeypatch.setattr(site, "on_documents_page", lambda _page: True)
+    assert app.page() is brokerage_page
+
+
+def test_two_workplace_tabs_do_not_choose_a_plan_by_tab_order(monkeypatch):
+    app = _app()
+    tabs = [SimpleNamespace(is_closed=lambda: False,
+                           url=f"https://ownyourfuture.vanguard.com/main/manage?planId={plan}")
+            for plan in ("900001", "900002")]
+    app.browser = lambda: SimpleNamespace(pages=tabs)
+    app._cdp_mode = True
+    monkeypatch.setattr(site, "on_documents_page", lambda _page: True)
+
+    with pytest.raises(SystemExit, match="desired Vanguard workplace plan"):
+        app.page()
+
+
+@pytest.mark.parametrize("response", [None, False, True])
+def test_only_an_answered_empty_list_completes_discovery(tmp_path, monkeypatch, response):
+    app = _app(tmp_path)
+
+    class Page:
+        url = "https://statements.web.vanguard.com/"
+
+        def on(self, event, listener):
+            assert event == "response"
+            self.listener = listener
+
+        def reload(self, **kwargs):
+            if response is not None:
+                self.listener(SimpleNamespace(
+                    url="https://personal1.vanguard.com/usa/api/lah-statements-consumer/"
+                        "statements/consumer?year=2026",
+                    ok=response, headers={}, body=lambda: b'{"statements": []}',
+                ))
+
+        def wait_for_timeout(self, ms):
+            pass
+
+        def remove_listener(self, event, listener):
+            assert event == "response" and listener == self.listener
+            self.listener = None
+
+    page = Page()
+    app.page = lambda: page
+    app.check_session = lambda page: None
+    failures = []
+    app.write_failure = lambda step, reason: failures.append((step, reason))
+    monkeypatch.setattr(site, "ensure_statements", lambda page: True)
+    monkeypatch.setattr(site, "year_options", lambda page: [])
+
+    if response is True:
+        assert app.cmd_discover(quiet=True) == 0
+        assert not failures
+    else:
+        with pytest.raises(SystemExit):
+            app.cmd_discover(quiet=True)
+        assert failures == [("read the statements list", "the statements list did not answer")]
+    assert json.loads(app.paths.last_listing.read_text())["complete"] is (response is True)
+    assert page.listener is None
+
+
+@pytest.mark.parametrize("older", ["missing", "refused", "wrong-year", "unreadable", "empty"])
+def test_brokerage_discovery_requires_an_answer_for_each_requested_year(tmp_path, monkeypatch, older):
+    app = _app(tmp_path)
+
+    class Page:
+        url = site.URLS["documents"]
+
+        def on(self, _event, listener):
+            self.listener = listener
+
+        def answer(self, year, ok=True, body=b'{"statements": []}'):
+            self.listener(SimpleNamespace(
+                url="https://personal1.vanguard.com/usa/api/lah-statements-consumer/"
+                    f"statements/consumer?year={year}",
+                ok=ok, headers={}, body=lambda: body,
+            ))
+
+        def reload(self, **_kwargs):
+            self.answer("2032", body=json.dumps({"statements": [{
+                "statementId": "NEWEST", "accountId": "10001111", "accountNumber": "1111",
+                "endDate": "2032-04-30", "statementDescription": "Synthetic Brokerage 1111",
+            }]}).encode())
+
+        def wait_for_timeout(self, _ms):
+            pass
+
+        def remove_listener(self, _event, _listener):
+            self.listener = None
+
+    page = Page()
+    app.page = lambda: page
+    app.check_session = lambda _page: None
+    app.write_failure = lambda *_: None
+    visited = []
+    monkeypatch.setattr(site, "ensure_statements", lambda _page: True)
+    monkeypatch.setattr(site, "year_options", lambda _page: ["2032", "2031"])
+
+    def select(_page, year):
+        visited.append(year)
+        if older != "missing":
+            page.answer("2030" if older == "wrong-year" else year, ok=older != "refused",
+                        body=b'{"statements": [null]}' if older == "unreadable" else b'{"statements": []}')
+        return True
+
+    monkeypatch.setattr(site, "select_year", select)
+    if older == "empty":
+        assert app.cmd_discover(quiet=True) == 1
+        assert len(app.discovery.data) == 1
+    else:
+        with pytest.raises(SystemExit):
+            app.cmd_discover(quiet=True)
+        assert not app.discovery.data
+    assert visited == ["2031"]
+    assert json.loads(app.paths.last_listing.read_text())["complete"] is (older == "empty")
 
 
 def test_diagnose_takes_no_screenshot_and_reads_what_vanguard_sends(tmp_path, monkeypatch):

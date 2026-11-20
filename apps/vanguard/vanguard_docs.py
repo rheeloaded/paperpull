@@ -123,6 +123,50 @@ def migrate_legacy_keys(records: dict) -> int:
     return _migrate_account_keys(records, lambda r: Document.from_dict(r).key)
 
 
+def _workplace_occurrences(rows, numbers, records) -> list:
+    """`numbers`, with each workplace statement numbered by its period.
+
+    One plan's statements that end on the same day (a quarter's and a
+    year's, say) share a title, a date and an account, and stable_occurrences
+    tells such rows apart by where they come in the list. A list that comes
+    back in another order would then hand a finished record the other
+    statement's period. A workplace statement's id is its period, so a
+    record already holding that id keeps its number, and a statement no
+    record holds takes the lowest number none of them has. Brokerage rows
+    keep the numbers they were given."""
+    def tidy(value):
+        return re.sub(r"\s+", " ", str(value or "")).strip()
+
+    def group(item):
+        return tidy(item.get("account")), tidy(item.get("title")), tidy(item.get("date"))
+
+    held: dict = {}
+    for rec in (records or {}).values():
+        if isinstance(rec, dict) and rec.get("doc_type") == site.WORKPLACE_STATEMENT:
+            held.setdefault(group(rec), {})[rec.get("document_id") or ""] = int(rec.get("occurrence") or 0)
+    out = list(numbers)
+    given: dict = {}
+    fresh = []
+    for i, row in enumerate(rows):
+        if row.get("doc_type") != site.WORKPLACE_STATEMENT:
+            continue
+        ids = held.get(group(row), {})
+        if row.get("document_id") and row["document_id"] in ids:
+            out[i] = ids[row["document_id"]]
+            given.setdefault(group(row), set()).add(out[i])
+        else:
+            fresh.append(i)
+    for i in fresh:
+        g = group(rows[i])
+        used = given.setdefault(g, set()) | set(held.get(g, {}).values())
+        n = 0
+        while n in used:
+            n += 1
+        out[i] = n
+        given[g].add(n)
+    return out
+
+
 class App:
     _journal = None
     _requests = None
@@ -222,7 +266,18 @@ class App:
             # matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
             vanguard = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = vanguard[0] if vanguard else tabs.new_tab(ctx)
+            ready = [p for p in vanguard if site.on_documents_page(p)]
+            # A workplace tab should not take over a brokerage run when
+            # both portals are open in the same PaperPull browser.
+            brokerage = next((p for p in ready if not site.is_workplace_page(p)), None)
+            if brokerage is None and len(ready) > 1:
+                raise SystemExit("Leave only the desired Vanguard workplace plan's Statements tab open.")
+            # A workplace tab with no plan open is not a tab a brokerage
+            # run can open its statements in.
+            others = [p for p in vanguard if not site.is_workplace_page(p)]
+            self._work_page = brokerage or next(iter(ready or others), None)
+            if self._work_page is None:
+                self._work_page = tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         # A file in the download folder that is an exact copy of a document
@@ -376,16 +431,18 @@ class App:
         if d.get("occurrence"):
             full_summary = f"{full_summary} ({int(d['occurrence']) + 1})"
         account_id = d.get("account_id") or ""
+        doc_type = d.get("doc_type") or ""
         doc = Document(title=title, category=category, summary=full_summary,
                        date=date, period=d.get("period") or "",
                        confidence=confidence, account=account,
                        account_id=account_id, last4=account_id[-4:],
                        charitable=account_id in charitable_ids,
-                       doc_type=d.get("doc_type") or "",
+                       doc_type=doc_type,
                        on_demand_type=d.get("on_demand_type") or "",
                        document_id=d.get("document_id") or "",
                        occurrence=int(d.get("occurrence", 0) or 0),
-                       href=site.URLS["documents"])
+                       href=(site.WORKPLACE_STATEMENTS_URL if doc_type == site.WORKPLACE_STATEMENT
+                             else site.URLS["documents"]))
         existing = self.discovery.get(doc.key)
         if existing is None:
             rec = doc.to_dict()
@@ -393,7 +450,10 @@ class App:
             self.discovery.update(doc.key, rec, save=False)
             return 1
 
-        if doc.document_id and existing.get("document_id") != doc.document_id:
+        # A workplace statement's id is its period, which the record is, so
+        # it is never moved onto another record (_workplace_occurrences).
+        if (doc.document_id and existing.get("document_id") != doc.document_id
+                and doc.doc_type != site.WORKPLACE_STATEMENT):
             self.discovery.update(doc.key, {"document_id": doc.document_id,
                                             "on_demand_type": doc.on_demand_type},
                                   save=False)
@@ -430,8 +490,14 @@ class App:
         # every account), and asking it walked every year of the picker a
         # second time before the walk that reads the statements.
         charitable_ids: set = set()
-        raw = site.collect_documents(
-            page, keep=scope.period_filter(self.args, self.config))
+        try:
+            raw = site.collect_documents(
+                page, keep=scope.period_filter(self.args, self.config))
+        except site.ListStopped:
+            self.write_failure("read the statements list", "the statements list did not answer")
+            print("Vanguard did not return a readable statements list. "
+                  "Open Statements in the signed-in window and try again.")
+            raise SystemExit(0)
         log.info("Vanguard: %d document(s) across all accounts", len(raw))
         n_new = 0
         # Which of several documents sharing a type, a title, a date and an
@@ -440,8 +506,9 @@ class App:
         # number, and the one already downloaded would be skipped as done
         # while the other arrived beside it. A number already given stays
         # with the document it was given to.
-        for d, occ in zip(raw, _stable_occurrences(
-                raw, self.discovery.data, fields=("doc_type", "title", "date"))):
+        numbers = _workplace_occurrences(raw, _stable_occurrences(
+            raw, self.discovery.data, fields=("doc_type", "title", "date")), self.discovery.data)
+        for d, occ in zip(raw, numbers):
             d["occurrence"] = occ
             n_new += self._record_vanguard_doc(d, charitable_ids)
 
@@ -476,9 +543,25 @@ class App:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
 
-    def _select(self, limit: Optional[int] = None) -> List[Document]:
+    def _select(self, limit: Optional[int] = None, *, pending_only: bool = False) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
+        has_workplace = any(d.doc_type == site.WORKPLACE_STATEMENT for d in docs)
         docs = [d for d in docs if self._in_scope(d)]
+        if pending_only:
+            docs = [d for d in docs if not self._already_done(d)]
+        page = self._work_page
+        # A Resume from a mixed archive needs the active portal only when
+        # there is work in scope. A dry run can still plan files offline.
+        if page is None and docs and has_workplace and not self.args.dry_run:
+            page = self.page()
+        if page is not None:
+            if site.is_workplace_page(page):
+                plan = site.workplace_plan(page)
+                if not plan:
+                    listing.read_again_stopped(self, "Open Statements for the selected Vanguard workplace plan.")
+                docs = [d for d in docs if d.doc_type == site.WORKPLACE_STATEMENT and d.account_id == plan]
+            else:
+                docs = [d for d in docs if d.doc_type != site.WORKPLACE_STATEMENT]
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
@@ -546,6 +629,9 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
+            except site.ListStopped:
+                self.write_failure("read the statements list", "the statements list did not answer")
+                listing.read_again_stopped(self, "Vanguard did not return the statement list for this plan.")
             except Exception as e:
                 log.exception("Failed on %s", doc.key)
                 self._record(doc, State.FAILED, notes=str(e))
@@ -753,7 +839,23 @@ class App:
         # run that stopped before it had the whole list, it says so and stops
         # as a run that stopped, rather than call the run finished
         # (paperpull_core.listing).
-        docs = [d for d in self._select() if not self._already_done(d)]
+        docs = self._select(pending_only=True)
+        # A mixed archive's statements of the portal or plan that is not open
+        # wait for it, and Resume says so rather than call the run complete.
+        here = {d.key for d in self._select(limit=0, pending_only=True)}
+        waiting = sum(1 for v in self.discovery.data.values()
+                      if (d := Document.from_dict(v)).key not in here
+                      and self._in_scope(d) and not self._already_done(d))
+        if waiting:
+            print(f"{waiting} statement{' waits' if waiting == 1 else 's wait'} for another "
+                  "Vanguard portal or plan. Open its Statements in the signed-in window "
+                  "and run Resume again for them.")
+            if not docs:
+                # What a Resume says of the last listing is still said, and a
+                # listing that stopped still stops this run (listing.resume).
+                listing.before_resume(self)
+                listing.after_resume(self)
+                return
         listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run))
 
 
