@@ -41,12 +41,13 @@ and confirmations in `Vertragsunterlagen\`, anything else in
 **Every PDF is checked before it is filed.** It must name Raisin or
 Weltsparen and print its own date, day first (05.03.2026 is the fifth of
 March, and an English 5 March 2026 is read too), and when another
-document of the run carries the same date, its own title too. A
-timestamp is taken as the day it was in Germany. A PDF that does not is not saved. It is said as unreadable,
+document of the run carries the same date, its own title too. A PDF
+that does not is not saved. It is said as unreadable,
 unconfirmed or wrong, and the next run tries it again. This is stricter
 than it may need to be, on purpose. If your documents name only a partner
 bank, or print their date another way, every one is refused until your
-first run says what they print, and that is a one-line repair.
+first run says what they print, and that is a one-line repair. A
+timestamp is taken as the day it was in Germany.
 
 What is not known yet, and what your first run confirms.
 

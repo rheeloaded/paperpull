@@ -636,7 +636,9 @@ class App:
                     # document, so the run stops and says so.
                     raise site.ListStopped(
                         "Raisin refused %d documents' PDFs in a row while its lists still "
-                        "answered, so the run stops here." % REFUSED_IN_A_ROW)
+                        "answered, so the run stops here. It was the files that were "
+                        "refused, and the next run lists first and tries them again."
+                        % REFUSED_IN_A_ROW)
                 return
             self._refused_in_row = 0
         except site.SessionExpired:

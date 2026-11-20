@@ -348,14 +348,20 @@ def _list_call(page, path: str, params: dict, what: str, name: str):
 # with. One that says there is more stops the list rather than be read as
 # all of it.
 _PAGED_TOTALS = ("totalPages", "total_pages")
-_PAGED_COUNTS = ("totalElements", "total_elements", "total", "totalCount", "count")
+# "total", "count" and "next" alone are left out, since a dashboard's
+# answer can hold a sum of balances or the next deposit to mature there.
+_PAGED_COUNTS = ("totalElements", "total_elements", "totalCount", "total_count")
+_PAGED_NEXT = ("next", "nextPage", "next_page", "nextPageToken", "next_page_token")
 
 
 def _more_to_come(data: dict, held: int) -> bool:
     if data.get("last") is False or data.get("hasMore") is True or data.get("has_more") is True:
         return True
-    if data.get("next") or data.get("nextPage") or data.get("next_page"):
-        return True
+    for key in _PAGED_NEXT:
+        value = data.get(key)
+        if (isinstance(value, str) and value.strip()) or (
+                isinstance(value, int) and not isinstance(value, bool) and key != "next"):
+            return True
     for key in _PAGED_TOTALS:
         value = data.get(key)
         if isinstance(value, int) and not isinstance(value, bool) and value > 1:
@@ -675,9 +681,14 @@ def check_text(text: str, date: str, title: str, rivals=()) -> tuple:
         mine = re.sub(r"\s+", " ", title.lower()).strip()
         longer = [t for t in same_day if mine and mine in t.lower() and _shows_words(low, t)]
         if longer:
-            # Its own title is seen, but only as the start of a neighbor's
-            # longer one, which says nothing about which of the two it is.
-            return WRONG, tuple(found)
+            # A neighbor's longer title holding this one is seen. Its own
+            # title counts only where it is seen apart from that, and
+            # otherwise which of the two it is cannot be told.
+            rest = low
+            for t in longer:
+                rest = re.sub(r"\s+".join(map(re.escape, t.lower().split())), " ", rest)
+            if not _shows_words(rest, title):
+                return UNCONFIRMED, tuple(found)
         if not own_title:
             if any(_shows_words(low, t) for t in same_day):
                 return WRONG, tuple(found)

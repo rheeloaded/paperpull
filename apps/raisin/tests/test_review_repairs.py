@@ -85,10 +85,19 @@ def test_the_core_is_handed_only_rows_of_the_same_day(run, monkeypatch):
 
 # -- MAJOR 1 scenario C, a title seen only inside a longer neighbor title ------------
 
-def test_a_title_seen_only_inside_a_same_day_neighbors_longer_title_is_wrong():
+def test_a_title_seen_only_inside_a_same_day_neighbors_longer_title_is_unconfirmed():
     longer = text("Raisin", "Kontoauszug Tagesgeld", "Datum 30.06.2026")
     rivals = [("2026-06-30", "Kontoauszug Tagesgeld")]
-    assert site.check_text(longer, "2026-06-30", "Kontoauszug", rivals)[0] == site.WRONG
+    assert site.check_text(longer, "2026-06-30", "Kontoauszug", rivals)[0] == site.UNCONFIRMED
+    # Never wrong, which would put the whole run in doubt, for a right PDF
+    # that prints a longer word or breaks the line (the second review, R2).
+    for printed in (("Kontoauszug Tagesgeldkonto",), ("Kontoauszug", "Tagesgeld Plus")):
+        got = site.check_text(text("Raisin", *printed, "Datum 30.06.2026"), "2026-06-30",
+                              "Kontoauszug", rivals)[0]
+        assert got != site.WRONG
+    # Its own title seen apart from the neighbor's is its own.
+    both = text("Raisin", "Kontoauszug", "Datum 30.06.2026", "Siehe auch Kontoauszug Tagesgeld")
+    assert site.check_text(both, "2026-06-30", "Kontoauszug", rivals)[0] == ""
     # The longer one's own PDF is its own.
     assert site.check_text(longer, "2026-06-30", "Kontoauszug Tagesgeld",
                            [("2026-06-30", "Kontoauszug")])[0] == ""
@@ -107,7 +116,7 @@ def test_a_paged_deposits_answer_stops_the_list(more):
         site.collect_documents(page)
 
 
-@pytest.mark.parametrize("more", [{"totalPages": 2}, {"total": 5}, {"has_more": True}])
+@pytest.mark.parametrize("more", [{"totalPages": 2}, {"totalCount": 5}, {"has_more": True}])
 def test_a_paged_documents_answer_stops_the_list(more):
     page = FakePage()
     page.body["FDA_t003"] = json.dumps({"documents": page.documents["FDA_t003"], **more})
@@ -115,11 +124,21 @@ def test_a_paged_documents_answer_stops_the_list(more):
         site.collect_documents(page)
 
 
+@pytest.mark.parametrize("extra", [
+    {"total": 1500000}, {"count": 7}, {"next": {"maturity_date": "2026-05-01"}},
+    {"next": None}, {"next": ""},
+])
+def test_a_field_that_need_not_be_paging_does_not_stop_the_list(extra):
+    page = FakePage()
+    page.body[site.ACTIVE_PATH] = json.dumps({"deposits": page.active, **extra})
+    assert len(site.collect_documents(page)) == 3
+
+
 def test_an_answer_that_says_it_is_all_is_read():
     page = FakePage()
     page.body[site.ACTIVE_PATH] = json.dumps({"content": page.active, "totalPages": 1,
                                               "last": True, "totalElements": 2})
-    page.body["FDA_t003"] = json.dumps({"documents": page.documents["FDA_t003"], "total": 1})
+    page.body["FDA_t003"] = json.dumps({"documents": page.documents["FDA_t003"], "totalCount": 1})
     assert len(site.collect_documents(page)) == 3
 
 
@@ -143,6 +162,9 @@ def test_a_timestamp_is_the_day_it_was_in_germany(value, day):
     ("Bestätigung Vertragsabschluss", storage.CONTRACT),
     ("Abschlussbestätigung Festgeld", storage.CONTRACT),
     ("Kontoabschluss 2025", "Statement"),
+    ("Rechnungsabschluss 2025", "Statement"),
+    ("Jahresabschluss", "Statement"),
+    ("Quartalsabschluss Q1", "Statement"),
     ("Steuer-ID Bestätigung", storage.CONTRACT),
     ("Jahressteuerbescheinigung 2025", "Tax Document"),
 ])

@@ -29,7 +29,7 @@
       "summary": "Zinsbescheinigung"
     },
     {
-      "pattern": "\\bkontoabschluss\\b|\\babschluss\\b|saldenbest(ae|ä)tigung|balance\\s+confirmation",
+      "pattern": "\\b(?:rechnungs|jahres|quartals|konto)?abschluss\\b|saldenbest(ae|ä)tigung|balance\\s+confirmation",
       "summary": "Kontoabschluss"
     }
   ],
