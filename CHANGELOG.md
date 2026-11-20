@@ -9,6 +9,19 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Trade Republic monthly account statements, UNTESTED.** A new app,
+  `traderepublic`, built without an account and waiting for a tester. Once
+  you are signed in and the web app shows its home page, it asks for one
+  month's statement at a time from inside that tab, about three years back,
+  and saves each PDF only when it prints that month's first and last day. A
+  month that answers with no PDF is said and asked again next time, never
+  taken for a sign-out or for done, and Login says Success only once a
+  statement has answered. The routes were first seen in the Habeas sources
+  definition for Trade Republic (CC0). Trade confirmations and other
+  per-trade documents are not covered. Have an account? Run Login, Diagnose
+  and a Pilot and attach the files, see its README.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
