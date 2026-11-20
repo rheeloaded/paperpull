@@ -740,3 +740,44 @@ def test_only_a_drawn_password_field_reads_as_a_sign_in_page(home):
         '<form><input type="password" name="pin2"></form>')""")
     assert site.looks_signed_out(home.page)
     assert site.survey(home.page, dwell_ms=0)["pages"][0]["password_fields"] == 1
+
+
+def test_all_uses_signed_in_postfach_when_an_older_login_tab_is_first(home):
+    home.bank.folders["Posteingang"] = [message("P1")]
+    home.page.goto(site.URLS["login"])
+    postfach = home.context.new_page()
+    postfach.goto(BASE + site.FOLDERS["Posteingang"])
+    code, said = home.run_all()
+    assert code == 0, said
+    assert home.on_disk() == ["P1"]
+    assert site.looks_signed_out(home.page)
+    assert "Reading all Postfach pages before starting downloads" in said
+
+
+def test_all_reports_listing_progress_before_downloading(home):
+    home.bank.folders["Posteingang"] = many("P", 12)
+    code, said = home.run_all("--max-docs", "1")
+    assert code == 0, said
+    assert len(home.on_disk()) == 1
+    assert len(home.store("discovery.json")) == 12
+    assert said.index("Reading all Postfach pages") < said.index("Downloading 1 document(s)")
+
+
+def test_slow_page_navigation_finishes_before_listing_stops(home):
+    from threading import Event
+    home.bank.pager = "form"
+    home.bank.folders["Posteingang"] = many("P", 11)
+    answer = home.bank.answer
+
+    def slow_pager(route):
+        request = route.request
+        if request.method == "POST" and "msg" not in parse_qs(urlsplit(request.url).query):
+            Event().wait(8.5)
+        answer(route)
+
+    home.context.unroute("**/*")
+    home.context.route("**/*", slow_pager)
+    code, said = home.run("--discover")
+    assert code == 0, said
+    assert len(home.store("discovery.json")) == 11, said
+    assert len(home.bank.presses) == 1
