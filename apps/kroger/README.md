@@ -146,6 +146,24 @@ already on your machine is used and not the bundled one.
   receipt's lines where they can be read. The receipt's line shape is the
   main thing the first support report will settle.
 
+## Quantities and pricing units
+
+`Quantity` keeps its existing meaning: the number of purchased items or
+packages. A weighed item can therefore have `Quantity` 1 while its price
+is per pound. `Pricing Quantity` and `Pricing Unit` preserve the printed
+basis separately, for example 1.75 and `lb`. They are included in the order
+history and the Purchases CSV/Excel export. Printed line totals are kept
+unchanged, since approximate prices and discounts need not multiply out
+exactly.
+
+An existing order-history header is backed up and upgraded before new rows
+are appended. Old rows keep blank pricing fields; exporting them again
+cannot recover a weight that was never recorded. No weight or unit is
+guessed from a product name or by dividing its total by its price. A
+history with queued writes must have those writes flushed with the
+previous version before its header is upgraded. Unknown headers are
+refused rather than overwritten.
+
 ## When Kroger changes its website
 
 All Kroger selectors/URLs live in **`kroger_site.py`** only. Run
