@@ -396,6 +396,7 @@ def test_bills_refused_right_after_the_list_answered_fail_alone_until_a_run_of_t
 
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
+    assert ended == ("exit", 0), (ended, folded(out))
     assert "signed out" not in out, folded(out)
     assert out.count("Nothing was saved, and the next run tries it again") == site.REFUSED_IN_A_ROW - 1, \
         folded(out)

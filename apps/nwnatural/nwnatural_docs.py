@@ -599,7 +599,24 @@ class App:
             ])
         return page
 
+    def _failed_before(self, doc: Document) -> bool:
+        return (self.progress.get(doc.key) or {}).get("state") == State.FAILED.value
+
+    def _counts_toward_the_stop(self, doc: Document) -> bool:
+        """Whether a refusal of this bill counts toward the stop for bills
+        refused one after another (site.BillsRefused). A bill that failed on
+        an earlier run does not, nor does any bill under Download again,
+        which goes over bills the person chose and finishes as it did
+        before, so the stop never falls on the same few bills run after
+        run."""
+        return not getattr(self.args, "redownload", False) and not self._failed_before(doc)
+
     def process(self, docs: List[Document], dry_run: bool = False):
+        # Bills that failed on an earlier run go after the others, newest
+        # first in each, so a run that stops for bills refused one after
+        # another stops among bills not asked for before, and asks none of
+        # those again on the way.
+        docs = sorted(docs, key=self._failed_before)
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
@@ -658,8 +675,9 @@ class App:
         whole, so the run ends as one that stopped (tabs.stop)."""
         log.info("bills refused in a row: %s", refused)
         tabs.stop(self, [
-            f"The NW Natural payment portal refused bills one after another ({refused}),",
-            "so this run stops here rather than read the whole history again for each.",
+            "The NW Natural payment portal refused bills one after another, right after",
+            f"the bill history answered ({refused}), so this run stops here rather than",
+            "read the whole history again for each bill left.",
             "Everything saved so far is kept. Look at the open browser window, sign in",
             "again if it asks, then run Resume to carry on from where this stopped.",
         ])
@@ -696,14 +714,12 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        # The site layer finds this bill and fetches it. A bill that failed
-        # on an earlier run is not counted toward a stop for refusals in a
-        # row (site.BillsRefused).
+        # The site layer finds this bill and fetches it.
         trace: list = []
-        failed_before = (self.progress.get(doc.key) or {}).get("state") == State.FAILED.value
         saved = site.download_bill(page, None, doc.date, out_path,
                                    title=doc.title, trace=trace, href=doc.href,
-                                   document_id=doc.document_id, failed_before=failed_before)
+                                   document_id=doc.document_id,
+                                   counts=self._counts_toward_the_stop(doc))
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (
                 out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):

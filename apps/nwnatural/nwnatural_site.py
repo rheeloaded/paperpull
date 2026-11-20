@@ -642,8 +642,8 @@ def expand_all(page) -> None:
 _RUN: dict = {}
 
 # Bills refused right after a list that answered, with no bill taken
-# between and none of them failed on an earlier run, before the run stops
-# (BillsRefused).
+# between, before the run stops (BillsRefused). Only bills that count are
+# counted (download_bill).
 REFUSED_IN_A_ROW = 3
 
 
@@ -736,7 +736,7 @@ def _fetch(page, bill: RawDoc, out_path: Path, trace: Optional[list]) -> bool:
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
                   trace: Optional[list] = None, href: str = "",
-                  document_id: str = "", failed_before: bool = False) -> bool:
+                  document_id: str = "", counts: bool = True) -> bool:
     """Save the bill discovery recorded for `iso_date`. The list this run
     read is used when there is one; it is read again when there is none,
     and once more when the bill is not in it or is not answered with a PDF,
@@ -751,10 +751,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     session ended nor that it holds (refused.list_again). A refusal of the
     bill itself right after the list was read and answered fails this bill
     alone, since the session plainly works, until REFUSED_IN_A_ROW of them
-    come with no bill taken between, which raises BillsRefused. A bill that
-    `failed_before` on an earlier run is not counted, so bills retried
-    newest first never stop every run at the same few, and each Continue
-    after the stop moves on to bills not asked for before."""
+    come with no bill taken between, which raises BillsRefused. A bill
+    the run says does not count (`counts` False), one that failed on an
+    earlier run or one asked for by Download again, fails alone and leaves
+    the count as it is, so the stop never falls on the same few bills run
+    after run."""
     out_path = Path(out_path)
     if href != DOWNLOAD_PATH or not BILL_ID_RE.fullmatch(document_id or "") \
             or document_id != f"bill-{iso_date}":
@@ -790,11 +791,11 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             # right after a list that answered, it is this bill's alone.
             why = "the bill was refused right after the list was read" if fresh \
                 else "the bill was refused"
-            if fresh and not failed_before:
+            if fresh and counts:
                 _RUN["refused"] = _RUN.get("refused", 0) + 1
                 if _RUN["refused"] >= REFUSED_IN_A_ROW:
                     raise BillsRefused(
-                        f"{_RUN['refused']} bills in a row were refused right after the list was read")
+                        f"{_RUN['refused']} bills were refused with none taken between")
     log.info("the bill dated %s was not taken: %s", iso_date, why)
     if trace is not None:
         trace.append({"note": "not taken", "why": why})
