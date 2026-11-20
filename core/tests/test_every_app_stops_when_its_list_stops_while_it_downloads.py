@@ -324,6 +324,9 @@ LIST_STOPS = {
 # and why. Continue carries on from them once the person has done what the
 # stop asked, or they are one document's.
 NOT_A_LIST = {
+    ("nwnatural", "BillsRefused"):
+        "bills refused one after another, each weighed against a list that still "
+        "reads whole, which the person looks at before Continue",
     "SessionExpired": "a sign-in or a check, which the person answers before Continue",
     "OtpRequired": "a code only the account holder answers, before Continue",
     "DeadlineReached": "the run's own time at the site, which the next run starts again",
