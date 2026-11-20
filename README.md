@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-six providers are supported today, all built on the same pattern.
+Eighty-seven providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -95,7 +95,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`chasebusiness`](apps/chasebusiness) | Chase Business (business document center) | United States | Business checking and business card statements, up to seven years | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 10 checking statements and the business card's first statement saved on full runs.** One profile so far, so a debit account's statements are untested. Seven kinds of control pressed through the guard, real Edge/Chrome |
 | [`cibc`](apps/cibc) | CIBC (Canadian Imperial Bank of Commerce) | Canada | Bank account, credit card and line of credit statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/cibc/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document, and a second recording for a credit card or line of credit whose statements open somewhere else. Requested in [#204](https://github.com/rheeloaded/paperpull/issues/204) |
 | [`citi`](apps/citi) | Citi (credit cards) | United States | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
-| [`cloudflare`](apps/cloudflare) | Cloudflare | United States, may work elsewhere | Billing invoice PDFs | Reads the selected Dashboard account's paginated invoice history. Checks the invoice number and date before filing each PDF |
+| [`cloudflare`](apps/cloudflare) | Cloudflare | United States, may work elsewhere | Billing invoice PDFs | **Contributed by [@solkennedy](https://github.com/solkennedy), a full run saved the supported history on the contributor's account** ([#238](https://github.com/rheeloaded/paperpull/pull/238)). Reads the selected Dashboard account's paginated invoice history, nothing clicked. Checks the invoice number and date before filing each PDF. Invoices of Cloudflare's older billing system are counted, not saved |
 | [`coinbase`](apps/coinbase) | Coinbase | United States, may work elsewhere | Monthly account statements, Coinbase One Card statements, tax forms, gain and loss reports | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 66 statements and 2 tax documents saved on a full run.** Each month's own PDF button on the Statements page pressed once and the download taken only from Coinbase's statements bucket, and tax PDFs from the list calls the Taxes page makes, nothing pressed. One Card statements from the Credit Card tab, each row's own PDF button pressed once, 13 saved on a full run on one account |
 | [`consorsbank`](apps/consorsbank) | Consorsbank | Germany | Statements, securities documents, tax certificates | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/consorsbank/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document. Requested in [#178](https://github.com/rheeloaded/paperpull/issues/178) |
 | [`costco`](apps/costco) | Costco Wholesale | United States | Receipts, in-warehouse, gas, pharmacy and costco.com orders | **Written from a member's recording and run against their account, 34 purchases back to July 2024** ([#47](https://github.com/rheeloaded/paperpull/issues/47)). Each receipt names its part of Costco, Warehouse or Gas Station, for a file name pattern ([#60](https://github.com/rheeloaded/paperpull/issues/60)). One membership so far, so a second Pilot is welcome. Two tabs, quarters walked, the warehouse receipt is a dialog rendered with printToPDF, real Edge/Chrome |
@@ -966,7 +966,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-five** apps pass their tests, the eighty-six that are
+- ✅ All **ninety-six** apps pass their tests, the eighty-seven that are
   supported, the five still waiting for a tester and the Scalable Capital,
   Consorsbank, CIBC and MBNA shells, 46,567 of them
   across the repo. Most are in regular use by the author. The rest were built or

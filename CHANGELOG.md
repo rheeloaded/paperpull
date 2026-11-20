@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Cloudflare invoices (#238).** A new app saves the invoice PDFs of the
+  Cloudflare account selected in the Dashboard, read page by page from the
+  billing history the Invoices page itself asks for, with nothing clicked.
+  Each PDF is filed only once its own text shows the listed invoice number
+  and date, two invoices of one day are kept apart, and an invoice is filed
+  only under the account it was listed for, Resume included. A history page
+  that does not answer, repeats or is cut short stops the run, and so does a
+  request limit. Invoices of Cloudflare's older billing system are counted
+  and said, not saved. It signs in on port 9319. Contributed by @solkennedy.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight

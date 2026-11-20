@@ -11,7 +11,9 @@ Invoices folder.
 
 The connector reads the account's paginated invoice history using the signed-in
 browser. It verifies the invoice number and date in the PDF before saving it.
-This connector supports the dashboard's Stripe-backed invoice PDFs.
+This connector supports the dashboard's Stripe-backed invoice PDFs. Invoices
+from Cloudflare's older billing system are counted and the run says how many,
+but they are not saved, so download those from the Invoices page yourself.
 
 CLI commands on macOS are `paperpull cloudflare login`, `paperpull cloudflare pilot`,
 and `paperpull cloudflare all`.
