@@ -404,16 +404,9 @@ class _Redirect(Response):
         self.headers["location"] = location
 
 
-@pytest.mark.parametrize("location", ["/login", "https://dash.cloudflare.com/login?redirect_uri=x"])
-def test_a_history_sent_to_the_sign_in_page_is_a_sign_out(location):
-    page = Page()
-    page.context = SimpleNamespace(request=SimpleNamespace(get=lambda url, **kw: _Redirect(location)))
-    with pytest.raises(site.SessionExpired):
-        site.collect_download_docs(page)
-
-
-@pytest.mark.parametrize("location", ["https://example.test/login", "/somewhere", ""])
-def test_a_history_redirected_elsewhere_is_a_list_stop(location):
+@pytest.mark.parametrize("location", ["/login", "https://dash.cloudflare.com/login?redirect_uri=x",
+                                      "https://example.test/login", "/somewhere", ""])
+def test_a_history_redirected_anywhere_is_a_list_stop(location):
     page = Page()
     page.context = SimpleNamespace(request=SimpleNamespace(get=lambda url, **kw: _Redirect(location)))
     with pytest.raises(site.ListStopped):
@@ -447,3 +440,25 @@ def test_a_pdf_whose_text_cannot_be_read_is_said_as_unreadable(tmp_path, monkeyp
     app, rec = _download(tmp_path, monkeypatch, broken)
     assert "could not be read" in rec["notes"], rec["notes"]
     assert not app.stats.get("wrong_document")
+
+
+@pytest.mark.parametrize("printed", ["11/1/2032", "1/11/2032", "11/01/2032", "21/1/2032"])
+def test_a_date_found_only_inside_another_date_is_refused(printed):
+    assert not site._printed_date(f"Invoice CF-00000001 Date {printed}", "2032-01-01")
+
+
+@pytest.mark.parametrize("printed", ["1/1/2032", "January 1, 2032", "2032-01-01"])
+def test_the_invoice_date_printed_on_its_own_is_found(printed):
+    assert site._printed_date(f"Invoice CF-00000001 Date {printed}", "2032-01-01")
+
+
+def test_a_history_text_with_a_lone_surrogate_half_is_made_whole():
+    page = Page()
+    row = entry(FIRST)
+    row["note"] = "\ud83d"
+    page.pages = {1: ([row], False)}
+    body = json.dumps({"success": True, "result": [row],
+                       "result_info": {"next_page": False, "page": 1}}).encode()
+    page.context = SimpleNamespace(request=SimpleNamespace(
+        get=lambda url, **kw: Response(body)))
+    assert len(site.collect_download_docs(page)) == 1

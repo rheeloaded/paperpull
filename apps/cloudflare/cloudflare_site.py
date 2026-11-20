@@ -16,9 +16,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from paperpull_core import identity, intake, pdf_reader, refused, shared_folder
+from paperpull_core.characters import whole_json
 from paperpull_core.controls import AUTH_CONTROL_RE, SETTINGS_CONTROL_RE
 from paperpull_core.urls import is_safe_url as _host_allows
-from paperpull_core.urls import join as _join
 
 
 HOST = "dash.cloudflare.com"
@@ -136,18 +136,6 @@ def detect_security_challenge(page):
     return None
 
 
-def _to_sign_in(response) -> bool:
-    """Whether an answer is a redirect to the Dashboard's own sign-in page.
-    Redirects are never followed, so the 3xx itself comes back."""
-    if response.status not in (301, 302, 303, 307, 308):
-        return False
-    try:
-        u = urlsplit(_join(BILLING_URL, response.headers.get("location", "") or ""))
-    except ValueError:
-        return False
-    return (u.scheme, u.netloc) == ("https", HOST) and u.path.rstrip("/") in LOGIN_URL_MARKERS
-
-
 def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
     if _account(page.url) != account:
         raise ListStopped("The selected Cloudflare account changed.")
@@ -157,7 +145,7 @@ def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
         response = page.context.request.get(endpoint, max_redirects=0, timeout=20000,
                                             params={"page": page_number, "per_page": PAGE_SIZE},
                                             headers={"Accept": "application/json"})
-        if response.status == 401 or _to_sign_in(response):
+        if response.status == 401:
             raise SessionExpired()
         if response.status == 429:
             raise ListStopped("Cloudflare is limiting invoice requests. Try again later.")
@@ -166,7 +154,7 @@ def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
                               "not have billing access to this account")
         if response.status != 200:
             raise ListStopped("Cloudflare did not answer the invoice history request")
-        data = json.loads(intake.text_of(response, limit=LIST_BYTES))
+        data = whole_json(json.loads(intake.text_of(response, limit=LIST_BYTES)))
         rows, info = data.get("result"), data.get("result_info")
         if (data.get("success") is not True or not isinstance(rows, list)
                 or not isinstance(info, dict) or type(info.get("next_page")) is not bool):
@@ -263,6 +251,13 @@ def _printed_number(text: str, number: str) -> bool:
     return bool(pattern and re.search(rf"(?<![A-Z0-9]){pattern}(?![A-Z0-9])", text, re.I))
 
 
+def _printed_date(text: str, date: str) -> bool:
+    """Whether the PDF prints the invoice's date as a date of its own, so
+    1/1/2032 is never found inside 11/1/2032."""
+    low = (text or "").lower()
+    return any(identity.on_its_own(v, low) for v in identity.date_variants(date))
+
+
 def _fetch_invoice(page, selected: str, invoice_id: str) -> bytes:
     endpoint = f"{BASE}/api/v4/accounts/{selected}/billing/receipts/{invoice_id}/pdf"
     response = None
@@ -327,7 +322,7 @@ def download_bill(page, date: str, out_path: Path, *, account: str, document_id:
     except Exception:
         return _refuse("unreadable")
     if (not _printed_number(text, invoice.number)
-            or not identity.contains(text, identity.date_variants(date), "date")):
+            or not _printed_date(text, date)):
         return _refuse("wrong")
     shared_folder.write_bytes(out_path, data)
     return True
