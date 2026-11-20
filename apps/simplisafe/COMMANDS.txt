@@ -1,0 +1,7 @@
+SimpliSafe monitoring bills
+
+  paperpull simplisafe login       open the sign-in window
+  paperpull simplisafe discover    list available monitoring invoices
+  paperpull simplisafe pilot       save the newest invoice
+  paperpull simplisafe all         save invoices in scope
+  paperpull simplisafe resume      continue a stopped run

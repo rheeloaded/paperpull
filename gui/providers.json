@@ -81,6 +81,7 @@
     "sdge": {"gets": "Monthly bills, about two years online", "group": "bills", "note": "Reads the one account selected on the site"},
     "shelbycounty": {"gets": "Memphis property tax receipts and the current tax notice", "group": "bills", "note": "One parcel per setup, no sign-in needed"},
     "simmons": {"gets": "Loan statements, notices and tax forms", "group": "loans", "note": "One account per sign-in"},
+    "simplisafe": {"gets": "Monitoring invoices from the SimpliSafe account page", "group": "bills"},
     "smud": {"gets": "Monthly bills", "group": "bills"},
     "sparkassepc": {"gets": "Account statements and other Postfach PDFs", "group": "banks", "note": "Tested on one account so far"},
     "spectrum": {"gets": "Internet and Mobile statements, about a year online", "group": "bills"},
