@@ -48,7 +48,9 @@ def test_a_run_reaches_the_capture_with_arguments_it_accepts(app, monkeypatch):
     assert the_app.stats["failed"] == 0, "a call the capture refused"
     assert len(the_app.stats["new_files"]) == 3
     first = spy.calls[0].arguments
-    assert first["rivals"], "the rows it could be confused with never arrived"
+    # No two of these documents share a day, so the core is handed no
+    # rival (test_review_repairs.test_the_core_is_handed_only_rows_of_the_same_day).
+    assert first["rivals"] == []
     assert first["strict"] is True
 
 

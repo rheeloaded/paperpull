@@ -14,7 +14,7 @@
       "summary": "Freistellungsauftrag"
     },
     {
-      "pattern": "steuerbescheinigung|\\bsteuer|\\btax\\b",
+      "pattern": "steuerbescheinigung|\\bsteuer(?!\\s*-?\\s*id)|\\btax\\b(?!\\s*-?\\s*id)",
       "summary": "Steuerbescheinigung"
     }
   ],
@@ -29,7 +29,7 @@
       "summary": "Zinsbescheinigung"
     },
     {
-      "pattern": "abschluss|saldenbest(ae|ä)tigung|balance\\s+confirmation",
+      "pattern": "\\bkontoabschluss\\b|\\babschluss\\b|saldenbest(ae|ä)tigung|balance\\s+confirmation",
       "summary": "Kontoabschluss"
     }
   ],

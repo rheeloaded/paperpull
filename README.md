@@ -63,7 +63,7 @@ test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#42](https://github.com/rheeloaded/paperpull/issues/42),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
 [#53](https://github.com/rheeloaded/paperpull/issues/53),
-[#54](https://github.com/rheeloaded/paperpull/issues/54), Raisin not yet asked for), and Scalable Capital, Consorsbank,
+[#54](https://github.com/rheeloaded/paperpull/issues/54), and for Raisin a new issue), and Scalable Capital, Consorsbank,
 CIBC and MBNA are first shells waiting for a tester to Record a trip to a document
 ([#170](https://github.com/rheeloaded/paperpull/issues/170),
 [#178](https://github.com/rheeloaded/paperpull/issues/178),

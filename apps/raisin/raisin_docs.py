@@ -13,7 +13,6 @@ transfers money or changes any setting. Everything stays on this machine.
 from __future__ import annotations
 
 from paperpull_core import delivery
-from paperpull_core import identity
 from paperpull_core import pdf_reader
 from paperpull_core import refused
 from paperpull_core import failure
@@ -60,6 +59,10 @@ def ask(prompt: str) -> str:
         print("Run this from a real console window (use the .bat files).")
         raise SystemExit(3)
 
+
+# How many documents' files may be refused one after another, while the
+# lists still answer, before the run stops.
+REFUSED_IN_A_ROW = 3
 
 CONTRACT_RE = re.compile(
     r"vertrag|best(?:ä|ae)tigung|er(?:ö|oe)ffnung|produktinformation|"
@@ -126,6 +129,8 @@ class Document:
 class App:
     _journal = None
     _requests = None
+    # Files refused one after another while the lists still answer.
+    _refused_in_row = 0
 
     def __init__(self, args):
         self.args = args
@@ -392,7 +397,7 @@ class App:
             print("Sign in again in the open browser window, then run this again.")
             raise SystemExit(0)
         except (site.ListStopped, ValueError) as stop:
-            self.write_failure("read the deposits list", "the deposits list did not answer")
+            self.write_failure("read the deposit and document lists", "the lists did not answer")
             print(f"Raisin document discovery stopped. {stop}")
             raise SystemExit(0)
         for r in docs:
@@ -492,7 +497,11 @@ class App:
         # instead. Pairs of date and title for this app's own check, which
         # reads the date day first and weighs each kind of neighbor apart
         # (site.check_text), and the title alone for the core's, whose
-        # dotted date reads month first.
+        # dotted date reads month first. The core is handed only the rows
+        # of the same day, the one kind of neighbor a title tells apart,
+        # since a title word printed in another day's document (a statement
+        # that says its interest certificate follows) would refuse the
+        # right document there, and the day was weighed already.
         rows = [(d.date, d.title) for d in docs]
         core_rows = [site.identity_for(d) for d in docs]
         for i, doc in enumerate(docs, 1):
@@ -516,7 +525,8 @@ class App:
             try:
                 page = self._on_its_site()
                 self.download_one(page, doc, filename,
-                                  rivals=identity.rivals_for(core_rows, i - 1),
+                                  rivals=[r for n, r in enumerate(core_rows)
+                                          if n != i - 1 and rows[n][0] == doc.date],
                                   check_rivals=site.neighbors(rows, i - 1))
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
@@ -615,8 +625,20 @@ class App:
                 # read again says which (paperpull_core.refused).
                 refused.list_again(lambda: site.collect_documents(page),
                                    site.SessionExpired, site.ListStopped)
+                if not site.listed_now(page, doc.account, doc.deposit_id, doc.document_id):
+                    self._refuse(doc, "gone")
+                    return
                 self._refuse(doc, "refused")
+                self._refused_in_row += 1
+                if self._refused_in_row >= REFUSED_IN_A_ROW:
+                    # Each refusal reads every deposit's list again. A file
+                    # route that refuses everything would do that for every
+                    # document, so the run stops and says so.
+                    raise site.ListStopped(
+                        "Raisin refused %d documents' PDFs in a row while its lists still "
+                        "answered, so the run stops here." % REFUSED_IN_A_ROW)
                 return
+            self._refused_in_row = 0
         except site.SessionExpired:
             # Stop the whole run. Continuing would file every remaining
             # document as failed and finish looking successful while having
@@ -772,9 +794,9 @@ class App:
             # A Download again that saved nothing kept the saved copy's
             # record as it was, so it is said here (paperpull_core.saved_copy).
             if saved_copy.tried(self, d.key):
-                problems.append(f"{d.key}: {saved_copy.tried(self, d.key)}")
+                problems.append(f"{d.date} {d.title}: {saved_copy.tried(self, d.key)}")
             if state != State.COMPLETED.value:
-                problems.append(f"{d.key}: {state} - {rec.get('notes', '')}")
+                problems.append(f"{d.date} {d.title}: {state} - {rec.get('notes', '')}")
         print("\n" + "-" * 70)
         if problems:
             print("Needs attention:")
@@ -1043,7 +1065,7 @@ def build_parser() -> argparse.ArgumentParser:
             ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
             ("rename", "rename downloaded files to this app's current naming"),
-            ("diagnose", "dump the Documents page structure (no downloads)"),
+            ("diagnose", "count deposits and documents and the shape of each answer (no downloads)"),
             ("record", "record your own path to a document, so this app can be repaired (downloads nothing)"),
             ]:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)

@@ -35,8 +35,8 @@ tester's Diagnose or failure file confirms or repairs:
 SAFETY. This is a savings account that moves money. The dashboard can
 open, extend and end deposits, transfer to and from the reference
 account and change personal and tax data. This app activates no control,
-submits nothing and navigates nowhere. It makes GET requests to three
-paths on one host and nothing else.
+submits nothing and navigates nowhere. It makes GET requests to four
+routes on one host and nothing else.
 """
 from __future__ import annotations
 
@@ -45,6 +45,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date as _date
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
@@ -64,7 +65,7 @@ URLS = {"home": PAGE, "login": PAGE, "documents": PAGE}
 ALLOWED_HOSTS = (PAGE_HOST, API_HOST)
 LOGIN_URL_MARKERS = ("/login", "/signin", "/sign-in", "/anmelden", "/auth")
 
-# The only three things this app ever asks the API for.
+# The only four routes this app ever asks the API for.
 ACTIVE_PATH = "/dbff/v1/public/deposits/dashboard/active"
 INACTIVE_PATH = "/dbff/v1/public/deposits/dashboard/inactive"
 DOCUMENTS_PATH = "/dds/api/v2/public/documents"
@@ -178,7 +179,11 @@ def customer_of(url: str) -> str:
     if not is_page_url(url or ""):
         return ""
     try:
-        values = parse_qs(urlsplit(url).query, keep_blank_values=True).get("customer_id", [])
+        parts = urlsplit(url)
+        values = parse_qs(parts.query, keep_blank_values=True).get("customer_id", [])
+        if "?" in parts.fragment:
+            values += parse_qs(parts.fragment.split("?", 1)[1],
+                               keep_blank_values=True).get("customer_id", [])
     except ValueError:
         return ""
     values = set(values)
@@ -339,12 +344,38 @@ def _list_call(page, path: str, params: dict, what: str, name: str):
         raise ListStopped(f"Raisin's {what} did not answer as a list.") from None
 
 
+# Fields a paged answer carries, which none of these routes was recorded
+# with. One that says there is more stops the list rather than be read as
+# all of it.
+_PAGED_TOTALS = ("totalPages", "total_pages")
+_PAGED_COUNTS = ("totalElements", "total_elements", "total", "totalCount", "count")
+
+
+def _more_to_come(data: dict, held: int) -> bool:
+    if data.get("last") is False or data.get("hasMore") is True or data.get("has_more") is True:
+        return True
+    if data.get("next") or data.get("nextPage") or data.get("next_page"):
+        return True
+    for key in _PAGED_TOTALS:
+        value = data.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 1:
+            return True
+    for key in _PAGED_COUNTS:
+        value = data.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > held:
+            return True
+    return False
+
+
 def _entries(data) -> list:
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
         found = [data[k] for k in DEPOSIT_LIST_KEYS if isinstance(data.get(k), list)]
         if len(found) == 1:
+            if _more_to_come(data, len(found[0])):
+                raise ListStopped("Raisin's deposits answer comes in pages, which PaperPull "
+                                  "does not read yet.")
             return found[0]
     raise ListStopped("Raisin's deposits answer is not a shape PaperPull knows.")
 
@@ -365,19 +396,45 @@ def _deposits(page, customer: str, which: str) -> list:
     return out
 
 
+def _last_sunday(year: int, month: int) -> int:
+    last = _date(year, month, 31)
+    return 31 - (last.weekday() + 1) % 7
+
+
+def _berlin(moment: datetime) -> datetime:
+    """A moment in UTC as the time in Germany, which keeps summer time from
+    01:00 UTC on the last Sunday of March to 01:00 UTC on the last Sunday
+    of October. Worked out here so no zone database is needed."""
+    year = moment.year
+    starts = datetime(year, 3, _last_sunday(year, 3), 1, tzinfo=timezone.utc)
+    ends = datetime(year, 10, _last_sunday(year, 10), 1, tzinfo=timezone.utc)
+    hours = 2 if starts <= moment < ends else 1
+    return moment + timedelta(hours=hours)
+
+
 def created_date(value) -> str:
     """The ISO day a document's created field names, or "" for anything
-    that is not an ISO date or timestamp of a real day. The day is the one
-    written, before any time or zone."""
+    that is not an ISO date or timestamp of a real day. A timestamp with a
+    zone is the day it was in Germany, which a document printed there
+    carries, so 2026-03-31T23:30:00Z is 2026-04-01. One without a zone, or
+    a date alone, is the day written."""
     if not isinstance(value, str):
         return ""
     match = _CREATED.fullmatch(value.strip())
     if not match:
         return ""
     try:
-        return _date.fromisoformat(match[1]).isoformat()
+        day = _date.fromisoformat(match[1])
     except ValueError:
         return ""
+    text = value.strip()
+    if not (text.endswith("Z") or re.search(r"[+-][0-9]{2}:?[0-9]{2}$", text)):
+        return day.isoformat()
+    try:
+        moment = datetime.fromisoformat(text.replace("Z", "+00:00").replace(" ", "T"))
+    except ValueError:
+        return ""
+    return _berlin(moment.astimezone(timezone.utc)).date().isoformat()
 
 
 def _documents(page, customer: str, deposit: str) -> list:
@@ -387,6 +444,9 @@ def _documents(page, customer: str, deposit: str) -> list:
     items = data.get("documents") if isinstance(data, dict) else None
     if not isinstance(items, list):
         raise ListStopped("Raisin's documents answer is not a shape PaperPull knows.")
+    if _more_to_come(data, len(items)):
+        raise ListStopped("Raisin's documents answer comes in pages, which PaperPull "
+                          "does not read yet.")
     out = []
     for item in items:
         if not isinstance(item, dict):
@@ -397,7 +457,7 @@ def _documents(page, customer: str, deposit: str) -> list:
         created = created_date(item.get("created"))
         if (not isinstance(doc_id, str) or not DOCUMENT_ID.fullmatch(doc_id)
                 or not isinstance(title, str) or not title.strip()
-                or not isinstance(kind, str) or not created):
+                or not isinstance(kind, str) or not kind.strip() or not created):
             raise ListStopped("Raisin listed a document PaperPull does not recognize.")
         out.append((doc_id, created, re.sub(r"\s+", " ", title).strip(), kind.strip()))
     return out
@@ -522,11 +582,14 @@ def fetch_file(page, document_id: str) -> bytes:
 # may come from a partner bank instead, in which case every one is refused
 # as unconfirmed until a tester's first run says what they print.
 ISSUER_WORDS = ("raisin", "weltsparen")
+ENGLISH_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+                  "August", "September", "October", "November", "December")
 GERMAN_MONTHS = ("Januar", "Februar", "März", "April", "Mai", "Juni", "Juli",
                  "August", "September", "Oktober", "November", "Dezember")
 # Unconfirmed. How a document prints its own date, day first as German
 # does, never month first, since 03.05.2026 is the third of May here.
-DATE_FORMS = ("DD.MM.YYYY", "D.M.YYYY", "YYYY-MM-DD", "D. Monat YYYY", "DD. Monat YYYY")
+DATE_FORMS = ("DD.MM.YYYY", "D.M.YYYY", "YYYY-MM-DD", "D. Monat YYYY", "DD. Monat YYYY",
+              "D Month YYYY", "DD Month YYYY")
 
 
 def date_forms(iso: str) -> list:
@@ -543,6 +606,9 @@ def date_forms(iso: str) -> list:
            "%02d. %s %04d" % (day.day, month, day.year)]
     if "ä" in month:
         out += [v.replace("ä", "ae") for v in out[3:5]]
+    english = ENGLISH_MONTHS[day.month - 1]
+    out += ["%d %s %04d" % (day.day, english, day.year),
+            "%02d %s %04d" % (day.day, english, day.year)]
     return list(dict.fromkeys(v.lower() for v in out))
 
 
@@ -606,6 +672,12 @@ def check_text(text: str, date: str, title: str, rivals=()) -> tuple:
         return UNCONFIRMED, tuple(found)
     same_day = [t for d, t in others if d == date and (t or "").lower() != title.lower()]
     if same_day:
+        mine = re.sub(r"\s+", " ", title.lower()).strip()
+        longer = [t for t in same_day if mine and mine in t.lower() and _shows_words(low, t)]
+        if longer:
+            # Its own title is seen, but only as the start of a neighbor's
+            # longer one, which says nothing about which of the two it is.
+            return WRONG, tuple(found)
         if not own_title:
             if any(_shows_words(low, t) for t in same_day):
                 return WRONG, tuple(found)

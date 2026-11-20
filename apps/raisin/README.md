@@ -27,7 +27,7 @@ reads, from inside that tab and with the sign-in the page already holds.
 3. For each document, its PDF.
 
 Nothing on the page is clicked, typed or submitted, and the app goes to no
-other page. Every request is a GET to one of those three paths. The page's
+other page. Every request is a GET to one of four routes there. The page's
 sign-in token stays in the page. It is never handed to PaperPull, so it is
 in no log, failure file, Diagnose or Support report. Your customer number
 is kept only as a digest in PaperPull's records on this computer.
@@ -40,8 +40,9 @@ and confirmations in `Vertragsunterlagen\`, anything else in
 
 **Every PDF is checked before it is filed.** It must name Raisin or
 Weltsparen and print its own date, day first (05.03.2026 is the fifth of
-March), and when another document of the run carries the same date, its
-own title too. A PDF that does not is not saved. It is said as unreadable,
+March, and an English 5 March 2026 is read too), and when another
+document of the run carries the same date, its own title too. A
+timestamp is taken as the day it was in Germany. A PDF that does not is not saved. It is said as unreadable,
 unconfirmed or wrong, and the next run tries it again. This is stricter
 than it may need to be, on purpose. If your documents name only a partner
 bank, or print their date another way, every one is refused until your
@@ -58,7 +59,12 @@ Each is a named constant in `raisin_site.py`.
 
 **What it does not cover.** The Raisin cash account's transactions are data,
 not documents. Raisin's sites for other countries, and Raisin in the United
-States, may use other hosts, which the app refuses.
+States, may use other hosts, which the app refuses, or print their dates
+in a way it does not read, in which case every PDF is refused until a
+tester says how. A list that comes in pages stops the run rather than be
+read as all of it, since no paging was recorded for these routes. One
+document listed under two deposits is kept as two, the same file saved
+under each.
 
 ## Help test it, no programming needed
 
@@ -78,9 +84,11 @@ States, may use other hosts, which the app refuses.
    states and no text from your account. `diagnose-documents.json` says how
    many deposits of each kind and documents were listed, how each request
    answered, whether the page held a sign-in, and the shape of each answer
-   (field names and types, never a value). Any word in it that is not on
-   PaperPull's fixed list is written as its shape, a for a letter and 9 for
-   a digit, so it can be sent too. Diagnose downloads nothing, clicks
+   (its fields and how many entries each list held, never a value). Any
+   word in it that is not on PaperPull's fixed list, a field name
+   included, is written as its shape, a for a letter and 9 for a digit, so
+   it can be sent too. If a list stopped, you may be asked to name one or
+   two field names from your browser yourself. Diagnose downloads nothing, clicks
    nothing and takes no screenshot.
 6. Run a **Pilot**. It saves the three newest documents, or says why each
    was not saved.
@@ -111,7 +119,7 @@ The app never sees your password.
 This account moves money. The dashboard can open, extend and end
 deposits, transfer to and from your reference account, and change your
 personal and tax details. This app activates no control at all. It asks
-for three lists and the PDFs in them, every request a GET to
+for the deposit and document lists and the PDFs in them, every request a GET to
 `api2.weltsparen.de` from your own tab. An expired session stops the run
 rather than reporting an empty success.
 
