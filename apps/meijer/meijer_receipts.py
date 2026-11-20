@@ -1761,7 +1761,7 @@ class App:
                         if p0:
                             found = site.row_controls(page, p0)
                             info["tabs"][name]["row_controls"] = [
-                                {**x, "text": site.control_words(x["text"]), "label": site.control_words(x["label"]),
+                                {**x, "text": site.control_mask(x["text"]), "label": site.control_mask(x["label"]),
                                  "href": site.mask_href(x["href"])} for x in (found[0] if found else [])][:10]
             site.open_tab(page, site.TAB_IN_STORE_RE)
             info["history"] = site.survey_history_page(page)

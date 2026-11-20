@@ -1063,8 +1063,10 @@ def own_when(page, purchase) -> tuple:
     timed = False
     try:
         raw = page.evaluate(_EVERY_ROW_JS, FALLBACK["row"]) or []
-    except Exception as e:
-        log.info("rows for a purchase's own: %s", e)
+    except Exception:
+        # Read as a page with no rows, so the row is looked for by its date
+        # alone, as before (#236).
+        log.info("the rows could not be read to find a purchase's own")
         raw = []
     for card in (RawCard(text=r.get("text") or "", links=r.get("links") or [])
                  for r in raw if r.get("shown")):
@@ -1329,7 +1331,7 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
         if body:
             if trace is not None:
                 trace.append({"note": "the receipt came from the row's control",
-                              "control": control_words(label),
+                              "control": control_mask(label),
                               "how": "its own address, fetched from the page"})
             return body
     ctx = page.context
@@ -1407,7 +1409,7 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
                 trace.append({"note": "the control is turned off on the page, so nothing was pressed"})
             return None
         if outcome.error is not None and trace is not None:
-            trace.append({"note": "click failed", "control": control_words(label),
+            trace.append({"note": "click failed", "control": control_mask(label),
                           "error": type(outcome.error).__name__})
         if outcome.how == pressing.GONE:
             # The row was drawn anew before the press, so nothing was pressed
@@ -1494,7 +1496,7 @@ def press_row_receipt(page, purchase, trace=None, facts=None):
                 trace.append({"note": "download save failed", "error": type(e).__name__})
     if got.get("body"):
         if trace is not None:
-            trace.append({"note": "the receipt came from the row's control", "control": control_words(label),
+            trace.append({"note": "the receipt came from the row's control", "control": control_mask(label),
                           "how": got.get("how", "")})
         return got["body"]
     said["outcome"] = NO_PDF
@@ -1735,7 +1737,7 @@ def mask_text(s: str) -> str:
     return _DIGITS_RE.sub(lambda m: "#" * len(m.group(0)), s)
 
 
-def control_words(label: str) -> str:
+def control_mask(label: str) -> str:
     """A pressed control's words for the trace. The current page's button
     names its purchase's date and time, and masking only runs of digits left
     the month and a one-digit hour in the file a tester attaches, so words

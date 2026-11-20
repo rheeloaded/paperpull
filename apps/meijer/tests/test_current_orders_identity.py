@@ -222,14 +222,14 @@ def test_the_diagnose_file_names_a_dated_control_in_fixed_words():
     """Diagnose wrote the first row's controls with only their digits
     masked, and at 160 characters a button's name kept its month and its am
     or pm (review)."""
-    assert site.control_words(f"Download receipt from {WHEN}") == \
+    assert site.control_mask(f"Download receipt from {WHEN}") == \
         "the receipt control, which names its date"
-    assert site.control_words("view receipt pdf") == "view receipt pdf"
+    assert site.control_mask("view receipt pdf") == "view receipt pdf"
     import inspect
     import meijer_receipts
     src = inspect.getsource(meijer_receipts.App.cmd_diagnose)
-    assert '"text": site.control_words(x["text"])' in src
-    assert '"label": site.control_words(x["label"])' in src
+    assert '"text": site.control_mask(x["text"])' in src
+    assert '"label": site.control_mask(x["label"])' in src
 
 
 def test_a_row_past_the_collectors_cap_is_still_pressed(browse):
