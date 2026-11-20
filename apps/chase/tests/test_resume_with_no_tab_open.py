@@ -195,7 +195,7 @@ def fake_chase(server, monkeypatch):
     monkeypatch.setattr(site, "is_safe_url",
                         lambda url: urlsplit(url or "").hostname == CHASE_HOST)
 
-    def saved_from(page, ctx, account, date, out_path):
+    def saved_from(page, ctx, account, date, out_path, **_asked):
         # The row's link is on the statements page and nowhere else.
         SITE.pressed.append((page.url, date))
         where = urlsplit(page.url or "")
