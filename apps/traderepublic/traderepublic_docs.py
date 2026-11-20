@@ -495,11 +495,21 @@ class App:
         self._empty_in_a_row = 0
         proof, _month = site.prove_session(page, self.months())
         if proof == site.SIGNED_OUT:
+            self._say_signed_out()
             raise site.SessionExpired()
+        if proof == site.LIMITED:
+            raise site.ListStopped("Trade Republic is limiting requests. Try again later.")
+        if site.tab_gone(page):
+            raise site.ListStopped("The Trade Republic tab closed.")
         if not site.proven(proof):
             raise site.ListStopped(
                 "Several months in a row answered with no statement PDF, and the newest "
                 "months no longer answer either, so Trade Republic may have signed you out.")
+
+    @staticmethod
+    def _say_signed_out() -> None:
+        print("\n  !! Trade Republic answered that this window is not signed in.")
+        print("     Sign in again in the open browser, then run:  paperpull traderepublic resume")
 
     def months_stopped(self, stop) -> None:
         """Leave the month pending when Trade Republic cannot be asked any more."""
@@ -557,8 +567,7 @@ class App:
 
         got = site.fetch_month(page, month)
         if got.kind == site.SIGNED_OUT:
-            print("\n  !! Trade Republic answered that this window is not signed in.")
-            print("     Sign in again in the open browser, then run:  paperpull traderepublic resume")
+            self._say_signed_out()
             self._record(doc, State.DISCOVERED, notes="Session expired before download")
             raise site.SessionExpired()
         if got.kind == site.LIMITED:

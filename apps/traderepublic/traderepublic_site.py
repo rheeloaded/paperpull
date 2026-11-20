@@ -304,6 +304,11 @@ _FETCH_JS = """async ({url}) => {
 }"""
 
 
+def tab_gone(page) -> bool:
+    """Whether the tab has closed, which is the browser and never a month."""
+    return _closed(page)
+
+
 def _closed(page) -> bool:
     try:
         return bool(page.is_closed())

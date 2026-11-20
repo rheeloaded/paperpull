@@ -383,6 +383,40 @@ def test_months_with_no_statement_in_a_row_prove_the_session_again_and_go_on(tmp
     assert tab.asked.count("2026-10") == 2 + 35 // 3
 
 
+@pytest.mark.parametrize("then, words, stopped", [
+    (status(401), "not signed in", False),
+    (status(429), "limiting requests", True),
+])
+def test_the_second_check_says_a_sign_out_or_a_limit_as_itself(tmp_path, capsys, then, words, stopped):
+    app, tab = pilot(tmp_path, right("2026-10"))
+    app.args.yes = True
+
+    def later(t):
+        return pdf_answer(statement("2026-10")) if len(t.asked) <= 2 else then
+    tab.answers["2026-10"] = later
+    run(app, app.cmd_run, "all")
+    said = capsys.readouterr().out
+    assert words in said and "may have signed you out" not in said
+    assert state(app, "2026-06") is None
+    if stopped:
+        assert listing.last(app) == listing.STOPPED
+
+
+def test_a_tab_closed_during_the_second_check_says_so(tmp_path, capsys):
+    app, tab = pilot(tmp_path, right("2026-10"))
+    app.args.yes = True
+
+    def later(t):
+        if len(t.asked) <= 2:
+            return pdf_answer(statement("2026-10"))
+        t.closed = True
+        raise RuntimeError("Target closed")
+    tab.answers["2026-10"] = later
+    run(app, app.cmd_run, "all")
+    said = capsys.readouterr().out
+    assert "tab closed" in said and "may have signed you out" not in said
+
+
 def test_a_session_that_ends_without_a_401_stops_the_run(tmp_path, capsys):
     answers = right("2026-10")
     app, tab = pilot(tmp_path, answers)
