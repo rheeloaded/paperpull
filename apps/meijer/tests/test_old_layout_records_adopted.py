@@ -474,12 +474,17 @@ def test_an_adopted_unsaved_record_takes_the_rows_words(tmp_path, monkeypatch):
     assert app2.progress.data[NEW_KEY]["items"][0]["name"] == "1600 INVENTED ROAD"
 
 
-def test_a_list_past_its_first_page_is_never_read_whole(tmp_path, monkeypatch):
+@pytest.mark.parametrize("later_row,adopted", [
+    (ELSEWHERE, False),
+    ("Online: September 17, 2026, 2:15 pm\n9 Invented Lane\n$5.10 1 items", True),
+], ids=["same-kind-on-page-two", "other-kind-on-page-two"])
+def test_a_kind_past_its_first_page_is_never_read_whole(tmp_path, monkeypatch, later_row, adopted):
     """Review. A later page that did not load ends the list as a last page
-    does, so a list that went on past its first page moves nothing."""
+    does, so a kind that went on past its first page moves nothing. A kind
+    wholly on the first page still adopts (re-check)."""
     app = make_app(tmp_path)
     put_saved(app, tmp_path)
-    pages = {2: [card(ELSEWHERE)]}
+    pages = {2: [card(later_row)]}
     discover(app, monkeypatch, [NEW_1141])
     app2 = make_app(tmp_path / "paged")
     put_saved(app2, tmp_path / "paged")
@@ -503,7 +508,11 @@ def test_a_list_past_its_first_page_is_never_read_whole(tmp_path, monkeypatch):
     app2._list_cut_short = False
     app2.cmd_discover(quiet=True, finish=False)
     assert app.progress.data[NEW_KEY]["downloaded_ok"] is True
-    assert OLD_KEY in app2.progress.data and is_held(app2, NEW_KEY)
+    if adopted:
+        assert OLD_KEY not in app2.progress.data and not is_held(app2, NEW_KEY)
+        assert app2.progress.data[NEW_KEY]["downloaded_ok"] is True
+    else:
+        assert OLD_KEY in app2.progress.data and is_held(app2, NEW_KEY)
 
 
 def test_csv_rows_under_the_old_number_go_when_an_adopted_record_is_saved(tmp_path, monkeypatch):

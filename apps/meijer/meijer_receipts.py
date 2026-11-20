@@ -727,7 +727,7 @@ class App:
 
         cards = []
         seen_texts = set()
-        paged = False
+        paged = set()
         for page_no in range(1, 60):
             if page_no == 1:
                 found = self._read_both_tabs(page)
@@ -749,7 +749,8 @@ class App:
             for c in fresh:
                 seen_texts.add(c.text)
             cards.extend(fresh)
-            paged = page_no > 1
+            if page_no > 1:
+                paged.update(p.purchase_type for p in map(site.card_to_purchase, fresh) if p)
         listed = []
         for card in cards:
             purchase = site.card_to_purchase(card)
@@ -839,7 +840,7 @@ class App:
             print("than finish. Run it again later to read the rest.")
             raise SystemExit(0)
 
-    def _adopt_old_layout(self, listed, floor, paged: bool = False) -> set:
+    def _adopt_old_layout(self, listed, floor, paged=frozenset()) -> set:
         """Records kept from Meijer's earlier orders page moved to the keys
         the current page gives their purchases (adopt_old_layout), on the
         tabs this discovery read whole, progress and discovery alike, each
@@ -848,11 +849,13 @@ class App:
         new keys. The keys to hold once they are recorded. The log says how
         many, never a date, a store, an amount or a key.
 
-        A list that went on past its first page is never taken as whole. A
-        later page that did not load ends the reading as a last page does,
-        so a twin on it would be missed and the other taken for the only one
-        (review)."""
-        whole = set() if (self._list_cut_short or paged) else set(self._kinds_read)
+        A kind that a later page of the list added rows to is never taken as
+        read whole. A later page that did not load ends the reading as a last
+        page does, so a twin on it would be missed and the other taken for the
+        only one (review). A kind wholly on the first page still is, so an
+        account whose online orders go on for pages still adopts its store
+        receipts (re-check)."""
+        whole = set() if self._list_cut_short else set(self._kinds_read) - set(paged)
         done = adopt_old_layout(self.discovery.data, self.progress.data, listed, whole, floor)
         if done["progress"]:
             self.progress.save(backup=True)
