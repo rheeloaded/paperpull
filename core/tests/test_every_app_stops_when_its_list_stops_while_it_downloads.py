@@ -175,6 +175,9 @@ ITS_OWN = {
     ("marinwater", "_resolve_bill_ids", ("_pdf_bytes",)):
         "a separate PDF viewer refusing a link immediately after Bill History answered. "
         "The unresolved date group is held and its partial list stops the run",
+    ("cloudflare", "download_bill", ("_fetch_invoice",)):
+        "an invoice PDF refusal, which reads the selected account's history again. "
+        "A sign-out or unreadable list reaches the run",
     ("verizonmobile", "download_bill", ("_fetch", "pdf_url")):
         "a refusal of one bill's PDF, after which the history is read again. A sign-out "
         "or a list that stops shows there and reaches the run, and a history that still "

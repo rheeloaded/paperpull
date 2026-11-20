@@ -39,6 +39,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   statements only. Brokerage discovery now stops when a year it asked for
   never answers, where it used to list that year as empty. Contributed by
   @solkennedy.
+- **Cloudflare invoices (#238).** A new app saves the invoice PDFs of the
+  Cloudflare account selected in the Dashboard, read page by page from the
+  billing history the Invoices page itself asks for, with nothing clicked.
+  Each PDF is filed only once its own text shows the listed invoice number
+  and date, two invoices of one day are kept apart, and an invoice is filed
+  only under the account it was listed for, Resume included. A history page
+  that does not answer, repeats or is cut short stops the run, and so does a
+  request limit. Invoices of Cloudflare's older billing system are counted
+  and said, not saved. It signs in on port 9319. Contributed by @solkennedy.
 
 ### Fixed
 - **A documents folder filed without kind folders holds only what
