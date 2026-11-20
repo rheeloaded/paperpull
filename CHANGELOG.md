@@ -19,7 +19,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   each get their own receipt, a button naming another purchase is never
   pressed, the date line no longer becomes the purchase's name, a button
   that shows its whole label is read whole, and the file a tester attaches
-  names the button in fixed words.
+  names the button in fixed words. A receipt saved from the old page is not
+  saved again. The new page words each row differently, which gave every
+  purchase a new key, so a record kept from the old page now moves to the
+  new key, file and all, when exactly one record and one purchase of the
+  same kind, day, amount and store fit. When more than one fits and one of
+  them was saved, those purchases are held and not downloaded, since which
+  is which cannot be told, and when none was saved they are downloaded
+  under their new keys. A record of the old page never saved is then found
+  on the new page instead of failing on every run.
 
 ## [0.69.0] - 2026-11-17
 

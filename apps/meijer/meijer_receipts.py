@@ -81,6 +81,192 @@ PUT_ASIDE = "put aside in manual review"
 # listed are in the CSVs, so they are written once (see _no_longer_listed).
 UNLISTED_ROWS = "unlisted_rows_written"
 
+# ---------------------------------------------------------------------------
+# Records kept from Meijer's earlier orders page (#236)
+# ---------------------------------------------------------------------------
+
+# A purchase's key is a digest of its row's words (site._stable_key), and
+# the current orders page words every row differently from the page before
+# it, so a receipt saved from the earlier page came out under a new key and
+# was saved a second time beside the first, and a record of the earlier page
+# never saved was looked for by a key no row gives, and failed on every run
+# (review of #236). The record is moved to the key the current page gives
+# it, the way E*TRADE moves its records to their accounts' keys
+# (adopt_account_keys, #96), but only when exactly one record and one
+# purchase fit, and never on a list read in part.
+
+# Marks the discovery record of a purchase whose row prints a time, so a
+# record of the current page is never taken for one of the earlier page
+# once its row has gone.
+ROW_PRINTS_TIME = "row_prints_time"
+# The order number a record had on the earlier page, kept when it moves.
+ADOPTED_FROM = "adopted_from"
+# Marks a record not to be pressed, because it, or a purchase of the same
+# kind, day, amount and store, may be a receipt saved from the earlier page
+# and which one cannot be told. Fixed words only.
+HELD = "held"
+HELD_REASON = "may be a receipt saved from the earlier orders page, and which one cannot be told"
+# What a row with no store line is named, which says nothing of the store.
+_NO_STORE = "meijer order"
+# A record that holds a receipt, or holds that it has none.
+_SETTLED_STATES = frozenset({State.COMPLETED.value, State.PDF_VERIFIED.value,
+                             State.CANCELED.value, State.NEEDS_MANUAL_REVIEW.value})
+
+
+def row_prints_time(card) -> bool:
+    """Whether a row prints the time of its purchase, as the current orders
+    page's rows do and the earlier page's never did."""
+    return bool(site.WHEN_RE.search(" ".join((getattr(card, "text", "") or "").split())))
+
+
+def fit_facts(rec) -> Optional[tuple]:
+    """What a purchase and a record of the earlier page are matched by, as
+    (kind, date, the total's digits, the store with case and spacing
+    folded). None when any of them is missing, or the store is the name a
+    row with no store line is given, since that names no store."""
+    if not isinstance(rec, dict):
+        return None
+    kind, date, total, items = (rec.get("purchase_type"), rec.get("purchase_date"),
+                                rec.get("total"), rec.get("items"))
+    if kind not in (ONLINE, IN_STORE) or not isinstance(date, str) or not date:
+        return None
+    digits = re.sub(r"\D", "", total) if isinstance(total, str) else ""
+    if not digits or not isinstance(items, list) or not items or not isinstance(items[0], dict):
+        return None
+    name = items[0].get("name")
+    store = " ".join(name.split()).casefold() if isinstance(name, str) else ""
+    if not store or store == _NO_STORE:
+        return None
+    return kind, date, digits, store
+
+
+def holds_something(prog, disc) -> bool:
+    """Whether a record holds a receipt saved, or holds that there is none
+    to save, from its progress and discovery records."""
+    prog = prog if isinstance(prog, dict) else {}
+    disc = disc if isinstance(disc, dict) else {}
+    if prog.get("downloaded_ok") or prog.get("state") in _SETTLED_STATES:
+        return True
+    return any(r.get(f) for r in (prog, disc) for f in ("pdf_path", "pdf_filename"))
+
+
+def _old_layout_records(discovery: dict, progress: dict, listed_keys) -> dict:
+    """The records of the earlier page, by key, each with its fit_facts. A
+    record under a key the list gives now, or whose discovery record was
+    listed from a row that prints a time, is not one."""
+    out = {}
+    for key in set(discovery) | set(progress):
+        if not isinstance(key, str) or key in listed_keys:
+            continue
+        disc, prog = discovery.get(key), progress.get(key)
+        if isinstance(disc, dict) and disc.get(ROW_PRINTS_TIME):
+            continue
+        rec = disc if fit_facts(disc) else prog
+        facts = fit_facts(rec)
+        if facts is None or f"{rec.get('purchase_type')}:{rec.get('order_number')}" != key:
+            continue
+        out[key] = facts
+    return out
+
+
+def _move(records: dict, old_key: str, new_key: str, order_number: str) -> bool:
+    """Move the record under old_key, whole, to new_key, with the new order
+    number and its old one kept. Whatever was under new_key gives way."""
+    rec = records.get(old_key)
+    if not isinstance(rec, dict):
+        return False
+    del records[old_key]
+    records[new_key] = dict(rec, order_number=order_number,
+                            **{ADOPTED_FROM: rec.get("order_number", "")})
+    return True
+
+
+def adopt_old_layout(discovery: dict, progress: dict, listed, whole_kinds, floor=None) -> dict:
+    """Move each record kept from the earlier orders page to the key the
+    current page gives its purchase, hold what cannot be told, and retire
+    what can never be fetched, on the stores' records as dicts.
+
+    `listed` is every purchase this discovery listed, as (purchase, whether
+    its row prints a time). `whole_kinds` are the kinds whose tab was read
+    whole. Only the purchases whose rows print a time, and the records of the
+    earlier page, are grouped, by kind, day, total and store (fit_facts).
+    In a group with records of the earlier page, for a kind read whole:
+
+    - One purchase, one record, and the purchase has no progress record of
+      its own. The record moves to the purchase's key, in both stores, with
+      its state, file and everything else, so a receipt saved before is done
+      under its new key and never fetched again, and one never saved is
+      fetched from its own row.
+    - Anything else when a record of the group holds something. Each of the
+      group's purchases with no progress record, and each of its records
+      holding nothing, is held, never pressed, since one of them may be a
+      receipt already saved and which cannot be told.
+    - Anything else when no record of the group holds anything. The purchases
+      are fetched under their own keys, which saves nothing twice, and the
+      records are retired from discovery, since no row gives their keys.
+
+    For a kind not read whole nothing moves or is retired, and each purchase
+    with no progress record that fits a record of the earlier page is held.
+    Holds on the records of a kind read whole are cleared first and worked
+    out again. A group dated before `floor` is left as it is, since nothing
+    before it is recorded or fetched.
+
+    Returns the counts and the keys to hold once discovery has recorded
+    them, {"adopted", "retired", "hold" (keys), "progress", "discovery"
+    (whether each store changed)}."""
+    listed = list(listed)
+    listed_keys = {p.key for p, _timed in listed}
+    whole_kinds = set(whole_kinds or ())
+    out = {"adopted": 0, "retired": 0, "hold": set(), "progress": False, "discovery": False}
+    # A run stopped between writing progress and writing discovery left a
+    # record moved in progress and not in discovery, and the move is
+    # finished, whatever the list says now, since it was decided on a list
+    # read whole.
+    for key, rec in list(progress.items()):
+        if not isinstance(rec, dict) or not rec.get(ADOPTED_FROM):
+            continue
+        was = f"{rec.get('purchase_type')}:{rec.get(ADOPTED_FROM)}"
+        if was != key and isinstance(discovery.get(was), dict) and was not in progress:
+            out["discovery"] |= _move(discovery, was, key, rec.get("order_number", ""))
+    for rec in discovery.values():
+        if isinstance(rec, dict) and rec.get(HELD) and rec.get("purchase_type") in whole_kinds:
+            del rec[HELD]
+            out["discovery"] = True
+    old = _old_layout_records(discovery, progress, listed_keys)
+    groups: dict = {}
+    for p, timed in listed:
+        facts = fit_facts(p.to_dict()) if timed else None
+        if facts is not None:
+            groups.setdefault(facts, ([], []))[0].append(p)
+    for key, facts in sorted(old.items()):
+        if facts in groups:
+            groups[facts][1].append(key)
+    for facts, (new, olds) in groups.items():
+        kind, date = facts[0], facts[1]
+        if not olds or (floor and date < floor):
+            continue
+        fresh = [p for p in new if not isinstance(progress.get(p.key), dict)]
+        if kind not in whole_kinds:
+            out["hold"].update(p.key for p in fresh)
+            continue
+        if len(new) == 1 and len(olds) == 1 and fresh:
+            p, old_key = fresh[0], olds[0]
+            out["progress"] |= _move(progress, old_key, p.key, p.order_number)
+            out["discovery"] |= _move(discovery, old_key, p.key, p.order_number)
+            out["adopted"] += 1
+            continue
+        if any(holds_something(progress.get(k), discovery.get(k)) for k in olds):
+            out["hold"].update(p.key for p in fresh)
+            out["hold"].update(k for k in olds if isinstance(discovery.get(k), dict)
+                               and not holds_something(progress.get(k), discovery.get(k)))
+            continue
+        for k in olds:
+            if isinstance(discovery.get(k), dict):
+                del discovery[k]
+                out["discovery"] = True
+                out["retired"] += 1
+    return out
+
 
 def _today():
     """Today's date, asked for here so that a test can say which day it is."""
@@ -537,11 +723,18 @@ class App:
             for c in fresh:
                 seen_texts.add(c.text)
             cards.extend(fresh)
-        seen_keys = set()
+        listed = []
         for card in cards:
             purchase = site.card_to_purchase(card)
-            if not purchase:
-                continue
+            if purchase:
+                listed.append((purchase, row_prints_time(card)))
+        # Before anything is recorded, a record kept from Meijer's earlier
+        # orders page moves to the key the current page gives its purchase,
+        # so its state comes along, a No Longer Listed one included, which
+        # _listed_again then puts back (review of #236).
+        held = self._adopt_old_layout(listed, floor)
+        seen_keys = set()
+        for purchase, timed in listed:
             seen_keys.add(purchase.key)
             if floor and purchase.purchase_date and purchase.purchase_date < floor:
                 continue  # before the cutoff: never record or download
@@ -549,9 +742,13 @@ class App:
             if self.discovery.get(key) is None:
                 rec = purchase.to_dict()
                 rec["state"] = State.DISCOVERED.value
+                if timed:
+                    rec[ROW_PRINTS_TIME] = True
                 self.discovery.update(key, rec, save=False)
                 n_new += 1
             else:
+                if timed:
+                    self.discovery.update(key, {ROW_PRINTS_TIME: True}, save=False)
                 self.discovery.update(key, {
                     "details_url": purchase.details_url,
                     "receipt_url": purchase.receipt_url,
@@ -560,6 +757,12 @@ class App:
                     "store_info": purchase.store_info
                     or self.discovery.get(key).get("store_info", ""),
                 }, save=False)
+        for key in sorted(held):
+            if self.discovery.get(key) is not None:
+                self.discovery.update(key, {HELD: HELD_REASON}, save=False)
+        if held:
+            print(f"\n{len(held)} purchase(s) may each be a receipt saved from Meijer's earlier "
+                  "orders page, and which one cannot be told, so they are held and not downloaded.")
         dropped = self._drop_undated_leftovers(seen_keys)
         if dropped:
             log.info("Dropped %d undated purchase(s) an earlier version recorded "
@@ -606,6 +809,25 @@ class App:
             print("\nNot all of Meijer's order list was read, so this run stops here rather")
             print("than finish. Run it again later to read the rest.")
             raise SystemExit(0)
+
+    def _adopt_old_layout(self, listed, floor) -> set:
+        """Records kept from Meijer's earlier orders page moved to the keys
+        the current page gives their purchases (adopt_old_layout), on the
+        tabs this discovery read whole, progress and discovery alike, each
+        store backed up before anything in it changes, progress first, so a
+        run stopped between the two has its saved receipts done under their
+        new keys. The keys to hold once they are recorded. The log says how
+        many, never a date, a store, an amount or a key."""
+        whole = set() if self._list_cut_short else set(self._kinds_read)
+        done = adopt_old_layout(self.discovery.data, self.progress.data, listed, whole, floor)
+        if done["progress"]:
+            self.progress.save(backup=True)
+        if done["discovery"]:
+            self.discovery.save(backup=True)
+        if done["adopted"] or done["retired"] or done["hold"]:
+            log.info("%d record(s) of the earlier orders page adopted, %d held, %d retired",
+                     done["adopted"], len(done["hold"]), done["retired"])
+        return done["hold"]
 
     def _drop_undated_leftovers(self, seen_keys) -> int:
         """Forget purchases an earlier version recorded with no date that
@@ -696,6 +918,11 @@ class App:
         --redownload to override and fetch everything in scope again."""
         if getattr(self.args, "redownload", False):
             return False
+        # It, or a purchase of its kind, day, amount and store, may be a
+        # receipt saved from Meijer's earlier orders page, and which one
+        # cannot be told (adopt_old_layout).
+        if (self.discovery.get(purchase.key) or {}).get(HELD):
+            return True
         rec = self.progress.get(purchase.key)
         if not rec:
             return False
@@ -743,6 +970,11 @@ class App:
                   f"{purchase.purchase_date or '(date unknown)'} "
                   f"#{purchase.order_number}")
             if self._already_done(purchase):
+                if (self.discovery.get(purchase.key) or {}).get(HELD):
+                    print("  Held. It may be a receipt saved from Meijer's earlier orders page, "
+                          "and which one cannot be told, so it is not downloaded.")
+                    self.stats["held"] = self.stats.get("held", 0) + 1
+                    continue
                 rec = self.progress.get(purchase.key) or {}
                 if (rec.get("state") == State.NO_LONGER_LISTED.value
                         and not rec.get("downloaded_ok")):
