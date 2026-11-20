@@ -323,6 +323,12 @@ ALLOWED = {
     # a receipt run's way out. It sat in documents_roots until #217 moved it
     # into the helper both lists are read through.
     ("storage.py", "_listed"),
+    # Reading documents-filed-flat.json and progress.json for the record of
+    # what the Move filed in a documents folder without kind folders. The
+    # try holds the read and the parse alone, whose SystemExit is the
+    # Server's refusal of a link there, never a receipt run's stop.
+    ("storage.py", "_read_filed"),
+    ("storage.py", "_from_records"),
 }
 
 

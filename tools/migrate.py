@@ -306,6 +306,21 @@ CORE_SETTINGS = ("owner", "owner_in_filename", "default_start_date", "min_pdf_by
 # so an import holds a value to its kind (kind_folders is true or false,
 # #201, and a run refuses anything else).
 CORE_DEFAULTS = {"kind_folders": True}
+# What settings_to_apply adds to its left_out for a "kind_folders": false it
+# did not write, since the config has no documents folder of its own for it.
+KIND_FOLDERS_LEFT_OUT = "kind_folders"
+
+
+def _own_documents_dir(cfg: dict) -> bool:
+    """Whether a config names a documents folder that is not its output
+    folder, as "kind_folders": false needs (core storage.set_kind_folders)."""
+    docs = cfg.get("documents_dir") if isinstance(cfg, dict) else None
+    if not isinstance(docs, str) or not docs.strip():
+        return False
+    out = cfg.get("output_dir")
+    if isinstance(out, str) and out.strip():
+        return os.path.normcase(os.path.normpath(docs)) != os.path.normcase(os.path.normpath(out))
+    return True
 # The longest a setting may be once written as JSON. The longest real one is a
 # list of account labels.
 MAX_SETTING_CHARS = 4000
@@ -564,6 +579,15 @@ def settings_to_apply(install: Path, cfg: dict, settings: dict, check_pattern=No
                 continue
         if key == "owner":
             value = str(value or "").strip()[:80]
+        if key == "kind_folders" and value is False and not _own_documents_dir(cfg):
+            # It files documents straight into a documents folder of the
+            # account's own, which documents_dir names, and that names this
+            # computer's folders, so it never travels. Taken here, every run
+            # that saves or moves documents would stop until one is set. The
+            # import says it was left out (KIND_FOLDERS_LEFT_OUT).
+            if left_out is not None:
+                left_out.append(KIND_FOLDERS_LEFT_OUT)
+            continue
         out[key] = value
     return out
 
