@@ -409,6 +409,25 @@ def test_a_stylesheet_behind_a_redirect_is_not_followed_and_fails_the_bill(attac
     assert asked("/css/bill.css") == 3, SITE.seen
 
 
+def test_no_stylesheet_after_one_left_out_is_asked_for(attached, server, tmp_path, capsys, caplog,
+                                                       drawn):
+    """A stylesheet left out for an answer that is not one, a 404 say,
+    fails the bill whatever comes after it, so a stylesheet linked after it
+    is never asked for."""
+    SITE.extra_links = ('<link rel="stylesheet" href="/css/missing.css">'
+                        '<link rel="stylesheet" href="/css/screen.css">')
+    their_tab(attached, server)
+
+    with caplog.at_level("WARNING", logger="tualatin_docs.site"):
+        ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert saved(tmp_path) == [] and drawn == [], folded(out)
+    assert stylesheet_left_out(caplog) == 3, caplog.text[-2000:]
+    assert asked("/css/missing.css") == 3, SITE.seen
+    assert asked("/css/screen.css") == 0 and asked("/img/logo.png") == 0, SITE.seen
+    assert not list((tmp_path / "out").rglob("*.drawing"))
+
+
 def test_a_print_page_of_another_billing_date_is_not_saved(attached, server, tmp_path, capsys):
     SITE.other_date_for = BILLS[1][2]
     their_tab(attached, server)

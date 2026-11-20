@@ -439,6 +439,18 @@ NOT_OPENED = "Activity did not open"
 NOT_DRAWN = "the Activity table did not finish loading"
 
 
+def _signed_out_meanwhile(page) -> None:
+    """Raise SessionExpired when the portal went to its sign-in page while
+    Activity's rows were counted. A tab that cannot say where it is says
+    nothing, so the caller's ListStopped follows."""
+    try:
+        out = looks_signed_out(page)
+    except Exception:
+        return
+    if out:
+        raise SessionExpired("the payment portal showed its sign-in page")
+
+
 def _open(page, timeout_ms: int = 30000) -> dict:
     """Open Activity by its address, the portal keeping its session in a
     cookie, and read its transaction table as drawn. Raises SessionExpired
@@ -467,12 +479,14 @@ def _open(page, timeout_ms: int = 30000) -> dict:
     # Rows drawn one at a time after the first are waited for: the table
     # is read once its row count has held for a moment.
     # A count that could not be taken, or a tab closed while waiting, is a
-    # table that was not read, never one that settled.
+    # table that was not read, never one that settled. When the portal has
+    # gone to its sign-in page meanwhile, that is the session ending.
     before = _UNCOUNTED = object()
     for _ in range(SETTLE_ROUNDS):
         try:
             now = page.evaluate(_ROW_COUNT_JS)
         except Exception as e:
+            _signed_out_meanwhile(page)
             raise ListStopped(f"the Activity table's rows could not be counted ({type(e).__name__})")
         if now == before:
             break
@@ -480,6 +494,7 @@ def _open(page, timeout_ms: int = 30000) -> dict:
         try:
             page.wait_for_timeout(SETTLE_MS)
         except Exception as e:
+            _signed_out_meanwhile(page)
             raise ListStopped(f"Activity went away while its rows were drawn ({type(e).__name__})")
     else:
         raise ListStopped("the Activity table was still drawing rows")
@@ -752,7 +767,8 @@ _PRINT_JS = r"""async ([url, origin, limit, ms]) => {
     if (!got.buf || size(css) > left()) {
       if (got.buf) full = true;
       dropped.push({kind: 'stylesheet', why: got.why || 'over the budget'});
-      continue;
+      // The bill is not kept now, so no later stylesheet is asked for.
+      break;
     }
     spent += size(css);
     const style = doc.createElement('style');

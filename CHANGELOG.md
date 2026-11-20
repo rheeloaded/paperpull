@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Tualatin Water keeps no bill drawn without its stylesheet (#239).** A
+  bill whose stylesheet timed out, was cut off, refused, redirected or over
+  the size budget is not kept, so the next run asks for it again, and
+  nothing more is asked for that bill. Images stay best effort, and the log
+  says how many were left out. After the first request that times out
+  nothing more is asked, so stalls cost one time limit and not one each.
+  Alternate and disabled stylesheets are left out, Activity's settle wait
+  stops cleanly when the tab goes away or signs out, and Login says why
+  Activity was not read whole. Contributed by @crazyhorse90210.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight

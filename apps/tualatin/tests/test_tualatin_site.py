@@ -297,6 +297,25 @@ class ListReady(unittest.TestCase):
             with self.assertRaises(site.ListStopped):
                 site.collect_download_docs(page)
 
+    def test_a_count_or_wait_that_fails_on_the_sign_in_page_is_a_sign_out(self):
+        """The portal moving to its sign-in page while the rows are counted
+        says the session ended, as it does while the table is waited for,
+        not that the list stopped."""
+        class SignedOutWhileCounted(Page):
+            def evaluate(self, js, arg=None):
+                if js == site._ROW_COUNT_JS:
+                    self.url = "https://tualatin.merchanttransact.com/LoginRedirect.aspx"
+                    raise RuntimeError("Execution context was destroyed")
+                return super().evaluate(js, arg)
+
+        class SignedOutWhileWaiting(Page):
+            def wait_for_timeout(self, ms):
+                self.url = "https://tualatin.merchanttransact.com/LoginRedirect.aspx"
+                raise RuntimeError("Execution context was destroyed")
+        for page in (SignedOutWhileCounted(), SignedOutWhileWaiting()):
+            with self.assertRaises(site.SessionExpired):
+                site.collect_download_docs(page)
+
     def test_login_gives_why_unless_the_table_never_drew(self):
         class Drawing(Page):
             def evaluate(self, js, arg=None):
