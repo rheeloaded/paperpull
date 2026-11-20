@@ -592,7 +592,7 @@ def test_after_the_first_image_that_stalls_nothing_more_is_asked_for(attached, s
         ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
     assert len(saved(tmp_path)) == 3, folded(out)
-    assert sum("6 image(s)" in r.getMessage() for r in caplog.records) == 3, caplog.text[-2000:]
+    assert sum("without 6 of its images" in r.getMessage() for r in caplog.records) == 3, caplog.text[-2000:]
     assert asked("/img/logo.png") == 3, SITE.seen
     assert asked("/img/%s1.png" % how) == 3, SITE.seen
     assert sum(asked("/img/%s%d.png" % (how, n)) for n in range(2, 7)) == 0, SITE.seen

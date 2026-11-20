@@ -875,8 +875,8 @@ def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[lis
                     "and the next run asks for it again", iso_date)
         return False
     if dropped:
-        log.warning("%d image(s) of the bill dated %s were left out of its PDF",
-                    len(dropped), iso_date)
+        log.warning("the PDF of the bill dated %s is drawn without %d of its images",
+                    iso_date, len(dropped))
     tmp = out_path.with_name(out_path.name + ".drawing")
     try:
         try:
