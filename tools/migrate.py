@@ -100,12 +100,11 @@ account and the last four digits its account switcher showed, so after the
 move a config still refuses a list of another account rather than save its
 statements under this one. The token is the page's own word for the
 account, not its number, and no sign-in.
-A Meijer purchase keeps its kind, date, total, first item's name (the store
-its row names), order number and file name, whether its row printed a time,
-the number it had before it moved and whether it is held, so a receipt saved
-from Meijer's earlier orders page still moves to the key the current page
-gives it and is not saved a second time. Meijer's records therefore carry a
-purchase total and a store location after the move.
+A Meijer purchase keeps whether its row printed a time, the number it had
+before it moved off Meijer's earlier orders page and whether it is held. Its
+date, total and store stay out, so a receipt saved from the earlier page and
+not yet moved to the key the current page gives it is saved again after the
+move, under its new key.
 A record still under a key that left out its account's
 last four, as the apps did past forty characters until 0.34.0 and Chase did
 at any length until 0.17.1, also keeps what its key is built from
@@ -223,17 +222,17 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # and stops when the window shows another
                         # (amexbanking_docs.App._held_accounts).
                         "American Express Banking": ("account_token", "account_digits"),
-                        # A receipt saved from Meijer's earlier orders page
-                        # moves to the key the current page gives it, found
-                        # by its kind, day, total and store (its first item's
-                        # name), and its order number and file name, and a
-                        # purchase of the current page is told from one of
-                        # the earlier page by its mark, or one moved by the
-                        # number it had. A purchase that may be either is
-                        # held (meijer_receipts.adopt_old_layout, #236).
-                        "Meijer": ("purchase_type", "purchase_date", "total", "items",
-                                   "order_number", "pdf_filename", "adopted_from",
-                                   "row_prints_time", "held")}
+                        # Whether a Meijer purchase's row printed a time,
+                        # the number a record moved from Meijer's earlier
+                        # orders page had, and whether it is held, none of
+                        # them a total, a date or a store. Its date, total
+                        # and store, which a move off the earlier page
+                        # matches by, stay out as --minimal promises, so
+                        # after a move nothing is moved, and a receipt saved
+                        # from the earlier page is saved again under its new
+                        # key, never taken for another's
+                        # (meijer_receipts.adopt_old_layout, #236).
+                        "Meijer": ("row_prints_time", "adopted_from", "held")}
 
 
 def _optum_form(rec: dict) -> bool:

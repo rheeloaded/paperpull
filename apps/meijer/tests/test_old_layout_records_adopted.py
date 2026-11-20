@@ -463,6 +463,25 @@ def test_a_history_moved_with_progress_alone_keeps_the_mark(tmp_path, monkeypatc
     assert is_held(app, TWIN_KEY)
 
 
+def test_a_history_moved_with_minimal_adopts_nothing_and_takes_no_other_receipt(tmp_path, monkeypatch):
+    """Review. --minimal leaves out the date, total and store a record is
+    matched by, as it promises. After such a move nothing is moved and
+    nothing held, and the purchase is saved again under its new key, the
+    behavior before adoption, never another purchase's receipt."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+    migrate = pytest.importorskip("migrate")
+    app = make_app(tmp_path)
+    put_saved(app, tmp_path)
+    moved = {k: migrate._skip_fields(r, "Meijer") for k, r in app.progress.data.items()}
+    assert not {"total", "items", "purchase_date"} & set(moved[OLD_KEY])
+    app.progress.data = moved
+    app.discovery.data = {}
+    discover(app, monkeypatch, [NEW_1141])
+    assert app.progress.data[OLD_KEY]["downloaded_ok"] is True
+    assert NEW_KEY not in app.progress.data and not is_held(app, NEW_KEY)
+    assert run_all(app, monkeypatch) == [NEW_KEY]
+
+
 def test_a_hold_before_a_later_start_date_stays(tmp_path, monkeypatch):
     """Review. A run scoped to start after the held day must not clear the
     hold, or a Resume with no start date presses both twins."""
