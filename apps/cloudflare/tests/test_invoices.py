@@ -439,3 +439,11 @@ def test_a_history_cycling_between_two_pages_stops_at_the_third():
 def test_login_words_print_through_a_plain_windows_console():
     source = (Path(app_mod.__file__)).read_text(encoding="utf-8")
     assert "→" not in source
+
+
+def test_a_pdf_whose_text_cannot_be_read_is_said_as_unreadable(tmp_path, monkeypatch):
+    def broken(page):
+        monkeypatch.setattr(site.pdf_reader, "page_texts", lambda *a, **k: 1 / 0)
+    app, rec = _download(tmp_path, monkeypatch, broken)
+    assert "could not be read" in rec["notes"], rec["notes"]
+    assert not app.stats.get("wrong_document")

@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urlsplit
 
 from paperpull_core import identity, intake, pdf_reader, refused, shared_folder
 from paperpull_core.controls import AUTH_CONTROL_RE, SETTINGS_CONTROL_RE
 from paperpull_core.urls import is_safe_url as _host_allows
+from paperpull_core.urls import join as _join
 
 
 HOST = "dash.cloudflare.com"
@@ -141,7 +142,7 @@ def _to_sign_in(response) -> bool:
     if response.status not in (301, 302, 303, 307, 308):
         return False
     try:
-        u = urlsplit(urljoin(BILLING_URL, response.headers.get("location", "") or ""))
+        u = urlsplit(_join(BILLING_URL, response.headers.get("location", "") or ""))
     except ValueError:
         return False
     return (u.scheme, u.netloc) == ("https", HOST) and u.path.rstrip("/") in LOGIN_URL_MARKERS
@@ -149,7 +150,7 @@ def _to_sign_in(response) -> bool:
 
 def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
     if _account(page.url) != account:
-        raise ListStopped("the selected Cloudflare account changed")
+        raise ListStopped("The selected Cloudflare account changed.")
     response = None
     endpoint = f"{BASE}/api/v4/accounts/{account}/billing/history"
     try:
@@ -191,7 +192,7 @@ def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
 def _invoices(page) -> tuple[str, dict[str, Invoice]]:
     account = _account(page.url)
     if not account:
-        raise ListStopped("open Invoices and documents for your Cloudflare account")
+        raise ListStopped("Open Invoices and documents for your Cloudflare account.")
     tag = _tag(account)
     invoices = {}
     seen = []
@@ -236,7 +237,7 @@ def _invoices(page) -> tuple[str, dict[str, Invoice]]:
             raise ListStopped("Cloudflare repeated an invoice history page")
         if not has_next:
             if _account(page.url) != account:
-                raise ListStopped("the selected Cloudflare account changed")
+                raise ListStopped("The selected Cloudflare account changed.")
             _RUN.update(page=page, account=tag, invoices=invoices, legacy=legacy)
             return tag, invoices
         seen.append(rows)
@@ -315,7 +316,7 @@ def download_bill(page, date: str, out_path: Path, *, account: str, document_id:
         return _refuse("gone")
     selected = _account(page.url)
     if not selected or _tag(selected) != account:
-        raise ListStopped("the selected Cloudflare account changed")
+        raise ListStopped("The selected Cloudflare account changed.")
     try:
         data = _fetch_invoice(page, selected, invoice.invoice_id)
     except SessionExpired:
