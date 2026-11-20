@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from paperpull_core import identity, intake, pdf_reader, refused, shared_folder
 from paperpull_core.controls import AUTH_CONTROL_RE, SETTINGS_CONTROL_RE
@@ -135,6 +135,18 @@ def detect_security_challenge(page):
     return None
 
 
+def _to_sign_in(response) -> bool:
+    """Whether an answer is a redirect to the Dashboard's own sign-in page.
+    Redirects are never followed, so the 3xx itself comes back."""
+    if response.status not in (301, 302, 303, 307, 308):
+        return False
+    try:
+        u = urlsplit(urljoin(BILLING_URL, response.headers.get("location", "") or ""))
+    except ValueError:
+        return False
+    return (u.scheme, u.netloc) == ("https", HOST) and u.path.rstrip("/") in LOGIN_URL_MARKERS
+
+
 def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
     if _account(page.url) != account:
         raise ListStopped("the selected Cloudflare account changed")
@@ -144,10 +156,13 @@ def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
         response = page.context.request.get(endpoint, max_redirects=0, timeout=20000,
                                             params={"page": page_number, "per_page": PAGE_SIZE},
                                             headers={"Accept": "application/json"})
-        if response.status == 401:
+        if response.status == 401 or _to_sign_in(response):
             raise SessionExpired()
         if response.status == 429:
             raise ListStopped("Cloudflare is limiting invoice requests. Try again later.")
+        if response.status == 403:
+            raise ListStopped("Cloudflare refused the invoice history. The signed-in user may "
+                              "not have billing access to this account")
         if response.status != 200:
             raise ListStopped("Cloudflare did not answer the invoice history request")
         data = json.loads(intake.text_of(response, limit=LIST_BYTES))
@@ -179,7 +194,7 @@ def _invoices(page) -> tuple[str, dict[str, Invoice]]:
         raise ListStopped("open Invoices and documents for your Cloudflare account")
     tag = _tag(account)
     invoices = {}
-    previous = None
+    seen = []
     legacy = 0
     _RUN.clear()
     for n in range(1, MAX_PAGES + 1):
@@ -217,14 +232,14 @@ def _invoices(page) -> tuple[str, dict[str, Invoice]]:
                 added += 1
         # Detect the API returning the previous page again even if it claims
         # to be the last one, before treating the archive as fully listed.
-        if rows and not added and rows == previous:
+        if rows and not added and rows in seen:
             raise ListStopped("Cloudflare repeated an invoice history page")
         if not has_next:
             if _account(page.url) != account:
                 raise ListStopped("the selected Cloudflare account changed")
             _RUN.update(page=page, account=tag, invoices=invoices, legacy=legacy)
             return tag, invoices
-        previous = rows
+        seen.append(rows)
         page.wait_for_timeout(350)
     raise ListStopped("Cloudflare invoice history exceeded the page limit")
 
@@ -274,14 +289,30 @@ def _fetch_invoice(page, selected: str, invoice_id: str) -> bytes:
             response.dispose()
 
 
+# Why the last download_bill saved nothing, one of REFUSALS, so the run
+# records and says it rather than calling every refusal a capture failure.
+REFUSALS = ("gone", "refused", "unreadable", "wrong")
+_REFUSAL = {"why": ""}
+
+
+def last_refusal() -> str:
+    return _REFUSAL["why"]
+
+
+def _refuse(why: str) -> bool:
+    _REFUSAL["why"] = why
+    return False
+
+
 def download_bill(page, date: str, out_path: Path, *, account: str, document_id: str) -> bool:
+    _REFUSAL["why"] = ""
     if not account or account_tag(page) != account:
-        raise ListStopped("reopen the Cloudflare account that owns this invoice")
+        raise ListStopped("Reopen the Cloudflare account that owns this invoice.")
     if _RUN.get("page") is not page or _RUN.get("account") != account:
         _invoices(page)
     invoice = _RUN["invoices"].get(document_id)
     if invoice is None or invoice.date != date:
-        return False
+        return _refuse("gone")
     selected = _account(page.url)
     if not selected or _tag(selected) != account:
         raise ListStopped("the selected Cloudflare account changed")
@@ -289,13 +320,13 @@ def download_bill(page, date: str, out_path: Path, *, account: str, document_id:
         data = _fetch_invoice(page, selected, invoice.invoice_id)
     except SessionExpired:
         refused.list_again(lambda: collect_download_docs(page), SessionExpired, ListStopped)
-        return False
+        return _refuse("refused")
     try:
         text = " ".join(pdf_reader.page_texts(data, pages=2))
     except Exception:
-        return False
+        return _refuse("unreadable")
     if (not _printed_number(text, invoice.number)
             or not identity.contains(text, identity.date_variants(date), "date")):
-        return False
+        return _refuse("wrong")
     shared_folder.write_bytes(out_path, data)
     return True

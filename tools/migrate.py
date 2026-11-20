@@ -217,8 +217,12 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # and stops when the window shows another
                         # (amexbanking_docs.App._held_accounts).
                         "American Express Banking": ("account_token", "account_digits"),
-                        # These are hashes used to bind archived invoices
-                        # to their dashboard account and invoice.
+                        # An invoice is known by its key part, a digest of
+                        # its account's digest and its invoice id, which
+                        # Document.key builds the record's key from, and is
+                        # taken only under the account it was listed for,
+                        # by its account's digest, which _select reads
+                        # (cloudflare_docs). Both are digests, never an id.
                         "Cloudflare": ("account", "document_id")}
 
 

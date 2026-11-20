@@ -329,3 +329,113 @@ def test_a_stopped_list_leaves_no_legacy_count_of_an_earlier_one():
     with pytest.raises(site.ListStopped):
         site.collect_download_docs(page)
     assert site.legacy_count() == 0
+
+
+# -- review repairs (review-238.md) ------------------------------------------
+
+
+class _Tab:
+    """A Dashboard tab of the person's, on some page, never closed."""
+
+    def __init__(self, url):
+        self.url = url
+
+    def is_closed(self):
+        return False
+
+
+def test_a_dashboard_tab_off_the_invoices_page_is_told_to_open_invoices(tmp_path, monkeypatch, capsys):
+    app = _app(tmp_path, monkeypatch)
+    tab = _Tab(f"https://dash.cloudflare.com/{ACCOUNT}/home/overview")
+    monkeypatch.setattr(app, "page", lambda: tab)
+    with pytest.raises(SystemExit):
+        app._on_its_site()
+    said = capsys.readouterr().out
+    assert "Invoices and documents" in said and "not open" not in said, said
+
+
+def test_a_dashboard_tab_on_invoices_is_used_as_before(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    tab = _Tab(f"https://dash.cloudflare.com/{ACCOUNT}/billing/invoices")
+    monkeypatch.setattr(app, "page", lambda: tab)
+    assert app._on_its_site() is tab
+
+
+def _download(tmp_path, monkeypatch, change):
+    app = _app(tmp_path, monkeypatch)
+    page = Page()
+    monkeypatch.setattr(app, "_on_its_site", lambda: page)
+    app.cmd_discover(quiet=True)
+    change(page)
+    doc = app._select()[-1]
+    app.download_one(page, doc, "invoice.pdf")
+    return app, app.progress.get(doc.key)
+
+
+def test_a_pdf_that_names_another_invoice_is_counted_as_a_wrong_document(tmp_path, monkeypatch):
+    def other(page):
+        page.pdfs[FIRST] = page.pdfs[SECOND] = text_pdf(["Invoice CF-00000009", "February 6, 2032"])
+    app, rec = _download(tmp_path, monkeypatch, other)
+    assert app.stats.get("wrong_document") == 1 and app.stats["failed"] == 1
+    assert "did not show this invoice" in rec["notes"], rec["notes"]
+    assert "Could not capture" not in rec["notes"]
+
+
+def test_an_invoice_gone_from_the_list_is_said_as_gone(tmp_path, monkeypatch):
+    def gone(page):
+        page.pages = {1: ([], False)}
+        site._RUN.clear()
+    app, rec = _download(tmp_path, monkeypatch, gone)
+    assert "no longer listed" in rec["notes"], rec["notes"]
+    assert not app.stats.get("wrong_document")
+
+
+def test_a_refused_pdf_is_said_as_refused(tmp_path, monkeypatch):
+    def refuse(page):
+        page.pdf_status = 403
+    app, rec = _download(tmp_path, monkeypatch, refuse)
+    assert "refused" in rec["notes"], rec["notes"]
+    assert not app.stats.get("wrong_document")
+
+
+class _Redirect(Response):
+    def __init__(self, location):
+        super().__init__(b"", "text/html", 302)
+        self.headers["location"] = location
+
+
+@pytest.mark.parametrize("location", ["/login", "https://dash.cloudflare.com/login?redirect_uri=x"])
+def test_a_history_sent_to_the_sign_in_page_is_a_sign_out(location):
+    page = Page()
+    page.context = SimpleNamespace(request=SimpleNamespace(get=lambda url, **kw: _Redirect(location)))
+    with pytest.raises(site.SessionExpired):
+        site.collect_download_docs(page)
+
+
+@pytest.mark.parametrize("location", ["https://example.test/login", "/somewhere", ""])
+def test_a_history_redirected_elsewhere_is_a_list_stop(location):
+    page = Page()
+    page.context = SimpleNamespace(request=SimpleNamespace(get=lambda url, **kw: _Redirect(location)))
+    with pytest.raises(site.ListStopped):
+        site.collect_download_docs(page)
+
+
+def test_a_history_refused_says_billing_access():
+    page = Page()
+    page.history_status = 403
+    with pytest.raises(site.ListStopped, match="billing access"):
+        site.collect_download_docs(page)
+
+
+def test_a_history_cycling_between_two_pages_stops_at_the_third():
+    page = Page()
+    first, second = [entry(FIRST)], [entry(SECOND)]
+    page.pages = {n: (first if n % 2 else second, True) for n in range(1, 201)}
+    with pytest.raises(site.ListStopped, match="repeated"):
+        site.collect_download_docs(page)
+    assert len(page.fetched) == 3
+
+
+def test_login_words_print_through_a_plain_windows_console():
+    source = (Path(app_mod.__file__)).read_text(encoding="utf-8")
+    assert "→" not in source
