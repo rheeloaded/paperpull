@@ -1,0 +1,7 @@
+Starlink invoices
+
+  paperpull starlink login       open the sign-in window
+  paperpull starlink discover    list available invoices
+  paperpull starlink pilot       save the newest invoice
+  paperpull starlink all         save invoices in scope
+  paperpull starlink resume      continue a stopped run
