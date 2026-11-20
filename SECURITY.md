@@ -48,7 +48,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Coinbase, Costco, Discover, Discover Bank, Dominion, eBay, E*TRADE, Fairfax Water, First
     Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Nelnet, Newrez,
     PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD,
-    Sparkasse Pforzheim Calw, Spectrum,
+    Sparkasse Pforzheim Calw, Spectrum, Starlink,
     State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
     Wells Fargo) decide which of the page's controls may be
     pressed with `is_safe_control()`, a hard blocklist (`FORBIDDEN_CONTROL_RE`,
@@ -59,6 +59,9 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Bank, First Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo
     narrow the allowlist to the whole labels they press, and all of them but
     TreasuryDirect give each control a guard of its own built the same way.
+    Starlink presses only the Invoices grid’s exact page controls. Invoice PDFs
+    come from the same-origin invoice link, with redirects disabled, and
+    are checked against the listed invoice number and issue date.
     Best Buy presses only its year menu and a year in it. Discover Bank
     presses only the keep-alive button of Discover's inactivity dialog, a
     button whose whole name is I'm still here, Stay signed in, Continue
