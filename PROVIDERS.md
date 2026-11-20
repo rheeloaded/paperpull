@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (88, plus five built and waiting for a tester, and four first shells)
+## Supported (89, plus four built and waiting for a tester, and four first shells)
 
 | App | Provider | Country | Documents | Category |
 |-----|----------|---------|-----------|----------|
@@ -65,7 +65,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`irs`](apps/irs) | IRS (Individual Online Account) | United States | Account, return, wage and income, and record of account transcripts, read from the list the transcript page asks for and each fetched by its own address, nothing clicked. Built from a read-only survey and run in full on the builder's own account, 26 transcripts listed and all 26 saved as valid PDFs. A notice stops Run All until one has been seen, and Resume then saves the transcripts. Sign-in is ID.me, the account holder's own | Government / tax |
 | [`marinwater`](apps/marinwater) | Marin Water (CA) | United States | Water bills, read from Bill History on Marin Water's Paymentus portal for a sign-in with one account. Contributed by @solkennedy. Run on the contributor's own account (#233), nothing clicked, each bill's PDF fetched from its own View Bill link, and bills that share a date told apart by their PDFs. Requested in #231 | Utility |
 | [`mbna`](apps/mbna) | MBNA (Canada, credit cards) | Canada | Credit card statements. UNTESTED, built without an account. A first shell that opens the site for you to sign in and nothing more, and downloads nothing yet. Have an account? Sign in, Record one trip to a document and attach the recording to issue #205 | Card |
-| [`meijer`](apps/meijer) | Meijer | United States | Order receipts, and in-store digital receipts where mPerks lists them. UNTESTED, built without an account. Have one? Run Diagnose and attach the file to issue #42. Being tested by @jpfieber | Retail |
+| [`meijer`](apps/meijer) | Meijer | United States | Order receipts, and in-store digital receipts where mPerks lists them. Confirmed by @cmcculloh, whose Pilot on their own account saved five in-store receipts from Meijer's current orders page (#236). Requested by @jpfieber, whose reports on issue #42 shaped it. A receipt saved from the old orders page is kept under its new record rather than saved again, not yet seen on a real account | Retail |
 | [`myecp`](apps/myecp) | MILITARY STAR card (MyECP, Exchange Credit Program) | United States | Monthly card statements, the three and a half years MyECP keeps online. Built on the maintainer's own account, 25 statements | Card |
 | [`mypay`](apps/mypay) | DFAS myPay | United States | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | United States | Mortgage statements, escrow, 1098 | Mortgage servicing |
