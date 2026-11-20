@@ -271,7 +271,7 @@ class App:
         saved session - so nothing is duplicated in the launcher scripts. You
         sign in; the tool attaches afterwards.
         """
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9318")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9319")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         # The account holder signs in using the dedicated Chrome or Edge profile.
@@ -360,6 +360,14 @@ class App:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
         self.discovery.save()
         log.info("Cloudflare invoices: %d listed, %d new", len(docs), n_new)
+        legacy = site.legacy_count()
+        if legacy:
+            # Said on every listing, Resume's too, since these stay unsaved.
+            many = legacy != 1
+            print(f"  {legacy} older Cloudflare invoice{'s' if many else ''} from its "
+                  f"earlier billing system {'are' if many else 'is'} listed but not saved "
+                  "by PaperPull. Open the Dashboard's Invoices page to download "
+                  f"{'them' if many else 'it'} yourself.")
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).

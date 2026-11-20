@@ -116,7 +116,7 @@ def looks_signed_out(page) -> bool:
     if u.path.rstrip("/") in LOGIN_URL_MARKERS:
         return True
     try:
-        return bool(page.locator("input[type=password]:visible").count())
+        return bool(page.locator("input[type='password']").count())
     except Exception:
         return False
 
@@ -180,6 +180,7 @@ def _invoices(page) -> tuple[str, dict[str, Invoice]]:
     tag = _tag(account)
     invoices = {}
     previous = None
+    legacy = 0
     _RUN.clear()
     for n in range(1, MAX_PAGES + 1):
         rows, has_next = _history_page(page, account, n)
@@ -191,6 +192,10 @@ def _invoices(page) -> tuple[str, dict[str, Invoice]]:
                 continue
             source = row.get("source")
             if source == "legacy":
+                # An invoice of Cloudflare's older billing, whose PDF this
+                # app does not ask for. Counted, so the run says how many
+                # it left, rather than reading as the whole history saved.
+                legacy += 1
                 continue
             if source != "stripe":
                 raise ListStopped("Cloudflare returned an invoice with an unrecognized billing source")
@@ -217,7 +222,7 @@ def _invoices(page) -> tuple[str, dict[str, Invoice]]:
         if not has_next:
             if _account(page.url) != account:
                 raise ListStopped("the selected Cloudflare account changed")
-            _RUN.update(page=page, account=tag, invoices=invoices)
+            _RUN.update(page=page, account=tag, invoices=invoices, legacy=legacy)
             return tag, invoices
         previous = rows
         page.wait_for_timeout(350)
@@ -228,6 +233,12 @@ def collect_download_docs(page) -> list[RawDoc]:
     tag, invoices = _invoices(page)
     return [RawDoc("Cloudflare Invoice", invoice.date, tag, key)
             for key, invoice in invoices.items()]
+
+
+def legacy_count() -> int:
+    """How many invoices of Cloudflare's older billing the last whole list
+    held, none of which this app saves. Nought after a list that stopped."""
+    return int(_RUN.get("legacy", 0))
 
 
 def _printed_number(text: str, number: str) -> bool:

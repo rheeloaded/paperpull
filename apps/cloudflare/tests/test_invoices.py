@@ -264,3 +264,68 @@ def test_app_keeps_same_day_filenames_unique_and_resumes_the_account_currently_o
     assert len(set(saved)) == len(saved) == (2 if prior_listing_stopped else 4)
     assert {path.read_bytes() for path in saved} == set(active.pdfs.values())
     assert app._select(pending_only=True) == []
+
+
+class _Fields:
+    """A page's password fields, drawn or not, as a locator counts them."""
+
+    def __init__(self, url, drawn, hidden):
+        self.url, self.drawn, self.hidden = url, drawn, hidden
+
+    def locator(self, selector):
+        count = self.drawn + (0 if ":visible" in selector else self.hidden)
+        return SimpleNamespace(count=lambda: count)
+
+
+def test_a_password_field_reads_as_signed_out_whether_drawn_or_not():
+    url = f"https://dash.cloudflare.com/{ACCOUNT}/billing/invoices"
+    assert site.looks_signed_out(_Fields(url, drawn=0, hidden=1))
+    assert site.looks_signed_out(_Fields(url, drawn=1, hidden=0))
+    assert not site.looks_signed_out(_Fields(url, drawn=0, hidden=0))
+    assert not site.looks_signed_out(_Fields("https://example.test/login", drawn=1, hidden=1))
+
+
+def _app(tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({
+        "owner": "Synthetic Owner", "output_dir": str(tmp_path), "min_pdf_bytes": 100,
+    }), encoding="utf-8")
+    monkeypatch.setattr(app_mod.App, "_setup_logging", lambda self: None)
+    app = app_mod.App(app_mod.build_parser().parse_args(["--config", str(config)]))
+    monkeypatch.setattr(app, "check_session", lambda _page: None)
+    monkeypatch.setattr(app, "_delay", lambda: None)
+    return app
+
+
+def test_legacy_invoices_the_app_does_not_save_are_counted_and_said(tmp_path, monkeypatch, capsys):
+    page = Page()
+    legacy = {"type": "invoice", "source": "legacy"}
+    page.pages[1] = ([legacy, entry(FIRST), legacy], True)
+    page.pages[2] = ([entry(SECOND), legacy], False)
+    app = _app(tmp_path, monkeypatch)
+    monkeypatch.setattr(app, "_on_its_site", lambda: page)
+    capsys.readouterr()
+    assert app.cmd_discover(quiet=True) == 2
+    said = capsys.readouterr().out
+    assert "3 older Cloudflare invoices" in said and "not saved" in said, said
+    assert site.legacy_count() == 3
+
+
+def test_a_history_with_no_legacy_invoice_says_nothing_of_them(tmp_path, monkeypatch, capsys):
+    page = Page()
+    app = _app(tmp_path, monkeypatch)
+    monkeypatch.setattr(app, "_on_its_site", lambda: page)
+    app.cmd_discover(quiet=True)
+    assert "older Cloudflare invoice" not in capsys.readouterr().out
+    assert site.legacy_count() == 0
+
+
+def test_a_stopped_list_leaves_no_legacy_count_of_an_earlier_one():
+    page = Page()
+    page.pages[1] = ([{"type": "invoice", "source": "legacy"}, entry(FIRST)], True)
+    site.collect_download_docs(page)
+    assert site.legacy_count() == 1
+    page.history_status = 500
+    with pytest.raises(site.ListStopped):
+        site.collect_download_docs(page)
+    assert site.legacy_count() == 0
