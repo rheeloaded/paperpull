@@ -8,8 +8,8 @@ from paperpull_core.spec import (AppSpec, CsvSpec, DOCUMENT, Folder,
                                  INFRASTRUCTURE_FOLDERS)
 
 # One row per downloaded Trade Republic statement. Deliberately records NO account
-# numbers, SSN, balances, or other sensitive values from inside the documents
-#, only what is needed to find and verify a file locally.
+# numbers, SSN, balances, or other sensitive values from inside the documents,
+# only what is needed to find and verify a file locally.
 DOCUMENT_INDEX_COLUMNS = [
     "Account Holder",
     "Document Date", "Category", "Document Summary", "Document Title",
@@ -42,7 +42,7 @@ SPEC = AppSpec(
         "min_pdf_bytes": 2000,
         "delay_min_seconds": 2.5,
         "delay_max_seconds": 5.0,
-        "pilot_count": 5,
+        "pilot_count": 3,
         "document_types": ["Statement"],
     },
     base_url="https://app.traderepublic.com/",

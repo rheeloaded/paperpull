@@ -193,7 +193,7 @@ class App:
                 self._pw = None
                 raise not_signed_in(cdp_url, e)
             if not self._browser.contexts:
-                raise SystemExit("Connected browser has no context; open a tab and retry.")
+                raise SystemExit("Connected browser has no context. Open a tab and retry.")
             self._context = self._browser.contexts[0]
             self._cdp_mode = True
         else:
@@ -393,8 +393,9 @@ class App:
         # route's reach is left alone, and said, rather than asked forever.
         reach = {m.period for m in self.months()}
         gone = [d for d in docs if site.month_of(d.document_id) and d.document_id not in reach]
-        if gone:
-            print(f"  {len(gone)} month(s) recorded earlier are now past the "
+        untried = [d for d in gone if not self._already_done(d)]
+        if untried:
+            print(f"  {len(untried)} month(s) not saved earlier are now past the "
                   f"{site.LOOKBACK_DAYS} days Trade Republic keeps and are not asked.")
         docs = [d for d in docs if d not in gone]
         if pending_only:
@@ -442,6 +443,7 @@ class App:
         return tabs.on_its_site(self, site.is_ready_url, "Trade Republic")
 
     def process(self, docs: List[Document], dry_run: bool = False):
+        self._empty_in_a_row = 0
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.period or doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
@@ -462,7 +464,7 @@ class App:
                 page = self._on_its_site()
                 self.download_one(page, doc, filename)
             except KeyboardInterrupt:
-                print("\nInterrupted. Progress saved; run --resume to continue.")
+                print("\nInterrupted. Progress saved. Run --resume to continue.")
                 raise
             except site.SessionExpired:
                 # Already explained by download_one. Stop rather than ask
@@ -480,6 +482,24 @@ class App:
                 self._record(doc, State.FAILED, notes=kind)
                 self.stats["failed"] += 1
             self._delay()
+
+    # How many months in a row may answer with no PDF before the session is
+    # proven again. A session that ended without a 401 or a 403 would answer
+    # every later month that way, and the run would ask all of them.
+    EMPTY_BEFORE_A_CHECK = 3
+
+    def _after_an_empty_month(self, page) -> None:
+        self._empty_in_a_row = getattr(self, "_empty_in_a_row", 0) + 1
+        if self._empty_in_a_row < self.EMPTY_BEFORE_A_CHECK:
+            return
+        self._empty_in_a_row = 0
+        proof, _month = site.prove_session(page, self.months())
+        if proof == site.SIGNED_OUT:
+            raise site.SessionExpired()
+        if not site.proven(proof):
+            raise site.ListStopped(
+                "Several months in a row answered with no statement PDF, and the newest "
+                "months no longer answer either, so Trade Republic may have signed you out.")
 
     def months_stopped(self, stop) -> None:
         """Leave the month pending when Trade Republic cannot be asked any more."""
@@ -508,7 +528,7 @@ class App:
 
     def _saved_nothing(self, doc: Document, why: str, postmortem: dict = None) -> None:
         note, step, reason = self._REFUSED.get(why, self._REFUSED[""])
-        if why == "refused" or why == delivery.WRONG:
+        if why == "refused":
             # A PDF that arrived and was another month, which puts the
             # run's other months in doubt too (run_reporting).
             self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
@@ -545,7 +565,9 @@ class App:
             raise site.ListStopped("Trade Republic is limiting requests. Try again later.")
         if got.kind != site.PDF:
             self._saved_nothing(doc, got.kind)
+            self._after_an_empty_month(page)
             return
+        self._empty_in_a_row = 0
         check = site.check_period(got.data, month)
         if not check.ok:
             self._saved_nothing(doc, check.outcome, postmortem={"identity": check.report()})
@@ -579,7 +601,7 @@ class App:
             self._write_row(doc, "Validation failed", "Needs Manual Review")
             self.write_failure('validate the saved pdf', 'the saved pdf did not validate')
             self.stats["manual_review"] += 1
-            print(f"  !! Validation failed ({result.reason}); moved to Manual Review.")
+            print(f"  !! Validation failed ({result.reason}), moved to Manual Review.")
             return
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
@@ -718,7 +740,7 @@ class App:
             else:
                 row["Verified At"] = now_iso()
         self.index_csv.rewrite(rows)
-        print(f"\nVerified {len(rows)} index rows; {bad} problem(s).")
+        print(f"\nVerified {len(rows)} index rows, {bad} problem(s).")
 
     @property
     def requests(self):
@@ -891,14 +913,14 @@ def build_parser() -> argparse.ArgumentParser:
             ("resume", "continue an interrupted run"),
             ("verify", "re-validate every saved PDF"),
             ("rename", "rename downloaded files to this app's current naming"),
-            ("diagnose", "ask the newest month once and write counts for a tester to send"),
+            ("diagnose", "ask the newest months once each and write counts for a tester to send"),
             ("record", "record your own path to a document, so this app can be repaired (downloads nothing)"),
             ]:
         ap.add_argument(f"--{name}", action="store_true", help=help_text)
     ap.add_argument("--apply", action="store_true",
                     help="with --rename, actually rename (default is a preview)")
     ap.add_argument("--dry-run", action="store_true",
-                    help="plan filenames but download nothing")
+                    help="plan filenames and save nothing (the session proof still asks one statement)")
     ap.add_argument("--year", type=int)
     ap.add_argument("--start-date")
     ap.add_argument("--end-date")

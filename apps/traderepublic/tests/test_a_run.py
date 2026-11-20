@@ -201,7 +201,11 @@ def test_a_sign_out_stops_the_run_with_the_month_left_for_resume(tmp_path, code)
     again = make_app(tmp_path, tab, "--resume")
     again.stats["mode"] = "resume"
     again.cmd_resume()
-    assert "2026-10" not in tab.asked and tab.asked[:2] == ["2026-09", "2026-08"]
+    # 2026-10 is asked again only as the session proof after months with
+    # no statement, never downloaded again.
+    assert tab.asked[:2] == ["2026-09", "2026-08"]
+    assert again.progress.get("id:2026-10")["state"] == State.COMPLETED.value
+    assert again.stats["statements"] == 2
     assert state(again, "2026-09") == State.COMPLETED.value
 
 
@@ -365,3 +369,31 @@ def test_diagnose_off_the_home_page_asks_nothing(tmp_path, capsys):
     found = diagnose(tmp_path, tab)
     assert tab.asked == [] and found["on_home_page"] is False
     assert "nothing was asked" in capsys.readouterr().out
+
+
+def test_months_with_no_statement_in_a_row_prove_the_session_again_and_go_on(tmp_path):
+    """An account opened recently answers its older months with no PDF, and
+    the run goes on through them once the newest month still answers."""
+    app, tab = pilot(tmp_path, right("2026-10"))
+    app.args.yes = True
+    app.cmd_run("all")
+    assert state(app, "2023-11") == State.FAILED.value
+    assert app.stats["no_statement"] == 35
+    # The proof once in discovery, then once after every three empty months.
+    assert tab.asked.count("2026-10") == 2 + 35 // 3
+
+
+def test_a_session_that_ends_without_a_401_stops_the_run(tmp_path, capsys):
+    answers = right("2026-10")
+    app, tab = pilot(tmp_path, answers)
+    app.args.yes = True
+
+    def lapse(t):
+        return pdf_answer(statement("2026-10")) if len(t.asked) <= 2 else body(b"<html>sign in</html>")
+    tab.answers["2026-10"] = lapse
+    run(app, app.cmd_run, "all")
+    said = capsys.readouterr().out
+    assert "may have signed you out" in said
+    assert listing.last(app) == listing.STOPPED
+    assert state(app, "2026-06") is None, "the run asked past the check"
+    assert [state(app, p) for p in ("2026-09", "2026-08", "2026-07")] == [State.FAILED.value] * 3

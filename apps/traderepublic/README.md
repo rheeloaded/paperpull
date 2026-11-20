@@ -95,7 +95,7 @@ home page stops the run with nothing asked.
 ```
 paperpull traderepublic setup
 paperpull traderepublic login        sign in yourself, leave the window open
-paperpull traderepublic diagnose     ask the newest month once, write counts to send
+paperpull traderepublic diagnose     ask the newest months once, write counts to send
 paperpull traderepublic discover     list the months in reach
 paperpull traderepublic pilot        save the newest few months
 paperpull traderepublic all          save every month in reach
