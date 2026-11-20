@@ -111,6 +111,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and a receipt key in a shape the app does not know is not opened by a
   run and is tried again next run, so it is never set aside. Contributed
   by @cmcculloh.
+- **Apple asks again on a later run for a purchase it passed over (#237).**
+  Once Apple has refused ten of an account's purchases in a row, older ones
+  in a year where it refused one are passed over for the rest of the run.
+  Such a purchase is now left pending rather than counted failed, and a
+  later download run that covers its date asks Apple for that receipt
+  itself, even when Apple refuses the newer ones again, so that run takes
+  longer by one paced ask for each. Purchases an older
+  version recorded as failed this way are asked the same way. A purchase is
+  passed over at most once, so a receipt Apple never gives still ends as a
+  purchase record by its third run, and every record rests on Apple
+  refusing that receipt itself. The end of the run says how many were left
+  pending. Contributed by @solkennedy. Before merging, a test was added that
+  follows such a history run by run to its records and counts every ask,
+  and the end-of-run line was worded for a single purchase too.
 
 ## [0.69.0] - 2026-11-17
 
