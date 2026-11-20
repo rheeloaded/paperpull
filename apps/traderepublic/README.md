@@ -31,7 +31,9 @@ it, which is what Diagnose is for.
 
 A month Trade Republic answers with no PDF (an empty answer, an error, a
 page) is recorded as having no statement, said at the end of the run, and
-asked again next time. It is never taken for a sign-out or for done. A 401
+asked again next time. It is never taken for a sign-out or for done. After
+three such months in a row the newest months are asked again, and the run
+goes on only while one of them still answers with a statement. A 401
 or a 403 means you are signed out, and the run stops with that month left
 for Resume. Login says Success only when a statement actually answered.
 
