@@ -130,6 +130,8 @@ STAND_INS = {
         "the real scope.period_filter of a run with no period of its own and that config, "
         "None, keep all, since keep only narrows what is listed",
     "self._reads_notices()": "True, the reader's own default, which opens the notices list too",
+    "self._only_accounts()": "the last fours the config's only_accounts names, none in the "
+                             "template, so every account, as an install starts (Wells Fargo, #221)",
 }
 
 # Arguments a Diagnose hands one reader that are of its own walk, by name,
@@ -276,6 +278,8 @@ def _stand_in(text: str, app: str):
         return scope.period_filter(argparse.Namespace(), config)
     if text == "self._reads_notices()":
         return True
+    if text == "self._only_accounts()":
+        return list(config.get("only_accounts") or [])
     raise KeyError(text)
 
 

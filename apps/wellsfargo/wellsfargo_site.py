@@ -1049,18 +1049,63 @@ def _open_picker(page, box):
     return None
 
 
-def _shown_account(page, box, labels) -> Optional[str]:
-    """Which of `labels` the closed picker shows as chosen, or None when it
-    is open or shows no one of them. Two labels one inside the other end in
-    the same last four, which discovery refuses before anything is chosen."""
+# What a closed picker says of the account it shows. The box's own text,
+# read node by node in the live page, leaving out a list of entries it
+# keeps inside itself (a listbox, its options, a select) and any part
+# hidden by display, visibility or the hidden attribute, since a hidden
+# list would name every account. Each piece is read apart, so a nickname
+# and its masked digits drawn in two blocks are still both read.
+_SHOWN_WORDS_JS = """(el) => {
+  const left_out = (e) => {
+    for (let n = e; n && n !== el.parentElement; n = n.parentElement) {
+      if (n.matches('[role=listbox], [role=option], select, option, datalist, [hidden]')) return true;
+      const cs = getComputedStyle(n);
+      if (cs.display === 'none' || cs.visibility === 'hidden') return true;
+    }
+    return false;
+  };
+  const parts = [];
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+    if (t.parentElement && !left_out(t.parentElement)) parts.push(t.nodeValue);
+  }
+  const named = (el.getAttribute('aria-labelledby') || '').split(/\\s+/).filter(Boolean)
+    .map(id => (document.getElementById(id) || {}).textContent);
+  return [parts.join(' '), el.getAttribute('aria-label'), ...named].filter(Boolean).join(' ');
+}"""
+
+
+def _plain(words: str) -> str:
+    """Words compared with no spacing at all and in one case, so a label
+    drawn in pieces, spaced or in capitals still reads as itself. Two
+    labels that only spacing would tell apart end in the same last four,
+    which discovery refuses before anything is chosen."""
+    return "".join((words or "").split()).casefold()
+
+
+def _picker_reading(page, box, labels):
+    """What the closed picker shows, in fixed words, with the one of
+    `labels` it shows or None. "open" for a picker left open, "no account"
+    and "several accounts" for words naming none or more than one, read
+    whatever their case and spacing (#221). Two labels one inside the other
+    end in the same last four, which discovery refuses before anything is
+    chosen."""
     try:
         if (box.get_attribute("aria-expanded") or "").lower() == "true":
-            return None
+            return "open", None
+        said = _plain(box.evaluate(_SHOWN_WORDS_JS, timeout=_READ_MS) or "")
     except Exception:
-        return None
-    said = _picker_words(page, box)
-    found = [label for label in labels if label and label in said]
-    return found[0] if len(found) == 1 else None
+        return "unread", None
+    found = [label for label in labels if label and _plain(label) in said]
+    if len(found) == 1:
+        return "one account", found[0]
+    return ("several accounts" if found else "no account"), None
+
+
+def _shown_account(page, box, labels) -> Optional[str]:
+    """Which of `labels` the closed picker shows as chosen, or None when it
+    is open, could not be read or shows no one of them."""
+    return _picker_reading(page, box, labels)[1]
 
 
 def _let_go_of_focus(page) -> None:
@@ -1083,14 +1128,53 @@ def _close_picker(page, box) -> None:
     _let_go_of_focus(page)
 
 
-def _still_shows(page, box, labels, label: str) -> bool:
-    """Whether the picker still shows `label` as chosen, or shows no
-    account's words to tell by, when the answer that came for it is what
-    was waited on."""
+def _unproven(page, box, labels, label: str) -> str:
+    """"" when the closed picker shows `label` as chosen, or when the page
+    has no picker, else what it showed in fixed words, another account,
+    no account, several accounts, open or unread. A picker that is open,
+    or that shows no account's words, proves nothing, and the list it
+    shows could be another account's (#221)."""
     if box is None:
-        return True
-    shown = _shown_account(page, box, labels)
-    return shown is None or shown == label
+        return ""
+    state, shown = _picker_reading(page, box, labels)
+    if shown == label:
+        return ""
+    return "another account" if shown else state
+
+
+def _still_shows(page, box, labels, label: str) -> bool:
+    """Whether the closed picker still shows `label` as chosen, True for a
+    page with no picker."""
+    return not _unproven(page, box, labels, label)
+
+
+class PickerMoved(pressing.Stop):
+    """The picker showed another account, or none, where the run had to
+    know which account's list it was reading or taking a document from."""
+
+
+def _picker_moved(showed: str, step: str = "read the accounts") -> PickerMoved:
+    """The stop for a picker that did not show the account, with what it
+    showed, from the reading that failed, in fixed words and never which
+    account (#221)."""
+    return PickerMoved(step, "the picker moved to another account", [
+        "The Wells Fargo picker did not show the account whose statements were being "
+        "read, so nothing of them was filed under the wrong account.",
+        pressing.AGAIN], {"picker_showed": showed})
+
+
+# The forms a last four may be written in for only_accounts, the masked
+# digits alone or after three dots, an ellipsis, up to four stars or an x.
+_ONLY_ACCOUNT_RE = re.compile(r"(?:(?:\.{3}|\u2026|\*{1,4}|[xX]) ?)?([0-9]{4})")
+
+
+def only_account(value) -> str:
+    """The four digits of one entry of only_accounts, or "" when it is not
+    a last four in one of the forms it may be written in."""
+    if not isinstance(value, str):
+        return ""
+    m = _ONLY_ACCOUNT_RE.fullmatch(value.strip(" "))
+    return m.group(1) if m else ""
 
 
 def account_picker(page):
@@ -1692,7 +1776,7 @@ def _held_as(survey: _Survey, iso: str, kind: str) -> list:
     return [c for c in survey.held if c.iso == iso and c.held == kind]
 
 
-def collect_download_docs(page) -> List[RawDoc]:
+def collect_download_docs(page, only=()) -> List[RawDoc]:
     """Read every statement and tax document the page offers, one for each
     date and kind, so a statement and a 1099 of one day are both found.
 
@@ -1706,35 +1790,106 @@ def collect_download_docs(page) -> List[RawDoc]:
     With an account picker of more than one account, each account is
     chosen in turn and its documents carry its label (#27). With one, or
     none, they carry no account, as they always did, so the records of a
-    sign-in of one account keep their keys."""
+    sign-in of one account keep their keys.
+
+    `only` holds the last fours only_accounts names (#221), empty for
+    every account. Then the picker is read first, before anything is
+    expanded, scrolled or read, and only the entries it names are chosen,
+    in the picker's order. An entry it does not name is never pressed and
+    its list is never read, the account the page shows first among them."""
+    if only:
+        return _collect_chosen(page, list(only))
     expand_all(page)
     scroll_full_page(page)
     _box, labels = account_picker(page)
     docs = _Found()
+    docs.accounts = {"only_accounts": False, "picker_entries": len(labels),
+                     "chosen": len(labels)}
     if len(labels) <= 1:
         _add_documents(docs, _survey(page), "")
     else:
-        tails = [account_tail(label) or label for label in labels]
-        if len(set(tails)) < len(tails) or len(set(labels)) < len(labels):
-            raise pressing.Stop("read the accounts", "two accounts end in the same last four", [
-                "Two accounts in the Wells Fargo picker end in the same last four digits, and "
-                "this app tells accounts apart by them, so it lists none of them rather than "
-                "mix one account's statements with the other's.",
-                "Please say so on GitHub issue #27, so that case can be built."])
+        _no_twins(labels)
         for label in labels:
-            if not choose_account(page, label):
-                raise pressing.Stop("read the accounts", "an account could not be chosen", [
-                    "An account in the Wells Fargo picker could not be chosen, so the list "
-                    "of statements was not read whole.",
-                    pressing.AGAIN])
-            expand_all(page)
-            scroll_full_page(page)
-            if not _still_shows(page, _box, labels, label):
-                raise pressing.Stop("read the accounts", "the picker moved to another account", [
-                    "The Wells Fargo picker showed another account while its statements were "
-                    "being read, so none of them was filed under the wrong account.",
-                    pressing.AGAIN])
-            _add_documents(docs, _survey(page), label)
+            _choose(page, label)
+            _read_account(page, docs, _box, labels, label)
+    _say_what_was_left(docs)
+    return docs
+
+
+def _no_twins(labels) -> None:
+    tails = [account_tail(label) or label for label in labels]
+    if len(set(tails)) < len(tails) or len(set(labels)) < len(labels):
+        raise pressing.Stop("read the accounts", "two accounts end in the same last four", [
+            "Two accounts in the Wells Fargo picker end in the same last four digits, and "
+            "this app tells accounts apart by them, so it lists none of them rather than "
+            "mix one account's statements with the other's.",
+            "Please say so on GitHub issue #27, so that case can be built."])
+
+
+def _choose(page, label: str) -> None:
+    if not choose_account(page, label):
+        raise pressing.Stop("read the accounts", "an account could not be chosen", [
+            "An account in the Wells Fargo picker could not be chosen, so the list "
+            "of statements was not read whole.",
+            pressing.AGAIN])
+
+
+def _read_account(page, docs: _Found, box, labels, label: str) -> None:
+    """The list of the account `label`, just chosen, added to `docs`. The
+    picker has to show that account before the list is expanded, before it
+    is read and after, or nothing of that look is kept (#221)."""
+    showed = _unproven(page, box, labels, label)
+    if showed:
+        raise _picker_moved(showed)
+    expand_all(page)
+    scroll_full_page(page)
+    showed = _unproven(page, box, labels, label)
+    if showed:
+        raise _picker_moved(showed)
+    look = _survey(page)
+    showed = _unproven(page, box, labels, label)
+    if showed:
+        raise _picker_moved(showed)
+    _add_documents(docs, look, label)
+
+
+def _collect_chosen(page, only: list) -> List[RawDoc]:
+    """The documents of the accounts only_accounts names, and of no other
+    (#221). The picker's entries are read first, the one press being the
+    one that opens the picker, as it always was. Every last four has to be
+    the last four of exactly one entry, or nothing is chosen and nothing
+    is read. Stops and the log say counts only, never a label or a digit."""
+    box, labels = account_picker(page)
+    if len(labels) <= 1:
+        raise pressing.Stop("read the accounts", "the page showed no picker of several accounts", [
+            "only_accounts in this app's config.json is set, and no account picker of "
+            "several accounts could be read on the Wells Fargo page, so nothing was read.",
+            "If the window shows several accounts, the picker could not be read, so look "
+            "at the window and run this again. For a sign-in of one account, leave "
+            "only_accounts empty, []."],
+            {"picker_entries": len(labels)})
+    _no_twins(labels)
+    tails = [account_tail(label) for label in labels]
+    if any(tails.count(want) != 1 for want in only):
+        raise pressing.Stop("read the accounts", "the picker has no account ending in a number given in the settings", [
+            "only_accounts in this app's config.json names a last four that no account in "
+            "the Wells Fargo picker ends in, so no account was chosen and nothing was read.",
+            "Look at the picker in the browser window, put the last four digits of each "
+            "account to read in only_accounts, then run this again."],
+            {"picker_entries": len(labels), "only_accounts": len(only)})
+    chosen = [label for label in labels if account_tail(label) in only]
+    log.info("%d of %d accounts in the picker chosen by only_accounts", len(chosen), len(labels))
+    docs = _Found()
+    docs.accounts = {"only_accounts": True, "picker_entries": len(labels),
+                     "chosen": len(chosen)}
+    for label in chosen:
+        _choose(page, label)
+        _read_account(page, docs, box, labels, label)
+    _say_what_was_left(docs)
+    return docs
+
+
+def _say_what_was_left(docs: _Found) -> None:
     if docs.unread:
         log.info("%d document controls would not answer, what they hold waits for the next run",
                  docs.unread)
@@ -1745,7 +1900,6 @@ def collect_download_docs(page) -> List[RawDoc]:
     if shared:
         log.info("%d documents share their date and kind with another row, none of them is guessed at",
                  shared)
-    return docs
 
 
 def _add_documents(docs: _Found, survey: _Survey, account: str) -> None:
@@ -1777,6 +1931,7 @@ _REFUSALS = (
     "the document names no account and the page lists several",
     "the document's account is not in the picker",
     "the picker moved to another account",
+    "the document account is not in the settings",
 )
 
 
@@ -2081,7 +2236,8 @@ def _account_shown(page, account: str, iso: str, trace: Optional[list]):
 
 
 def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
-                  trace: Optional[list] = None, rows: int = 1, account: str = "") -> bool:
+                  trace: Optional[list] = None, rows: int = 1, account: str = "",
+                  only=()) -> bool:
     """Save the document dated `iso_date` of the kind its `title` names,
     the title discovery wrote, of the account `account` discovery chose in
     the picker, "" for a page of one account. A PDF link on the row is
@@ -2092,7 +2248,18 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
 
     `dl_dir` is where the attached browser saves a download, watched
     after every click. `rows` is how many rows of the page discovery found
-    holding a document of this date and kind."""
+    holding a document of this date and kind.
+
+    `only` holds the last fours only_accounts names, empty for every
+    account. A document of another account, or of none, is refused before
+    the page is touched (#221). The picker has to show the document's
+    account once its list is expanded, and again just before its link is
+    fetched and before its control is pressed, or nothing is taken and the
+    run stops, since a picker that moved by itself makes every next press
+    suspect (#221)."""
+    if only and account_tail(account) not in only:
+        _refuse(trace, "the document account is not in the settings", iso_date)
+        return False
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     if not goto_documents(page):
@@ -2101,10 +2268,9 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     shown, box, labels = _account_shown(page, account, iso_date, trace)
     if not shown:
         return False
+    _shows_still(page, box, labels, account, iso_date, trace)
     expand_all(page)
-    if account and not _still_shows(page, box, labels, account):
-        _refuse(trace, "the picker moved to another account", iso_date)
-        return False
+    _shows_still(page, box, labels, account, iso_date, trace)
 
     el, label = _control_for(page, iso_date, kind_of_title(title), trace, rows)
     if el is None:
@@ -2124,6 +2290,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         # first. A PDF answer is the document. Anything else means the link
         # is a page or a handoff, and the click below follows it.
         if is_safe_url(target):
+            _shows_still(page, box, labels, account, iso_date, trace)
             body = _fetch_pdf(page, target, zip_ok=True)
             if body:
                 shared_folder.write_bytes(out_path, body)
@@ -2131,7 +2298,17 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
             if trace is not None:
                 trace.append({"note": "the control's own link did not answer with a PDF",
                               "url": redact(target)[:160]})
+    _shows_still(page, box, labels, account, iso_date, trace)
     return _catch_pdf(page, el, label, out_path, trace, dl_dir)
+
+
+def _shows_still(page, box, labels, account: str, iso: str, trace: Optional[list]) -> None:
+    """Stop, with nothing taken, unless the picker shows the document's
+    account, strictly. A page of one account has no picker to read."""
+    showed = _unproven(page, box, labels, account) if account else ""
+    if showed:
+        _refuse(trace, "the picker moved to another account", iso)
+        raise _picker_moved(showed, "take the document")
 
 
 # ---------------------------------------------------------------------------
