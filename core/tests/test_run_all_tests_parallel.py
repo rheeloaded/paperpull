@@ -242,14 +242,13 @@ def test_no_part_of_ci_plans_far_longer_than_the_others():
     assert max(rat.expected(n, times) for n in names) < sum(loads) / parts
 
 
-
 def test_no_part_of_ci_plans_past_33_minutes_of_tests():
     """On the v0.70.0 tag part 1 of eight was cancelled at the job's 45
     minute limit with nothing failed, on main too, planned from a file whose
     times had fallen behind CI's own (core-censuses 1,224 s against 1,209 to
     1,915 on CI, kroger 278 against 465, gui 234 against 582). Refreshed
-    from CI, eight parts planned 2,037 s of tests each, about 35 minutes a
-    job, with no room for a slow runner. A part planned past 33 minutes of
+    from CI, the longest of eight parts planned 2,042 s of tests, about
+    35 minutes a job, with no room for a slow runner. A part planned past 33 minutes of
     tests is the sign to run more parts, so refreshing the file from CI
     says so here rather than in a cancelled run."""
     parts = ci_parts()
