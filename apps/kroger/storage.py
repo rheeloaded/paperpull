@@ -18,7 +18,7 @@ from paperpull_core.spec import (AppSpec, CsvSpec, RECEIPT, Folder,
 ORDER_HISTORY_COLUMNS = [
     "Account Holder",
     "Purchase Date", "Purchase Type", "Order or Receipt Number", "Order Status",
-    "Item Name", "Quantity", "Unit Price", "Line Item Total", "Order Total",
+    "Item Name", "Quantity", "Pricing Quantity", "Pricing Unit", "Unit Price", "Line Item Total", "Order Total",
     "Fulfillment Method", "Return Status", "Purchase Summary", "PDF Filename",
     "Purchase Details URL", "Receipt URL", "Processing Status", "Notes",
 ]
@@ -69,3 +69,27 @@ from paperpull_core.storage import (  # noqa: E402  (must follow bind)
     backup_file, build_pdf_filename, ensure_owner, load_config, now_iso,
     sanitize_component, set_filename_owner, title_case, unique_path,
 )
+
+
+class PricingCsvFile(CsvFile):
+    """Upgrade Kroger's old header before appending rows with a pricing basis."""
+    def _ensure_header(self):
+        if self.path.exists() and self.path.stat().st_size:
+            import csv
+            from paperpull_core import shared_folder
+            from paperpull_core.sheets import read_stored_row
+            with shared_folder.open_to_read(self.path, 'r', encoding='utf-8-sig', newline='') as fh:
+                reader = csv.DictReader(fh)
+                header = reader.fieldnames
+                if header == self.columns:
+                    return
+                legacy = [c for c in self.columns if c not in ('Pricing Quantity', 'Pricing Unit')]
+                if header != legacy:
+                    raise ValueError('Kroger history has an unknown header; refusing to append mismatched columns')
+                if self.waiting_path.exists():
+                    raise ValueError('Flush queued Kroger CSV writes with the previous version before upgrading the history header')
+                rows = [read_stored_row(row) for row in reader]
+            # Existing values survive, new fields stay unknown, and rewrite backs up first.
+            self.rewrite(rows, backup=True)
+            return
+        super()._ensure_header()
