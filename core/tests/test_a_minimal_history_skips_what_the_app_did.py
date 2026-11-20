@@ -1185,6 +1185,8 @@ def test_another_app_does_not_carry_a_providers_own_fields():
                href="/account/products/12345678/tax_documents/777.pdf",
                occurrence=1, covers=["cd" * 32], plan="ef" * 32,
                account_token="tok-invented-0001", account_digits="4321",
+               purchase_type="In-Store", purchase_date="2026-05-14", adopted_from="pinvented01",
+               row_prints_time=True, held="invented reason",
                invoices=[{"file": "Invoices/2026-05-14 Invented Invoice (1 of 1).pdf",
                           "part": "1 of 1", "number": "10000000000000001", "kept": True,
                           "names": True, "size": 4096, "pages": 1}])

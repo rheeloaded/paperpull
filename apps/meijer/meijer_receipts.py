@@ -159,7 +159,7 @@ def _old_layout_records(discovery: dict, progress: dict, listed_keys) -> dict:
         if not isinstance(key, str) or key in listed_keys:
             continue
         disc, prog = discovery.get(key), progress.get(key)
-        if isinstance(disc, dict) and disc.get(ROW_PRINTS_TIME):
+        if any(isinstance(r, dict) and r.get(ROW_PRINTS_TIME) for r in (disc, prog)):
             continue
         rec = disc if fit_facts(disc) else prog
         facts = fit_facts(rec)
@@ -255,9 +255,12 @@ def adopt_old_layout(discovery: dict, progress: dict, listed, whole_kinds, floor
     # Its twin was the reason both were held, and with one row gone the
     # other would look like the only one and take a receipt that may be
     # the gone one's (review).
-    for key, rec in sorted(discovery.items(), key=lambda kv: str(kv[0])):
-        if (isinstance(rec, dict) and rec.get(ROW_PRINTS_TIME) and key not in listed_keys
-                and fit_facts(rec) in groups):
+    # Progress carries the mark too, since a history moved to another
+    # computer takes progress.json alone.
+    for key in sorted(set(discovery) | set(progress), key=str):
+        rec = next((r for r in (discovery.get(key), progress.get(key))
+                    if isinstance(r, dict) and r.get(ROW_PRINTS_TIME)), None)
+        if rec is not None and key not in listed_keys and fit_facts(rec) in groups:
             groups[fit_facts(rec)][2].append(key)
     for facts, (new, olds, gone) in groups.items():
         kind, date = facts[0], facts[1]
@@ -1685,6 +1688,11 @@ class App:
         rec = purchase.to_dict()
         if extra:
             rec.update(extra)
+        # Progress keeps the mark of a row that prints a time, as discovery
+        # does, since a history moved to another computer takes progress
+        # alone (adopt_old_layout).
+        if (self.discovery.get(purchase.key) or {}).get(ROW_PRINTS_TIME):
+            rec[ROW_PRINTS_TIME] = True
         not_shown.let_go_on_save(self, purchase, state, rec)
         # A receipt saved before keeps its record while a Download again
         # saves no copy of its own (paperpull_core.saved_copy).

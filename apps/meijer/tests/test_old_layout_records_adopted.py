@@ -448,6 +448,21 @@ def test_holds_are_cleared_and_worked_out_again_on_a_whole_read(tmp_path, monkey
     assert sorted(run_all(app, monkeypatch)) == sorted([NEW_KEY, TWIN_KEY])
 
 
+def test_a_history_moved_with_progress_alone_keeps_the_mark(tmp_path, monkeypatch):
+    """Core census. A history moved to another computer takes progress.json
+    alone. A purchase of the current page saved there, whose row has gone,
+    still counts as its twin, by the mark progress keeps."""
+    app = make_app(tmp_path)
+    put_saved(app, tmp_path)
+    discover(app, monkeypatch, [NEW_1141, OLD_ROW])
+    app._record_state(Purchase.from_dict(app.discovery.data[NEW_KEY]), mr.State.COMPLETED)
+    assert app.progress.data[NEW_KEY][ROW_PRINTS_TIME] is True
+    app.discovery.data.clear()
+    discover(app, monkeypatch, [NEW_0402])
+    assert OLD_KEY in app.progress.data and TWIN_KEY not in app.progress.data
+    assert is_held(app, TWIN_KEY)
+
+
 def test_a_hold_before_a_later_start_date_stays(tmp_path, monkeypatch):
     """Review. A run scoped to start after the held day must not clear the
     hold, or a Resume with no start date presses both twins."""
