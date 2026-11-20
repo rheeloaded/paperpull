@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-11-20
+
+Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
+workplace retirement plan statements. Wells Fargo can read only the
+accounts you name and checks the account again just before it takes a
+document. Chase reads its newer statements view, Kroger opens its
+receipts at their new address, Apple asks again for a purchase it passed
+over, Tualatin Water keeps no bill drawn without its stylesheet, and NW
+Natural stops after three refused bills in a row. A documents folder
+filed without kind folders holds only what PaperPull filed there.
+
 ### Added
 - **Wells Fargo reads only the accounts you name (#221).** Put the last four
   digits of the accounts to read in `"only_accounts"` in Wells Fargo's
@@ -107,8 +118,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   row is pressed, rather than whichever came first. Contributed by
   @solkennedy.
 - **PROVIDERS.md counts the supported providers right.** Its heading said
-  84 where the list held 86, and with Marin Water it holds 87, as the
-  README says.
+  84 where the list held 86, and with Marin Water and Cloudflare it
+  holds 88, as the README says.
 - **Kroger opens its receipts again (#225, #235).** Kroger's receipt pages
   moved to an address that puts the purchase date first, so every receipt
   page went back to the purchase history and each receipt was said not to

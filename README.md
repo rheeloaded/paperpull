@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-seven providers are supported today, all built on the same pattern.
+Eighty-eight providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -967,7 +967,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-six** apps pass their tests, the eighty-seven that are
+- ✅ All **ninety-seven** apps pass their tests, the eighty-eight that are
   supported, the five still waiting for a tester and the Scalable Capital,
   Consorsbank, CIBC and MBNA shells, 46,567 of them
   across the repo. Most are in regular use by the author. The rest were built or

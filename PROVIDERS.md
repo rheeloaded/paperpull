@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (87, plus five built and waiting for a tester, and four first shells)
+## Supported (88, plus five built and waiting for a tester, and four first shells)
 
 | App | Provider | Country | Documents | Category |
 |-----|----------|---------|-----------|----------|
