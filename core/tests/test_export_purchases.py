@@ -560,3 +560,40 @@ def test_a_half_the_app_held_as_the_mark_reads_into_both_spreadsheets_as_it(tmp_
     shown = {o.value: (i.value, n.value, n.quotePrefix) for o, i, n in
              zip(_column(ws, "Order Number"), _column(ws, "Item"), _column(ws, "Notes"))}
     assert shown == {k: (item, note, note.startswith("=")) for k, (item, note) in want.items()}
+
+
+def test_meijer_summary_recovers_saved_pdf_items(tmp_path, monkeypatch):
+    from paperpull_core import meijer_items
+    from paperpull_core.models import Item
+    folder = tmp_path / 'Meijer Receipts'
+    history = _history(folder, 'Meijer', [_row('2026-07-04', 'm1', 'In-Store:', unit='', line='$5.00', total='$5.00', ptype='In-Store', pdf='saved.pdf')])
+    (folder / 'In-Store').mkdir()
+    (folder / 'In-Store' / 'saved.pdf').write_bytes(b'placeholder')
+    calls = []
+    def read(path, date, total):
+        calls.append((path, date, total))
+        return [Item(name='MILK', quantity='2', unit_price='$2.50', line_total='$5.00')]
+    monkeypatch.setattr(meijer_items, 'read_items', read)
+    before = history.read_bytes()
+    rows = xp.load_purchases('Meijer', history)
+    assert len(rows) == 1
+    assert rows[0]['Item'] == 'MILK'
+    assert rows[0]['Quantity'] == 2
+    assert rows[0]['Line Total'] == 5
+    assert calls[0][1:] == ('2026-07-04', 5.0)
+    assert history.read_bytes() == before
+
+
+def test_meijer_failed_recovery_never_exports_total_as_product(tmp_path, monkeypatch):
+    from paperpull_core import meijer_items
+    history = _history(tmp_path / 'Meijer Receipts', 'Meijer', [
+        _row('2026-07-04', 'm1', 'In-Store:', pdf='../outside.pdf'),
+        _row('2026-07-05', 'm2', 'MILK'),
+    ])
+    def forbidden(*args):
+        raise AssertionError('must not read outside the archive')
+    monkeypatch.setattr(meijer_items, 'read_items', forbidden)
+    rows = xp.load_purchases('Meijer', history)
+    assert rows[0]['Item'] == ''
+    assert rows[0]['Line Total'] is None
+    assert rows[1]['Item'] == 'MILK'

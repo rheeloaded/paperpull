@@ -305,3 +305,20 @@ def test_a_second_print_that_passes_takes_the_first_ones_place(tmp_path, monkeyp
     assert out.read_bytes() == RECEIPT
     assert printed == [out.name + ".second"], "printed beside the first, never over it"
     assert sorted(f.name for f in out.parent.iterdir()) == [out.name]
+
+
+def test_verified_direct_pdf_replaces_list_placeholder_before_history_write(tmp_path):
+    from paperpull_core.models import Item
+    purchase = _purchase()
+    purchase.items = [Item(name="In-Store:", quantity="1", line_total="$22.37")]
+    app = _app(tmp_path)
+    pdf = tmp_path / "receipt.pdf"
+    pdf.write_bytes(_text_pdf([
+        "09/19/26 Fastlane1", "GROCERY", "12345678901 MILK 22.37 F",
+        "mPerks # -- ********00", "TOTAL TOTAL TAX .00", "TOTAL 22.37",
+        "PAYMENTS", "Tx:1 Op:2 Tm:3 St:4 12:00:00",
+    ]))
+    assert app._finish_pdf(PAGE, purchase, pdf)
+    assert len(purchase.items) == 1
+    assert purchase.items[0].name == "MILK"
+    assert purchase.items[0].line_total == "$22.37"
