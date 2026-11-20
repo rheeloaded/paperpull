@@ -51,13 +51,12 @@ PRINT = """<!doctype html><html><head><title>My Bill</title>
 <link rel="stylesheet" href="/css/bill.css">
 <link rel="stylesheet" href="http://%(other)s/css/evil.css">
 <link rel="stylesheet" href="http://%(host)s:%(port)d/css/bill.css">
-<link rel="stylesheet" href="/css/moved.css">
 <link rel="stylesheet" href="/css/breakout.css">
 <link rel="stylesheet" href="/css/big.css">
 <link rel="stylesheet" href="/css/big2.css">%(extra)s
 </head><body><img src="/img/logo.png"><img src="http://%(other)s/img/track.png">
 <h2>Bill Details</h2><p>Billing Date</p><p>%(billed)s</p><p>Due Date</p><p>10/20/2026</p>
-<p>Total Amount Due</p><p>$100.00</p><p>%(amp)s</p><script>document.title = 'ran';</script></body></html>"""
+<p>Total Amount Due</p><p>$100.00</p><p>%(amp)s</p>%(imgs)s<script>document.title = 'ran';</script></body></html>"""
 # A stylesheet that makes the bill a short box with its overflow hidden
 # and its lines gone, as a screen stylesheet might.
 SHORT_BOX = b"body { height: 30px; overflow: hidden } p { display: none }"
@@ -93,6 +92,13 @@ class FakePortal:
         self.amp = 0
         # More of Activity, after its table.
         self.activity_extra = ""
+        # More <img> elements at the end of each print page's body.
+        self.extra_imgs = ""
+        # The size of /css/fill.css, a stylesheet that spends the budget.
+        self.fill = 0
+        # The bytes each answer with no Content-Length got out before its
+        # connection was closed, by path.
+        self.sent = {}
 
 
 SITE = FakePortal()
@@ -156,7 +162,8 @@ class _Handler(BaseHTTPRequestHandler):
                 port = self.server.server_address[1]
                 page = PRINT % {"other": "%s:%d" % (OTHER, port), "host": HOST,
                                 "port": SITE.other_port, "billed": billed,
-                                "extra": SITE.extra_links, "amp": "&" * SITE.amp}
+                                "extra": SITE.extra_links, "amp": "&" * SITE.amp,
+                                "imgs": SITE.extra_imgs}
                 return self._send(200, page.encode(),
                                   "text/html; charset=utf-8")
         if path == "/css/bill.css":
@@ -167,14 +174,23 @@ class _Handler(BaseHTTPRequestHandler):
             return self._redirect("/css/bill.css")
         if path == "/css/breakout.css":
             return self._send(200, b'@import url("/css/imported.css"); @\\69mport url("/css/imported.css");'
+                                   b' @i\\6dport url("/css/imported.css"); @imp@import;ort url("/css/imported.css");'
+                                   b' @imp@x\\;ort url("/css/imported.css");'
                                    b' p { margin: 0 } </style><h1>BROKE OUT</h1><style>', "text/css")
         if path in ("/css/screen.css", "/css/print.css"):
             return self._send(200, SHORT_BOX, "text/css")
-        if path == "/css/stall.css":
+        if path.startswith("/img/silent"):
+            # Nothing at all for STALL seconds, not even headers.
+            time.sleep(STALL)
+            self.close_connection = True
+            return
+        if path == "/css/fill.css":
+            return self._send(200, b"/*" + b"x" * SITE.fill + b"*/", "text/css")
+        if path == "/css/stall.css" or path.startswith("/img/stall"):
             # Its headers, then nothing for STALL seconds, then the
             # connection closes with its body never sent.
             self.send_response(200)
-            self.send_header("Content-Type", "text/css")
+            self.send_header("Content-Type", "text/css" if path.endswith(".css") else "image/png")
             self.send_header("Content-Length", "100")
             self.end_headers()
             self.wfile.flush()
@@ -191,6 +207,9 @@ class _Handler(BaseHTTPRequestHandler):
             try:
                 for _ in range(80):
                     self.wfile.write(b"/*" + b"x" * 65530 + b"*/")
+                    self.wfile.flush()
+                    SITE.sent[path] = SITE.sent.get(path, 0) + 65534
+                    time.sleep(0.01)
             except OSError:
                 pass
             return
@@ -323,8 +342,8 @@ def test_every_bill_is_drawn_from_its_own_page_with_only_its_own_look(attached, 
                                                                       capsys, drawn):
     """Each print page is drawn as a PDF. Its own stylesheet and image are
     written in, and a password rule in that stylesheet does not make it a
-    sign-in page. The stylesheet on another host, the one behind a redirect
-    and the one it imports are never fetched or followed, the one that
+    sign-in page. The stylesheet on another host and the one it imports
+    are never fetched, the one that
     closes its style element does not draw into the bill, and the render
     itself asks the portal for nothing."""
     their_tab(attached, server)
@@ -336,7 +355,8 @@ def test_every_bill_is_drawn_from_its_own_page_with_only_its_own_look(attached, 
     assert len(drawn) == 3, folded(out)
     for html in drawn:
         assert "h2 { color: #036 }" in html and "data:image/png;base64," in html
-        assert "@import" not in html and "69mport" not in html and "</style><h1>" not in html
+        assert "@import" not in html and "69mport" not in html and "6dport" not in html
+        assert "</style><h1>" not in html
         assert "\\3c /style>" in html
     pdfs = saved(tmp_path)
     assert len(pdfs) == 3, folded(out)
@@ -345,17 +365,21 @@ def test_every_bill_is_drawn_from_its_own_page_with_only_its_own_look(attached, 
         assert "Bill Details" in text and "TOTAL AMOUNT DUE" in text, text
         assert "BROKE OUT" not in text, text
     assert asked("/css/bill.css") == 3, SITE.seen
-    assert asked("/css/moved.css") == 3, SITE.seen
     assert asked("/img/logo.png") == 3, SITE.seen
     assert asked("/css/imported.css") == 0, SITE.seen
     assert not any(s[1] in (OTHER, "another port") for s in SITE.seen), SITE.seen
 
 
-def test_a_stylesheet_over_the_budget_is_left_out_and_noted(attached, server, tmp_path, capsys,
-                                                           monkeypatch, caplog, drawn):
+def stylesheet_left_out(caplog):
+    return sum("a stylesheet of the bill" in r.getMessage() for r in caplog.records)
+
+
+def test_a_stylesheet_over_the_budget_fails_the_bill(attached, server, tmp_path, capsys,
+                                                    monkeypatch, caplog, drawn):
     """Two stylesheets each well under the limit, which together are over
-    it: the first is written in and the second left out, and the run's log
-    says so, where the person reads it. Nothing is asked for after it."""
+    it. The second is left out, so the bill is not drawn or kept and the
+    next run asks for it again, and the run's log says so. Nothing is asked
+    for after it."""
     monkeypatch.setattr(site, "MAX_PAGE_BYTES", 60_000)
     SITE.big = 35_000
     their_tab(attached, server)
@@ -363,15 +387,46 @@ def test_a_stylesheet_over_the_budget_is_left_out_and_noted(attached, server, tm
     with caplog.at_level("WARNING", logger="tualatin_docs.site"):
         ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
-    assert ended[1] in (0, None), folded(out)
-    assert len(saved(tmp_path)) == 3, folded(out)
-    noted = [r.getMessage() for r in caplog.records if "left out of its PDF" in r.getMessage()]
-    assert len(noted) == 3, caplog.text[-2000:]
+    assert saved(tmp_path) == [] and drawn == [], folded(out)
+    assert out.count("Nothing was saved, and the next run tries it again") == len(BILLS), folded(out)
+    assert stylesheet_left_out(caplog) == 3, caplog.text[-2000:]
     assert asked("/css/big.css") == 3 and asked("/css/big2.css") == 3, SITE.seen
     assert asked("/img/logo.png") == 0, SITE.seen
-    for html in drawn:
-        assert html.count("x" * SITE.big) == 1, len(html)
-        assert "data:image/png;base64," not in html
+
+
+def test_a_stylesheet_behind_a_redirect_is_not_followed_and_fails_the_bill(attached, server, tmp_path,
+                                                                         capsys, caplog, drawn):
+    SITE.extra_links = '<link rel="stylesheet" href="/css/moved.css">'
+    their_tab(attached, server)
+
+    with caplog.at_level("WARNING", logger="tualatin_docs.site"):
+        ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert saved(tmp_path) == [] and drawn == [], folded(out)
+    assert stylesheet_left_out(caplog) == 3, caplog.text[-2000:]
+    assert asked("/css/moved.css") == 3, SITE.seen
+    # Nothing more is asked for once a stylesheet is left out.
+    assert asked("/img/logo.png") == 0, SITE.seen
+    assert asked("/css/bill.css") == 3, SITE.seen
+
+
+def test_no_stylesheet_after_one_left_out_is_asked_for(attached, server, tmp_path, capsys, caplog,
+                                                       drawn):
+    """A stylesheet left out for an answer that is not one, a 404 say,
+    fails the bill whatever comes after it, so a stylesheet linked after it
+    is never asked for."""
+    SITE.extra_links = ('<link rel="stylesheet" href="/css/missing.css">'
+                        '<link rel="stylesheet" href="/css/screen.css">')
+    their_tab(attached, server)
+
+    with caplog.at_level("WARNING", logger="tualatin_docs.site"):
+        ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert saved(tmp_path) == [] and drawn == [], folded(out)
+    assert stylesheet_left_out(caplog) == 3, caplog.text[-2000:]
+    assert asked("/css/missing.css") == 3, SITE.seen
+    assert asked("/css/screen.css") == 0 and asked("/img/logo.png") == 0, SITE.seen
+    assert not list((tmp_path / "out").rglob("*.drawing"))
 
 
 def test_a_print_page_of_another_billing_date_is_not_saved(attached, server, tmp_path, capsys):
@@ -524,7 +579,8 @@ def test_a_pdf_that_does_not_read_as_the_bill_is_not_kept(attached, server, tmp_
     assert not list((tmp_path / "out").rglob("*.drawing"))
 
 
-def test_a_stylesheet_that_stalls_is_given_up_on(attached, server, tmp_path, capsys, monkeypatch, caplog):
+def test_a_stylesheet_that_stalls_is_given_up_on_and_fails_the_bill(attached, server, tmp_path, capsys,
+                                                                   monkeypatch, caplog):
     monkeypatch.setattr(site, "FETCH_MS", 1000)
     SITE.extra_links = '<link rel="stylesheet" href="/css/stall.css">'
     their_tab(attached, server)
@@ -534,28 +590,71 @@ def test_a_stylesheet_that_stalls_is_given_up_on(attached, server, tmp_path, cap
         ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
     took = time.monotonic() - started
 
-    assert len(saved(tmp_path)) == 3, folded(out)
-    assert sum("left out of its PDF" in r.getMessage() for r in caplog.records) == 3, caplog.text[-2000:]
+    assert saved(tmp_path) == [], folded(out)
+    assert stylesheet_left_out(caplog) == 3, caplog.text[-2000:]
+    assert asked("/img/logo.png") == 0, SITE.seen
     # Waited out, the three stalls alone would take 3 * STALL seconds.
     assert took < 2 * STALL, took
+
+
+@pytest.mark.parametrize("how", ["stall", "silent"])
+def test_after_the_first_image_that_stalls_nothing_more_is_asked_for(attached, server, tmp_path, capsys,
+                                                                     monkeypatch, caplog, how):
+    """Images are best effort. Six that stall, sending their headers and
+    then nothing or nothing at all, leave a bill kept without them, and
+    after the first runs out of time the rest are not asked for, so the
+    limits never add up one after another."""
+    monkeypatch.setattr(site, "FETCH_MS", 1000)
+    SITE.extra_imgs = "".join('<img src="/img/%s%d.png">' % (how, n) for n in range(1, 7))
+    their_tab(attached, server)
+
+    with caplog.at_level("WARNING", logger="tualatin_docs.site"):
+        ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert len(saved(tmp_path)) == 3, folded(out)
+    assert sum("without 6 of its images" in r.getMessage() for r in caplog.records) == 3, caplog.text[-2000:]
+    assert asked("/img/logo.png") == 3, SITE.seen
+    assert asked("/img/%s1.png" % how) == 3, SITE.seen
+    assert sum(asked("/img/%s%d.png" % (how, n)) for n in range(2, 7)) == 0, SITE.seen
 
 
 def test_nothing_more_is_asked_for_after_the_first_that_does_not_fit(attached, server, tmp_path,
                                                                     capsys, monkeypatch, drawn):
     """Stylesheets with no Content-Length, each read only as far as what is
-    left of the budget, and after the first nothing more is asked for."""
-    monkeypatch.setattr(site, "MAX_PAGE_BYTES", 60_000)
-    SITE.extra_links = "".join('<link rel="stylesheet" href="/css/huge%d.css">' % n for n in (1, 2, 3))
+    left of the budget, and after the first nothing more is asked for. A
+    stylesheet first spends all but about 90 KB of a 3 MB budget, so the
+    one huge sheet asked for is read no further than that and not to the
+    3 MB the bounded reader alone would allow. The server gets well under
+    3 MB of it out for each bill, so the reading itself stopped."""
+    monkeypatch.setattr(site, "MAX_PAGE_BYTES", 3 * 1024 * 1024)
+    SITE.fill = 3 * 1024 * 1024 - 100_000
+    SITE.extra_links = '<link rel="stylesheet" href="/css/fill.css">' + "".join(
+        '<link rel="stylesheet" href="/css/huge%d.css">' % n for n in (1, 2, 3))
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
+
+    assert saved(tmp_path) == [] and drawn == [], folded(out)
+    assert asked("/css/huge1.css") == 3, SITE.seen
+    assert asked("/css/huge2.css") == 0 and asked("/css/huge3.css") == 0, SITE.seen
+    assert asked("/img/logo.png") == 0, SITE.seen
+    assert SITE.sent["/css/huge1.css"] < 3 * 1024 * 1024, SITE.sent
+
+
+def test_a_stylesheet_the_browser_does_not_apply_is_not_written_in(attached, server, tmp_path, capsys,
+                                                                    drawn):
+    """An alternate stylesheet, or one marked disabled, that would hide
+    the bill's lines. Neither is asked for, and the bill is whole."""
+    SITE.extra_links = ('<link rel="alternate stylesheet" href="/css/print.css" title="Short">'
+                        '<link rel="stylesheet" href="/css/print.css" disabled>')
     their_tab(attached, server)
 
     ended, out = run(tmp_path, attached, capsys, "--all", "--yes")
 
     assert len(saved(tmp_path)) == 3, folded(out)
-    assert asked("/css/huge1.css") == 3, SITE.seen
-    assert asked("/css/huge2.css") == 0 and asked("/css/huge3.css") == 0, SITE.seen
-    assert asked("/img/logo.png") == 0, SITE.seen
+    assert asked("/css/print.css") == 0, SITE.seen
     for html in drawn:
-        assert "x" * 65530 not in html
+        assert "overflow: hidden" not in html
 
 
 def test_a_page_written_out_larger_than_the_limit_is_not_drawn(attached, server, tmp_path, capsys,
@@ -578,6 +677,24 @@ def test_login_says_why_an_activity_it_read_was_not_whole(attached, server, tmp_
 
     ended, out = run(tmp_path, attached, capsys, "--login")
 
-    assert "Activity's table was read, but not whole" in folded(out), folded(out)
+    assert "Activity opened, but its table was not read whole" in folded(out), folded(out)
     assert "of a type 'Late Fee'" in folded(out), folded(out)
     assert "cannot say whether" not in out
+
+
+def test_login_says_why_when_activity_was_still_drawing_rows(attached, server, tmp_path, capsys,
+                                                             monkeypatch):
+    """A stop inside the opening of Activity, its rows still arriving, is
+    said as such and not as a sign-in Login cannot tell."""
+    monkeypatch.setattr(site, "SETTLE_MS", 200)
+    monkeypatch.setattr(site, "SETTLE_ROUNDS", 3)
+    SITE.activity_extra = ("<script>setInterval(() => document.querySelector('tbody').insertAdjacentHTML("
+                           "'beforeend', '<tr><td>06/30/2026</td><td>Payment</td><td></td><td>$1</td>"
+                           "<td>$1</td></tr>'), 50)</script>")
+    their_tab(attached, server)
+
+    ended, out = run(tmp_path, attached, capsys, "--login")
+
+    assert "since the Activity table was still drawing rows" in folded(out), folded(out)
+    assert "cannot say whether" not in out
+
