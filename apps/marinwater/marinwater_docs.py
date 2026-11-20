@@ -64,7 +64,7 @@ from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("marinwater_docs")
 
-# What a run and Login say when the portal's bot protection answers.
+# What a run says when the portal's bot protection answers.
 CHALLENGED = [
     "Marin Water's payment portal asked to check the browser, so this run stops here.",
     "Everything saved so far is kept. Answer it yourself in the open browser",
@@ -392,8 +392,9 @@ class App:
         try:
             listed = site.bill_list_opens(page)
         except site.Challenged:
-            print("!! " + CHALLENGED[0])
-            print("   Answer it yourself in the open browser window, then re-run --login.")
+            print("!! Marin Water's payment portal asked to check the browser, so Login could")
+            print("   not read Bill History. Answer it yourself in the open browser window,")
+            print("   then re-run --login.")
             self.close()
             return
         challenge = site.detect_security_challenge(page)
