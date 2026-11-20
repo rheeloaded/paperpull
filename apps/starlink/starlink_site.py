@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from hashlib import sha256
 from pathlib import Path
 import re
@@ -317,7 +317,14 @@ def _pdf_matches(data: bytes, bill: Bill) -> bool:
     lines = [" ".join(line.split()) for line in pages[0].splitlines() if line.strip()]
     numbers = [value for label, value in zip(lines, lines[1:]) if label.casefold() == "invoice"]
     dates = [line.split(":", 1)[1].strip() for line in lines if line.casefold().startswith("invoice date:")]
-    return numbers == [bill.number] and len(dates) == 1 and _date(dates[0]) == bill.date
+    if numbers != [bill.number] or len(dates) != 1:
+        return False
+    issued = _date(dates[0])
+    if not issued:
+        return False
+    # Starlink can print an issue date one calendar day after the date in
+    # Billing. Keep the exact invoice number and the billing date for filing.
+    return (date.fromisoformat(issued) - date.fromisoformat(bill.date)).days in (0, 1)
 
 
 def _fetch_pdf(page, bill: Bill) -> bytes:

@@ -38,17 +38,23 @@ def test_refuses_incomplete_or_ambiguous_rows(raw):
         site._parse_view(raw)
 
 
-@pytest.mark.parametrize("number,date,accepted", [
-    (FIRST, "Friday, March 5, 2032", True),
-    (SECOND, "Friday, March 5, 2032", False),
-    (FIRST, "Saturday, March 6, 2032", False),
+@pytest.mark.parametrize("number,billing_date,issue_date,accepted", [
+    (FIRST, DATE, "Friday, March 5, 2032", True),
+    (FIRST, DATE, "Saturday, March 6, 2032", True),
+    (FIRST, "2031-12-31", "Thursday, January 1, 2032", True),
+    (SECOND, DATE, "Friday, March 5, 2032", False),
+    (SECOND, DATE, "Saturday, March 6, 2032", False),
+    (FIRST, DATE, "Thursday, March 4, 2032", False),
+    (FIRST, DATE, "Sunday, March 7, 2032", False),
+    (FIRST, DATE, "Unavailable", False),
 ])
-def test_pdf_requires_labeled_number_and_date(monkeypatch, number, date, accepted):
+def test_pdf_requires_labeled_number_and_date(monkeypatch, number, billing_date, issue_date, accepted):
     # The expected number and date in unrelated text must not suffice.
-    pdf_text = f"Invoice\n{number}\nInvoice Date: {date}\nNotes: {FIRST} {DATE}"
+    pdf_text = f"Invoice\n{number}\nInvoice Date: {issue_date}\nNotes: {FIRST} {billing_date}"
     monkeypatch.setattr(site.pdf_reader, "page_texts", lambda *args, **kwargs: [pdf_text])
-    assert site._pdf_matches(b"%PDF-", site.Bill(FIRST, DATE)) is accepted
-    assert not site._pdf_matches(b"<html>Sign in</html>", site.Bill(FIRST, DATE))
+    bill = site.Bill(FIRST, billing_date)
+    assert site._pdf_matches(b"%PDF-", bill) is accepted
+    assert not site._pdf_matches(b"<html>Sign in</html>", bill)
 
 
 def test_fetch_has_exact_invoice_path_and_disables_redirects(monkeypatch):

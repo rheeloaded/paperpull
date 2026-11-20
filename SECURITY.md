@@ -61,7 +61,8 @@ The `.gitignore` already blocks all of the following. Do not override it.
     TreasuryDirect give each control a guard of its own built the same way.
     Starlink presses only the Invoices grid’s exact page controls. Invoice PDFs
     come from the same-origin invoice link, with redirects disabled, and
-    are checked against the listed invoice number and issue date.
+    must match the listed invoice number and show the Billing date or the
+    following date as the issue date.
     Best Buy presses only its year menu and a year in it. Discover Bank
     presses only the keep-alive button of Discover's inactivity dialog, a
     button whose whole name is I'm still here, Stay signed in, Continue
