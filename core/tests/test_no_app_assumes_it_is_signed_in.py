@@ -104,6 +104,13 @@ def test_a_sign_in_page_is_still_noticed(app):
     site = site_of(app)
     if getattr(site, "looks_signed_out", None) is None:
         pytest.skip("this app has no sign-in check")
+    if app.name == "sonic":
+        # Member Tools serves the sign-in form at the requested billing URL.
+        # The same address serves bill history once the person signs in.
+        for url in (site.URLS["login"], site.URLS["documents"]):
+            assert answer(site, SignIn(url)) is True
+            assert answer(site, Quiet(url)) is False
+        return
     markers = getattr(site, "LOGIN_URL_MARKERS", [])
     assert markers, "%s recognizes no sign-in address at all" % app.name
     host = sorted(getattr(site, "ALLOWED_HOSTS", ["x.test"]))[0]
