@@ -9,6 +9,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Raisin (Weltsparen), UNTESTED and waiting for a tester.** A new app
+  for the EU savings marketplace that saves the documents Raisin lists for
+  every term deposit and overnight savings account, statements,
+  confirmations, contracts and tax certificates. It was built without an
+  account, from routes first seen in Habeas sources (CC0), so nobody has
+  run it on a real dashboard yet. The lists and each PDF are asked for from
+  inside your own signed-in dashboard with the page's own sign-in, which
+  never leaves the page, and nothing is clicked. Each PDF must name Raisin
+  and print its own date, day first, before it is filed, and one that does
+  not is refused rather than guessed about. It signs in on port 9321.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
