@@ -152,6 +152,18 @@ WALKS_DECIDE_NOTHING = {
             "asked on the run that would make its record",
     },
     "chase": {"chase_docs.migrate_legacy_keys": CUT_KEY},
+    "meijer": {
+        "meijer_receipts.adopt_old_layout":
+            "moves a record kept from Meijer's earlier orders page to the key the current "
+            "page gives its purchase, matched by kind, date, total and store, which --minimal "
+            "leaves out as it promises. After a move nothing matches, so nothing moves and "
+            "a receipt saved from the earlier page is saved again under its new key, as "
+            "before #236, never taken for another purchase's",
+        "meijer_receipts.fit_facts": "the kind, date, total and store adopt_old_layout matches by",
+        "meijer_receipts.holds_something":
+            "whether a record adopt_old_layout matched holds a receipt",
+        "meijer_receipts._move": "the move adopt_old_layout makes",
+    },
     "netbenefits": {
         "netbenefits_docs.App._judge_held":
             "files a statement held in Manual Review or sets it aside, and downloads nothing. "
@@ -1185,6 +1197,7 @@ def test_another_app_does_not_carry_a_providers_own_fields():
                href="/account/products/12345678/tax_documents/777.pdf",
                occurrence=1, covers=["cd" * 32], plan="ef" * 32,
                account_token="tok-invented-0001", account_digits="4321",
+               adopted_from="pinvented01", row_prints_time=True, held="invented reason",
                invoices=[{"file": "Invoices/2026-05-14 Invented Invoice (1 of 1).pdf",
                           "part": "1 of 1", "number": "10000000000000001", "kept": True,
                           "names": True, "size": 4096, "pages": 1}])

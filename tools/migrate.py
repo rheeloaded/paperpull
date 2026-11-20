@@ -103,6 +103,11 @@ account, not its number, and no sign-in.
 Marin Water keeps the document identity and saved PDF digest so moves
 preserve distinct bills with a shared date and can identify a previously
 saved bill whose date later gains another PDF.
+A Meijer purchase keeps whether its row printed a time, the number it had
+before it moved off Meijer's earlier orders page and whether it is held. Its
+date, total and store stay out, so a receipt saved from the earlier page and
+not yet moved to the key the current page gives it is saved again after the
+move, under its new key.
 A record still under a key that left out its account's
 last four, as the apps did past forty characters until 0.34.0 and Chase did
 at any length until 0.17.1, also keeps what its key is built from
@@ -227,7 +232,18 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # taken only under the account it was listed for,
                         # by its account's digest, which _select reads
                         # (cloudflare_docs). Both are digests, never an id.
-                        "Cloudflare": ("account", "document_id")}
+                        "Cloudflare": ("account", "document_id"),
+                        # Whether a Meijer purchase's row printed a time,
+                        # the number a record moved from Meijer's earlier
+                        # orders page had, and whether it is held, none of
+                        # them a total, a date or a store. Its date, total
+                        # and store, which a move off the earlier page
+                        # matches by, stay out as --minimal promises, so
+                        # after a move nothing is moved, and a receipt saved
+                        # from the earlier page is saved again under its new
+                        # key, never taken for another's
+                        # (meijer_receipts.adopt_old_layout, #236).
+                        "Meijer": ("row_prints_time", "adopted_from", "held")}
 
 
 def _optum_form(rec: dict) -> bool:

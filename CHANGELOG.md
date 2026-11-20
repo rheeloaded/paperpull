@@ -15,10 +15,11 @@ Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
 workplace retirement plan statements. Wells Fargo can read only the
 accounts you name and checks the account again just before it takes a
 document. Chase reads its newer statements view, Kroger opens its
-receipts at their new address, Apple asks again for a purchase it passed
-over, Tualatin Water keeps no bill drawn without its stylesheet, and NW
-Natural stops after three refused bills in a row. A documents folder
-filed without kind folders holds only what PaperPull filed there.
+receipts at their new address, Meijer reads its current orders page,
+Apple asks again for a purchase it passed over, Tualatin Water keeps no
+bill drawn without its stylesheet, and NW Natural stops after three
+refused bills in a row. A documents folder filed without kind folders
+holds only what PaperPull filed there.
 
 ### Added
 - **Wells Fargo reads only the accounts you name (#221).** Put the last four
@@ -162,6 +163,24 @@ filed without kind folders holds only what PaperPull filed there.
   for after the others and does not count, so Resume moves on to the bills
   not asked for yet. Download again counts none. Login has a line of its own
   for the portal's bot check. Contributed by @crazyhorse90210.
+- **Meijer finds and saves receipts on its current orders page (#220,
+  #236).** Meijer moved its orders to /shopping/orders, renamed the tabs
+  Online and In-Store, and gave each row a button named "Download receipt
+  from" its date and time. Both the new page and the old one are read.
+  Contributed by @cmcculloh. Before merging, each purchase was tied to its
+  own row by the date and time that row prints, so two purchases of one day
+  each get their own receipt, a button naming another purchase is never
+  pressed, the date line no longer becomes the purchase's name, a button
+  that shows its whole label is read whole, and the file a tester attaches
+  names the button in fixed words. A receipt saved from the old page is not
+  saved again. The new page words each row differently, which gave every
+  purchase a new key, so a record kept from the old page now moves to the
+  new key, file and all, when exactly one record and one purchase of the
+  same kind, day, amount and store fit. When more than one fits and one of
+  them was saved, those purchases are held and not downloaded, since which
+  is which cannot be told, and when none was saved they are downloaded
+  under their new keys. A record of the old page never saved is then found
+  on the new page instead of failing on every run.
 
 ## [0.69.0] - 2026-11-17
 
