@@ -59,6 +59,7 @@
     "lowes": {"gets": "Store and online receipts and returns, back to 2023", "group": "shopping"},
     "mbna": {"gets": "MBNA Canada credit card statements", "group": "banks", "tested": false, "shell": true, "note": "Not built yet, it opens the site for you to sign in and nothing more"},
     "meijer": {"gets": "Order receipts and in-store digital receipts", "group": "shopping", "tested": false},
+    "mercury": {"gets": "Monthly checking and savings statement PDFs", "group": "banks", "note": "One organization at a time"},
     "mtb": {"gets": "Mortgage statements, escrow and 1098", "group": "loans"},
     "myecp": {"gets": "MILITARY STAR card statements, about three and a half years online", "group": "banks"},
     "mypay": {"gets": "Retiree account statements (eRAS), CRSC, 1099-R, 1095", "group": "pay"},

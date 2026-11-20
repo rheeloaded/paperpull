@@ -335,6 +335,13 @@ def test_resume_after_a_run_that_listed_nothing_is_not_clean(home):
     home.run_all_stopped()
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
+    if home.app.name == "mercury":
+        # Mercury refreshes the visible organization on Resume. The prior
+        # list could have come from a different organization.
+        assert home.listings == 2
+        assert "Resume reads it before anything else" in said and stopped(result), said[-1500:]
+        assert not told_to_list(said, result), said[-1500:]
+        return
     assert NOTHING_LISTED in said and stopped(result), said[-1500:]
     assert told_to_list(said, result), said[-1500:]
 
@@ -351,6 +358,11 @@ def test_resume_after_a_run_that_stopped_listing_is_not_clean(home):
         "the Run All that stopped left the earlier listing noted as whole")
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
+    if home.app.name == "mercury":
+        assert home.listings == 2
+        assert "Resume reads it before anything else" in said and stopped(result), said[-1500:]
+        assert not told_to_list(said, result), said[-1500:]
+        return
     assert CUT_SHORT in said and stopped(result), said[-1500:]
     told_to_list(said, result)
 
