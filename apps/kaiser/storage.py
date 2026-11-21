@@ -41,7 +41,7 @@ SPEC = AppSpec(
         "delay_min_seconds": 2.5,
         "delay_max_seconds": 5.0,
         "pilot_count": 1,
-        "document_types": ["Statement"],
+        "document_types": ["Statement", "Tax Document", "Insurance Document", "Year-End Summary", "Other Document"],
     },
     base_url="https://healthy.kaiserpermanente.org/",
     rules_filename="document_rules.json",

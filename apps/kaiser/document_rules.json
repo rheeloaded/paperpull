@@ -7,9 +7,23 @@
     {
       "pattern": "^medical bill$",
       "summary": "Medical Bill"
+    },
+    {
+      "pattern": "\\bmedical (?:billing statements?|bills?)\\b",
+      "summary": "Medical Bill"
     }
   ],
-  "tax_rules": [],
-  "insurance_rules": [],
+  "tax_rules": [
+    {
+      "pattern": "\\b1095(?:-[A-C])?\\b",
+      "summary": "Tax Form 1095"
+    }
+  ],
+  "insurance_rules": [
+    {
+      "pattern": "\\b(?:explanations? of benefits|EOB)\\b",
+      "summary": "Explanation of Benefits"
+    }
+  ],
   "skip_patterns": []
 }

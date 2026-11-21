@@ -1,4 +1,4 @@
-"""Download Kaiser Permanente bills from a manually signed-in browser."""
+"""Archive Kaiser Permanente My Documents from a manually signed-in browser."""
 from __future__ import annotations
 
 from paperpull_core import failure
@@ -12,6 +12,7 @@ from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING
                                           after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
 import argparse
+import json
 import logging
 import random
 import re
@@ -19,22 +20,25 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, NoReturn, Optional
 
-from paperpull_core import doc_types, receipt_pdf
+from playwright.sync_api import Error as BrowserError
+
+from paperpull_core import doc_types, intake, receipt_pdf
 from paperpull_core import browser as browser_launcher
 import kaiser_site as site
 from paperpull_core.models import State
 from paperpull_core.keys import account_component as _account_component
 from paperpull_core.words import shape_tree, words_for, write_shaped
 from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
-                     atomic_write_text, build_pdf_filename, load_config,
+                     atomic_write_json, atomic_write_text, build_pdf_filename, load_config,
                      now_iso, sanitize_component, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("kaiser_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
+RESUME_SCOPE = (*listing.SCOPE_FLAGS, "type", "max_docs")
 
 
 def ask(prompt: str) -> str:
@@ -111,6 +115,7 @@ class App:
         set_filename_owner(self.config.get("owner", "") if self.config.get("owner_in_filename") else "")
         self.paths = Paths(Path(self.config["output_dir"]))
         self.paths.ensure()
+        self._sign_in_resume = self.paths.last_listing.with_name("kaiser-sign-in-resume.json")
         self._setup_logging()
 
         self.progress = JsonStore(self.paths.progress_json, self.paths.backups)
@@ -127,6 +132,8 @@ class App:
         self._work_page = None
         self._current_bill_ids = None
         self._current_bills = {}
+        self._listing_source = None
+        self._pdf_copies = None
         self._cdp_mode = False
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
@@ -184,23 +191,47 @@ class App:
         ctx = self.browser()
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
-        if self._cdp_mode:
-            # Reuse the person's own tab on Kaiser Permanente's site, the page they left
-            # open for this. With none open, a tab of this run's own is
-            # opened, never a tab of another site, since the session is a
-            # cookie a new tab shares (tabs.new_tab). Matched on the parsed
-            # host, never a substring, since "provider.com" in an address also
-            # matches "provider.com.phish.example".
-            live = [p for p in ctx.pages if not p.is_closed()]
-            dom = [p for p in live if site.is_session_url(p.url or "")]
-            history_tabs = [p for p in dom if site.is_history_tab(p)]
-            if len(history_tabs) > 1:
-                raise SystemExit("Leave the Kaiser bill list you want to save open and close the other bill-list tabs.")
-            self._work_page = (history_tabs or dom or [tabs.new_tab(ctx)])[0]
-        else:
-            self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        self._work_page = self._wait_for_bill_tab(ctx)
         self.requests
         return self._work_page
+
+    def _wait_for_bill_tab(self, ctx):
+        deadline = time.monotonic() + site.BILL_PAGE_WAIT_SECONDS
+        announced = False
+        while True:
+            provider_tabs = [page for page in ctx.pages
+                             if tabs.on_site(page, site.is_session_url)]
+            history_tabs = [page for page in provider_tabs if site.is_history_tab(page)]
+            if self._listing_source:
+                history_tabs = [page for page in history_tabs if site.list_source_url(page) == self._listing_source]
+            if len(history_tabs) > 1:
+                raise SystemExit("Leave one Kaiser document list open for this account.")
+            if history_tabs:
+                return history_tabs[0]
+
+            billing_tabs = [page for page in provider_tabs if site.can_lead_to_bill_list(page.url)
+                            and (self._listing_source is None
+                                 or site.list_source_url(page) in (None, self._listing_source))]
+            expired = next((page for page in provider_tabs if site.looks_signed_out(page)), None)
+            if expired is not None and (not billing_tabs or expired in billing_tabs):
+                return expired
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 and billing_tabs:
+                raise TimeoutError("Kaiser Permanente's My Documents page did not finish loading.")
+            if remaining <= 0 or (not billing_tabs and not announced):
+                return (billing_tabs or provider_tabs or [tabs.new_tab(ctx)])[0]
+            if not announced:
+                print("Waiting for Kaiser Permanente's My Documents page. " + site.OPEN_BILL_LIST, flush=True)
+                announced = True
+            try:
+                interval = min(250, remaining * 1000)
+                if billing_tabs:
+                    billing_tabs[0].wait_for_timeout(interval)
+                else:
+                    ctx.wait_for_event("page", timeout=interval)
+            except BrowserError:
+                # A link can replace its old tab with a new one during loading.
+                continue
 
     def close(self):
         try:
@@ -237,13 +268,35 @@ class App:
                 print("Then press Resume here to carry on from where this stopped.")
                 raise SystemExit(0)
         if site.looks_signed_out(page):
-            self.progress.save(backup=True)
-            print("\n!! Kaiser Permanente appears to have signed you out.")
-            print("Please sign in again in the open browser window.")
-            if browser_launcher.ask_or_none(
-                    "Press Enter after you are signed in... ") is None:
-                print("Then press Resume here to carry on from where this stopped.")
-                raise SystemExit(0)
+            raise site.SessionExpired()
+
+    def _stop_for_sign_in(self, message="Kaiser Permanente signed you out.") -> NoReturn:
+        self.progress.save(backup=True)
+        print(f"\n!! {message}")
+        print("Sign in to the same Kaiser Permanente account and reopen the document list.")
+        # The panel's existing stop reporting uses the unanswered sign-in
+        # prompt to offer its sign-in window followed by Continue.
+        if browser_launcher.ask_or_none("Press Enter once the document list is open... ") is None:
+            print("Choose Open sign-in window in PaperPull to sign in and continue.")
+            raise SystemExit(0)
+        print("Run --resume to continue with the pending documents.")
+        raise SystemExit(0)
+
+    def _remember_sign_in_resume(self, pending=None) -> None:
+        if self.args.redownload:
+            return
+        scope = {name: getattr(self.args, name) for name in RESUME_SCOPE}
+        if self.stats["mode"] == "pilot":
+            scope["max_docs"] = self.config["pilot_count"]
+        atomic_write_json(self._sign_in_resume, {
+            "scope": scope, "pending": pending, "source": self._listing_source,
+        })
+
+    def _sign_in_checkpoint(self):
+        try:
+            return json.loads(self._sign_in_resume.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
 
     # -- commands ----------------------------------------------------------
 
@@ -257,6 +310,9 @@ class App:
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9323")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
+        checkpoint = self._sign_in_checkpoint()
+        if checkpoint and checkpoint.get("source") == site.medical.SOURCE_URL:
+            url = site.URLS["medical_billing"]
         # The account holder signs in using the dedicated Chrome or Edge profile.
         name = browser_launcher.open_signin_browser(profile, port, url,
             prefer_real=True,
@@ -268,7 +324,7 @@ class App:
         print(f"Sign in, keep the window OPEN, then {after_sign_in()}.")
 
     def cmd_login(self):
-        print("Checking Kaiser Permanente bill history...\n")
+        print("Checking Kaiser Permanente documents...\n")
         page = self.page()
         challenge = site.detect_security_challenge(page)
         if challenge:
@@ -279,11 +335,11 @@ class App:
         else:
             ok = site.bill_list_ready(page)
             if ok:
-                print("Success: the Kaiser Permanente bill history answered.")
+                print("Success: the Kaiser Permanente document list answered.")
                 print("Keep the window open, then run: paperpull kaiser pilot")
             else:
-                print("Could not read the Kaiser Permanente bill history.")
-                print("Open View past bills → My Documents or Medical Billing → Statements in that window.")
+                print("Could not read the Kaiser Permanente document list.")
+                print(site.OPEN_BILL_LIST)
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -306,6 +362,8 @@ class App:
         """Record one statement without storing its temporary download address."""
         title = r.title
         category, summary, confidence = doc_types.classify_document(title, self.rules)
+        if summary in {"Document", "Insurance Document", "Account Statement"} and title:
+            summary = title
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
             return 0
@@ -324,26 +382,49 @@ class App:
             return 1
         return 0
 
-    def cmd_discover(self, quiet: bool = False) -> int:
+    def cmd_discover(self, quiet: bool = False, *, recovering_sign_in: bool = False,
+                     pending_ids: set[str] | None = None) -> int:
         listing.started(self)
-        page = self._on_its_site()
-        self.check_session(page)
         n_new = 0
         try:
+            page = self._on_its_site()
+            source = site.list_source_url(page)
+            if self._listing_source and source and source != self._listing_source:
+                self._stop_for_sign_in("Reopen the same Kaiser Permanente document list to continue.")
+            self._listing_source = source or self._listing_source
+            self.check_session(page)
             docs = site.collect_download_docs(page)
-        except site.SessionExpired:
-            print("Kaiser Permanente signed out before the bill history could be read.")
-            raise SystemExit(0)
-        except site.ListStopped as stop:
-            self.write_failure("read the bill history", "the bill history did not answer")
-            print(f"Kaiser Permanente bill discovery stopped. {stop}")
-            raise SystemExit(0)
+        except (site.SessionExpired, site.ListStopped) as stop:
+            if isinstance(stop, site.ListStopped) and not site.looks_signed_out(page):
+                self.write_failure("read My Documents", "My Documents did not answer")
+                print(f"Kaiser Permanente document discovery stopped. {stop}")
+                raise SystemExit(0)
+            docs = None
+        except pressing.Stop:
+            if not site.looks_signed_out(page):
+                raise
+            docs = None
+        if docs is None:
+            if self.stats["mode"] in ("all", "pilot") or (
+                    self.stats["mode"] == "resume" and not self._sign_in_resume.exists()):
+                self._remember_sign_in_resume()
+            self._stop_for_sign_in()
+        resume_ids = set()
+        if recovering_sign_in:
+            resume_ids = {record["document_id"] for record in self.discovery.data.values()
+                          if record.get("source_url") == self._listing_source and record.get("document_id")}
+        if resume_ids:
+            matched = [row for row in docs if row.document_id in resume_ids]
+            if not matched:
+                self._stop_for_sign_in("My Documents no longer matches the documents in this run.")
+            if pending_ids is not None:
+                docs = matched
         self._current_bills = {row.document_id: row for row in docs}
         self._current_bill_ids = set(self._current_bills)
         for r in docs:
             n_new += self._record_rawdoc(r, site.bill_source_url(r))
         self.discovery.save()
-        log.info("Kaiser Permanente bills: %d listed, %d new", len(docs), n_new)
+        log.info("Kaiser Permanente documents: %d listed, %d new", len(docs), n_new)
 
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
@@ -371,7 +452,8 @@ class App:
                 print(f"  Skipped as out of scope: {self.stats['skipped_out_of_scope']}")
         return n_new
 
-    def _select(self, limit: Optional[int] = None, *, pending_only: bool = False) -> List[Document]:
+    def _select(self, limit: Optional[int] = None, *, pending_only: bool = False,
+                pending_ids: set[str] | None = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         self.stats["discovered"] = len(docs)
         docs = [d for d in docs if self._in_scope(d)]
@@ -379,6 +461,8 @@ class App:
             docs = [d for d in docs if not self._already_done(d)]
         if self._current_bill_ids is not None:
             docs = [d for d in docs if d.document_id in self._current_bill_ids]
+        if pending_ids is not None:
+            docs = [d for d in docs if d.document_id in pending_ids]
         docs.sort(key=lambda d: (d.date, d.document_id), reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
@@ -440,21 +524,14 @@ class App:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
             except site.SessionExpired:
-                # Already explained by download_one. Stop rather than grind
-                # through the rest producing empty "manual review" entries.
-                print("Stopped. Everything downloaded so far is saved.")
-                # Left with the stop in flight, which is what the core
-                # reports as a run that stopped. A return here finished
-                # the run clean, with documents still to download.
-                raise SystemExit(0)
+                self._remember_sign_in_resume([d.document_id for d in docs if not self._already_done(d)])
+                self._stop_for_sign_in()
             except site.ListStopped as stop:
-                # Bills, read again after this statement was refused,
-                # did not answer or showed no statement. Every statement after
-                # it reads the same list, so the run stops here, with
-                # nothing recorded against this one.
                 self.list_changed(stop)
-            except Exception as e:
-                kind = failure.error_kind(e)
+            except pressing.Stop:
+                raise
+            except Exception as error:
+                kind = failure.error_kind(error)
                 log.info("Could not download the statement: %s", kind)
                 self._record(doc, State.FAILED, notes=kind)
                 self.stats["failed"] += 1
@@ -463,9 +540,27 @@ class App:
     def list_changed(self, stop) -> None:
         """Leave the statement pending when the list or session needs attention."""
         log.info("Kaiser Permanente bill download stopped before the selected document was saved")
-        self.write_failure("read the bill history again", "the bill history did not answer")
+        self.write_failure("read My Documents again", "My Documents did not answer")
         listing.read_again_stopped(self, (
             f"Kaiser Permanente bill download stopped. {stop}"))
+
+    def _known_pdfs(self) -> dict[str, Path]:
+        """Find completed PDFs already saved by the connector, including earlier views."""
+        if self._pdf_copies is None:
+            self._pdf_copies = {}
+            root = self.paths.root.resolve()
+            for record in self.progress.data.values():
+                if not record.get("downloaded_ok") or not record.get("pdf_path"):
+                    continue
+                try:
+                    path = Path(record["pdf_path"]).resolve()
+                    if path.is_relative_to(root):
+                        digest = intake.plain_sha256(path)
+                        if digest:
+                            self._pdf_copies.setdefault(digest, path)
+                except (OSError, ValueError, intake.TooLarge):
+                    continue
+        return self._pdf_copies
 
     def download_one(self, page, doc: Document, filename: str):
         """Save one statement. The site layer asks for the PDF from
@@ -481,17 +576,10 @@ class App:
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
 
-        try:
-            saved = site.download_bill(page, self._current_bills[doc.document_id], out_path)
-        except site.SessionExpired:
-            # Stop the whole run. Continuing would file every remaining
-            # statement as "manual review" and finish looking successful
-            # while having saved nothing.
-            print("\n  !! Kaiser Permanente answered with a sign-in page instead of a document.")
-            print("     Your session has expired. Sign in again in the open")
-            print("     browser, then run:  paperpull kaiser resume")
-            self._record(doc, State.DISCOVERED, notes="Session expired before download")
-            raise
+        bill = self._current_bills[doc.document_id]
+        reuse = isinstance(bill, site.NativeDocument) and not self.args.redownload
+        saved = site.download_bill(page, bill, out_path,
+                                   existing_pdfs=self._known_pdfs() if reuse else None)
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):
@@ -506,12 +594,19 @@ class App:
             print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return
 
-        doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
-        self._record(doc, State.PDF_SAVED)
+        reused = saved != out_path
+        out_path = saved
+        if not reused:
+            doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
+            self._record(doc, State.PDF_SAVED)
 
         result = receipt_pdf.validate_pdf(out_path, self.config["min_pdf_bytes"])
         if not result.ok:
             self.stats["validation_failures"] += 1
+            if reused:
+                self._record(doc, State.FAILED, notes="The archived copy could not be verified")
+                self.stats["failed"] += 1
+                return
             quarantine = unique_path(self.paths.manual_review, out_path.name,
                                      self.config["max_path_length"])
             try:
@@ -529,7 +624,19 @@ class App:
 
         doc.pdf_size, doc.pdf_pages = result.size_bytes, result.page_count
         doc.downloaded_ok = True   # done for good, even if the file is deleted later
+        if reused and not self.args.redownload:
+            # The existing file keeps its own index row and can be renamed
+            # independently of this duplicate listing.
+            doc.pdf_path, doc.pdf_filename = "", ""
+            self._record(doc, State.COMPLETED, notes="Matched an already archived PDF")
+            self.stats["skipped_completed"] += 1
+            print("  The original PDF is already saved in this archive.")
+            return
         self._record(doc, State.COMPLETED)
+        if self._pdf_copies is not None:
+            digest = intake.plain_sha256(out_path)
+            if digest:
+                self._pdf_copies[digest] = out_path
         self.journal.checkpoint('a document is saved')
         self._write_row(doc, "Downloaded", "Completed")
         self.stats["new_files"].append(str(out_path))
@@ -572,7 +679,7 @@ class App:
             "PDF Full Path": doc.pdf_path,
             "PDF File Size": doc.pdf_size,
             "PDF Page Count": doc.pdf_pages,
-            "Source URL": doc.href,
+            "Source URL": doc.source_url,
             "Classification Confidence": doc.confidence,
             "Downloaded At": now_iso() if doc.pdf_filename else "",
             "Verified At": now_iso() if doc.pdf_pages else "",
@@ -587,6 +694,7 @@ class App:
         if not self.args.dry_run:
             print("PILOT MODE - limited supervised test run.\n")
             self.cmd_discover()
+            self._sign_in_resume.unlink(missing_ok=True)
         docs = self._select(limit=self.config.get("pilot_count", 5))
         if self.args.dry_run:
             self.process(docs, dry_run=True)
@@ -630,33 +738,48 @@ class App:
     def cmd_run(self, mode_name: str):
         if self.args.dry_run:
             self.stats["mode"] = "dry-run"
-            print("Previewing bills from the saved list.")
+            print("Previewing documents from the saved list.")
             self.process(self._select(), dry_run=True)
             return
         self.stats["mode"] = mode_name
         if mode_name == "all" and not self.args.yes:
             scope = ", ".join(self.config.get("document_types", []))
-            print(f"This downloads ALL available Kaiser Permanente bills ({scope}).")
+            print(f"This downloads ALL available items from the open Kaiser Permanente document list ({scope}).")
             print("Type YES to continue:")
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
         self.cmd_discover()
+        self._sign_in_resume.unlink(missing_ok=True)
         docs = self._select()
         print(f"\nDownloading {len(docs)} document(s)...")
         self.process(docs, dry_run=self.args.dry_run)
 
     def cmd_resume(self):
         self.stats["mode"] = "dry-run" if self.args.dry_run else "resume"
-        # The last complete listing can belong to another dashboard
-        # account. Check the account currently open before consulting the
-        # saved records, even when none of them are pending.
+        pending_ids = None
+        checkpoint = self._sign_in_checkpoint()
+        if checkpoint is not None:
+            self._listing_source = checkpoint.get("source")
+            for flag in RESUME_SCOPE:
+                if getattr(self.args, flag) is None:
+                    setattr(self.args, flag, checkpoint["scope"][flag])
+            if checkpoint["pending"] is not None:
+                pending_ids = set(checkpoint["pending"])
         if not self.args.dry_run:
-            listing.read_again_first(self, noun="bills")
-            self.cmd_discover(quiet=True)
-        docs = self._select(pending_only=True)
+            listing.read_again_first(self, noun="documents")
+            self.cmd_discover(quiet=True, recovering_sign_in=checkpoint is not None,
+                              pending_ids=pending_ids)
+        docs = self._select(pending_only=True, pending_ids=pending_ids)
         listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run),
-                       noun="bills")
+                       noun="documents")
+        if not self.args.dry_run and checkpoint is not None:
+            intended = docs if pending_ids is None else [
+                Document.from_dict(record) for record in self.discovery.data.values()
+                if record.get("document_id") in pending_ids
+            ]
+            if all(self._already_done(doc) for doc in intended):
+                self._sign_in_resume.unlink(missing_ok=True)
 
 
     def cmd_rename(self):

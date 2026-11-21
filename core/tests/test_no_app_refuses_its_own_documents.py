@@ -57,8 +57,9 @@ ALLOWED_TO = {
     "spectrum": {"Internet Statement", "Mobile Statement"},
     # The card statement's PDF button is pressed by its own label, "PDF".
     "coinbase": {"One Card Statement"},
-    # Kaiser's archived names differ from the exact Premium Bills and View statement (PDF) links.
-    "kaiser": {"Medical Bill", "Premium Bill"},
+    # Kaiser presses exact controls on the row, including Download PDF for
+    # forms and notices. The names below describe the resulting files.
+    "kaiser": {"Medical Bill", "Premium Bill", "Explanation of Benefits", "Tax Form 1095"},
 }
 
 

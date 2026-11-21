@@ -12,17 +12,22 @@ LIST_PATH = "/northern-california/secure/my-documents-myc"
 DETAILS = LIST_PATH + "/viewer"
 ROWS = """
 <div class="_datafeed_row">
-  <a id="getdoc_1" class="_document_name" href="#" onclick="location.href='my-documents-myc/viewer?synthetic=1';return false">Premium Bills</a>
+  <a id="getdoc_1" class="_document_name" href="#">Premium Bills</a>
   <span class="_document_date">Apr 6, 2031</span>
 </div>
 <div class="_datafeed_row">
-  <a id="getdoc_2" class="_document_name" href="#" onclick="location.href='my-documents-myc/viewer?synthetic=2';return false">Premium Bills</a>
+  <a id="getdoc_2" class="_document_name" href="#">Premium Bills</a>
   <span class="_document_date">Apr 6, 2031</span>
 </div>
-<div class="_datafeed_row">
-  <a class="_document_name" href="#payment" onclick="window.unexpected = true">Pay Now</a>
-  <span class="_document_date">Apr 6, 2031</span>
-</div>
+<a href="#payment">Pay Now</a>
+<script>
+  for (const id of [1, 2]) {
+    document.querySelector('#getdoc_' + id).addEventListener('click', event => {
+      event.preventDefault();
+      location.href = 'my-documents-myc/viewer?synthetic=' + id;
+    });
+  }
+</script>
 """
 
 

@@ -6,7 +6,11 @@
   "browser": "auto",
   "cdp_url": "http://127.0.0.1:9323",
   "document_types": [
-    "Statement"
+    "Statement",
+    "Tax Document",
+    "Insurance Document",
+    "Year-End Summary",
+    "Other Document"
   ],
   "default_start_date": "",
   "min_pdf_bytes": 2000,
