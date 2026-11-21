@@ -27,6 +27,8 @@ def test_malformed_or_ambiguous_row_is_refused():
 @pytest.mark.parametrize(("text", "accept"), [
     ("Account statement. Statement date: 4/1/2031", True),
     ("Account statement. Date of statement: April 1, 2031", True),
+    ("Account statement. Bill Date: 4/1/2031", True),
+    ("Account statement. Amount due 4/1/2031", False),
     ("Account statement. Statement date: 4/11/2031. Due: 4/1/2031", False),
     ("Account statement. Statement date: 4/31/2031. Due: 4/1/2031", False),
     ("Account statement. 14/1/2031", False),
@@ -45,3 +47,10 @@ def test_medical_details_origin_and_path_are_exact():
     assert medical.is_details_url(legitimate + "?synthetic=true")
     assert not medical.is_details_url(legitimate + "/DownloadSomething")
     assert not medical.is_details_url(legitimate.replace(".org/", ".org.test/"))
+
+
+def test_accessible_label_must_match_the_selected_statement_day():
+    label = "View the statement sent on April 1, 2031 (PDF)."
+    assert medical.matches_accessible_label(label, "2031-04-01")
+    assert not medical.matches_accessible_label(label, "2031-04-02")
+    assert not medical.matches_accessible_label(label + " Pay now", "2031-04-01")

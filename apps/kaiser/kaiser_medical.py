@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from playwright.sync_api import Error as BrowserError
 
-from paperpull_core import capture, intake, pdf_reader, shared_folder
+from paperpull_core import capture, intake, pdf_reader, pressing, shared_folder
 
 HOST = "healthy.kaiserpermanente.org"
 DETAILS_PATH = "/mychartcn/Billing/Details"
@@ -25,9 +25,9 @@ _LONG_DATE = rf"{_MONTH}\s+\d{{1,2}},?\s+\d{{4}}"
 _NUMERIC_DATE = r"\d{1,2}/\d{1,2}/\d{4}"
 _DATE = rf"(?<!\w)(?:{_LONG_DATE}|{_NUMERIC_DATE})(?!\w)"
 _ROW_DATE = re.compile(rf"(?<!\w){_LONG_DATE}(?!\w)", re.I)
-_PRINT_LABEL = r"\b(?:statement date|date of statement)\b"
+_PRINT_LABEL = r"\b(?:bill date|statement date|date of statement)\b"
 _PRINT_DATE = re.compile(rf"{_PRINT_LABEL}\s*:?\s*({_DATE})", re.I)
-_ANY_DATE = re.compile(_DATE, re.I)
+_ACCESSIBLE_LABEL = re.compile(rf"View the statement sent on ({_LONG_DATE}) \(PDF\)\.", re.I)
 
 _HEADING = re.compile(r"^Statements\s*(?:&|and)\s*Billing$", re.I)
 _ACCOUNT_KEYS = {"id", "accountid", "billingaccountid", "guarantorid"}
@@ -41,16 +41,21 @@ _READ_LIST = r"""heading => {
     const visible = e => Boolean(e.getClientRects().length) &&
                          getComputedStyle(e).visibility === 'visible';
     const label = e => e.innerText.trim().replace(/\s+/g, ' ');
+    const statementRows = new Set(
+        [...region.querySelectorAll('.ba_details_document, .ba_details_statement_date')]
+            .filter(visible).map(item => item.closest('li'))
+    );
     const documents = [];
-    for (const control of region.querySelectorAll('a')) {
-        if (!visible(control) || !/^View statement\s*\(?PDF\)?$/i.test(label(control))) continue;
-        const row = control.closest('li');
+    for (const row of statementRows) {
         const dates = row?.querySelectorAll('.ba_details_statement_date');
-        const href = control.getAttribute('href');
-        const index = control.getAttribute('data-index');
-        const safe = row && dates.length === 1 && href?.startsWith('#') && /^\d+$/.test(index || '') &&
-            !control.hasAttribute('target') && !control.hasAttribute('download') &&
-            !control.closest('form');
+        const controls = [...(row?.querySelectorAll('a') || [])].filter(e =>
+            visible(e) && /^View statement\s*\(?PDF\)?$/i.test(label(e)));
+        const control = controls.length === 1 ? controls[0] : null;
+        const href = control?.getAttribute('href');
+        const index = control?.getAttribute('data-index');
+        const safe = control && dates.length === 1 && href?.startsWith('#') &&
+            /^\d+$/.test(index || '') && !control.hasAttribute('target') &&
+            !control.hasAttribute('download') && !control.closest('form');
         documents.push(safe ? [index, row.innerText, dates[0].innerText] : null);
     }
     return {
@@ -178,10 +183,18 @@ def _matches_pdf(data: bytes, bill: MedicalBill) -> bool:
     text = " ".join(" ".join(read.texts).split())
     if not re.search(r"\bstatement\b", text, re.I):
         return False
-    # A printed statement date takes precedence over visit and due dates.
-    if re.search(_PRINT_LABEL, text, re.I):
-        return _dates_in(text, _PRINT_DATE) == {bill.date_text}
-    return bill.date_text in _dates_in(text, _ANY_DATE)
+    # Visit and due dates do not identify a bill.
+    return _dates_in(text, _PRINT_DATE) == {bill.date_text}
+
+
+def matches_accessible_label(label: str, expected_date: str) -> bool:
+    match = _ACCESSIBLE_LABEL.fullmatch(" ".join(label.split()))
+    if not match:
+        return False
+    try:
+        return _iso_date(match[1]) == expected_date
+    except ValueError:
+        return False
 
 
 def collect_download_docs(page) -> list[MedicalBill]:
@@ -214,7 +227,7 @@ def _close_viewer(page, press) -> bool:
     return True
 
 
-def _capture_inline_pdf(page, control, press) -> bytes | None:
+def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
     """Read the browser's inline PDF response before Chromium opens its viewer."""
     session = page.context.new_cdp_session(page)
     answers = []
@@ -252,11 +265,28 @@ def _capture_inline_pdf(page, control, press) -> bytes | None:
             "urlPattern": BASE + DETAILS_PATH + "/Download*",
             "requestStage": "Response",
         }]})
-        press(page, control, "a[data-index]")
+        covered = None
+        try:
+            press(page, control, "a[data-index]", statement_date=statement_date)
+        except pressing.Covered as stop:
+            # A real viewer can put its own PDF iframe over the control that
+            # just opened it. Do not press again. Accept that outcome only
+            # when this press brought a complete PDF and left the known viewer.
+            if not stop.after_a_press:
+                raise
+            covered = stop
         deadline = monotonic() + 12
         while not answers and not refused and monotonic() < deadline:
             page.wait_for_timeout(100)
-        return answers[0] if len(answers) == 1 and not refused else None
+        data = answers[0] if len(answers) == 1 and not refused else None
+        if covered is not None:
+            dialog = page.locator(_DIALOG)
+            viewers = dialog.locator("iframe:visible").evaluate_all("frames => frames.map(e => e.src)")
+            if (not data or dialog.count() != 1 or
+                    dialog.get_by_role("heading", name=_DIALOG_HEADING).count() != 1 or
+                    sum(bool(_medical_download_url(url)) for url in viewers) != 1):
+                raise covered
+        return data
     finally:
         try:
             session.send("Fetch.disable")
@@ -286,11 +316,9 @@ def download_bill(page, bill: MedicalBill, out_path: Path, *, press) -> bool:
             eligible.append(control)
     if len(eligible) != 1:
         return False
-    try:
-        data = _capture_inline_pdf(page, eligible[0], press)
-    finally:
-        if not _close_viewer(page, press):
-            raise MedicalListError("Close the medical statement viewer and leave Statements open.")
+    data = _capture_inline_pdf(page, eligible[0], press, bill.date_text)
+    if not _close_viewer(page, press):
+        raise MedicalListError("Close the medical statement viewer and leave Statements open.")
     if not data or not _matches_pdf(data, bill):
         return False
     shared_folder.write_whole(out_path, data)

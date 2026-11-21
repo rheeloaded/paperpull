@@ -55,12 +55,15 @@ def is_safe_control(label: str) -> bool:
     )
 
 
-def press_named(page, control, selector: str, *, frame=None) -> None:
+def press_named(page, control, selector: str, *, frame=None, statement_date="") -> None:
     labels = control.evaluate(
         "e => [e.innerText, e.getAttribute('aria-label'), e.getAttribute('title')]"
     )
     words = words_for("Kaiser Permanente", sys.modules[__name__])
-    if not any(labels) or any(label and not is_safe_control(label) for label in labels):
+    visible, accessibility, title = labels
+    if (not is_safe_control(visible or accessibility or title or "") or (title and not is_safe_control(title))
+            or (accessibility and not is_safe_control(accessibility)
+                and not medical.matches_accessible_label(accessibility, statement_date))):
         raise pressing.Changed("check the document control", "unexpected control label",
                                ["Kaiser Permanente changed a bill control."])
     pressing.click(page, control, css=selector, what="the Kaiser bill control",

@@ -36,13 +36,13 @@ HTML = b"""<!doctype html><main>
 <div><div><div><h2>Statements &amp; Billing</h2></div></div>
 <ul>
 <li><span class="ba_details_statement_date">April 1, 2031 Apr 1, 2031</span><span>Account statement</span>
-<a data-index="1" href="#view" onclick="openStatement(1);return false">View statement (PDF)</a></li>
+<a data-index="1" aria-label="View the statement sent on April 1, 2031 (PDF)." href="#view" onclick="openStatement(1);return false">View statement (PDF)</a></li>
 <li><span class="ba_details_statement_date">April 2, 2031 Apr 2, 2031</span><span>Account statement</span>
 <a data-index="2" href="#view" onclick="openStatement(2);return false">View statement (PDF)</a></li>
 </ul></div></main>
-<div class="Popup" id="viewer" role="dialog" hidden>
-<h2>Statement</h2><button type="button" aria-label="Close this popup" onclick="closeStatement()">Close</button>
-<iframe></iframe></div>
+<div class="Popup" id="viewer" role="dialog" style="position:fixed;inset:0;background:white" hidden>
+<h2>Statement</h2><button type="button" aria-label="Close this popup" style="position:absolute;top:4px;right:4px;z-index:2" onclick="closeStatement()">Close</button>
+<iframe style="position:absolute;top:40px;left:0;width:100%;height:100%"></iframe></div>
 <script>
 const viewer = document.querySelector('#viewer');
 function openStatement(i) { viewer.hidden=false; viewer.querySelector('iframe').src='Details/DownloadStatement/?doc='+i }
@@ -115,5 +115,18 @@ def _exercise_medical_browser(monkeypatch, tmp_path, port):
             assert not medical.download_bill(page, refused, unexpected, press=site.press_named)
             assert not unexpected.exists()
             assert not page.locator(medical._DIALOG).count()
+            calls = len(GETS)
+            page.evaluate("""() => {
+                const overlay = document.createElement('div');
+                overlay.style = 'position:fixed;inset:0;z-index:999;background:white';
+                document.body.append(overlay);
+            }""")
+            with pytest.raises(site.pressing.Covered) as stop:
+                medical.download_bill(page, good, tmp_path / "covered.pdf", press=site.press_named)
+            assert not stop.value.after_a_press
+            assert len(GETS) == calls
+            page.locator('a[data-index="2"]').evaluate("link => link.textContent = 'Unknown action'")
+            with pytest.raises(medical.MedicalListError):
+                medical.collect_download_docs(page)
         finally:
             browser.close()
