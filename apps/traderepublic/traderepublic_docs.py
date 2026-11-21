@@ -176,7 +176,7 @@ class App:
 
     def months(self) -> List[site.Month]:
         if self._months is None:
-            self._months = site.months()
+            self._months = list(site.months() or [])
         return self._months
 
     def browser(self):
@@ -361,8 +361,8 @@ class App:
             print("Trade Republic is limiting requests. Try again later.")
             raise SystemExit(0)
         if proof != site.PDF:
-            self.write_failure("ask for the newest statements",
-                               "none of the newest months answered with a statement pdf")
+            self.write_failure("read the latest statements",
+                               "none of the latest statements was a pdf")
             print("Could not confirm a Trade Republic session. None of the newest months")
             print("answered with a statement PDF, so nothing was listed.")
             raise SystemExit(0)
@@ -514,26 +514,26 @@ class App:
     def months_stopped(self, stop) -> None:
         """Leave the month pending when Trade Republic cannot be asked any more."""
         log.info("Trade Republic statement download stopped before the month was saved")
-        self.write_failure("ask for the month's statement", "trade republic could not be asked")
+        self.write_failure("read the statement", "trade republic stopped answering")
         listing.read_again_stopped(self, f"Trade Republic statement download stopped. {stop}")
 
     # What a month that saved nothing is recorded and said as: the record's
     # note, the failure file's step and its reason.
     _REFUSED = {
         site.NO_STATEMENT: (NO_STATEMENT_NOTE,
-                            "ask for the month's statement", "the answer held no statement pdf"),
+                            "read the statement", "the statement was not a pdf"),
         site.TOO_LARGE: ("Trade Republic's answer was larger than a document may be",
-                         "ask for the month's statement", "the answer was too large"),
+                         "read the statement", "the document was too large"),
         "refused": ("The PDF printed another month's first and last day",
-                    "check the statement pdf", "the pdf named another month"),
+                    "read the statement pdf", "the pdf is of another month"),
         "unchecked": ("The PDF did not print this month's first and last day",
-                      "check the statement pdf", "the pdf did not show its month"),
+                      "read the statement pdf", "the pdf did not show its month"),
         "unreadable": ("The PDF's text could not be read",
                        "read the statement pdf", "the statement pdf could not be read"),
         delivery.NOT_PLACED: ("The statement could not be put in place in its folder",
-                              "save the statement", "the folder would not take the file"),
+                              "save the statement", "the file could not be saved"),
         "": ("Could not capture the statement PDF",
-             "capture the document", "the document would not arrive"),
+             "read the statement", "the document was not found"),
     }
 
     def _saved_nothing(self, doc: Document, why: str, postmortem: dict = None) -> None:
@@ -834,9 +834,16 @@ class App:
                 try:
                     got = site.fetch_month(page, m)
                 except site.ListStopped:
-                    asked.append({"status_class": Fixed("none"), "answer": Fixed("tab closed")})
+                    asked.append({"status_class": Fixed("none"), "tab_closed": True})
                     break
-                one = {"status_class": site.status_class(got.status), "answer": Fixed(got.kind)}
+                # What came back, as yes or no only, so nothing the site
+                # layer hands back is ever written as words.
+                one = {"status_class": site.status_class(got.status),
+                       "is_pdf": got.kind == site.PDF,
+                       "signed_out": got.kind == site.SIGNED_OUT,
+                       "too_many_requests": got.kind == site.LIMITED,
+                       "no_statement": got.kind == site.NO_STATEMENT,
+                       "over_the_limit": got.kind == site.TOO_LARGE}
                 if got.kind == site.PDF:
                     one.update(site.survey_pdf(got.data, m))
                     info["statements_read"] += 1
@@ -845,7 +852,7 @@ class App:
                     break
             info["newest_months_asked"] = asked
             info["signed_out"] = info["signed_out"] or any(
-                a["answer"] == site.SIGNED_OUT for a in asked)
+                a.get("signed_out") is True for a in asked)
         out = self.paths.diagnostics / "diagnose-documents.json"
         write_shaped(out, info, words)
         print(f"Wrote {out}")

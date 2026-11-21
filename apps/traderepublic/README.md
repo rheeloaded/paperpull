@@ -54,8 +54,8 @@ uses a config of their own (`--config`).
    there. Your own Edge or Chrome opens with a separate profile. Sign in to
    app.traderepublic.com yourself, with your phone number, PIN and the code
    Trade Republic sends, until the home page shows. Leave the window open.
-4. Run **Login** (or `paperpull traderepublic login` in a terminal). It
-   says Success only when Trade Republic answered with a statement.
+4. If you use a terminal, run `paperpull traderepublic login`. It says
+   Success only when Trade Republic answered with a statement.
 5. Back in Get help, click **Make the report** (Diagnose). It asks for the
    newest months once each and writes two files in the Trade Republic
    folder's `Diagnostics`. `survey-diagnose-<time>.json` and
@@ -65,7 +65,8 @@ uses a config of their own (`--config`).
    and yes or no only, with no text from your account in them, never a
    date, an amount, a name or an account number. Diagnose saves nothing
    and clicks nothing.
-6. Run a **Pilot**. It tries the newest three months.
+6. Back on the Trade Republic page, click **Try the newest few first**. It
+   tries the newest three months.
 7. Open the files you will send in Notepad and look through them. If
    anything in one looks personal, delete that line.
 8. Open a [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)

@@ -342,7 +342,8 @@ def test_diagnose_reports_what_the_newest_statement_holds_as_counts(tmp_path, ca
     found = diagnose(tmp_path, FakeTab(right("2026-10")))
     asked = found["newest_months_asked"]
     assert found["statements_read"] == 1 and found["on_home_page"] is True
-    assert asked[0]["answer"] == "pdf" and asked[0]["status_class"] == "2xx"
+    assert asked[0]["is_pdf"] is True and asked[0]["status_class"] == "2xx"
+    assert asked[0]["signed_out"] is False and asked[0]["no_statement"] is False
     assert asked[0]["first_day_found"] is True and asked[0]["last_day_found"] is True
     assert asked[0]["dates_day_month_year"] == 2
     said = capsys.readouterr().out
