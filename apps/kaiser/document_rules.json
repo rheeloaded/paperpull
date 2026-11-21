@@ -1,0 +1,15 @@
+{
+  "statement_rules": [
+    {
+      "pattern": "\\bpremium bills\\b",
+      "summary": "Premium Bill"
+    },
+    {
+      "pattern": "^medical bill$",
+      "summary": "Medical Bill"
+    }
+  ],
+  "tax_rules": [],
+  "insurance_rules": [],
+  "skip_patterns": []
+}
