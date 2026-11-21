@@ -20,4 +20,6 @@ If Kaiser signs you out, use **Open sign-in window** to sign back in. Leave
 the same document list open for **Continue**. PaperPull waits for **My
 Documents** to load and picks up the pending downloads within the original
 run's limits. For medical statements, reopen the same billing account's
-**Statements** view.
+**Statements** view. If PaperPull cannot match a billing statement to the
+earlier list, verify the account in the browser and choose **Get new
+documents**.

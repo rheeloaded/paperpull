@@ -50,6 +50,7 @@ _BILLING_ENTRY = re.compile(rf"/(?:{REGION}/)?secure/billing/?")
 _FEEDBACK_CLOSE = '.QSIWebResponsive-creative-container-fade button[aria-label="Close"]'
 _EXTRA_RESULTS = re.compile(r"^(?:(?:go to )?next(?: page| results)?|load more|(?:show|view) more (?:documents|bills))$", re.I)
 _RANGE = re.compile(r"^(\d+)\s*[-–]\s*(\d+)\s+of\s+(\d+)\s+items?$", re.I)
+_EMPTY_RANGE = re.compile(r"^0(?:\s*[-–]\s*0\s+of\s+0)?\s+items?$", re.I)
 _PAGER = ".ds-pagination:visible"
 _NAV = ".ds-pagination nav.ds-pagination__nav"
 _PAGE_CHANGE_MS = 15000
@@ -330,6 +331,9 @@ def _statement_date(text: str) -> str:
 def _parse_page(raw) -> DocumentsPage:
     if not raw:
         raise ListStopped("My Documents displayed an unrecognized pager.")
+    if (not raw["rows"] and _EMPTY_RANGE.fullmatch(raw["range"] or "")
+            and raw.get("previous") is False and raw.get("next") is False):
+        return DocumentsPage(1, 0, 0, ())
     if not raw["rows"] or any(item is None for item in raw["rows"]):
         raise ListStopped("A My Documents row has an unrecognized document action.")
     if raw["range"] is not None:
@@ -362,7 +366,13 @@ def _visible_page(frame) -> DocumentsPage:
     first_row = frame.locator(_ROW).first
     if not first_row.is_visible():
         print("Waiting for Kaiser Permanente's My Documents list to load.", flush=True)
-    first_row.wait_for(timeout=_LIST_WAIT_SECONDS * 1000)
+    empty = frame.locator(_PAGER + " .ds-pagination__count > p").filter(has_text=_EMPTY_RANGE)
+    try:
+        first_row.or_(empty).first.wait_for(timeout=_LIST_WAIT_SECONDS * 1000)
+    except BrowserTimeout:
+        if looks_signed_out(frame.page):
+            raise SessionExpired() from None
+        raise ListStopped("Kaiser did not finish showing the My Documents list.") from None
     # A full-sized list may appear just before its pager mounts.
     if frame.locator(_ROW).count() >= _DEFAULT_PAGE_SIZE:
         frame.locator(_PAGER).first.wait_for(timeout=_PAGE_CHANGE_MS)
@@ -430,8 +440,9 @@ def bill_list_ready(page) -> bool:
     if frame is None:
         return False
     try:
-        return bool(_visible_page(frame).rows)
-    except (BrowserError, ListStopped):
+        _visible_page(frame)
+        return True
+    except (BrowserError, ListStopped, SessionExpired):
         return False
 
 
@@ -500,6 +511,8 @@ def collect_download_docs(page) -> list[Bill | NativeDocument | medical.MedicalB
     try:
         current = _seek_page(frame, 1)
         total = current.total
+        if not total:
+            return []
         rows = []
         seen = set()
         while True:

@@ -131,3 +131,23 @@ def test_ten_visible_rows_without_a_total_is_not_a_complete_list():
     rows = [[f"getdoc_{i}", "Apr 6, 2031", "Synthetic Notice", True] for i in range(10)]
     with pytest.raises(site.ListStopped, match="verifiable total"):
         site._parse_page({"range": None, "rows": rows})
+
+
+@pytest.mark.parametrize("empty", [True, False])
+def test_only_an_explicit_empty_result_completes_an_empty_list(browser_page, monkeypatch, empty):
+    page = browser_page
+    document = """<main class="feed-container"><div class="ds-pagination">
+      <div class="ds-pagination__count"><p>0–0 of 0 items</p></div>
+      <nav class="ds-pagination__nav"><ul>
+        <li class="-prev -disabled"><a class="ds-pagination__link" href="#">Previous results</a></li>
+        <li class="-next -disabled"><a class="ds-pagination__link" href="#">Next results</a></li>
+      </ul></nav></div></main>""" if empty else "<main>Loading My Documents</main>"
+    page.route("**/*", lambda route: route.fulfill(content_type="text/html; charset=utf-8", body=document))
+    page.goto(site.BASE + LIST)
+    monkeypatch.setattr(site, "_LIST_WAIT_SECONDS", 0.2)
+    if empty:
+        assert site.collect_download_docs(page) == []
+        assert site.bill_list_ready(page)
+    else:
+        with pytest.raises(site.ListStopped, match="finish showing"):
+            site.collect_download_docs(page)

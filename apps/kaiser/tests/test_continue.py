@@ -59,7 +59,26 @@ def test_unloaded_documents_page_is_not_a_sign_out(browser_page, monkeypatch):
     page.goto(site.URLS["login"])
     monkeypatch.setattr(site, "BILL_PAGE_WAIT_SECONDS", 0.1)
     with pytest.raises(TimeoutError, match="did not finish loading"):
-        connector.App._wait_for_bill_tab(SimpleNamespace(_listing_source=None), page.context)
+        connector.App._wait_for_bill_tab(
+            SimpleNamespace(_listing_source=None, _recovering_sign_in=False), page.context)
+
+
+def test_medical_recovery_waits_for_statements_from_landing_page(browser_page, monkeypatch):
+    details = site.BASE + site.medical.DETAILS_PATH + "?id=synthetic"
+    page = browser_page
+
+    def serve(route):
+        if route.request.url == details:
+            html = "<h2>Statements &amp; Billing</h2>"
+        else:
+            html = f"<script>setTimeout(() => location.href = {json.dumps(details)}, 300)</script>"
+        route.fulfill(content_type="text/html", body=html)
+
+    page.route("**/*", serve)
+    page.goto(site.BASE + "/secure/synthetic-landing")
+    monkeypatch.setattr(site, "BILL_PAGE_WAIT_SECONDS", 4)
+    app = SimpleNamespace(_listing_source=site.medical.SOURCE_URL, _recovering_sign_in=True)
+    assert connector.App._wait_for_bill_tab(app, page.context).url == details
 
 
 def test_expired_download_stays_pending_and_continue_waits_for_the_list(
@@ -90,22 +109,32 @@ def test_expired_download_stays_pending_and_continue_waits_for_the_list(
         address = urlsplit(route.request.url)
         if address.hostname == site.AUTH_HOST and address.path == "/signin":
             html = "<title>Sign in</title><input type=password>"
+        elif address.hostname == site.HOST and address.path == "/secure/synthetic-landing":
+            html = f"<script>setTimeout(() => location.href = {json.dumps(site.URLS['login'])}, 300)</script>"
         elif address.hostname == site.HOST and address.path == site._WRAPPER_PATH:
             html = """<title>My Documents</title><script>setTimeout(() => {
               const iframe = document.createElement('iframe');
               iframe.src = LIST;
               document.body.append(iframe);
             }, 300)</script>""".replace("LIST", json.dumps(LIST))
+        elif address.hostname == site.HOST and address.path == LIST + "/viewer":
+            account = "Synthetic alternate" if phase == "different" else "Synthetic original"
+            html = f'<main><div id="documentcontent">Premium bill. Statement Date: 3/5/2031. {account}</div></main>'
         elif address.hostname == site.HOST and address.path == LIST:
-            ids = {"initial": [10, 11, 12], "different": [19], "resume": [10, 11, 12, 13]}[phase]
-            rows = []
+            ids = {"initial": [10, 11, 12], "different": [10, 11, 12],
+                   "missing": [10, 12], "resume": [10, 11, 12, 13]}[phase]
+            rows = ["""<div class="_datafeed_row">
+                <a class="_document_name" id="getdoc_5" href="#">Premium Bills</a>
+                <span class="_document_date">Apr 5, 2031</span>
+                </div>"""]
             for n in ids:
                 rows.append(f"""<div class="_datafeed_row">
                     <a class="_document_name" id="getdoc_{n}" href="#">Synthetic Notice</a>
                     <span class="_document_date">Apr {n}, 2031</span>
                     <a class="download-pdf-link" href="#" data-docid="{n}">Download PDF</a>
                     </div>""")
-            pdfs = {11: b64encode(SECOND).decode(), 12: b64encode(FIRST).decode()}
+            pdfs = {11: b64encode(SECOND).decode(), 12: b64encode(FIRST).decode(),
+                    13: b64encode(FIRST).decode()}
             html = """<main id="rows"></main><script>
               const pdfs = PDFS;
               setTimeout(() => {
@@ -113,6 +142,11 @@ def test_expired_download_stays_pending_and_continue_waits_for_the_list(
                 console.log('rows ready');
               }, 450);
               document.addEventListener('click', event => {
+                if (event.target.id === 'getdoc_5') {
+                  event.preventDefault();
+                  location.href = 'my-documents-myc/viewer';
+                  return;
+                }
                 const id = event.target.dataset.docid;
                 if (!id) return;
                 event.preventDefault();
@@ -152,6 +186,13 @@ def test_expired_download_stays_pending_and_continue_waits_for_the_list(
         return json.loads(result[0].removeprefix(PREFIX + mark + " "))
 
     monkeypatch.setattr(connector.App, "_delay", lambda app: None)
+    page.goto(SIGN_IN)
+    assert run("--all", "--max-docs", "2", stops=True)["stop"] == "needs_you"
+    page.goto(site.URLS["login"], wait_until="domcontentloaded")
+    before_first_list = run("--resume", stops=True)
+    assert before_first_list["list_not_read"] == 1 and before_first_list["new_files"] == 0
+    assert not list(archive.rglob("*.pdf"))
+
     page.goto(site.URLS["login"], wait_until="domcontentloaded")
     result = run("--all", "--max-docs", "2", stops=True)
     assert result["stop"] == "needs_you" and result["stopped"] == 1
@@ -163,27 +204,46 @@ def test_expired_download_stays_pending_and_continue_waits_for_the_list(
     saved_state = (sha256(saved.read_bytes()).digest(), saved.stat().st_mtime_ns)
     discovery = next(archive.rglob("discovery.json"))
     assert sorted(row["state"] for row in json.loads(discovery.read_text()).values()) == [
-        "Completed", "Discovered", "Discovered",
+        "Completed", "Discovered", "Discovered", "Discovered",
     ]
 
     phase = "different"
     events.clear()
     page.goto(site.URLS["login"], wait_until="domcontentloaded")
     result = run("--resume", stops=True)
-    assert result["stop"] == "needs_you" and result["new_files"] == result["failed"] == 0
+    assert result["list_not_read"] == 1 and result["new_files"] == result["failed"] == 0
+    assert not any(event.startswith("download") for event in events)
+
+    phase = "missing"
+    events.clear()
+    page.goto(site.URLS["login"], wait_until="domcontentloaded")
+    result = run("--resume", stops=True)
+    assert result["list_not_read"] == 1 and result["new_files"] == result["failed"] == 0
+    assert list(archive.rglob("kaiser-sign-in-resume.json"))
     assert not any(event.startswith("download") for event in events)
 
     phase = "resume"
     events.clear()
-    page.goto(site.URLS["login"], wait_until="domcontentloaded")
+    page.goto(site.BASE + "/secure/synthetic-landing", wait_until="domcontentloaded")
     assert site._history_frame(page) is None
     result = run("--resume")
     assert result["new_files"] == 1 and result["failed"] == result["stopped"] == 0
-    assert events == ["rows ready", "download 11"]
+    assert "rows ready" in events
+    assert [event for event in events if event.startswith("download")] == ["download 11"]
     assert (sha256(saved.read_bytes()).digest(), saved.stat().st_mtime_ns) == saved_state
     new_files = set(archive.rglob("*.pdf")) - {saved}
     assert len(new_files) == 1 and new_files.pop().read_bytes() == SECOND
     assert sorted(row["state"] for row in json.loads(discovery.read_text()).values()) == [
-        "Completed", "Completed", "Discovered",
+        "Completed", "Completed", "Discovered", "Discovered",
     ]
     assert not list(archive.rglob("kaiser-sign-in-resume.json"))
+
+    progress = next(archive.rglob("progress.json"))
+    records = json.loads(progress.read_text())
+    legacy = next(record for record in records.values() if record.get("pdf_path") == str(saved))
+    legacy.pop("downloaded_ok")
+    progress.write_text(json.dumps(records))
+    result = run("--all", "--max-docs", "1")
+    assert result["new_files"] == result["failed"] == 0
+    assert len(list(archive.rglob("*.pdf"))) == 2
+    assert (sha256(saved.read_bytes()).digest(), saved.stat().st_mtime_ns) == saved_state

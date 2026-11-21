@@ -133,6 +133,8 @@ class App:
         self._current_bill_ids = None
         self._current_bills = {}
         self._listing_source = None
+        self._listing_anchors = set()
+        self._recovering_sign_in = False
         self._pdf_copies = None
         self._cdp_mode = False
         self.stats = {
@@ -216,9 +218,10 @@ class App:
             if expired is not None and (not billing_tabs or expired in billing_tabs):
                 return expired
             remaining = deadline - time.monotonic()
-            if remaining <= 0 and billing_tabs:
-                raise TimeoutError("Kaiser Permanente's My Documents page did not finish loading.")
-            if remaining <= 0 or (not billing_tabs and not announced):
+            if remaining <= 0 and (billing_tabs or self._recovering_sign_in):
+                raise TimeoutError("Kaiser Permanente's document list did not finish loading. "
+                                   + site.OPEN_BILL_LIST)
+            if remaining <= 0 or (not billing_tabs and not announced and not self._recovering_sign_in):
                 return (billing_tabs or provider_tabs or [tabs.new_tab(ctx)])[0]
             if not announced:
                 print("Waiting for Kaiser Permanente's My Documents page. " + site.OPEN_BILL_LIST, flush=True)
@@ -288,8 +291,11 @@ class App:
         scope = {name: getattr(self.args, name) for name in RESUME_SCOPE}
         if self.stats["mode"] == "pilot":
             scope["max_docs"] = self.config["pilot_count"]
+        # A native row's control ID and date can repeat in another account.
+        # Only already verified billing statements can anchor recovery.
         atomic_write_json(self._sign_in_resume, {
             "scope": scope, "pending": pending, "source": self._listing_source,
+            "anchors": sorted(self._listing_anchors),
         })
 
     def _sign_in_checkpoint(self):
@@ -382,8 +388,7 @@ class App:
             return 1
         return 0
 
-    def cmd_discover(self, quiet: bool = False, *, recovering_sign_in: bool = False,
-                     pending_ids: set[str] | None = None) -> int:
+    def cmd_discover(self, quiet: bool = False, *, checkpoint: dict | None = None) -> int:
         listing.started(self)
         n_new = 0
         try:
@@ -409,16 +414,25 @@ class App:
                     self.stats["mode"] == "resume" and not self._sign_in_resume.exists()):
                 self._remember_sign_in_resume()
             self._stop_for_sign_in()
-        resume_ids = set()
-        if recovering_sign_in:
-            resume_ids = {record["document_id"] for record in self.discovery.data.values()
-                          if record.get("source_url") == self._listing_source and record.get("document_id")}
-        if resume_ids:
-            matched = [row for row in docs if row.document_id in resume_ids]
-            if not matched:
-                self._stop_for_sign_in("My Documents no longer matches the documents in this run.")
-            if pending_ids is not None:
-                docs = matched
+        visible_anchors = {doc.document_id for doc in docs
+                           if isinstance(doc, (site.Bill, site.medical.MedicalBill))}
+        if checkpoint is not None:
+            anchors = set(checkpoint.get("anchors", ()))
+            if not anchors or not anchors.issubset(visible_anchors):
+                listing.read_again_stopped(self, "PaperPull could not verify the original Kaiser account. "
+                                           "Check the account in the browser before choosing Get new documents.")
+            pending = checkpoint.get("pending")
+            if pending is not None:
+                expected = set(pending)
+                completed = {record.get("document_id") for record in self.discovery.data.values()
+                             if record.get("document_id") in expected
+                             and self._already_done(Document.from_dict(record))}
+                visible_ids = {doc.document_id for doc in docs}
+                if expected - completed - visible_ids:
+                    listing.read_again_stopped(self, "Kaiser no longer lists every pending document. "
+                                               "The pending items remain in the original run.")
+                docs = [doc for doc in docs if doc.document_id in expected]
+        self._listing_anchors = visible_anchors
         self._current_bills = {row.document_id: row for row in docs}
         self._current_bill_ids = set(self._current_bills)
         for r in docs:
@@ -550,7 +564,9 @@ class App:
             self._pdf_copies = {}
             root = self.paths.root.resolve()
             for record in self.progress.data.values():
-                if not record.get("downloaded_ok") or not record.get("pdf_path"):
+                done = record.get("downloaded_ok") or record.get("state") in (
+                    State.COMPLETED.value, State.PDF_VERIFIED.value)
+                if not done or not record.get("pdf_path"):
                     continue
                 try:
                     path = Path(record["pdf_path"]).resolve()
@@ -761,6 +777,7 @@ class App:
         checkpoint = self._sign_in_checkpoint()
         if checkpoint is not None:
             self._listing_source = checkpoint.get("source")
+            self._recovering_sign_in = not self.args.dry_run
             for flag in RESUME_SCOPE:
                 if getattr(self.args, flag) is None:
                     setattr(self.args, flag, checkpoint["scope"][flag])
@@ -768,8 +785,7 @@ class App:
                 pending_ids = set(checkpoint["pending"])
         if not self.args.dry_run:
             listing.read_again_first(self, noun="documents")
-            self.cmd_discover(quiet=True, recovering_sign_in=checkpoint is not None,
-                              pending_ids=pending_ids)
+            self.cmd_discover(quiet=True, checkpoint=checkpoint)
         docs = self._select(pending_only=True, pending_ids=pending_ids)
         listing.resume(self, docs, lambda left: self.process(left, dry_run=self.args.dry_run),
                        noun="documents")
