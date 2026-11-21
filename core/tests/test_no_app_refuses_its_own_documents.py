@@ -57,6 +57,8 @@ ALLOWED_TO = {
     "spectrum": {"Internet Statement", "Mobile Statement"},
     # The card statement's PDF button is pressed by its own label, "PDF".
     "coinbase": {"One Card Statement"},
+    # Kaiser's archived names differ from the exact Premium Bills and View statement (PDF) links.
+    "kaiser": {"Medical Bill", "Premium Bill"},
 }
 
 
