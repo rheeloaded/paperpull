@@ -45,7 +45,15 @@ HTML = b"""<!doctype html><main>
 <iframe style="position:absolute;top:40px;left:0;width:100%;height:100%"></iframe></div>
 <script>
 const viewer = document.querySelector('#viewer');
-function openStatement(i) { viewer.hidden=false; viewer.querySelector('iframe').src='Details/DownloadStatement/?doc='+i }
+function openStatement(i) {
+    viewer.hidden=false; viewer.querySelector('iframe').src='Details/DownloadStatement/?doc='+i;
+    if (window.differentCover) {
+        const other = document.createElement('iframe');
+        other.id = 'cover';
+        other.style = 'position:fixed;inset:0;width:100%;height:100%;z-index:999';
+        document.body.append(other);
+    }
+}
 function closeStatement() { viewer.hidden=true; viewer.querySelector('iframe').src='about:blank' }
 </script>"""
 DOC = pdf_with_statement_date(1)
@@ -115,6 +123,13 @@ def _exercise_medical_browser(monkeypatch, tmp_path, port):
             assert not medical.download_bill(page, refused, unexpected, press=site.press_named)
             assert not unexpected.exists()
             assert not page.locator(medical._DIALOG).count()
+            page.evaluate("window.differentCover = true")
+            with pytest.raises(site.pressing.Covered) as late_stop:
+                medical.download_bill(page, good, tmp_path / "other-frame.pdf", press=site.press_named)
+            assert late_stop.value.after_a_press
+            assert not (tmp_path / "other-frame.pdf").exists()
+            page.reload()
+            good = min(medical.collect_download_docs(page), key=lambda bill: bill.date_text)
             calls = len(GETS)
             page.evaluate("""() => {
                 const overlay = document.createElement('div');
@@ -125,7 +140,13 @@ def _exercise_medical_browser(monkeypatch, tmp_path, port):
                 medical.download_bill(page, good, tmp_path / "covered.pdf", press=site.press_named)
             assert not stop.value.after_a_press
             assert len(GETS) == calls
-            page.locator('a[data-index="2"]').evaluate("link => link.textContent = 'Unknown action'")
+            row = page.locator('li').nth(1)
+            row.evaluate("e => e.insertAdjacentHTML('beforeend', '<a href=#unknown>Unknown action</a>')")
+            with pytest.raises(medical.MedicalListError):
+                medical.collect_download_docs(page)
+            row.locator('a[href="#unknown"]').evaluate("e => e.remove()")
+            row.locator('.ba_details_statement_date').evaluate("e => e.removeAttribute('class')")
+            row.locator('a').evaluate("e => { e.removeAttribute('data-index'); e.textContent = 'Unknown action'; }")
             with pytest.raises(medical.MedicalListError):
                 medical.collect_download_docs(page)
         finally:

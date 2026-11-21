@@ -35,22 +35,22 @@ _VIEWER_DOWNLOAD = re.compile(rf"{DETAILS_PATH}/Download[A-Za-z]{{1,48}}/?")
 _DIALOG = '[role=dialog].Popup:visible'
 _DIALOG_HEADING = re.compile(r"^(?:Statement(?: PDF)?|Billing Statement|View Statement(?: \(PDF\))?|View PDF|PDF Viewer)$", re.I)
 _OPEN_LIST = "In Medical Billing, open View billing and payment details, then Statements."
-_READ_LIST = r"""heading => {
+_READ_LIST = r"""(heading, datePattern) => {
     const region = heading.parentElement?.parentElement?.parentElement;
     if (!region) return null;
     const visible = e => Boolean(e.getClientRects().length) &&
                          getComputedStyle(e).visibility === 'visible';
     const label = e => e.innerText.trim().replace(/\s+/g, ' ');
-    const statementRows = new Set(
-        [...region.querySelectorAll('.ba_details_document, .ba_details_statement_date')]
-            .filter(visible).map(item => item.closest('li'))
-    );
+    const date = new RegExp(datePattern, 'i');
+    const statementRows = [...region.querySelectorAll('li')].filter(row =>
+        visible(row) && (date.test(row.innerText) ||
+            row.querySelector('.ba_details_document, .ba_details_statement_date, a[data-index]')));
     const documents = [];
     for (const row of statementRows) {
-        const dates = row?.querySelectorAll('.ba_details_statement_date');
-        const controls = [...(row?.querySelectorAll('a') || [])].filter(e =>
-            visible(e) && /^View statement\s*\(?PDF\)?$/i.test(label(e)));
-        const control = controls.length === 1 ? controls[0] : null;
+        const dates = row.querySelectorAll('.ba_details_statement_date');
+        const controls = [...row.querySelectorAll('a,button,input,[role=button],[role=link]')].filter(visible);
+        const control = controls.length === 1 && controls[0].tagName === 'A' &&
+            /^View statement\s*\(?PDF\)?$/i.test(label(controls[0])) ? controls[0] : null;
         const href = control?.getAttribute('href');
         const index = control?.getAttribute('data-index');
         const safe = control && dates.length === 1 && href?.startsWith('#') &&
@@ -115,7 +115,7 @@ def _read_rows(page) -> dict[MedicalBill, str]:
     source_url = page.url
     deadline = monotonic() + 8
     while True:
-        view = heading.evaluate(_READ_LIST)
+        view = heading.evaluate(_READ_LIST, _ROW_DATE.pattern)
         if not view or view["more"] or page.url != source_url:
             raise MedicalListError("The visible medical statements list is incomplete.")
         if view["rows"] or view["empty"]:
@@ -231,6 +231,7 @@ def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
     """Read the browser's inline PDF response before Chromium opens its viewer."""
     session = page.context.new_cdp_session(page)
     answers = []
+    by_frame = {}
     refused = False
 
     def observe(event):
@@ -238,8 +239,12 @@ def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
         request_id = event["requestId"]
         try:
             request = event["request"]
-            if (event.get("responseStatusCode") != 200 or request["method"] != "GET"
-                    or not _medical_download_url(request["url"])):
+            if request["method"] != "GET" or not _medical_download_url(request["url"]):
+                return
+            frame_id = event.get("frameId")
+            if frame_id:
+                by_frame.setdefault(frame_id, set()).add(request["url"].split("#", 1)[0])
+            if event.get("responseStatusCode") != 200:
                 return
             headers = {item["name"].casefold(): item["value"] for item in event["responseHeaders"]}
             if headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/pdf":
@@ -250,7 +255,7 @@ def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
             answer = session.send("Fetch.getResponseBody", {"requestId": request_id})
             data = intake.decode(answer["body"]) if answer["base64Encoded"] else b""
             if capture.is_document(data):
-                answers.append(data)
+                answers.append((data, frame_id))
         except (BrowserError, TypeError, ValueError, KeyError, intake.TooLarge):
             refused = True
         finally:
@@ -260,7 +265,17 @@ def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
                 pass
 
     session.on("Fetch.requestPaused", observe)
+    point = None
     try:
+        point = control.evaluate_handle(r"""el => {
+            const proof = {point: null, stop: () => el.removeEventListener('click', heard, true)};
+            function heard(event) {
+                if (event.isTrusted && el.contains(event.target))
+                    proof.point = [event.clientX, event.clientY];
+            }
+            el.addEventListener('click', heard, {capture: true, once: true});
+            return proof;
+        }""")
         session.send("Fetch.enable", {"patterns": [{
             "urlPattern": BASE + DETAILS_PATH + "/Download*",
             "requestStage": "Response",
@@ -278,20 +293,32 @@ def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
         deadline = monotonic() + 12
         while not answers and not refused and monotonic() < deadline:
             page.wait_for_timeout(100)
-        data = answers[0] if len(answers) == 1 and not refused else None
+        data, frame_id = answers[0] if len(answers) == 1 and not refused else (None, None)
         if covered is not None:
+            source = point.evaluate(r"""proof => {
+                if (!proof.point) return null;
+                const frame = document.elementFromPoint(...proof.point);
+                if (frame?.tagName !== 'IFRAME' || !frame.closest('[role=dialog].Popup')) return null;
+                return frame.src.split('#', 1)[0];
+            }""")
             dialog = page.locator(_DIALOG)
-            viewers = dialog.locator("iframe:visible").evaluate_all("frames => frames.map(e => e.src)")
-            if (not data or dialog.count() != 1 or
-                    dialog.get_by_role("heading", name=_DIALOG_HEADING).count() != 1 or
-                    sum(bool(_medical_download_url(url)) for url in viewers) != 1):
+            if (not data or source not in by_frame.get(frame_id, ()) or dialog.count() != 1
+                    or dialog.get_by_role("heading", name=_DIALOG_HEADING).count() != 1):
                 raise covered
         return data
     finally:
         try:
-            session.send("Fetch.disable")
+            if point is not None:
+                try:
+                    point.evaluate("proof => proof.stop()")
+                except BrowserError:
+                    pass
+                point.dispose()
         finally:
-            session.detach()
+            try:
+                session.send("Fetch.disable")
+            finally:
+                session.detach()
 
 
 def download_bill(page, bill: MedicalBill, out_path: Path, *, press) -> bool:
