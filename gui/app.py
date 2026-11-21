@@ -4065,11 +4065,20 @@ def _apply_settings(mod, cfg_path: Path, install: Path, settings: dict, slug: st
 
 def _left_out_note(left_out: list) -> str:
     """What the import says of addresses it did not write. The address is
-    not repeated, since a provider's own address can name an employer."""
-    if not left_out:
-        return ""
-    return ("Its %s was left out, since it is not an address on the provider's own site. "
-            "Set it in the provider's settings." % " and ".join(sorted(set(left_out))))
+    not repeated, since a provider's own address can name an employer.
+    "kind_folders" is said apart, since it was left out for another reason
+    (tools/migrate.py settings_to_apply)."""
+    addresses = sorted(set(k for k in left_out if k != "kind_folders"))
+    said = []
+    if addresses:
+        said.append("Its %s was left out, since it is not an address on the provider's own "
+                    "site. Set it in the provider's settings." % " and ".join(addresses))
+    if "kind_folders" in left_out:
+        said.append("Filing documents with no folder for each kind was left out, since it "
+                    "needs a documents folder of the account's own, and the documents folder "
+                    "is not carried from another computer. Set a documents folder here first, "
+                    "then put \"kind_folders\": false in its config.json again.")
+    return " ".join(said)
 
 
 def _template_for(entry: dict, providers: list):

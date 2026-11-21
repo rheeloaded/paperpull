@@ -165,5 +165,5 @@ ENTRYPOINT ["/opt/paperpull/server/entrypoint.sh"]
 LABEL org.opencontainers.image.title="PaperPull Server" \
       org.opencontainers.image.description="PaperPull on an always-on machine at home, used from a browser on the home network." \
       org.opencontainers.image.source="https://github.com/rheeloaded/paperpull" \
-      org.opencontainers.image.vendor="TNE Enterprises LLC" \
+      org.opencontainers.image.vendor="TNE Labs" \
       org.opencontainers.image.licenses="AGPL-3.0-only"

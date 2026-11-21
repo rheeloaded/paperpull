@@ -9,6 +9,179 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+## [0.70.0] - 2026-11-20
+
+Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
+workplace retirement plan statements. Wells Fargo can read only the
+accounts you name and checks the account again just before it takes a
+document. Chase reads its newer statements view, Kroger opens its
+receipts at their new address, Meijer reads its current orders page,
+Apple asks again for a purchase it passed over, Tualatin Water keeps no
+bill drawn without its stylesheet, and NW Natural stops after three
+refused bills in a row. A documents folder filed without kind folders
+holds only what PaperPull filed there.
+
+### Added
+- **Wells Fargo reads only the accounts you name (#221).** Put the last four
+  digits of the accounts to read in `"only_accounts"` in Wells Fargo's
+  `config.json`, for example `["2222"]`, and every run, the Pilot, Run All,
+  Continue, Download again and the support report, chooses only those
+  accounts in the picker and never opens, scrolls or reads another
+  account's list. Empty, the default, reads every account as before.
+  Records already saved for other accounts are kept as they are. A last
+  four the picker does not hold, two accounts sharing it, a sign-in of one
+  account, and a value that is not a list of last fours stop the run
+  before anything is read. Existing installs get the empty setting when
+  the panel next starts.
+- **Marin Water (#231, #233).** Water bills from Marin Water's Paymentus
+  portal, for a sign-in with one account. Sign in with Open sign-in window,
+  then Try the newest few first and Get new documents. The app reads Bill
+  History from the signed-in tab and fetches each bill's PDF from its own
+  View Bill link in a request of its own, with none of the portal's
+  cookies, and presses nothing. Two bills that share a date are told apart
+  by their PDFs, and a bill saved before its date gained a second keeps its
+  record when its file matches. Port 9318. Contributed by @solkennedy.
+- **Vanguard workplace retirement plan statements (#234).** With a plan's
+  Statements open in Vanguard's workplace portal, Vanguard lists that
+  plan's statements and saves each one only when the PDF prints the plan
+  number and the statement's own date range. Each download reads the
+  plan's list again first, since the link to a statement can point at
+  another one once the list changes. A brokerage Statements tab is used
+  when both portals are open, and Resume works on the open portal's
+  statements only. Brokerage discovery now stops when a year it asked for
+  never answers, where it used to list that year as empty. Contributed by
+  @solkennedy.
+- **Cloudflare invoices (#238).** A new app saves the invoice PDFs of the
+  Cloudflare account selected in the Dashboard, read page by page from the
+  billing history the Invoices page itself asks for, with nothing clicked.
+  Each PDF is filed only once its own text shows the listed invoice number
+  and date, two invoices of one day are kept apart, and an invoice is filed
+  only under the account it was listed for, Resume included. A history page
+  that does not answer, repeats or is cut short stops the run, and so does a
+  request limit. Invoices of Cloudflare's older billing system are counted
+  and said, not saved. It signs in on port 9319. Contributed by @solkennedy.
+
+### Fixed
+- **A documents folder filed without kind folders holds only what
+  PaperPull filed there (#201).** With `"kind_folders": false` the
+  documents folder can be a broad one, and any PDF in it that a record
+  named, from an imported history or an edited index, counted as the
+  account's own, so Rename could rename it, the Move could move it and
+  AT&T's wrong-year repair could put it in Manual Review. The Move now
+  writes down each document it files there, by its size and SHA-256 and
+  never its name, in `documents-filed-flat.json` before it moves anything,
+  and only those are touched there, under any name Rename gives them
+  later. If that file cannot be written or read, nothing is moved.
+  Documents 0.69.0 filed this way are written down once from the
+  account's own saved records, never from imported ones, and again on
+  each run until each one there is read or found gone, so one on a drive
+  not plugged in or not synced yet is not left out. A folder named like a
+  folder of a kind inside the documents folder is still the account's as
+  before. Found in the 0.69.0 release review.
+- **The cleanup after a Move without kind folders never removes a link or
+  a junction (#201).** A folder of a kind in the documents folder that a
+  person made a junction or a link was removed by itself on Windows,
+  whatever it led to. Only a real empty folder is removed now. No file
+  was ever removed.
+- **A refused `kind_folders` setting no longer stops Login or the Support
+  report (#201).** It stopped every run for that account, so a person
+  could not even sign in. Login and the Support report now go on with
+  documents in folders of their kind and say why the setting was not
+  taken, and any run that saves or moves documents still stops with the
+  same message. Import history leaves `"kind_folders": false` out of a
+  provider it sets up and says so, since the documents folder it needs
+  is not carried from another computer.
+- **Wells Fargo checks the account again just before it takes a document
+  (#221).** The account picker had to show the document's account before
+  the list was read, and nothing checked it again between finding the
+  document and fetching or pressing it. A picker that moved by itself then
+  could save one account's statement under another's name. It is read
+  again just before the fetch and the press, and a picker showing another
+  account, or no account at all, takes nothing, leaves the document for the
+  next run and stops the run. A picker showing no account is no longer
+  taken as showing the right one while a list is read either.
+- **Chase reads the newer personal statements view (#228, #232).** Chase
+  now draws a card's statements under one year button shared by every card,
+  with a Download button named only by its date. The app chooses each year
+  there, opens one card at a time, and files a statement under the card
+  whose accordion holds its button, so two cards with a statement on the
+  same day each keep their own. A button it cannot tie to exactly one card,
+  two buttons for one card and date, and a year whose rows never draw are
+  passed over, and the list is not noted as read whole. The same holds for
+  a card table that shows a pager the app does not press, and for a view
+  whose year could not be read, on the older route as well. A card with no
+  statement in a year looks the same as one whose rows have not drawn, so
+  a run that meets one, such as a run in
+  January or one with a card newer than the oldest year, also ends with
+  the list not read whole. Everything it read is kept and downloaded, and
+  the run says so and stops at its end. On the older route, where a card
+  has a statement and a corrected one on the same date, the statement's own
+  row is pressed, rather than whichever came first. Contributed by
+  @solkennedy.
+- **PROVIDERS.md counts the supported providers right.** Its heading said
+  84 where the list held 86, and with Marin Water and Cloudflare it
+  holds 88, as the README says.
+- **Kroger opens its receipts again (#225, #235).** Kroger's receipt pages
+  moved to an address that puts the purchase date first, so every receipt
+  page went back to the purchase history and each receipt was said not to
+  render. The app now opens the new address, built from the key Kroger's
+  history gives. That key still names the purchase in your records, so
+  receipts saved before are neither renamed nor downloaded again, and a
+  Resume opens an address saved before the move at the new one. Two
+  receipts from one store on one day are each saved from their own page,
+  and a receipt key in a shape the app does not know is not opened by a
+  run and is tried again next run, so it is never set aside. Contributed
+  by @cmcculloh.
+- **Apple asks again on a later run for a purchase it passed over (#237).**
+  Once Apple has refused ten of an account's purchases in a row, older ones
+  in a year where it refused one are passed over for the rest of the run.
+  Such a purchase is now left pending rather than counted failed, and a
+  later download run that covers its date asks Apple for that receipt
+  itself, even when Apple refuses the newer ones again, so that run takes
+  longer by one paced ask for each. Purchases an older
+  version recorded as failed this way are asked the same way. A purchase is
+  passed over at most once, so a receipt Apple never gives still ends as a
+  purchase record by its third run, and every record rests on Apple
+  refusing that receipt itself. The end of the run says how many were left
+  pending. Contributed by @solkennedy. Before merging, a test was added that
+  follows such a history run by run to its records and counts every ask,
+  and the end-of-run line was worded for a single purchase too.
+- **Tualatin Water keeps no bill drawn without its stylesheet (#239).** A
+  bill whose stylesheet timed out, was cut off, refused, redirected or over
+  the size budget is not kept, so the next run asks for it again, and
+  nothing more is asked for that bill. Images stay best effort, and the log
+  says how many were left out. After the first request that times out
+  nothing more is asked, so stalls cost one time limit and not one each.
+  Alternate and disabled stylesheets are left out, Activity's settle wait
+  stops cleanly when the tab goes away or signs out, and Login says why
+  Activity was not read whole. Contributed by @crazyhorse90210.
+- **NW Natural stops after three bills in a row are refused (#240).** When
+  the portal refuses bill after bill right after Bill History answers, the
+  run stops at the third with nothing recorded against it, rather than read
+  the whole history again for every bill left. A bill taken in between
+  starts the count again, and a bill that failed on an earlier run is asked
+  for after the others and does not count, so Resume moves on to the bills
+  not asked for yet. Download again counts none. Login has a line of its own
+  for the portal's bot check. Contributed by @crazyhorse90210.
+- **Meijer finds and saves receipts on its current orders page (#220,
+  #236).** Meijer moved its orders to /shopping/orders, renamed the tabs
+  Online and In-Store, and gave each row a button named "Download receipt
+  from" its date and time. Both the new page and the old one are read.
+  Contributed by @cmcculloh. Before merging, each purchase was tied to its
+  own row by the date and time that row prints, so two purchases of one day
+  each get their own receipt, a button naming another purchase is never
+  pressed, the date line no longer becomes the purchase's name, a button
+  that shows its whole label is read whole, and the file a tester attaches
+  names the button in fixed words. A receipt saved from the old page is not
+  saved again. The new page words each row differently, which gave every
+  purchase a new key, so a record kept from the old page now moves to the
+  new key, file and all, when exactly one record and one purchase of the
+  same kind, day, amount and store fit. When more than one fits and one of
+  them was saved, those purchases are held and not downloaded, since which
+  is which cannot be told, and when none was saved they are downloaded
+  under their new keys. A record of the old page never saved is then found
+  on the new page instead of failing on every run.
+
 ## [0.69.0] - 2026-11-17
 
 You can choose the browser you sign in with, and file documents straight

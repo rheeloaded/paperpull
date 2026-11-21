@@ -47,8 +47,8 @@ WHAT THE LIVE PROBE ESTABLISHED (2026-08-18):
     endpoint, so "the next reply" is not the reply to this click.
   * A card that is ALREADY expanded never re-fetches, so it must be collapsed
     before being opened, or its documents are silently missed entirely.
-  * Downloads fire a real browser download event from the row's "Saves
-    document" link.
+  * Downloads fire a browser download event from a "Saves document" link
+    or a date-labeled "Download" button in the card's statement table.
 
 OUT OF SCOPE: tax documents and year-end summaries. Chase gives both their own
 nav entries, and this app deliberately collects neither - `document_types` in
@@ -66,9 +66,11 @@ import html as _html
 import json
 import logging
 import re
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+from urllib.parse import urlsplit
 
 from paperpull_core import shared_folder
 from paperpull_core import intake
@@ -299,7 +301,7 @@ def detect_security_challenge(page) -> Optional[str]:
     return None
 
 
-def is_safe_control(name: str) -> bool:
+def is_safe_control(name: str, *, allowed: re.Pattern = SAFE_DOC_CONTROL_RE) -> bool:
     """A control may be clicked only if it looks like a document action AND
     matches nothing in the forbidden list."""
     name = (name or "").strip()
@@ -318,7 +320,7 @@ def is_safe_control(name: str) -> bool:
             return False
     except Exception:
         pass
-    return bool(SAFE_DOC_CONTROL_RE.search(name))
+    return bool(allowed.search(name))
 
 
 def dismiss_timeout(page) -> None:
@@ -363,7 +365,8 @@ def on_documents_page(page) -> bool:
 
 # The document center's route, as the live probe found it
 # (#/dashboard/documents/myDocs/index).
-DOCUMENT_CENTER_ROUTE = "#/dashboard/documents/"
+DOCUMENT_CENTER_ROUTE = "/dashboard/documents/"
+PERSONAL_STATEMENTS_PATH = "/dashboard/mydocs/documents/statements"
 # The center's tabs, named in its address by the same probe, of which
 # this app collects STATEMENTS alone.
 DOCUMENT_TYPE_RE = re.compile(r"documentType=([A-Za-z_]+)", re.I)
@@ -379,6 +382,29 @@ def on_another_documents_tab(url: str) -> bool:
     return bool(found) and found.group(1).upper() != "STATEMENTS"
 
 
+def _statements_path(url: str) -> str:
+    """The statements route from Chase's hash-based dashboard."""
+    if not is_safe_url(url) or on_another_documents_tab(url):
+        return ""
+    path = urlsplit(url).fragment.split("?", 1)[0].rstrip("/").lower()
+    if (path.startswith(DOCUMENT_CENTER_ROUTE)
+            or path == PERSONAL_STATEMENTS_PATH
+            or path.startswith(PERSONAL_STATEMENTS_PATH + "/")):
+        return path
+    return ""
+
+
+def _view_picker_shows_a_year(page) -> bool:
+    """The older center's "View:" year picker is on the page showing a year.
+    A page that cannot be asked answers no."""
+    try:
+        pickers = page.locator(YEAR_PICKER_SEL)
+        return any(re.fullmatch(r"20\d{2}", (pickers.nth(i).get_attribute("value") or "").strip())
+                   for i in range(min(pickers.count(), 5)))
+    except Exception:
+        return False
+
+
 def document_center_drawn(page) -> bool:
     """The document center on screen, even with no row in its view.
 
@@ -387,22 +413,28 @@ def document_center_drawn(page) -> bool:
     all year for a card with no statement in it, that view can hold no row,
     and a test of rows alone took the center for a page that never opened,
     so Discover listed nothing and a download gave up. The center is told
-    by its route, its "View:" year picker showing a year, and a card
-    accordion, the things the probe found and the collector works through.
+    by its route, a card accordion and its "View:" year picker, or by the
+    newer statements route and its rendered card expanders when the picker
+    is absent. On either route a statement button bound to its card counts.
+    The older route with a card and no picker does not, as at 0.69.0
+    (review of #232).
     The route alone is not enough, since the dashboard ignores a route
     pasted into its address and may keep it there while it draws its own
     front page, and a page that merely says Documents, or has a picker of
     something other than years, does not count."""
     try:
-        url = page.url or ""
-        if not is_safe_url(url) or DOCUMENT_CENTER_ROUTE not in url or looks_signed_out(page) \
-                or on_another_documents_tab(url):
+        path = _statements_path(page.url or "")
+        if not path or looks_signed_out(page):
             return False
-        pickers = page.locator(YEAR_PICKER_SEL)
-        if not any(re.fullmatch(r"20\d{2}", (pickers.nth(i).get_attribute("value") or "").strip())
-                   for i in range(min(pickers.count(), 5))):
-            return False
-        return bool(card_accordions(page))
+        if _view_picker_shows_a_year(page):
+            return bool(card_accordions(page))
+        if path.startswith(PERSONAL_STATEMENTS_PATH) and any(
+            header.get_attribute("aria-expanded") in {"true", "false"}
+            for header, _ in card_accordions(page)
+        ):
+            return True
+        buttons, _ = _statement_buttons(page)
+        return bool(buttons)
     except Exception:
         return False
 
@@ -560,7 +592,8 @@ class RawDoc:
 # --diagnose shows the real markup, tighten _ROW_JS to Chase's actual
 # testids/classes so unrelated rows can never be picked up.
 # ---------------------------------------------------------------------------
-_ROW_JS = r"""() => {
+_ROW_JS = r"""(downloadButtonPattern) => {
+  const DATE_DOWNLOAD = new RegExp(downloadButtonPattern, 'i');
   const DATE_RE = /(\d{1,2}\/\d{1,2}\/\d{4})|((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})|((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{4})/i;
   const CTRL = "a[href$='.pdf'], a[download], a[aria-label], button[aria-label], a, button";
   const SAFE = /(download|view|open|save|print|pdf|statement|document|1099|1098|5498|tax)/i;
@@ -578,6 +611,8 @@ _ROW_JS = r"""() => {
     if (!m) continue;
     let ctrl = null;
     for (const c of el.querySelectorAll(CTRL)) {
+      // Date-only controls require the card binding used by _statement_buttons.
+      if (c.tagName === 'BUTTON' && DATE_DOWNLOAD.test(c.getAttribute('aria-label') || '')) continue;
       const label = ((c.innerText || '') + ' ' + (c.getAttribute('aria-label') || '') +
                      ' ' + (c.getAttribute('href') || '')).trim();
       if (SAFE.test(label)) { ctrl = { label: label.slice(0, 80),
@@ -616,7 +651,7 @@ def collect_documents(page) -> List[RawDoc]:
     docs: List[RawDoc] = []
     seen = set()
     try:
-        rows = page.evaluate(_ROW_JS)
+        rows = page.evaluate(_ROW_JS, DOWNLOAD_BUTTON_RE.pattern)
     except Exception as e:
         log.info("row scrape failed: %s", error_kind(e))
         rows = []
@@ -891,13 +926,13 @@ def chase_download(page, ctx, account: str, date: str, out_path,
         log.info("documents page not available for %r %s", shape_label(account), date)
         return False
 
-    if not select_year(page, date[:4]):
-        log.info("year %s not offered by the picker - cannot reach %s %s",
-                 date[:4], shape_label(account), date)
-        return False
+    year_selected = select_year(page, date[:4])
     if account and not expand_only_card(page, account):
         log.info("could not open the card %r", shape_label(account[:40]))
         return False
+    if (year_selected and account
+            and _statements_path(page.url or "").startswith(PERSONAL_STATEMENTS_PATH)):
+        _wait_for_personal_card_rows(page, account, date[:4])
 
     # Which document Chase actually serves, so the file can be checked against
     # the one that was asked for rather than trusted.
@@ -916,7 +951,10 @@ def chase_download(page, ctx, account: str, date: str, out_path,
 
     page.on("response", _note)
     try:
-        ok = _click_row_and_capture(page, ctx, account, date, out_path)
+        if year_selected:
+            ok = _click_row_and_capture(page, ctx, account, date, out_path, title=title)
+        else:
+            ok = _click_row_and_capture(page, ctx, account, date, out_path, allow_legacy=False)
     finally:
         try:
             page.remove_listener("response", _note)
@@ -936,23 +974,51 @@ def chase_download(page, ctx, account: str, date: str, out_path,
     return True
 
 
+def _row_reads_as(handle, account: str, title: str) -> bool:
+    """The older route's row link reads as this card's row of this title."""
+    try:
+        m = ROW_NAME_RE.search(" ".join((handle.inner_text() or "").split()))
+    except Exception:
+        return False
+    return (bool(m) and " ".join(m.group("card").split()) == account
+            and ((m.group("type") or "").strip() or "Statement") == title)
+
+
 def _click_row_and_capture(page, ctx, account: str, date: str,
-                           out_path: Path) -> bool:
-    """Click this row's save control and keep whatever PDF it produces."""
-    link = None
-    for action in ("Saves document", "opens document"):
+                           out_path: Path, *, allow_legacy=True, title: str = "") -> bool:
+    """Click this row's save control and keep whatever PDF it produces.
+
+    On the older route two rows of one card and date (a statement and a
+    corrected one) both match the date and card. The row is then the one
+    whose type and card read as Discover read them (ROW_NAME_RE), and with
+    none or more than one such row nothing is pressed (review of #232)."""
+    buttons, _ = _statement_buttons(page)
+    matches = buttons.get((account, date), [])
+    if len(matches) > 1:
+        log.info("multiple download buttons match %s on %s", shape_label(account), date)
+        return False
+    control = matches[0] if matches else None
+    # The new button identifies its full date even when the picker is absent.
+    # Keep the existing year requirement for the legacy path.
+    for action in ("Saves document", "opens document") if allow_legacy and control is None else ():
         try:
             loc = page.get_by_role("link", name=row_label_re(date, account, action))
-            if loc.count():
-                label = " ".join((loc.first.inner_text(timeout=1500) or "").split())
+            links = loc.element_handles()
+            if len(links) > 1 and title:
+                links = [h for h in links if _row_reads_as(h, account, title)]
+            if len(links) > 1:
+                log.info("multiple document links match %s on %s", shape_label(account), date)
+                return False
+            if links:
+                label = " ".join((links[0].inner_text() or "").split())
                 if not is_safe_row_control(label or action):
                     log.info("row control %r did not clear the guard", shape_label(label[:60]))
                     continue
-                link = loc.first
+                control = links[0]
                 break
         except Exception as e:
             log.info("row lookup failed (%s): %s", action, error_kind(e))
-    if link is None:
+    if control is None:
         log.info("no row for %s on %s", shape_label(account[:40]), date)
         return False
 
@@ -960,7 +1026,7 @@ def _click_row_and_capture(page, ctx, account: str, date: str,
     try:
         try:
             with page.expect_download(timeout=25000) as dl:
-                link.click()
+                control.click(timeout=5000)
             intake.save_download_as(dl.value, out_path)
             # A tax form that comes as a ZIP holding its PDF is kept for the
             # docs module, which opens it.
@@ -1194,6 +1260,9 @@ def probe_api(page, seconds: int = 25) -> List[dict]:
 # "FREEDOM (...5678)" - a card accordion header
 CARD_RE = re.compile(r"\(\s*\.{2,}\s*\d{4}\s*\)")
 YEAR_PICKER_SEL = "input[id*='filterstyledselect']"
+_YEAR_RE = re.compile(r"^\s*20\d{2}\s*$")
+_YEAR_OPTION_RE = re.compile(r"^\s*(20\d{2})(?:\s+\1)?\s*$")
+_PERSONAL_YEAR_BUTTON = "button[type='button'][aria-haspopup='listbox']:visible"
 
 
 # A card's NAME is not an action. Chase sells "SOUTHWEST RAPID REWARDS PLUS",
@@ -1311,10 +1380,47 @@ def expand_only_card(page, label: str, why: Optional[dict] = None) -> bool:
     return False
 
 
-def year_options(page) -> List[str]:
-    """The years the "View:" picker offers. It is not a <select> but a styled
-    input, so the list only exists once it is open."""
+def _personal_year_picker(page):
+    if not _statements_path(page.url or "").startswith(PERSONAL_STATEMENTS_PATH):
+        return None, None
+    # One year filter in the statement table's action bar, shared by all cards.
+    year_button = page.locator(_PERSONAL_YEAR_BUTTON).filter(has_text=_YEAR_RE)
+    host = page.locator("mds-data-table-action-bar mds-select:visible").filter(has=year_button)
+    if host.count() != 1:
+        return None, None
+    picker = host.locator(_PERSONAL_YEAR_BUTTON).filter(has_text=_YEAR_RE)
+    if picker.count() != 1 or picker.evaluate("button => Boolean(button.form)", timeout=3000):
+        return None, None
+    if not is_safe_control(picker.inner_text(timeout=3000), allowed=_YEAR_RE):
+        return None, None
+    return host, picker
+
+
+@contextmanager
+def _personal_year_menu(host, picker):
     try:
+        if picker.get_attribute("aria-expanded", timeout=5000) == "false":
+            picker.click(timeout=5000)
+        options = host.get_by_role("option", name=_YEAR_OPTION_RE)
+        options.first.wait_for(timeout=5000)
+        yield options
+    finally:
+        if picker.get_attribute("aria-expanded", timeout=5000) == "true":
+            picker.press("Escape", timeout=5000)
+
+
+def year_options(page) -> List[str]:
+    """Read the available years from the personal or legacy statement picker."""
+    try:
+        host, picker = _personal_year_picker(page)
+        if picker is not None:
+            with _personal_year_menu(host, picker) as options:
+                captions = options.evaluate_all(
+                    "els => els.map(el => el.getAttribute('aria-label') || el.innerText || '')")
+                years = {match.group() for caption in captions
+                         if (match := re.search(r"\b20\d{2}\b", caption))}
+                return sorted(years, reverse=True)
+
         inp = page.locator(YEAR_PICKER_SEL).first
         if inp.count() == 0:
             return []
@@ -1349,7 +1455,27 @@ def select_year(page, year: str, why: Optional[dict] = None) -> bool:
     could choose, where a year the picker lists and would not take is a
     year of the list not read."""
     try:
+        host, picker = _personal_year_picker(page)
+        if picker is not None:
+            if not is_safe_control(year, allowed=_YEAR_RE):
+                return False
+            chosen = picker.filter(has_text=re.compile(rf"^\s*{year}\s*$"))
+            if chosen.count() == 1:
+                return True
+            with _personal_year_menu(host, picker):
+                option = host.get_by_role("option", name=re.compile(rf"^\s*{year}(?:\s+{year})?\s*$"))
+                if option.count() != 1:
+                    log.info("Chase year %s has no unique picker option", year)
+                    return False
+                option.click(timeout=5000)
+                chosen.wait_for(timeout=5000)
+            # The button label changes before Chase redraws the card tables.
+            page.wait_for_timeout(3500)
+            return True
+
         inp = page.locator(YEAR_PICKER_SEL).first
+        if inp.count() == 0:
+            return False
         if (inp.get_attribute("value") or "").strip() == str(year):
             return True
         inp.click()
@@ -1382,16 +1508,143 @@ ROW_NAME_RE = re.compile(
     r"(?P<type>.*?)\s+(?P<card>[A-Z0-9][^()]*\(\s*\.{2,}\s*\d{4}\s*\))",
     re.I)
 
+DOWNLOAD_BUTTON_RE = re.compile(
+    r"^\s*([A-Za-z]{3,9}\.?\s+\d{1,2},\s*20\d{2})\s+Download\s*$", re.I)
+_PERSONAL_ROWS_TIMEOUT_MS = 10000
 
-def read_card_rows(page, label: str) -> List[dict]:
+# Follow the rendered relationships, including slotted tables and open shadow
+# roots. Prefer a card header's explicit panel reference. For an older
+# accordion without that reference, require one expanded card in the closest
+# shared section. A page-level, shared or ownerless table cannot establish
+# which card a date-only button belongs to.
+_BUTTON_OWNERS = r"""({buttons, headers}) => {
+  const ancestors = el => {
+    const nodes = [];
+    for (; el && !el.matches('main, [role="main"], body, html');
+         el = el.assignedSlot || el.parentElement || el.getRootNode().host) {
+      nodes.push(el);
+    }
+    return nodes;
+  };
+  const cardPaths = headers.map(ancestors);
+  const cardNames = headers.map(h => (h.innerText || '').trim().replace(/\s+/g, ' '));
+  const controlled = headers.map(h => (h.getAttribute('aria-controls') || '').split(/\s+/)
+      .filter(Boolean).map(id => h.getRootNode().getElementById(id)).filter(Boolean));
+  return buttons.map(button => {
+    const path = ancestors(button);
+    if (!button.isConnected || button.disabled || button.type === 'reset' ||
+        (button.form && button.type !== 'button') ||
+        !path.some(el => el.matches('tr')) || !path.some(el => el.matches('table'))) {
+      return null;
+    }
+    const item = path.find(el => el.matches('mds-accordion-item'));
+    let owners;
+    if (item) {
+      owners = headers.flatMap((_, i) => cardPaths[i].includes(item) ? [i] : []);
+      if (owners.length !== 1 || headers[owners[0]].getAttribute('aria-expanded') !== 'true')
+        return null;
+    } else {
+      owners = headers.flatMap((_, i) => controlled[i].some(el => path.includes(el)) ? [i] : []);
+    }
+    if (!owners.length && !item) {
+      for (const el of path) {
+        owners = headers.flatMap((_, i) => cardPaths[i].includes(el) ? [i] : []);
+        if (owners.length) break;
+      }
+      if (owners.length !== 1 || controlled[owners[0]].length ||
+          headers[owners[0]].getAttribute('aria-expanded') !== 'true') return null;
+    }
+    if (owners.length !== 1 || headers[owners[0]].getAttribute('aria-expanded') === 'false')
+      return null;
+    const account = cardNames[owners[0]];
+    if (cardNames.filter(name => name === account).length !== 1) return null;
+    return {account, caption: button.getAttribute('aria-label') || ''};
+  });
+}"""
+
+
+def _statement_buttons(page):
+    """Index visible date-only buttons by their verified card and date."""
+    if not _statements_path(page.url or ""):
+        return {}, False
+    try:
+        candidates = page.get_by_role("button", name=DOWNLOAD_BUTTON_RE).and_(
+            page.locator("button[aria-label]")).element_handles()
+        if not candidates:
+            return {}, False
+        headers = page.get_by_role("button", name=CARD_RE).element_handles()
+        bindings = page.evaluate(_BUTTON_OWNERS, {"buttons": candidates, "headers": headers})
+    except Exception as exc:
+        log.info("could not bind Chase download buttons: %s", error_kind(exc))
+        return {}, True
+
+    buttons = {}
+    incomplete = False
+    for candidate, binding in zip(candidates, bindings):
+        account = binding["account"] if binding else ""
+        caption = DOWNLOAD_BUTTON_RE.fullmatch(binding["caption"]) if binding else None
+        date = parse_date(caption.group(1)) if caption else None
+        if not date or not is_safe_control(binding["caption"]) or not is_card_control(account):
+            incomplete = True
+            continue
+        buttons.setdefault((account, date), []).append(candidate)
+    return buttons, incomplete
+
+
+def _wait_for_personal_card_rows(page, account: str, year: str) -> bool:
+    """Wait for evidence that this card's table has reached the chosen year."""
+    header = page.get_by_role("button", name=account, exact=True)
+    card = page.locator("mds-accordion-item").filter(has=header)
+    date_in_year = re.compile(rf",\s*{escape_for_locator(year)}\s+Download\s*$", re.I)
+    buttons = card.get_by_role("button", name=DOWNLOAD_BUTTON_RE).and_(
+        card.get_by_role("button", name=date_in_year))
+    try:
+        if card.count() != 1:
+            return False
+        buttons.first.wait_for(timeout=_PERSONAL_ROWS_TIMEOUT_MS)
+        return True
+    except Exception as exc:
+        log.info("no confirmed statement rows for %s in %s: %s",
+                 shape_label(account), year, error_kind(exc))
+        return False
+
+
+# A control that would show more of a card's table, read and never pressed.
+_PAGER_RE = re.compile(
+    r"\bnext\s+page\b|^\s*next\s*$|^\s*(show|load|view|see)\s+(more|all)\b|"
+    r"^\s*older\b|^\s*page\s+\d+\b", re.I)
+
+
+def _card_table_pages(page, account: str) -> bool:
+    """Whether this card's table shows a pager, so the rows on screen may be
+    one page of the year (review of #232). A card that cannot be asked
+    answers yes, so its list is not noted whole."""
+    try:
+        header = page.get_by_role("button", name=account, exact=True)
+        card = page.locator("mds-accordion-item").filter(has=header)
+        if card.count() != 1:
+            return True
+        # In the card's own item, or in the action bar every card shares
+        # with the year button.
+        for where in (card, page.locator("mds-data-table-action-bar")):
+            pagers = (where.get_by_role("button", name=_PAGER_RE, disabled=False)
+                      .or_(where.get_by_role("link", name=_PAGER_RE))
+                      .or_(where.locator("mds-pagination, [role='navigation']")))
+            if pagers.count() > 0:
+                return True
+        return False
+    except Exception as exc:
+        log.info("could not look for a pager on %s: %s", shape_label(account), error_kind(exc))
+        return True
+
+
+def read_card_rows(page, label: str, *, year: str = "") -> List[dict]:
     """The documents Chase is showing for one card, read from the rows.
 
     Attribution comes from the ROW, not from correlating an async API reply.
-    Each row names itself completely - date, type and card - so a document can
-    only ever be filed under the card printed on it. Correlating responses
-    instead put a card's statements under its neighbor: collapsing, expanding
-    and changing the year all fire the same endpoint, so "the next reply" is
-    not reliably the reply to this click.
+    Legacy links name the card in the row itself. Date-only buttons get their
+    card from the table's enclosing accordion. Correlating responses instead
+    put a card's statements under its neighbor.
 
     A card whose accordion is on the page and would not open was not read,
     which is never a card with no statement, so its passed_over names it.
@@ -1401,13 +1654,28 @@ def read_card_rows(page, label: str) -> List[dict]:
     why: dict = {}
     if not expand_only_card(page, label, why):
         return _listed([], ("card",) if why.get("why") == "would not open" else ())
+    ready = not year or _wait_for_personal_card_rows(page, label, year)
+    buttons, unbound = _statement_buttons(page)
+    incomplete = not ready or unbound
     out: List[dict] = []
+    for (account, date), controls in buttons.items():
+        if account != label:
+            continue
+        if len(controls) != 1:
+            incomplete = True
+            continue
+        out.append({"documentId": "", "date": date, "title": "Statement",
+                    "account": account, "kind": "statement",
+                    "occurrence": 0, "ambiguous": False})
+    if out and _card_table_pages(page, label):
+        # One page of the year is on screen, and no pager is ever pressed.
+        incomplete = True
     try:
         links = page.get_by_role("link", name=re.compile(r"Saves document", re.I))
         n = min(links.count(), 400)
     except Exception as e:
         log.info("could not read rows for %r: %s", shape_label(label[:40]), error_kind(e))
-        return []
+        return _listed(out, ("statement rows",))
     for i in range(n):
         try:
             name = " ".join((links.nth(i).inner_text(timeout=800) or "").split())
@@ -1428,7 +1696,7 @@ def read_card_rows(page, label: str) -> List[dict]:
                     "title": (m.group("type") or "Statement").strip() or "Statement",
                     "account": card, "kind": "statement",
                     "occurrence": 0, "ambiguous": False})
-    return out
+    return _listed(out, ("statement rows",) if incomplete else ())
 
 
 def chase_collect_via_api(page, keep=None) -> Listed:
@@ -1446,7 +1714,16 @@ def chase_collect_via_api(page, keep=None) -> Listed:
     if not ensure_statements(page):
         log.info("documents page not reachable")
         return _listed([])
-    years = year_options(page) or [""]
+    years = year_options(page)
+    route = _statements_path(getattr(page, "url", "") or "")
+    personal = route.startswith(PERSONAL_STATEMENTS_PATH)
+    # With no year picker on the page, the cards show the year on screen
+    # alone. On either statements route that is a part of the list, never
+    # the whole of it (review of #232, the older route drawn without its
+    # "View:" picker was noted whole from one year). The older center with
+    # its picker showing a year is read as it always was.
+    no_year_read = not years and bool(route) and not _view_picker_shows_a_year(page)
+    years = years or [""]
     if keep is not None:
         # A scoped run does not select years it will throw away. Each
         # selection is a round trip, and the picker goes back a decade.
@@ -1459,6 +1736,8 @@ def chase_collect_via_api(page, keep=None) -> Listed:
     if not cards:
         log.info("no card accordions found")
         return _listed([])
+    if no_year_read:
+        passed_over.add("year picker")
     log.info("Chase: %d card(s) x %d year(s)", len(cards), len(years))
 
     for year in years:
@@ -1472,8 +1751,11 @@ def chase_collect_via_api(page, keep=None) -> Listed:
                 continue
         collapse_all_cards(page)
         for label in cards:
-            rows = read_card_rows(page, label)
+            rows = read_card_rows(page, label, year=year) if personal else read_card_rows(page, label)
             passed_over.update(getattr(rows, "passed_over", ()))
+            if personal and year and any(row["date"][:4] != year for row in rows):
+                passed_over.add("statement rows")
+                rows = [row for row in rows if row["date"][:4] == year]
             log.info("  %s %s: %d document(s)", year or "(current)", shape_label(label[:34]), len(rows))
             found.extend(rows)
             collapse_all_cards(page)

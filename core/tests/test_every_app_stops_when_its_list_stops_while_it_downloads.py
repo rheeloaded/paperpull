@@ -169,6 +169,15 @@ ITS_OWN = {
         "a refusal of a View address read earlier in this run, which reads the list "
         "again once, or of one right after a list that answered, which is that bill's "
         "alone. A refusal of the list itself reaches the run",
+    ("marinwater", "download_bill", ("_fetch",)):
+        "a refusal of a signed PDF link reads Bill History again. A refusal of the list "
+        "reaches the run, and a refusal of one PDF after a fresh list fails that bill alone",
+    ("marinwater", "_resolve_bill_ids", ("_pdf_bytes",)):
+        "a separate PDF viewer refusing a link immediately after Bill History answered. "
+        "The unresolved date group is held and its partial list stops the run",
+    ("cloudflare", "download_bill", ("_fetch_invoice",)):
+        "an invoice PDF refusal, which reads the selected account's history again. "
+        "A sign-out or unreadable list reaches the run",
     ("verizonmobile", "download_bill", ("_fetch", "pdf_url")):
         "a refusal of one bill's PDF, after which the history is read again. A sign-out "
         "or a list that stops shows there and reaches the run, and a history that still "
@@ -318,6 +327,9 @@ LIST_STOPS = {
 # and why. Continue carries on from them once the person has done what the
 # stop asked, or they are one document's.
 NOT_A_LIST = {
+    ("nwnatural", "BillsRefused"):
+        "bills refused one after another, each weighed against a list that still "
+        "reads whole, which the person looks at before Continue",
     "SessionExpired": "a sign-in or a check, which the person answers before Continue",
     "OtpRequired": "a code only the account holder answers, before Continue",
     "DeadlineReached": "the run's own time at the site, which the next run starts again",
@@ -363,6 +375,8 @@ NOT_A_LIST = {
     ("nwnatural", "Challenged"):
         "the portal's bot protection answering in place of the list or a bill, which "
         "the person answers in the browser before Continue",
+    ("marinwater", "Challenged"):
+        "the Paymentus browser check, which the person answers before continuing",
     ("verizonmobile", "OtherAccountShown"):
         "another account shown in My Verizon than the one a bill was listed under, "
         "which the person chooses again before Continue",

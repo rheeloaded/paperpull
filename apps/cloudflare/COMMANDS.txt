@@ -1,0 +1,8 @@
+Cloudflare invoice commands from the PaperPull checkout
+
+paperpull cloudflare login      Open the sign-in window
+paperpull cloudflare discover   List the selected account's invoices
+paperpull cloudflare pilot      Save a sample of the newest invoices
+paperpull cloudflare all        Save the invoice history
+paperpull cloudflare resume     Continue an interrupted download
+paperpull cloudflare verify     Recheck saved PDFs

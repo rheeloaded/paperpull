@@ -112,6 +112,7 @@ MENDED = {
     ("bilt", "download_statement"): "_take",
     ("bofa", "document_bytes"): "_ask_link",
     ("cetera", "download_bill"): "_fetch",
+    ("cloudflare", "download_bill"): "_fetch_invoice",
     ("fedex", "download_bill"): "_fetch_file",
     ("firsthorizon", "download_statement"): "_catch_statement",
     ("ing", "download_document"): "_fetch",

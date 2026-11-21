@@ -392,8 +392,8 @@ class App:
             print("Success. Connected, and Activity lists your bills.")
             print("Keep that browser window OPEN, then run the diagnostics or pilot.")
         elif stopped:
-            print("Connected, and Activity's table was read, but not whole, since")
-            print(f"{stopped}. A run stops there rather than miss a bill. Keep the browser")
+            print("Connected, and Activity opened, but its table was not read whole,")
+            print(f"since {stopped}. A run stops there rather than miss a bill. Keep the browser")
             print("window OPEN, run --diagnose, and attach what it writes to an issue.")
         else:
             print("Connected, but Activity could not be read, so this cannot say whether")

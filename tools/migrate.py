@@ -100,6 +100,14 @@ account and the last four digits its account switcher showed, so after the
 move a config still refuses a list of another account rather than save its
 statements under this one. The token is the page's own word for the
 account, not its number, and no sign-in.
+Marin Water keeps the document identity and saved PDF digest so moves
+preserve distinct bills with a shared date and can identify a previously
+saved bill whose date later gains another PDF.
+A Meijer purchase keeps whether its row printed a time, the number it had
+before it moved off Meijer's earlier orders page and whether it is held. Its
+date, total and store stay out, so a receipt saved from the earlier page and
+not yet moved to the key the current page gives it is saved again after the
+move, under its new key.
 A record still under a key that left out its account's
 last four, as the apps did past forty characters until 0.34.0 and Chase did
 at any length until 0.17.1, also keeps what its key is built from
@@ -216,7 +224,26 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # the last four digits the account switcher shows,
                         # and stops when the window shows another
                         # (amexbanking_docs.App._held_accounts).
-                        "American Express Banking": ("account_token", "account_digits")}
+                        "American Express Banking": ("account_token", "account_digits"),
+                        "Marin Water": ("document_id", "pdf_sha256"),
+                        # An invoice is known by its key part, a digest of
+                        # its account's digest and its invoice id, which
+                        # Document.key builds the record's key from, and is
+                        # taken only under the account it was listed for,
+                        # by its account's digest, which _select reads
+                        # (cloudflare_docs). Both are digests, never an id.
+                        "Cloudflare": ("account", "document_id"),
+                        # Whether a Meijer purchase's row printed a time,
+                        # the number a record moved from Meijer's earlier
+                        # orders page had, and whether it is held, none of
+                        # them a total, a date or a store. Its date, total
+                        # and store, which a move off the earlier page
+                        # matches by, stay out as --minimal promises, so
+                        # after a move nothing is moved, and a receipt saved
+                        # from the earlier page is saved again under its new
+                        # key, never taken for another's
+                        # (meijer_receipts.adopt_old_layout, #236).
+                        "Meijer": ("row_prints_time", "adopted_from", "held")}
 
 
 def _optum_form(rec: dict) -> bool:
@@ -306,6 +333,21 @@ CORE_SETTINGS = ("owner", "owner_in_filename", "default_start_date", "min_pdf_by
 # so an import holds a value to its kind (kind_folders is true or false,
 # #201, and a run refuses anything else).
 CORE_DEFAULTS = {"kind_folders": True}
+# What settings_to_apply adds to its left_out for a "kind_folders": false it
+# did not write, since the config has no documents folder of its own for it.
+KIND_FOLDERS_LEFT_OUT = "kind_folders"
+
+
+def _own_documents_dir(cfg: dict) -> bool:
+    """Whether a config names a documents folder that is not its output
+    folder, as "kind_folders": false needs (core storage.set_kind_folders)."""
+    docs = cfg.get("documents_dir") if isinstance(cfg, dict) else None
+    if not isinstance(docs, str) or not docs.strip():
+        return False
+    out = cfg.get("output_dir")
+    if isinstance(out, str) and out.strip():
+        return os.path.normcase(os.path.normpath(docs)) != os.path.normcase(os.path.normpath(out))
+    return True
 # The longest a setting may be once written as JSON. The longest real one is a
 # list of account labels.
 MAX_SETTING_CHARS = 4000
@@ -564,6 +606,15 @@ def settings_to_apply(install: Path, cfg: dict, settings: dict, check_pattern=No
                 continue
         if key == "owner":
             value = str(value or "").strip()[:80]
+        if key == "kind_folders" and value is False and not _own_documents_dir(cfg):
+            # It files documents straight into a documents folder of the
+            # account's own, which documents_dir names, and that names this
+            # computer's folders, so it never travels. Taken here, every run
+            # that saves or moves documents would stop until one is set. The
+            # import says it was left out (KIND_FOLDERS_LEFT_OUT).
+            if left_out is not None:
+                left_out.append(KIND_FOLDERS_LEFT_OUT)
+            continue
         out[key] = value
     return out
 

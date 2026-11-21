@@ -1,0 +1,11 @@
+Marin Water WATER BILLS (read-only)
+
+paperpull marinwater login       Open the Paymentus sign-in window
+paperpull marinwater discover    List the bills
+paperpull marinwater pilot       Save a sample bill
+paperpull marinwater all         Save the available bill PDFs
+paperpull marinwater resume      Continue a stopped run
+paperpull marinwater verify      Check saved PDFs
+
+On macOS, use ./paperpull from a source checkout.
+Leave the signed-in account tab open while running PaperPull.

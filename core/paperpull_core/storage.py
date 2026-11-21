@@ -56,6 +56,32 @@ DOCUMENTS_FOLDERS = "documents-folders.json"
 # Each of those the Move filed documents in without a folder of their kind
 # (#201), so documents are looked for in it as a whole, and in no other.
 FLAT_DOCUMENTS_FOLDERS = "documents-folders-flat.json"
+# Each document the Move filed in such a folder, by its size and SHA-256,
+# never its name or path, so a file renamed there later is still known. A
+# file of such a folder is the account's only when it is one of these, so a
+# record naming some other file in a broad folder, Documents say, never has
+# Rename, the Move or a repair touch it (Paths.filed_here).
+FILED_FLAT = "documents-filed-flat.json"
+
+
+class FlatRoot(type(Path())):
+    """A documents folder filed without kind folders (#201), as
+    Paths.filing_folders lists it. A file in it, outside every other folder
+    listed, is held only when `holds` says PaperPull filed it there
+    (renaming.held_document). A path made from it, its children or where it
+    really is, is a plain Path, so nothing made from it is taken for it."""
+
+    holds = None
+
+    def with_segments(self, *segments):
+        return Path(*segments)
+
+
+def flat_root(path, holds) -> FlatRoot:
+    """`path` as a FlatRoot whose files are held as `holds` says."""
+    root = FlatRoot(path)
+    root.holds = holds
+    return root
 # The config file load_config last read, which Login asks about, since a
 # sign-in is opened on that config's port (ports.say_at_sign_in).
 _CONFIG_READ = None
@@ -542,7 +568,11 @@ def set_kind_folders(cfg: dict, path) -> bool:
     documents folder of the account's own, since documents would then sit
     loose beside the run's records, and when the app files more than one
     kind and its names do not say which, since two kinds sharing a folder
-    could want one file name. A warning would scroll past."""
+    could want one file name. A warning would scroll past.
+
+    A run that saves and moves no document, Login or a Support report
+    (_saves_nothing), is not stopped. It goes on with documents in the
+    folders of their kind, the setting not taken, and says so."""
     raw = cfg.get("kind_folders", True)
     key = _folder_key(cfg["output_dir"])
     _FLAT.discard(key)
@@ -550,32 +580,36 @@ def set_kind_folders(cfg: dict, path) -> bool:
         return True
     name = Path(path).name if path else "config.json"
     if raw is not False:
-        raise SystemExit(
+        return _refused(
             "kind_folders in %s is %s, and it has to be true or false, so this run "
-            "stopped before saving or moving anything." % (name, json.dumps(raw)))
+            "stopped before saving or moving anything." % (name, json.dumps(raw)),
+            "kind_folders in %s is %s, and it has to be true or false" % (name, json.dumps(raw)))
     docs = cfg.get("documents_dir") or ""
     if not docs or _folder_key(docs) == key:
-        raise SystemExit(
+        return _refused(
             "kind_folders is false in %s, which files documents straight into the "
             "documents folder, but documents_dir names no folder of its own, so they "
             "would sit loose beside this run's records. This run stopped before saving "
             "or moving anything. Set documents_dir to a full path, or take kind_folders "
-            "out, and run again." % name)
+            "out, and run again." % name,
+            "kind_folders is false in %s, but documents_dir names no folder of its own" % name)
     kinds = _kinds_filed()
     need = fields_telling_kinds_apart()
     if need is None:
-        raise SystemExit(
+        return _refused(
             "kind_folders is false in %s, but %s files %s, and some of them by name, "
             "which no field of a file naming pattern says, not even {kind}, so they "
             "would share one folder with nothing in a file's name to say which kind it "
             "is. This run stopped before saving or moving anything. Take kind_folders "
-            "out, and run again." % (name, spec().provider, _listed_kinds(kinds)))
+            "out, and run again." % (name, spec().provider, _listed_kinds(kinds)),
+            "kind_folders is false in %s, but %s files %s, and some of them by name, which "
+            "no field of a file naming pattern says" % (name, spec().provider, _listed_kinds(kinds)))
     from . import naming
     pattern = _FILENAME_PATTERN or (naming.DEFAULT_RECEIPTS if spec().kind == RECEIPT
                                     else naming.DEFAULT_STATEMENTS)
     missing = [f for f in need if not pattern_shows(pattern, f)]
     if missing:
-        raise SystemExit(
+        return _refused(
             "kind_folders is false in %s, but %s files %s, which would then share one "
             "folder with nothing in a file's name to say which kind it is, and two of "
             "them could want the same name. This run stopped before saving or moving "
@@ -584,9 +618,43 @@ def set_kind_folders(cfg: dict, path) -> bool:
             "another field. The usual names do not carry it. Change the pattern, or "
             "take kind_folders out, and run again."
             % (name, spec().provider, _listed_kinds(kinds),
-               _listed_kinds(["{%s}" % f for f in need])))
+               _listed_kinds(["{%s}" % f for f in need])),
+            "kind_folders is false in %s, but the file naming pattern does not carry %s, "
+            "which %s needs for its kinds to share one folder"
+            % (name, _listed_kinds(["{%s}" % f for f in need]), spec().provider))
     _FLAT.add(key)
     return False
+
+
+# The flags of a run that saves and moves no document, Login (--login, or
+# --open-browser where an app opens its own sign-in window) and a Support
+# report (--diagnose). --config, beside them, says whose account it is.
+_SAVES_NOTHING = ("--login", "--open-browser", "--diagnose")
+_BESIDE_THEM = ("--config",)
+
+
+def _saves_nothing(argv=None) -> bool:
+    """Whether this run, by the flags it was started with, only signs in
+    or writes a Support report. Every flag has to be one of those or
+    --config, given whole, so a flag beside them that could save or move a
+    document, a shortened one or one not known here, has the run taken as
+    one that does."""
+    args = sys.argv[1:] if argv is None else argv
+    flags = [a.split("=", 1)[0] for a in args if isinstance(a, str) and a.startswith("-")]
+    commands = [f for f in flags if f not in _BESIDE_THEM]
+    return bool(commands) and all(f in _SAVES_NOTHING for f in commands)
+
+
+def _refused(stopped: str, why: str) -> bool:
+    """Stop a run with `stopped`, a kind_folders setting refused, unless
+    the run saves and moves no document (_saves_nothing), which goes on
+    with documents in the folders of their kind and says `why` the
+    setting was not taken. Returns True, kind folders kept, for that run."""
+    if not _saves_nothing():
+        raise SystemExit(stopped)
+    print("%s, so it was not taken for this run, which saves and moves no document. "
+          "A run that saves or moves documents stops until it is changed." % why)
+    return True
 
 
 def _listed_kinds(kinds: List[str]) -> str:
@@ -908,6 +976,11 @@ class Paths:
         self.documents_folders_json = self.root / DOCUMENTS_FOLDERS
         # Each of those filed without kind folders (#201).
         self.flat_documents_json = self.root / FLAT_DOCUMENTS_FOLDERS
+        # What the Move filed in them (FILED_FLAT), read once when first asked.
+        self.filed_flat_json = self.root / FILED_FLAT
+        self._filed = None
+        self._to_read = False
+        self._digests = {}
         for folder in self._spec.folders:
             setattr(self, folder.attr, self.root / folder.name)
         for csv_spec in self._spec.csv_files:
@@ -1013,10 +1086,12 @@ class Paths:
         # those, so an account that never used the setting holds what it
         # always held, and not every file anywhere in a folder it used.
         flat = self.flat_documents_roots(used)
+        # Such a folder may be a broad one, Documents say, so a file in it is
+        # held only when the Move filed it there (filed_here).
         for root in ([] if self.kind_folders else [self.documents]) + flat:
             if _folder_key(root) not in seen:
                 seen.add(_folder_key(root))
-                held.append(Path(root))
+                held.append(flat_root(root, self.filed_here))
         return held
 
     def _routed(self):
@@ -1101,14 +1176,199 @@ class Paths:
         """Take away each folder of a kind left empty in the documents
         folder, once a Move without kind folders (#201) has brought its
         documents out. Only an empty one goes, since rmdir refuses any
-        other, so no file is ever removed."""
+        other, so no file is ever removed.
+
+        A link or a junction at a kind folder's name stays, whatever it
+        leads to. Windows takes such a name away with rmdir without looking
+        inside where it leads, so one a person made to a folder full of
+        files would be gone."""
         if self.kind_folders:
             return
         for folder in self._routed():
+            path = self.documents / folder.name
+            if shared_folder._a_link_at(path):
+                continue
             try:
-                (self.documents / folder.name).rmdir()
+                path.rmdir()
             except OSError:
                 pass
+
+    def _read_filed(self):
+        """(the (size, digest) pairs FILED_FLAT holds, whether the account's
+        own records are still to be read into it), (set(), True) when it is
+        not there, and None when it is there and cannot be read as written."""
+        try:
+            with shared_folder.open_to_read(self.filed_flat_json, "r", encoding="utf-8") as f:
+                listed = whole_json(json.loads(f.read()))
+        except FileNotFoundError:
+            return set(), True
+        except (OSError, ValueError, SystemExit):
+            return None
+        files = listed.get("files") if isinstance(listed, dict) else None
+        if not isinstance(files, list):
+            return None
+        pairs = {(item[0], item[1]) for item in files
+                 if isinstance(item, list) and len(item) == 2
+                 and isinstance(item[0], int) and not isinstance(item[0], bool)
+                 and isinstance(item[1], str) and re.fullmatch(r"[0-9a-f]{64}", item[1])}
+        return pairs, listed.get("records_to_read") is True
+
+    def _digest(self, path) -> Optional[tuple]:
+        """(size, SHA-256) of the plain file at `path`, or None."""
+        from . import intake
+        try:
+            st = os.stat(path)
+        except (OSError, ValueError):
+            return None
+        key = (_folder_key(path), st.st_size, st.st_mtime_ns)
+        if key not in self._digests:
+            digest = intake.sha256_of(path)
+            self._digests[key] = (st.st_size, digest) if digest else None
+        return self._digests[key]
+
+    def _filed_set(self) -> set:
+        """What the Move filed in a documents folder without kind folders,
+        read once a run. One that cannot be read holds nothing, so nothing
+        in such a folder is touched until it can be. With none written yet,
+        as for documents 0.69.0 filed so, the account's own records are read
+        into it (_from_records), and again on each run until every document
+        they name there could be read, a folder on a drive not plugged in
+        or a file synced on demand say, so none of them is left out for
+        good."""
+        if self._filed is not None:
+            return self._filed
+        read = self._read_filed()
+        if read is None:
+            self._filed = set()
+            return self._filed
+        filed, to_read = read
+        whole = True
+        if to_read:
+            found, whole = self._from_records()
+            if found - filed or whole or not os.path.lexists(self.filed_flat_json):
+                try:
+                    self._write_filed(filed | found, records_to_read=not whole)
+                except OSError:
+                    pass
+            filed = filed | found
+        self._to_read = to_read and not whole
+        self._filed = filed
+        return filed
+
+    def filed_unreadable(self) -> bool:
+        """Whether FILED_FLAT is there and cannot be read, so nothing in a
+        documents folder filed without kind folders is held."""
+        return os.path.lexists(self.filed_flat_json) and self._read_filed() is None
+
+    def _from_records(self):
+        """Each document the account's own records name, saved and checked,
+        in a documents folder filed without kind folders, as (size, digest)
+        pairs, and whether every one of them could be read. 0.69.0 filed
+        documents so without writing FILED_FLAT. A record an import brought
+        (imported_at) is not the account's own and is left out. The files
+        named are the ones the Move takes for a record, its pdf_path, each
+        invoice kept, and each other invoice its notes say was saved
+        (renaming._also_saved). A file named in a documents folder that is
+        not there, on a drive not plugged in say, a file that cannot be read
+        and records that cannot be read each leave it not whole. A file gone
+        from a folder that is there is gone, as one a person deleted is."""
+        from .renaming import _also_saved
+        roots = [Path(p) for p in self._listed(self.flat_documents_json)]
+        if not self.kind_folders:
+            roots.append(self.documents)
+        real, whole = [], True
+        for root in roots:
+            try:
+                real.append(Path(root).resolve())
+            except (OSError, RuntimeError, ValueError):
+                whole = False
+        if not real:
+            return set(), whole
+        try:
+            with shared_folder.open_to_read(self.progress_json, "r", encoding="utf-8") as f:
+                records = whole_json(json.loads(f.read()))
+        except FileNotFoundError:
+            records = {}
+        except (OSError, ValueError, SystemExit):
+            return set(), False
+        filed = set()
+        for rec in records.values() if isinstance(records, dict) else ():
+            if not isinstance(rec, dict) or "imported_at" in rec or not (
+                    rec.get("downloaded_ok") is True
+                    or rec.get("state") in ("Completed", "PDF Verified")):
+                continue
+            invoices = rec.get("invoices")
+            named = [rec.get("pdf_path")] + [
+                e.get("file") for e in (invoices if isinstance(invoices, list) else ())
+                if isinstance(e, dict) and e.get("kept", True)] + _also_saved(rec)
+            for text in named:
+                if not isinstance(text, str) or not text.strip():
+                    continue
+                try:
+                    if os.path.islink(text.strip()) or shared_folder._a_link_at(text.strip()):
+                        continue
+                    where = Path(text.strip()).resolve()
+                except (OSError, RuntimeError, ValueError):
+                    continue
+                if set(where.parents).isdisjoint(real):
+                    continue
+                try:
+                    there = where.is_file()
+                    # Gone, as a file a person deleted is, unless the whole
+                    # documents folder it is in is not there now, on a drive
+                    # not plugged in say, which is read again once it is.
+                    if not there and any(root in where.parents and not root.is_dir()
+                                         for root in real):
+                        whole = False
+                except OSError:
+                    # A folder this run may not search, asked again later.
+                    there, whole = False, False
+                if not there:
+                    continue
+                pair = self._digest(where)
+                if pair is None:
+                    whole = False
+                    continue
+                filed.add(pair)
+        return filed, whole
+
+    def _write_filed(self, filed: set, records_to_read: bool = False) -> None:
+        written = {"files": [list(pair) for pair in sorted(filed)]}
+        if records_to_read:
+            written["records_to_read"] = True
+        atomic_write_text(self.filed_flat_json, json.dumps(written, indent=1))
+
+    def filed_here(self, path) -> bool:
+        """Whether the file at `path` is one the Move filed in a documents
+        folder without kind folders, by its size and SHA-256 (FILED_FLAT)."""
+        filed = self._filed_set()
+        if not filed:
+            return False
+        pair = self._digest(path)
+        return pair is not None and pair in filed
+
+    def remember_filed(self, files) -> None:
+        """Write down each of `files` as one the Move files in a documents
+        folder without kind folders, before it moves them, so each is held
+        there after it moves, under any name. Raises OSError, and nothing
+        is to be moved, when one cannot be read or the list cannot be read
+        or written, since a file moved then would not be held there. The
+        account's records still to be read into it stay so."""
+        filed = self._filed_set()
+        read = self._read_filed()
+        if read is None:
+            raise OSError("%s could not be read" % self.filed_flat_json.name)
+        more = set()
+        for path in files:
+            pair = self._digest(path)
+            if pair is None:
+                raise OSError("%s could not be read" % Path(path).name)
+            more.add(pair)
+        # Measured against what is written, which is nothing when the file
+        # is not there, so a record that could not be written before is.
+        if more - read[0]:
+            self._write_filed(filed | more, records_to_read=self._to_read)
+            self._filed = filed | more
 
     def remember_documents(self) -> None:
         """Write down the documents folder in documents-folders.json, once

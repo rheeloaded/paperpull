@@ -63,7 +63,7 @@ from storage import (CsvFile, DOCUMENT_INDEX_COLUMNS, JsonStore, Paths,
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
 log = logging.getLogger("nwnatural_docs")
 
-# What a run and Login say when the portal's bot protection answers.
+# What a run says when the portal's bot protection answers.
 CHALLENGED = [
     "NW Natural's payment portal asked to check the browser, so this run stops here.",
     "Everything saved so far is kept. Answer it yourself in the open browser",
@@ -396,8 +396,9 @@ class App:
         try:
             listed = site.bill_list_opens(page)
         except site.Challenged:
-            print("!! " + CHALLENGED[0])
-            print("   Answer it yourself in the open browser window, then re-run --login.")
+            print("!! NW Natural's payment portal asked to check the browser, so Login could")
+            print("   not read Bill History. Answer it yourself in the open browser window,")
+            print("   then re-run --login.")
             self.close()
             return
         challenge = site.detect_security_challenge(page)
@@ -598,7 +599,24 @@ class App:
             ])
         return page
 
+    def _failed_before(self, doc: Document) -> bool:
+        return (self.progress.get(doc.key) or {}).get("state") == State.FAILED.value
+
+    def _counts_toward_the_stop(self, doc: Document) -> bool:
+        """Whether a refusal of this bill counts toward the stop for bills
+        refused one after another (site.BillsRefused). A bill that failed on
+        an earlier run does not, nor does any bill under Download again,
+        which goes over bills the person chose and finishes as it did
+        before, so the stop never falls on the same few bills run after
+        run."""
+        return not getattr(self.args, "redownload", False) and not self._failed_before(doc)
+
     def process(self, docs: List[Document], dry_run: bool = False):
+        # Bills that failed on an earlier run go after the others, newest
+        # first in each, so a run that stops for bills refused one after
+        # another stops among bills not asked for before, and asks none of
+        # those again on the way.
+        docs = sorted(docs, key=self._failed_before)
         for i, doc in enumerate(docs, 1):
             print(f"\n[{i}/{len(docs)}] {doc.date or '(no date)'}  "
                   f"{doc.category}  {doc.summary}")
@@ -623,6 +641,8 @@ class App:
             except KeyboardInterrupt:
                 print("\nInterrupted. Progress saved; run --resume to continue.")
                 raise
+            except site.BillsRefused as refused:
+                self.bills_refused(refused)
             except site.SessionExpired:
                 # The portal answered a bill as a signed-out session. Every
                 # bill after it would get the same answer, so the run stops
@@ -646,6 +666,20 @@ class App:
             "nwnatural.com answered as signed out, so this run stops here.",
             "Everything saved so far is kept. Sign in again in the open browser",
             "window, then run Resume to carry on from where this stopped.",
+        ])
+
+    def bills_refused(self, refused) -> None:
+        """Stop the run because the portal refused bill after bill right
+        after the list answered. The bills before this one failed alone,
+        this one has nothing recorded against it, and the list was read
+        whole, so the run ends as one that stopped (tabs.stop)."""
+        log.info("bills refused in a row: %s", refused)
+        tabs.stop(self, [
+            "The NW Natural payment portal refused bills one after another, right after",
+            f"the bill history answered ({refused}), so this run stops here rather than",
+            "read the whole history again for each bill left.",
+            "Everything saved so far is kept. Look at the open browser window, sign in",
+            "again if it asks, then run Resume to carry on from where this stopped.",
         ])
 
     def challenged(self) -> None:
@@ -684,7 +718,8 @@ class App:
         trace: list = []
         saved = site.download_bill(page, None, doc.date, out_path,
                                    title=doc.title, trace=trace, href=doc.href,
-                                   document_id=doc.document_id)
+                                   document_id=doc.document_id,
+                                   counts=self._counts_toward_the_stop(doc))
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (
                 out_path.stat().st_size == 0 or out_path.read_bytes()[:5] != b"%PDF-"):

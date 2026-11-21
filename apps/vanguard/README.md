@@ -26,6 +26,13 @@ configuration, and request/control guards.
 
 ## How it reads the site
 
+For a workplace retirement plan, leave **Statements** open for the plan in
+Vanguard's workplace portal. PaperPull reads that plan's full statement
+list and verifies the plan number and printed date range in each PDF.
+A brokerage Statements tab takes priority when both portals are open in
+the same PaperPull browser. For a workplace run, leave only that portal
+open.
+
 Sign-in is at `logon.vanguard.com`; the portal's documents shell at
 `investor.vanguard.com/myaccount/documents` spawns the statements app on
 its own host, `statements.web.vanguard.com`. Nothing there is clicked to

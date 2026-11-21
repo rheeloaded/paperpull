@@ -71,8 +71,8 @@ from typing import Callable, Iterable, List, Optional
 from . import shared_folder
 from .characters import whole_json
 from .models import State
-from .storage import (FileName, build_pdf_filename, filing_folder, fitted_name,
-                      free_to_write, name_length, path_length, remove_empty,
+from .storage import (FileName, FlatRoot, build_pdf_filename, filing_folder, fitted_name,
+                      flat_root, free_to_write, name_length, path_length, remove_empty,
                       sanitize_component, title_case, unique_path)
 
 
@@ -193,14 +193,36 @@ def _real(folders) -> List[Path]:
     """Each folder where it really is, with links and ".." followed, as a
     file's path is before it is compared with them. Once for a whole plan,
     since finding that out takes the file system a while on Windows. A
-    folder that cannot be read that way holds nothing here."""
+    folder that cannot be read that way holds nothing here. A documents
+    folder filed without kind folders (storage.FlatRoot) stays one, so a
+    file in it alone is held only when the Move filed it there."""
     real = []
     for folder in folders:
         try:
-            real.append(Path(folder).resolve())
+            where = Path(folder).resolve()
         except (OSError, RuntimeError, ValueError):
             continue
+        real.append(flat_root(where, getattr(folder, "holds", None))
+                    if _flat(folder) else where)
     return real
+
+
+def _in_held_folder(path: Path, real_folders: List[Path]) -> bool:
+    """Whether `path`, where it really is, is in one of `real_folders`. In
+    a documents folder filed without kind folders, and in no other of them,
+    it is only when the Move filed it there (storage.Paths.filed_here), so a
+    record naming another file in a broad folder never reaches it."""
+    parents = set(path.parents)
+    within = [f for f in real_folders if f in parents]
+    if any(not _flat(f) for f in within):
+        return True
+    return any(callable(f.holds) and f.holds(path) for f in within)
+
+
+def _flat(folder) -> bool:
+    """Whether a folder is a documents folder filed without kind folders,
+    one with its `holds` lost included, which then holds nothing."""
+    return isinstance(folder, FlatRoot) or callable(getattr(folder, "holds", None))
 
 
 def _held(text: str, real_folders: List[Path], staged: bool = False,
@@ -218,7 +240,7 @@ def _held(text: str, real_folders: List[Path], staged: bool = False,
         name = path.name.lower()
         held = ((name.endswith(ends) or (aside and _ASIDE.search(name))) and path.is_file()
                 and not Path(text).is_symlink()
-                and not set(path.parents).isdisjoint(real_folders))
+                and _in_held_folder(path, real_folders))
     except (OSError, RuntimeError, ValueError):
         return None
     return Path(text) if held else None
@@ -1500,6 +1522,11 @@ def run_for(app, apply_changes: bool = False, say=print,
     before = tuple(told_apart_before)
     limit = app.config.get("max_path_length", 240)
     folders = app.paths.filing_folders()
+    if any(_flat(f) for f in folders) and getattr(app.paths, "filed_unreadable", bool)():
+        say("%s in %s could not be read, so no document in a documents folder filed "
+            "without kind folders is renamed or moved. Take it out, and the next run "
+            "writes it again from this account's records."
+            % (storage_filed_name(app.paths), Path(app.paths.root).name))
     # Manual Review keeps a file put aside with no folders of a pattern's.
     flat = [f for f in (getattr(app.paths, "manual_review", None),) if f is not None]
     homes = _Homes(folders, flat)
@@ -1668,6 +1695,25 @@ def run_for(app, apply_changes: bool = False, say=print,
     # run state, read while the file is still there to be compared.
     spellings = current.spellings(changes, [r for _csv, rows in ledgers for r in rows],
                                   getattr(app.progress, "data", None) or {})
+    if flat_here:
+        # Written down before anything moves, so each document filed in the
+        # documents folder without kind folders is held there afterwards,
+        # and nothing else in it ever is (storage.Paths.filed_here).
+        into = [c.old_path for c in changes if c.renaming and c.new_path
+                and _inside(c.new_path, app.paths.documents)]
+        remember = getattr(app.paths, "remember_filed", None)
+        if into and remember is not None:
+            try:
+                remember(into)
+            except OSError as e:
+                say("")
+                say("Nothing was moved, since what the Move files in %s could not be written "
+                    "down (%s), and a document it moved there would not be found again. "
+                    "If %s in %s cannot be read, take it out, and the next Move writes it "
+                    "again from this account's records."
+                    % (app.paths.documents, e, storage_filed_name(app.paths),
+                       Path(app.paths.root).name))
+                raise SystemExit(1)
     result = apply(changes, say=say)
     result.spellings = spellings
     # A file left under a temporary name while its own name holds another
@@ -1714,6 +1760,19 @@ def run_for(app, apply_changes: bool = False, say=print,
 
 def storage_name(paths) -> str:
     return Path(getattr(paths, "documents_folders_json", "documents-folders.json")).name
+
+
+def storage_filed_name(paths) -> str:
+    return Path(getattr(paths, "filed_flat_json", "documents-filed-flat.json")).name
+
+
+def _inside(path, folder) -> bool:
+    """Whether `path`, there yet or not, is inside `folder`, both where
+    they really are."""
+    try:
+        return Path(folder).resolve() in Path(path).resolve().parents
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def _listed_this_run(app) -> set:

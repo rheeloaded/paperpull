@@ -29,7 +29,14 @@ Diagnose file confirms or corrects.
   record with a receiptKey, or a cancelled one, links to
   ``/mypurchases/detail/<key>``, a pending order to
   ``/mypurchases/pending/<orderNumber>``.
-* The **receipt page is** ``/mypurchases/image/<receiptKey>``, titled
+* Current detail and receipt routes use
+  ``date_division_store_terminal_transaction`` rather than the API's
+  tilde-separated identity (verified against a signed-in account in
+  November 2026). ``page_key`` converts only the navigation key, keeping
+  discovery and progress identities unchanged. A key with tildes in any
+  other shape is not opened (``unknown_receipt_key``), and the save path
+  compares the whole route (``on_purchase_receipt``).
+* The **receipt page is** ``/mypurchases/image/<pageKey>``, titled
   "Receipt", rendered by the page from the purchase details into
   ``#receipt-print-area`` (``data-testid="POT-original-receipt"``) inside
   ``.max-receipt-content``, 635px wide, with a Print button of its own
@@ -64,6 +71,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional
+from urllib.parse import urlsplit
 
 from paperpull_core.models import IN_STORE, ONLINE, Item, Purchase
 from storage import now_iso
@@ -99,12 +107,36 @@ LOGIN_URL_MARKERS = ["/signin", "/sign-in", "/login", "login.kroger", "/account/
 PURCHASE_KEY_RE = re.compile(r"^[0-9A-Za-z]+(?:[~-][0-9A-Za-z]+)*$")
 
 
+def page_key(key: str) -> str:
+    """The API identity stays stable; the site's routes use date first."""
+    m = re.fullmatch(r"(\d+)~(\d+)~(\d{4}-\d{2}-\d{2})~(\d+)~(\d+)", key)
+    if not m:
+        return key
+    division, store, date, terminal, transaction = m.groups()
+    return "_".join((date, division, store, terminal, transaction))
+
+
+def unknown_receipt_key(key: str) -> bool:
+    """True for a receipt key with tildes that page_key does not know, a
+    date without its dashes or a part more or less. Its old route shows no
+    receipt now, and an empty page counts toward setting a receipt aside
+    for good (core not_shown), so such a purchase is not opened at all and
+    nothing is guessed. An order number has no tildes and opens as before."""
+    key = key or ""
+    return "~" in key and page_key(key) == key
+
+
+def receipt_route(key: str) -> str:
+    """The path of this purchase's receipt page, query and fragment aside."""
+    return RECEIPT_PATH + page_key(key or "")
+
+
 def receipt_url(key: str) -> str:
-    return f"{BASE}{RECEIPT_PATH}{key}"
+    return f"{BASE}{RECEIPT_PATH}{page_key(key)}"
 
 
 def detail_url(key: str) -> str:
-    return f"{BASE}{DETAIL_PATH}{key}"
+    return f"{BASE}{DETAIL_PATH}{page_key(key)}"
 
 
 def orders_url(page_no: int = 1) -> str:
@@ -505,8 +537,21 @@ def on_receipt_page(page) -> bool:
     return RECEIPT_PATH in (page.url or "")
 
 
+def on_purchase_receipt(page, purchase: Purchase) -> bool:
+    """The browser is on this purchase's own receipt page. The whole path
+    is compared, since two receipts of one day at one store share all but
+    the transaction, and one transaction can start with the other's (#235)."""
+    return urlsplit(page.url or "").path == receipt_route(purchase.order_number)
+
+
 def goto_receipt(page, purchase: Purchase) -> None:
-    url = purchase.receipt_url if is_safe_url(purchase.receipt_url or "") else receipt_url(purchase.order_number)
+    # A saved address is used only when it is this purchase's own receipt
+    # route on Kroger. Resume can carry one saved before the route format
+    # changed, and one that names another purchase is never followed. Both
+    # give way to the address built from the purchase's own key (#235).
+    saved = purchase.receipt_url or ""
+    url = saved if is_safe_url(saved) and urlsplit(saved).path == receipt_route(purchase.order_number) \
+        else receipt_url(purchase.order_number)
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     wait_for_receipt(page)
 

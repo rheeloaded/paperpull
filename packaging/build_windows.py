@@ -455,7 +455,7 @@ def write_inno_script() -> Path:
 [Setup]
 AppName=PaperPull
 AppVersion={#AppVersion}
-AppPublisher=TNE Enterprises LLC
+AppPublisher=TNE Labs
 AppPublisherURL=https://github.com/rheeloaded/paperpull
 AppCopyright=Copyright (c) 2026 PaperPull, a trade name of TNE Enterprises LLC
 DefaultDirName={localappdata}\PaperPull

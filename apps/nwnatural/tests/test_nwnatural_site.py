@@ -245,6 +245,25 @@ class ListFailsAfterTheRefusal(Page):
         return [u for u in self.asked if "view-external-bill" in u]
 
 
+class RefusesSome(Page):
+    """Refuses the bills whose View address carries one of `refused`'s
+    numbers, and serves the others."""
+
+    def __init__(self, refused=(), **kw):
+        super().__init__(**kw)
+        self.refused, self.refused_asks, self.served = set(refused), set(), 0
+
+    def evaluate(self, js, arg=None):
+        if arg is not None and "view-external-bill" in arg[0]:
+            n = int(arg[0].split("docRef=")[1].split("/")[0])
+            if n in self.refused:
+                self.asked.append(arg[0])
+                self.refused_asks.add(n)
+                return {"status": 403, "type": "text/html"}
+            self.served += 1
+        return super().evaluate(js, arg)
+
+
 UNREAD = ("500", "timeout", "empty")
 
 
@@ -353,6 +372,53 @@ class Download(unittest.TestCase):
             fetch(page, self.out)
         self.assertEqual(lists(page), 2)
 
+    def test_refusals_in_a_row_stop_the_run_and_a_bill_taken_starts_the_count_again(self):
+        """One bill refused right after a list that answered fails alone.
+        REFUSED_IN_A_ROW of them with no bill taken between is the portal
+        refusing every bill, so the run stops once."""
+        dates = ["2026-10-21", "2026-09-22", "2026-08-21"]
+        page = Page(pdf_status=403)
+        site.collect_download_docs(page)
+        for i in range(site.REFUSED_IN_A_ROW - 1):
+            self.assertFalse(fetch(page, self.out, dates[i % 3]))
+        page.pdf_status = 200
+        self.assertTrue(fetch(page, self.out, dates[0]))
+        page.pdf_status = 403
+        for i in range(site.REFUSED_IN_A_ROW - 1):
+            self.assertFalse(fetch(page, self.out, dates[i % 3]))
+        with self.assertRaises(site.BillsRefused):
+            fetch(page, self.out, dates[2])
+
+    def test_what_moves_the_refusal_count_and_what_leaves_it(self):
+        """A kept address refused and then served on a fresh list sets the
+        count back. A bill that does not count, and an answer that is not a
+        PDF, leave it as it is. Only a refusal right after a fresh list
+        counts, never one at a kept address alone."""
+        dates = ["2026-10-21", "2026-09-22", "2026-08-21"]
+        page = Page(pdfs=[{"status": 403, "type": "text/html"}, {"status": 403, "type": "text/html"}])
+        site.collect_download_docs(page)
+        # A kept address refused, then the same bill refused on a fresh list.
+        self.assertFalse(fetch(page, self.out, dates[0]))
+        self.assertEqual(site._RUN["refused"], 1)
+        # A kept address refused, then served on the fresh list.
+        page.pdfs = [{"status": 403, "type": "text/html"}, PDF]
+        self.assertTrue(fetch(page, self.out, dates[1]))
+        self.assertEqual(site._RUN["refused"], 0)
+        self.out.unlink()
+        # Two counted refusals, with a bill that does not count and an answer
+        # that is not a PDF between them.
+        page.pdfs = [{"status": 403, "type": "text/html"}] * 2
+        self.assertFalse(fetch(page, self.out, dates[2]))
+        page.pdfs = [{"status": 403, "type": "text/html"}] * 2
+        self.assertFalse(site.download_bill(page, None, dates[0], self.out, href=site.DOWNLOAD_PATH,
+                                            document_id=f"bill-{dates[0]}", counts=False))
+        page.pdfs = [{"status": 200, "type": "text/html", "b64": ""}] * 2
+        self.assertFalse(fetch(page, self.out, dates[1]))
+        self.assertEqual(site._RUN["refused"], 1)
+        page.pdfs = [{"status": 403, "type": "text/html"}] * 2
+        self.assertFalse(fetch(page, self.out, dates[2]))
+        self.assertEqual(site._RUN["refused"], 2)
+
     def test_a_signed_out_list_read_for_a_bill_ends_the_session(self):
         page = Page(pdf_status=403)
         site.collect_download_docs(page)
@@ -400,6 +466,7 @@ def make_app(tmp, *args):
 class Orchestrator(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
+        site._RUN.clear()
 
     def test_the_portal_tab_is_taken_by_its_parsed_host(self):
         """A tab on nwnatural.com naming the portal in its address is not the
@@ -477,6 +544,115 @@ class Orchestrator(unittest.TestCase):
             self.assertNotIn("signed out", said, how)
             self.assertNotIn("Timeout 30000ms", said, how)
             self.assertEqual(len(page.bills_asked()), 1, how)
+
+    def test_bills_that_failed_on_an_earlier_run_do_not_count_toward_the_stop(self):
+        """The three newest bills failed before and are refused again, the
+        two older ones are served. Bills retried newest first would
+        otherwise stop every run and every Continue at the third, and the
+        older bills would never be asked for. So only a bill with no failure
+        recorded before counts, as core not_shown counts only a page that
+        had not shown nothing before."""
+        site._RUN.clear()
+        rows = [row(d, n) for n, d in enumerate(
+            ("Dec 21, 2026", "Nov 21, 2026", "Oct 21, 2026", "Sep 22, 2026", "Aug 21, 2026"), 1)]
+        app = make_app(self.tmp, "--all")
+        for r in site.bills_of(HEADS, rows):
+            app._record_rawdoc(r, site.BILLING_URL)
+        selected = app._select()
+        for doc in selected[:3]:
+            app._record(doc, docs.State.FAILED, notes="Could not capture the document PDF")
+        page = RefusesSome(rows=rows, refused=(1, 2, 3))
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        app._delay = lambda *a, **k: None
+
+        with redirect_stdout(io.StringIO()) as out:
+            app.process(app._select())
+
+        said = " ".join(out.getvalue().split())
+        self.assertNotIn("refused bills one after another", said)
+        # Each of the two older bills is asked for and served.
+        self.assertEqual(page.served, 2, said)
+        states = [app.progress.get(d.key)["state"] for d in selected]
+        self.assertEqual(states[:3], [docs.State.FAILED.value] * 3, said)
+        self.assertNotIn(docs.State.FAILED.value, states[3:], said)
+
+    def test_a_continue_after_the_stop_takes_up_bills_not_asked_before(self):
+        """Every bill is refused. The run stopped at the third, so the first
+        two failed alone. A Continue takes the bills not asked for before
+        first and stops at the third of those, the fifth, without asking the
+        two that failed again, so each Continue moves on and none loops on
+        one bill, and each costs a read of the history per bill it asks."""
+        site._RUN.clear()
+        rows = [row(d, n) for n, d in enumerate(
+            ("Dec 21, 2026", "Nov 21, 2026", "Oct 21, 2026", "Sep 22, 2026", "Aug 21, 2026"), 1)]
+        app = make_app(self.tmp, "--all")
+        for r in site.bills_of(HEADS, rows):
+            app._record_rawdoc(r, site.BILLING_URL)
+        selected = app._select()
+        for doc in selected[:2]:
+            app._record(doc, docs.State.FAILED, notes="Could not capture the document PDF")
+        page = RefusesSome(rows=rows, refused=(1, 2, 3, 4, 5))
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        app._delay = lambda *a, **k: None
+
+        with redirect_stdout(io.StringIO()) as out, self.assertRaises(SystemExit):
+            app.process(app._select())
+
+        said = " ".join(out.getvalue().split())
+        self.assertIn("refused bills one after another", said)
+        self.assertEqual(page.refused_asks, {3, 4, 5}, said)
+        self.assertEqual(lists(page), 3, said)
+        self.assertEqual(app.progress.get(selected[2].key)["state"], docs.State.FAILED.value, said)
+        self.assertEqual(app.progress.get(selected[3].key)["state"], docs.State.FAILED.value, said)
+        self.assertIsNone(app.progress.get(selected[4].key), said)
+
+    def test_download_again_counts_no_refusal(self):
+        """Download again over five saved bills that the portal now refuses
+        keeps their records and stops nowhere, so it never falls on the
+        same three every time and finishes as it did before."""
+        rows = [row(d, n) for n, d in enumerate(
+            ("Dec 21, 2026", "Nov 21, 2026", "Oct 21, 2026", "Sep 22, 2026", "Aug 21, 2026"), 1)]
+        app = make_app(self.tmp, "--all", "--redownload")
+        for r in site.bills_of(HEADS, rows):
+            app._record_rawdoc(r, site.BILLING_URL)
+        selected = app._select()
+        for doc in selected:
+            doc.downloaded_ok = True
+            app._record(doc, docs.State.COMPLETED)
+        page = RefusesSome(rows=rows, refused=(1, 2, 3, 4, 5))
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        app._delay = lambda *a, **k: None
+
+        with redirect_stdout(io.StringIO()) as out:
+            app.process(app._select())
+
+        said = " ".join(out.getvalue().split())
+        self.assertNotIn("refused bills one after another", said)
+        self.assertEqual(page.refused_asks, {1, 2, 3, 4, 5}, said)
+
+    def test_bills_refused_in_a_row_stop_the_run_and_record_nothing(self):
+        app = make_app(self.tmp, "--all")
+        for r in site.bills_of(HEADS, ROWS):
+            app._record_rawdoc(r, site.BILLING_URL)
+        app.check_session = lambda page: None
+        app._on_its_site = lambda: Page()
+        app._delay = lambda *a, **k: None
+
+        def refused(*a, **k):
+            raise site.BillsRefused("3 bills in a row were refused")
+        original = site.download_bill
+        site.download_bill = refused
+        try:
+            with redirect_stdout(io.StringIO()) as said, self.assertRaises(SystemExit):
+                app.process(app._select())
+        finally:
+            site.download_bill = original
+        self.assertIn("refused bills one after another", " ".join(said.getvalue().split()))
+        self.assertNotIn("signed out", said.getvalue())
+        self.assertEqual(app.progress.data, {})
 
     def test_discover_names_several_accounts_and_lists_nothing(self):
         app = make_app(self.tmp, "--discover")

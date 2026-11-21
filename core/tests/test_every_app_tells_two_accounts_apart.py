@@ -167,7 +167,7 @@ def _etrade_discovers(mod, tmp_path: Path, monkeypatch) -> dict:
     listed = [mod.site.RawDoc(title="Brokerage Statement", account=account,
                               date_text="2026-03-31", kind="statement") for account in TWO]
     monkeypatch.setattr(mod.site, "goto_documents", lambda page: True)
-    monkeypatch.setattr(mod.site, "collect_download_docs", lambda page: list(listed))
+    monkeypatch.setattr(mod.site, "collect_download_docs", lambda page, **_: list(listed))
     app.cmd_discover(quiet=True)
     return app.discovery.data
 
@@ -192,7 +192,7 @@ def _wellsfargo_discovers(mod, tmp_path: Path, monkeypatch) -> dict:
     listed = [mod.site.RawDoc(title="Account Statement - March 31, 2026", account=account,
                               date_text="2026-03-31", kind="statement") for account in TWO]
     monkeypatch.setattr(mod.site, "goto_documents", lambda page: True)
-    monkeypatch.setattr(mod.site, "collect_download_docs", lambda page: list(listed))
+    monkeypatch.setattr(mod.site, "collect_download_docs", lambda page, **_: list(listed))
     app.cmd_discover(quiet=True)
     return app.discovery.data
 

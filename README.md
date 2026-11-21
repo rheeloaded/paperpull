@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-six providers are supported today, all built on the same pattern.
+Eighty-eight providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -95,6 +95,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`chasebusiness`](apps/chasebusiness) | Chase Business (business document center) | United States | Business checking and business card statements, up to seven years | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 10 checking statements and the business card's first statement saved on full runs.** One profile so far, so a debit account's statements are untested. Seven kinds of control pressed through the guard, real Edge/Chrome |
 | [`cibc`](apps/cibc) | CIBC (Canadian Imperial Bank of Commerce) | Canada | Bank account, credit card and line of credit statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/cibc/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document, and a second recording for a credit card or line of credit whose statements open somewhere else. Requested in [#204](https://github.com/rheeloaded/paperpull/issues/204) |
 | [`citi`](apps/citi) | Citi (credit cards) | United States | Monthly card statements | Statements API from inside the page, nothing clicked; the site lists about two years online |
+| [`cloudflare`](apps/cloudflare) | Cloudflare | United States, may work elsewhere | Billing invoice PDFs | **Contributed by [@solkennedy](https://github.com/solkennedy), a full run saved the supported history on the contributor's account** ([#238](https://github.com/rheeloaded/paperpull/pull/238)). Reads the selected Dashboard account's paginated invoice history, nothing clicked. Checks the invoice number and date before filing each PDF. Invoices of Cloudflare's older billing system are counted, not saved |
 | [`coinbase`](apps/coinbase) | Coinbase | United States, may work elsewhere | Monthly account statements, Coinbase One Card statements, tax forms, gain and loss reports | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 66 statements and 2 tax documents saved on a full run.** Each month's own PDF button on the Statements page pressed once and the download taken only from Coinbase's statements bucket, and tax PDFs from the list calls the Taxes page makes, nothing pressed. One Card statements from the Credit Card tab, each row's own PDF button pressed once, 13 saved on a full run on one account |
 | [`consorsbank`](apps/consorsbank) | Consorsbank | Germany | Statements, securities documents, tax certificates | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/consorsbank/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a document. Requested in [#178](https://github.com/rheeloaded/paperpull/issues/178) |
 | [`costco`](apps/costco) | Costco Wholesale | United States | Receipts, in-warehouse, gas, pharmacy and costco.com orders | **Written from a member's recording and run against their account, 34 purchases back to July 2024** ([#47](https://github.com/rheeloaded/paperpull/issues/47)). Each receipt names its part of Costco, Warehouse or Gas Station, for a file name pattern ([#60](https://github.com/rheeloaded/paperpull/issues/60)). One membership so far, so a second Pilot is welcome. Two tabs, quarters walked, the warehouse receipt is a dialog rendered with printToPDF, real Edge/Chrome |
@@ -120,6 +121,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`github`](apps/github) | GitHub | United States, may work elsewhere | Payment receipts (Pro, Copilot, Actions, Sponsors and the rest) | **Confirmed by [@jpfieber](https://github.com/jpfieber) on [#43](https://github.com/rheeloaded/paperpull/issues/43).** Receipt links fetched or printed, nothing clicked |
 | [`golden1`](apps/golden1) | Golden 1 Credit Union | United States | Statements, tax forms | **Confirmed by [@watling777](https://github.com/watling777)**, whose run saved every statement on both of his accounts, a credit card's named as one ([#35](https://github.com/rheeloaded/paperpull/issues/35)) |
 | [`ibkr`](apps/ibkr) | Interactive Brokers | United States, may work elsewhere | Monthly Activity Statements | **Contributed by [@tylerverry](https://github.com/tylerverry), 60 of 61 months saved on a full run.** The Statements page's own Activity Statement dialog, Monthly chosen and each month's own Download PDF button pressed once, and nothing else is clicked. Regional hosts `.com`, `.co.uk` and `.ie` |
+| [`marinwater`](apps/marinwater) | Marin Water (CA) | United States | Water bills | **Contributed by [@solkennedy](https://github.com/solkennedy), run on the contributor's own account** ([#233](https://github.com/rheeloaded/paperpull/pull/233)). Bill History read on Marin Water's Paymentus portal for a sign-in with one account, nothing clicked, and each bill's PDF fetched from its own View Bill link without the portal's cookies. Bills that share a date are told apart by their PDFs. Requested in [#231](https://github.com/rheeloaded/paperpull/issues/231) |
 | [`mbna`](apps/mbna) | MBNA (Canada, credit cards) | Canada | Credit card statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/mbna/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a statement. Requested in [#205](https://github.com/rheeloaded/paperpull/issues/205) |
 | [`meijer`](apps/meijer) | Meijer | United States | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked but its two tabs and an in-store receipt's own icon |
 | [`myecp`](apps/myecp) | MILITARY STAR (Exchange Credit Program) | United States | Card statements | **Built on the maintainer's own account, 25 statements back to 2023.** The MyECP statements list and download from inside the page, nothing clicked |
@@ -966,9 +968,9 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-five** apps pass their tests, the eighty-six that are
+- ✅ All **ninety-seven** apps pass their tests, the eighty-eight that are
   supported, the five still waiting for a tester and the Scalable Capital,
-  Consorsbank, CIBC and MBNA shells, 46,567 of them
+  Consorsbank, CIBC and MBNA shells, 47,569 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
@@ -1051,6 +1053,8 @@ found a bug and diagnosed it to the line.
   and run against five accounts back to 2020, the Nelnet app, run against
   a student loan account back to 2019, and the Interactive Brokers app,
   run against five years of monthly statements.
+- [@solkennedy](https://github.com/solkennedy), the Marin Water app, built and run on their own account,
+  bills that share a date told apart by their PDFs.
 - [@JasperDale19](https://github.com/JasperDale19), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County
@@ -1101,10 +1105,11 @@ which the control panel shows the first time it opens. They say what
 PaperPull does and does not promise and limit liability, and take away
 nothing the license gives you.
 
-**Name.** PaperPull is a trade name of TNE Enterprises LLC, which publishes
-this project. The name is not part of the license. A modified version needs
-its own name, so that anything called PaperPull is this project. What that
-allows and what it doesn't is in [TRADEMARK.md](TRADEMARK.md).
+**Name.** TNE Labs publishes this project. PaperPull and TNE Labs are trade
+names of TNE Enterprises LLC. The PaperPull name is not part of the
+license. A modified version needs its own name, so that anything called
+PaperPull is this project. What that allows and what it doesn't is in
+[TRADEMARK.md](TRADEMARK.md).
 
 Copyright (c) 2026 PaperPull, a trade name of TNE Enterprises LLC, and the
 PaperPull contributors.

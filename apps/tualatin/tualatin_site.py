@@ -70,8 +70,10 @@ log = logging.getLogger("tualatin_docs.site")
 
 
 def _words():
-    """This app's own words for paperpull_core.words."""
-    return _words_for("Tualatin Water", sys.modules[__name__])
+    """This app's own words for paperpull_core.words, and the words of the
+    row types a utility's Activity is likely to hold, so a type this app
+    does not know is printed readable."""
+    return _words_for("Tualatin Water", sys.modules[__name__]) | TYPE_WORDS
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +301,13 @@ _BILLING_DATE_RE = re.compile(r"Billing Date\s*:?\s*([0-9]{1,2})/([0-9]{1,2})/([
 # app's words so a name in it is never printed, rather than passed over.
 BILL_TYPE = "Billing"
 KNOWN_TYPES = frozenset({BILL_TYPE, "Payment"})
+# Words of the types an Activity may hold that this app does not take, so
+# "Final Bill" stops the list under its own name and not its shape.
+TYPE_WORDS = frozenset({
+    "adjustment", "adjust", "balance", "bill", "billing", "charge", "credit", "debit",
+    "deposit", "fee", "final", "late", "misc", "miscellaneous", "nsf", "off", "penalty",
+    "reversal", "reversed", "returned", "refund", "service", "transfer", "write",
+})
 _TYPE_WORD_RE = re.compile(r"[A-Za-z][A-Za-z /]{0,29}")
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 # How long one fetch of a print page, a stylesheet or an image may take.
@@ -424,6 +433,24 @@ _TABLE_DRAWN_JS = r"""() => [...document.querySelectorAll('table')].some(t =>
   && t.querySelector('tbody tr'))"""
 
 
+# Why the list stops when Activity does not open or its table never draws,
+# which Login cannot tell from a session that has quietly ended.
+NOT_OPENED = "Activity did not open"
+NOT_DRAWN = "the Activity table did not finish loading"
+
+
+def _signed_out_meanwhile(page) -> None:
+    """Raise SessionExpired when the portal went to its sign-in page while
+    Activity's rows were counted or read. A tab that cannot say where it is
+    says nothing, so the caller's ListStopped follows."""
+    try:
+        out = looks_signed_out(page)
+    except Exception:
+        return
+    if out:
+        raise SessionExpired("the payment portal showed its sign-in page")
+
+
 def _open(page, timeout_ms: int = 30000) -> dict:
     """Open Activity by its address, the portal keeping its session in a
     cookie, and read its transaction table as drawn. Raises SessionExpired
@@ -441,33 +468,43 @@ def _open(page, timeout_ms: int = 30000) -> dict:
         # An address that did not open leaves the tab where it was, or on
         # Chromium's own error page, which says nothing of the session.
         if not opened:
-            raise ListStopped("Activity did not open")
+            raise ListStopped(NOT_OPENED)
         raise SessionExpired("the payment portal sent Activity somewhere else")
     try:
         page.wait_for_function(_TABLE_DRAWN_JS, timeout=timeout_ms)
     except Exception:
         if looks_signed_out(page):
             raise SessionExpired("the payment portal showed its sign-in page")
-        raise ListStopped("the Activity table did not finish loading")
+        raise ListStopped(NOT_DRAWN)
     # Rows drawn one at a time after the first are waited for: the table
     # is read once its row count has held for a moment.
-    before = None
+    # A count that could not be taken, or a tab closed while waiting, is a
+    # table that was not read, never one that settled. When the portal has
+    # gone to its sign-in page meanwhile, that is the session ending.
+    before = object()
     for _ in range(SETTLE_ROUNDS):
         try:
             now = page.evaluate(_ROW_COUNT_JS)
-        except Exception:
-            now = None
+        except Exception as e:
+            _signed_out_meanwhile(page)
+            raise ListStopped(f"the Activity table's rows could not be counted ({type(e).__name__})")
         if now == before:
             break
         before = now
-        page.wait_for_timeout(SETTLE_MS)
+        try:
+            page.wait_for_timeout(SETTLE_MS)
+        except Exception as e:
+            _signed_out_meanwhile(page)
+            raise ListStopped(f"Activity went away while its rows were drawn ({type(e).__name__})")
     else:
         raise ListStopped("the Activity table was still drawing rows")
     try:
         seen = page.evaluate(_ROWS_JS) or {}
     except Exception as e:
+        _signed_out_meanwhile(page)
         raise ListStopped(f"the Activity table could not be read ({type(e).__name__})")
     if not seen.get("table"):
+        _signed_out_meanwhile(page)
         raise ListStopped("Activity shows no transaction table")
     _keep_private(seen.get("account"))
     return seen
@@ -580,13 +617,15 @@ def bill_list_opens(page) -> bool:
 
 
 def bill_list_state(page) -> Tuple[bool, str]:
-    """Whether Activity was read whole, and when its table was read but
-    stopped, why. A table that never opened gives no reason."""
+    """Whether Activity was read whole, and when it opened but its table
+    was not read whole, why. An Activity that did not open, or a table
+    that never drew, gives no reason."""
     try:
         seen = _open(page)
     except (SessionExpired, ListStopped) as e:
         log.info("Activity could not be read: %s", e)
-        return False, ""
+        stopped = isinstance(e, ListStopped) and str(e) not in (NOT_OPENED, NOT_DRAWN)
+        return False, str(e) if stopped else ""
     try:
         _bills(seen)
         return True, ""
@@ -689,11 +728,16 @@ _PRINT_JS = r"""async ([url, origin, limit, ms]) => {
   const dropped = [], inlined = {css: 0, img: 0};
   const own = (href) => { try { const u = new URL(href, url); return u.origin === origin ? u.href : ''; } catch (e) { return ''; } };
   const over = () => { full = true; return {why: 'over the budget'}; };
+  // After the first answer that runs out of time, nothing more is asked
+  // for, so the limits never add up one after another.
+  let stalled = false;
+  const late = (e) => (e && e.name) === 'TimeoutError';
   const take = async (at, kind) => {
+    if (stalled) return {why: 'after a time out'};
     if (full || left() <= 0) return over();
     let c;
     try { c = await ask(at); }
-    catch (e) { return {why: 'not fetched'}; }
+    catch (e) { if (late(e)) { stalled = true; return {why: 'timed out'}; } return {why: 'not fetched'}; }
     const got = c.headers.get('content-type') || '';
     if (c.type === 'opaqueredirect' || c.status !== 200 || !kind.test(got)) {
       try { if (c.body) await c.body.cancel(); } catch (e) {}
@@ -706,22 +750,29 @@ _PRINT_JS = r"""async ([url, origin, limit, ms]) => {
     try { return {buf: await ppRead(upTo(c, left())), type: got}; }
     catch (e) {
       if (ppRefused(e) || String((e && e.message) || e) === 'over') return over();
+      if (late(e)) { stalled = true; return {why: 'timed out'}; }
       return {why: 'not read'};
     }
   };
   for (const link of [...doc.querySelectorAll('link[rel~="stylesheet"][href]')]) {
+    // A sheet the browser does not apply, an alternate or a disabled one,
+    // is not written in, so it never shapes the bill either.
+    if (/(^|\s)alternate(\s|$)/i.test(link.getAttribute('rel') || '') || link.hasAttribute('disabled')) continue;
     const at = own(link.getAttribute('href'));
     if (!at) continue;
     const got = await take(at, /css/i);
     // An @import, written plainly or with an escape in its name, would
     // reach past what was checked, and a "<" could close the style element
-    // and draw markup into the bill, so none of them stays.
+    // and draw markup into the bill, so none of them stays. Each at-rule
+    // dropped leaves a space, so the text on either side never joins into
+    // another @import.
     const css = got.buf ? new TextDecoder().decode(got.buf)
-      .replace(/@import[^;]*;?/gi, '').replace(/@\\[^;{]*;?/g, '').replace(/</g, '\\3c ') : '';
+      .replace(/@import[^;]*;?/gi, ' ').replace(/@[\w-]*\\[^;{]*;?/g, ' ').replace(/</g, '\\3c ') : '';
     if (!got.buf || size(css) > left()) {
       if (got.buf) full = true;
       dropped.push({kind: 'stylesheet', why: got.why || 'over the budget'});
-      continue;
+      // The bill is not kept now, so no later stylesheet is asked for.
+      break;
     }
     spent += size(css);
     const style = doc.createElement('style');
@@ -732,6 +783,10 @@ _PRINT_JS = r"""async ([url, origin, limit, ms]) => {
     link.replaceWith(style);
     inlined.css++;
   }
+  // A bill drawn without one of its stylesheets is not kept, so nothing
+  // more is asked for and the next run asks again.
+  if (dropped.length) return {status: r.status, type: type, said: said, password: password,
+                              inlined: inlined, dropped: dropped};
   for (const img of [...doc.querySelectorAll('img[src]')]) {
     const at = own(img.getAttribute('src'));
     if (!at) continue;
@@ -785,7 +840,9 @@ def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[lis
     page that is not a printed bill, or is one of another Billing Date than
     the Activity row's, is refused without a file, and so is a PDF whose
     own text does not read as that bill, a stylesheet having hidden part of
-    it say. A stylesheet or image left out is noted in the trace."""
+    it say, or a bill one of whose stylesheets was left out, so the next
+    run asks again. An image left out is noted in the trace and the bill
+    is kept."""
     from paperpull_core import receipt_pdf
     url = print_url(number)
     if not url:
@@ -833,9 +890,13 @@ def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[lis
         if trace is not None:
             trace.append({"note": "another billing date"})
         return False
+    if any(d.get("kind") == "stylesheet" for d in dropped):
+        log.warning("a stylesheet of the bill dated %s was left out, so the bill is not kept "
+                    "and the next run asks for it again", iso_date)
+        return False
     if dropped:
-        log.warning("%d stylesheet(s) or image(s) of the bill dated %s were left out of its PDF",
-                    len(dropped), iso_date)
+        log.warning("the PDF of the bill dated %s is drawn without %d of its images",
+                    iso_date, len(dropped))
     tmp = out_path.with_name(out_path.name + ".drawing")
     try:
         try:
