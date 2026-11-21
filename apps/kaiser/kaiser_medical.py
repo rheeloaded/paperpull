@@ -35,7 +35,37 @@ _VIEWER_DOWNLOAD = re.compile(rf"{DETAILS_PATH}/Download[A-Za-z]{{1,48}}/?")
 _DIALOG = '[role=dialog].Popup:visible'
 _DIALOG_HEADING = re.compile(r"^(?:Statement(?: PDF)?|Billing Statement|View Statement(?: \(PDF\))?|View PDF|PDF Viewer)$", re.I)
 _OPEN_LIST = "In Medical Billing, open View billing and payment details, then Statements."
+_READ_ROW = r"""row => {
+    const dates = row.querySelectorAll('.ba_details_statement_date');
+    const actionable = [
+        'a', 'area[href]', 'button', 'input', 'select', 'textarea', 'summary',
+        'audio[controls]', 'video[controls]', 'iframe', 'embed', 'object',
+        '[contenteditable]:not([contenteditable="false"])',
+        '[onclick]', '[onkeydown]', '[onkeyup]',
+    ].join(',');
+    const roles = new Set([
+        'button', 'link', 'checkbox', 'radio', 'switch', 'textbox', 'searchbox',
+        'combobox', 'listbox', 'option', 'menuitem', 'menuitemcheckbox',
+        'menuitemradio', 'slider', 'spinbutton', 'scrollbar', 'tab', 'treeitem',
+    ]);
+    const controls = [...row.querySelectorAll('*')].filter(e => {
+        const role = e.getAttribute('role')?.trim().toLowerCase().split(/\s+/)[0];
+        return (e.matches(actionable) || e.tabIndex >= 0 || roles.has(role)) &&
+            e.getClientRects().length && getComputedStyle(e).visibility === 'visible';
+    });
+    const control = controls.length === 1 && controls[0].tagName === 'A' &&
+        /^View statement\s*\(?PDF\)?$/i.test(controls[0].innerText.trim().replace(/\s+/g, ' '))
+        ? controls[0] : null;
+    const href = control?.getAttribute('href');
+    const index = control?.getAttribute('data-index');
+    const safe = control && dates.length === 1 && href?.startsWith('#') &&
+        /^\d+$/.test(index || '') && !control.hasAttribute('target') &&
+        !control.hasAttribute('download') && !control.closest('form');
+    return safe ? {control, index, text: row.innerText, date: dates[0].innerText} : null;
+}"""
+
 _READ_LIST = r"""(heading, datePattern) => {
+    const readRow = READ_ROW;
     const region = heading.parentElement?.parentElement?.parentElement;
     if (!region) return null;
     const visible = e => Boolean(e.getClientRects().length) &&
@@ -45,19 +75,10 @@ _READ_LIST = r"""(heading, datePattern) => {
     const statementRows = [...region.querySelectorAll('li')].filter(row =>
         visible(row) && (date.test(row.innerText) ||
             row.querySelector('.ba_details_document, .ba_details_statement_date, a[data-index]')));
-    const documents = [];
-    for (const row of statementRows) {
-        const dates = row.querySelectorAll('.ba_details_statement_date');
-        const controls = [...row.querySelectorAll('a,button,input,[role=button],[role=link]')].filter(visible);
-        const control = controls.length === 1 && controls[0].tagName === 'A' &&
-            /^View statement\s*\(?PDF\)?$/i.test(label(controls[0])) ? controls[0] : null;
-        const href = control?.getAttribute('href');
-        const index = control?.getAttribute('data-index');
-        const safe = control && dates.length === 1 && href?.startsWith('#') &&
-            /^\d+$/.test(index || '') && !control.hasAttribute('target') &&
-            !control.hasAttribute('download') && !control.closest('form');
-        documents.push(safe ? [index, row.innerText, dates[0].innerText] : null);
-    }
+    const documents = statementRows.map(row => {
+        const found = readRow(row);
+        return found ? [found.index, found.text, found.date] : null;
+    });
     return {
         rows: documents,
         empty: /\bno (?:[a-z-]+ )?statements are available for this account\b/i.test(region.innerText),
@@ -65,7 +86,7 @@ _READ_LIST = r"""(heading, datePattern) => {
             visible(e) && !e.disabled && e.getAttribute('aria-disabled') !== 'true' &&
                 /^(?:load more|next(?: page)?|(?:show|view) more(?: statements)?)$/i.test(label(e)))
     };
-}"""
+}""".replace("READ_ROW", _READ_ROW)
 
 
 class MedicalListError(RuntimeError):
@@ -227,11 +248,36 @@ def _close_viewer(page, press) -> bool:
     return True
 
 
+def _is_viewer_frame_at_click(session, frame_id, point) -> bool:
+    """Resolve Chromium's PDF response frame to its actual iframe element."""
+    if not frame_id or point is None:
+        return False
+    try:
+        owner = session.send("DOM.getFrameOwner", {"frameId": frame_id})
+        resolved = session.send("DOM.resolveNode", {"backendNodeId": owner["backendNodeId"]})
+        object_id = resolved["object"]["objectId"]
+        try:
+            result = session.send("Runtime.callFunctionOn", {
+                "objectId": object_id,
+                "functionDeclaration": """function (x, y) {
+                    return this.tagName === 'IFRAME'
+                        && Boolean(this.closest('[role=dialog].Popup'))
+                        && this.ownerDocument.elementFromPoint(x, y) === this;
+                }""",
+                "arguments": [{"value": coordinate} for coordinate in point],
+                "returnByValue": True,
+            })
+            return result.get("result", {}).get("value") is True
+        finally:
+            session.send("Runtime.releaseObject", {"objectId": object_id})
+    except (BrowserError, KeyError):
+        return False
+
+
 def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
     """Read the browser's inline PDF response before Chromium opens its viewer."""
     session = page.context.new_cdp_session(page)
     answers = []
-    by_frame = {}
     refused = False
 
     def observe(event):
@@ -242,8 +288,6 @@ def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
             if request["method"] != "GET" or not _medical_download_url(request["url"]):
                 return
             frame_id = event.get("frameId")
-            if frame_id:
-                by_frame.setdefault(frame_id, set()).add(request["url"].split("#", 1)[0])
             if event.get("responseStatusCode") != 200:
                 return
             headers = {item["name"].casefold(): item["value"] for item in event["responseHeaders"]}
@@ -295,14 +339,10 @@ def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
             page.wait_for_timeout(100)
         data, frame_id = answers[0] if len(answers) == 1 and not refused else (None, None)
         if covered is not None:
-            source = point.evaluate(r"""proof => {
-                if (!proof.point) return null;
-                const frame = document.elementFromPoint(...proof.point);
-                if (frame?.tagName !== 'IFRAME' || !frame.closest('[role=dialog].Popup')) return null;
-                return frame.src.split('#', 1)[0];
-            }""")
+            clicked_at = point.evaluate("proof => proof.point")
             dialog = page.locator(_DIALOG)
-            if (not data or source not in by_frame.get(frame_id, ()) or dialog.count() != 1
+            if (not data or not _is_viewer_frame_at_click(session, frame_id, clicked_at)
+                    or dialog.count() != 1
                     or dialog.get_by_role("heading", name=_DIALOG_HEADING).count() != 1):
                 raise covered
         return data
@@ -331,14 +371,11 @@ def download_bill(page, bill: MedicalBill, out_path: Path, *, press) -> bool:
     eligible = []
     for control in controls:
         row = control.evaluate(r"""e => {
-            const href = e.getAttribute('href');
-            if (!e.isConnected || !href?.startsWith('#') || e.hasAttribute('target') ||
-                e.hasAttribute('download') || e.closest('form') ||
-                !/^View statement\s*\(?PDF\)?$/i.test(e.innerText.trim().replace(/\s+/g,' '))) return null;
+            const readRow = READ_ROW;
             const row = e.closest('li');
-            const dates = row?.querySelectorAll('.ba_details_statement_date');
-            return dates?.length === 1 ? [row.innerText, dates[0].innerText] : null;
-        }""")
+            const found = row && e.isConnected && readRow(row);
+            return found?.control === e ? [found.text, found.date] : null;
+        }""".replace("READ_ROW", _READ_ROW))
         if row and _bill_from_row(*row, _account_scope(page.url)) == bill:
             eligible.append(control)
     if len(eligible) != 1:

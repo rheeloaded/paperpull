@@ -51,7 +51,14 @@ function openStatement(i) {
         const other = document.createElement('iframe');
         other.id = 'cover';
         other.style = 'position:fixed;inset:0;width:100%;height:100%;z-index:999';
-        document.body.append(other);
+        if (window.differentCover === 'same-url') {
+            other.setAttribute('src', viewer.querySelector('iframe').getAttribute('src'));
+            // The attribute matches but this frame never receives the PDF.
+            other.srcdoc = '<p>Synthetic covering frame</p>';
+            viewer.append(other);
+        } else {
+            document.body.append(other);
+        }
     }
 }
 function closeStatement() { viewer.hidden=true; viewer.querySelector('iframe').src='about:blank' }
@@ -123,13 +130,21 @@ def _exercise_medical_browser(monkeypatch, tmp_path, port):
             assert not medical.download_bill(page, refused, unexpected, press=site.press_named)
             assert not unexpected.exists()
             assert not page.locator(medical._DIALOG).count()
-            page.evaluate("window.differentCover = true")
-            with pytest.raises(site.pressing.Covered) as late_stop:
-                medical.download_bill(page, good, tmp_path / "other-frame.pdf", press=site.press_named)
-            assert late_stop.value.after_a_press
-            assert not (tmp_path / "other-frame.pdf").exists()
-            page.reload()
-            good = min(medical.collect_download_docs(page), key=lambda bill: bill.date_text)
+            for cover in ("different-url", "same-url"):
+                page.evaluate("cover => window.differentCover = cover", cover)
+                candidate = tmp_path / f"{cover}.pdf"
+                requested = len(GETS)
+                with pytest.raises(site.pressing.Covered) as late_stop:
+                    medical.download_bill(page, good, candidate, press=site.press_named)
+                assert late_stop.value.after_a_press
+                assert not candidate.exists()
+                assert DETAILS + "/DownloadStatementBytes/" in GETS[requested:]
+                if cover == "same-url":
+                    frames = page.locator(medical._DIALOG).locator("iframe")
+                    assert frames.count() == 2
+                    assert frames.nth(0).get_attribute("src") == frames.nth(1).get_attribute("src")
+                page.reload()
+                good = min(medical.collect_download_docs(page), key=lambda bill: bill.date_text)
             calls = len(GETS)
             page.evaluate("""() => {
                 const overlay = document.createElement('div');
@@ -141,10 +156,17 @@ def _exercise_medical_browser(monkeypatch, tmp_path, port):
             assert not stop.value.after_a_press
             assert len(GETS) == calls
             row = page.locator('li').nth(1)
-            row.evaluate("e => e.insertAdjacentHTML('beforeend', '<a href=#unknown>Unknown action</a>')")
-            with pytest.raises(medical.MedicalListError):
-                medical.collect_download_docs(page)
-            row.locator('a[href="#unknown"]').evaluate("e => e.remove()")
+            for unexpected in (
+                '<a href="#unknown">Unknown action</a>',
+                '<select aria-label="Unknown action"><option>Example</option></select>',
+                '<textarea aria-label="Unknown action"></textarea>',
+                '<span tabindex="0">Unknown action</span>',
+                '<span role="switch" aria-checked="false">Unknown action</span>',
+            ):
+                row.evaluate("(e, markup) => e.insertAdjacentHTML('beforeend', markup)", unexpected)
+                with pytest.raises(medical.MedicalListError):
+                    medical.collect_download_docs(page)
+                row.evaluate("e => e.lastElementChild.remove()")
             row.locator('.ba_details_statement_date').evaluate("e => e.removeAttribute('class')")
             row.locator('a').evaluate("e => { e.removeAttribute('data-index'); e.textContent = 'Unknown action'; }")
             with pytest.raises(medical.MedicalListError):
