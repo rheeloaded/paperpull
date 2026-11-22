@@ -274,20 +274,28 @@ def _fetch_pdf(page, invoice_id: str) -> bytes:
             response.dispose()
 
 
-def _pdf_matches(data: bytes, bill: Bill) -> bool:
+def _first_page(data: bytes):
+    """The first page's text, or None when the PDF cannot be read."""
     try:
         pages = pdf_reader.page_texts(data, pages=1, layout=True)
     except Exception:
-        return False
-    if not pages:
-        return False
-    invoice_numbers = _PDF_NUMBER.findall(pages[0])
+        return None
+    return pages[0] if pages else None
+
+
+def _pdf_matches(data: bytes, bill: Bill) -> bool:
+    text = _first_page(data)
+    return text is not None and _text_matches(text, bill)
+
+
+def _text_matches(text: str, bill: Bill) -> bool:
+    invoice_numbers = _PDF_NUMBER.findall(text)
     if set(invoice_numbers) != {bill.invoice_id}:
         return False
     # Sonic labels the date in bill history by the payment or service period.
     # The separately printed Invoice Date can precede it.
     variants = identity.date_variants(bill.date)
-    for line in pages[0].splitlines()[:60]:
+    for line in text.splitlines()[:60]:
         dates = _PDF_DATE.findall(line)
         if period := _PERIOD.fullmatch(line):
             dates.append(period[1])
@@ -296,7 +304,24 @@ def _pdf_matches(data: bytes, bill: Bill) -> bool:
     return False
 
 
+# Why the last download_bill saved nothing, read by the app to record and
+# say it: "refused" (Sonic would not give the PDF and the list still holds
+# the bill), "unreadable" (no text could be read from it) or "wrong" (its
+# first page does not name this bill's invoice number and date).
+_REFUSAL = {"why": ""}
+
+
+def last_refusal() -> str:
+    return _REFUSAL["why"]
+
+
+def _refuse(why: str) -> bool:
+    _REFUSAL["why"] = why
+    return False
+
+
 def download_bill(page, date: str, out_path: Path, *, document_id: str) -> bool:
+    _REFUSAL["why"] = ""
     if _RUN.get("page") is not page:
         collect_download_docs(page)
     bill = _RUN["bills"].get(document_id)
@@ -308,8 +333,11 @@ def download_bill(page, date: str, out_path: Path, *, document_id: str) -> bool:
         refreshed = refused.list_again(lambda: collect_download_docs(page), SessionExpired, ListStopped)
         if bill.record not in refreshed:
             raise ListStopped("The selected bill was missing after Sonic reloaded the history.")
-        return False
-    if not _pdf_matches(data, bill):
-        return False
+        return _refuse("refused")
+    text = _first_page(data)
+    if text is None:
+        return _refuse("unreadable")
+    if not _text_matches(text, bill):
+        return _refuse("wrong")
     shared_folder.write_bytes(out_path, data)
     return True

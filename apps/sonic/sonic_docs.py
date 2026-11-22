@@ -282,7 +282,7 @@ class App:
                 print("Keep the window open, then run: paperpull sonic pilot")
             else:
                 print("Could not read the Sonic bill history.")
-                print("Open Billing & Payments → View Bill History in that window.")
+                print("Open Billing & Payments > View Bill History in that window.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -465,6 +465,20 @@ class App:
         listing.read_again_stopped(self, (
             f"Sonic bill download stopped. {stop}"))
 
+    # What a refusal of download_bill is recorded and said as, by
+    # site.last_refusal(): the record's note, the failure file's step and
+    # its reason.
+    _REFUSED = {
+        "refused": ("Sonic refused this bill's PDF",
+                    "fetch the bill pdf", "the bill pdf was refused"),
+        "unreadable": ("The PDF's text could not be read",
+                       "read the bill pdf", "the bill pdf could not be read"),
+        "wrong": ("The PDF did not show this bill's invoice number and date",
+                  "check the bill pdf", "the pdf did not name the listed bill"),
+        "": ("Could not capture the document PDF",
+             "capture the document", "the document would not render"),
+    }
+
     def download_one(self, page, doc: Document, filename: str):
         """Save one statement. The site layer asks for the PDF from
         inside the signed-in page and hands back the bytes."""
@@ -496,12 +510,17 @@ class App:
             out_path.unlink()
             saved = False
         if not saved:
-            self._record(doc, State.FAILED,
-                         notes="Could not capture the document PDF")
+            why = site.last_refusal()
+            note, step, reason = self._REFUSED.get(why, self._REFUSED[""])
+            if why == "wrong":
+                # A PDF that arrived and was not this bill, which puts the
+                # run's other bills in doubt too (run_reporting).
+                self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+            self._record(doc, State.FAILED, notes=note)
             self._write_row(doc, "Capture failed", State.FAILED.value)
-            self.write_failure('capture the document', 'the document would not render')
+            self.write_failure(step, reason)
             self.stats["failed"] += 1
-            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
+            print(f"  {note}. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name
@@ -646,9 +665,10 @@ class App:
 
     def cmd_resume(self):
         self.stats["mode"] = "dry-run" if self.args.dry_run else "resume"
-        # The last complete listing can belong to another dashboard
-        # account. Check the account currently open before consulting the
-        # saved records, even when none of them are pending.
+        # Sonic's history is read again before the saved records are
+        # consulted, even when none of them are pending, so a Resume says
+        # what the signed-in account lists now rather than what an earlier
+        # run noted (paperpull_core.listing.read_again_first).
         if not self.args.dry_run:
             listing.read_again_first(self, noun="bills")
             self.cmd_discover(quiet=True)

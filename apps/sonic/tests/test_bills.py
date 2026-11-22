@@ -237,3 +237,50 @@ def test_same_day_bills_get_distinct_filenames_and_resume_skips_both(tmp_path, m
     assert len(page.calls) == calls_before_resume + 1
     assert page.calls[-1] == site.DOCUMENTS_URL
     assert app.stats["new_files"] == [str(path) for path in files]
+
+
+def _app(tmp_path, monkeypatch, page):
+    import sonic_docs as app_module
+
+    config = tmp_path/"config.json"
+    config.write_text(json.dumps({"output_dir": str(tmp_path), "min_pdf_bytes": 100}))
+    monkeypatch.setattr(app_module.App, "_setup_logging", lambda self: None)
+    app = app_module.App(app_module.build_parser().parse_args(["--config", str(config)]))
+    monkeypatch.setattr(app, "_on_its_site", lambda: page)
+    monkeypatch.setattr(app, "_delay", lambda: None)
+    monkeypatch.setattr(app, "write_failure", lambda step, reason, **_: app.stats.setdefault(
+        "failures_said", []).append((step, reason)))
+    return app
+
+
+@pytest.mark.parametrize("change, note, wrong", [
+    (lambda page: page.pdfs.update({FIRST: pdf(invoice_id=SECOND)}),
+     "The PDF did not show this bill's invoice number and date", 1),
+    (lambda page: setattr(page, "pdf_status", 403),
+     "Sonic refused this bill's PDF", 0),
+    (lambda page: page.pdfs.update({FIRST: b"%PDF-1.4 not a readable pdf"}),
+     "The PDF's text could not be read", 0),
+])
+def test_a_bill_that_saved_nothing_says_why(tmp_path, monkeypatch, capsys, change, note, wrong):
+    page = Page()
+    page.html = history(row()).encode()
+    app = _app(tmp_path, monkeypatch, page)
+    assert app.cmd_discover() == 1
+    change(page)
+    app.process(app._select())
+    record = next(iter(app.progress.data.values()))
+    assert record["state"] == "Failed" and record["notes"] == note
+    assert app.stats["failed"] == 1 and app.stats.get("wrong_document", 0) == wrong
+    assert note in capsys.readouterr().out
+    assert not app.stats["new_files"]
+
+
+def test_login_words_print_in_a_plain_windows_console(tmp_path, monkeypatch, capsys):
+    page = Page()
+    page.history_status = 500
+    app = _app(tmp_path, monkeypatch, page)
+    monkeypatch.setattr(app, "page", lambda: page)
+    app.cmd_login()
+    said = capsys.readouterr().out
+    assert "Could not read the Sonic bill history" in said
+    said.encode("cp1252")
