@@ -125,6 +125,11 @@ class ListStopped(RuntimeError):
     """The monitoring invoice list could not be verified."""
 
 
+class NoBills(ListStopped):
+    """The table settled with no bills, which cannot be told from a history
+    that has not arrived, so the list stops and says so in its own words."""
+
+
 @dataclass(frozen=True)
 class RawDoc:
     title: str
@@ -323,7 +328,7 @@ def _settled(page) -> Shown:
             if time.monotonic() - empty_since >= _EMPTY_SETTLE_S:
                 # A table that still prints "0 of 0" cannot be told from one
                 # whose history has not arrived, so it is never a whole list.
-                raise ListStopped("SimpliSafe shows no monitoring bills yet. Run again once "
+                raise NoBills("SimpliSafe shows no monitoring bills yet. Run again once "
                                   "Monitoring Payments lists them.")
         elif now is None or now.total:
             empty_since = None
@@ -436,6 +441,20 @@ def bill_list_ready(page) -> bool:
     except (SessionExpired, ListStopped):
         return False
     return True
+
+
+def bill_list_problem(page) -> str:
+    """What keeps the bill history from being ready, in words a person can
+    act on, or "" when it is ready. A table with no bills says that, not
+    where to find a page the person already has open."""
+    try:
+        _open_account(page)
+        _view(page)
+    except NoBills as stop:
+        return str(stop)
+    except (SessionExpired, ListStopped):
+        return "Open Manage Account → Monitoring Payments in that window."
+    return ""
 
 
 def _show(page, bill: Bill) -> bool:

@@ -277,13 +277,13 @@ class App:
             print("Connected, but SimpliSafe shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         else:
-            ok = site.bill_list_ready(page)
-            if ok:
+            problem = site.bill_list_problem(page)
+            if not problem:
                 print("Success: the SimpliSafe bill history answered.")
                 print("Keep the window open, then run: paperpull simplisafe pilot")
             else:
                 print("Could not read the SimpliSafe bill history.")
-                print("Open Manage Account → Monitoring Payments in that window.")
+                print(problem)
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:
@@ -335,7 +335,9 @@ class App:
             print("SimpliSafe signed out before the bill history could be read.")
             raise SystemExit(0)
         except site.ListStopped as stop:
-            self.write_failure("read the bill history", "the bill history did not answer")
+            self.write_failure("read the bill history", (
+                "the bill history shows no bills" if isinstance(stop, site.NoBills)
+                else "the bill history did not answer"))
             print(f"SimpliSafe bill discovery stopped. {stop}")
             raise SystemExit(0)
         self._current_bill_ids = {r.document_id for r in docs}

@@ -402,3 +402,39 @@ def test_a_sign_in_while_an_invoice_is_open_is_said_as_a_sign_in(page, tmp_path,
     # No Close was pressed on the signed-out page, so the dialog is still there.
     assert page.locator("mat-dialog-container").count() == 1
     assert real
+
+
+def test_login_on_an_account_with_no_bills_says_so(browser, capsys):
+    """Login on a table that stays empty says the stop's own words, not to
+    open a page the person already has open."""
+    import simplisafe_docs as docs
+    tab = open_history(browser, [], 10)
+    app = docs.App.__new__(docs.App)
+    app.page = lambda: tab
+    app.close = lambda: None
+    app.cmd_login()
+    said = " ".join(capsys.readouterr().out.split())
+    assert "SimpliSafe shows no monitoring bills yet" in said, said
+    assert "Open Manage Account" not in said and "Success" not in said, said
+
+
+@pytest.mark.parametrize("stop,reason", [
+    ("NoBills", "the bill history shows no bills"),
+    ("ListStopped", "the bill history did not answer"),
+])
+def test_discover_tells_an_empty_history_from_a_broken_one(monkeypatch, stop, reason):
+    import simplisafe_docs as docs
+    from paperpull_core import listing
+    app = docs.App.__new__(docs.App)
+    written = []
+    monkeypatch.setattr(listing, "started", lambda _app: None)
+    app._on_its_site = lambda: None
+    app.check_session = lambda _page: None
+    app.write_failure = lambda step, why, **_kw: written.append(why)
+
+    def stopped(_page):
+        raise getattr(site, stop)("invented stop")
+    monkeypatch.setattr(docs.site, "collect_download_docs", stopped)
+    with pytest.raises(SystemExit):
+        app.cmd_discover()
+    assert written == [reason]
