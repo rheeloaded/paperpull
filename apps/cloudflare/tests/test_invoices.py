@@ -83,8 +83,10 @@ class Page:
         return response
 
 
-def test_walks_all_pages_and_saves_same_date_invoices_separately(tmp_path):
+@pytest.mark.parametrize("prefix", ["", "settings/"])
+def test_walks_all_pages_and_saves_same_date_invoices_separately(tmp_path, prefix):
     page = Page()
+    page.url = f"https://dash.cloudflare.com/{ACCOUNT}/{prefix}billing/invoices"
     docs = site.collect_download_docs(page)
     assert len(docs) == 2
     assert {d.date_text for d in docs} == {DATE}
@@ -104,10 +106,12 @@ def test_resume_refreshes_list_and_will_not_download_another_accounts_invoice(tm
     page = Page()
     doc = site.collect_download_docs(page)[0]
     reopened = Page()
+    reopened.url = f"https://dash.cloudflare.com/{ACCOUNT}/settings/billing/invoices"
     assert site.download_bill(reopened, DATE, tmp_path / "invoice.pdf",
                               account=doc.account, document_id=doc.document_id)
     assert len(reopened.fetched) == 3
     other = Page(OTHER)
+    other.url = f"https://dash.cloudflare.com/{OTHER}/settings/billing/invoices"
     with pytest.raises(site.ListStopped):
         site.download_bill(other, DATE, tmp_path / "other.pdf", account=doc.account,
                            document_id=doc.document_id)
@@ -169,6 +173,9 @@ def test_rate_limited_pdf_stops_without_another_request(tmp_path):
     f"https://dash.cloudflare.com.attacker.example/{ACCOUNT}/billing/invoices",
     f"http://dash.cloudflare.com/{ACCOUNT}/billing/invoices",
     f"https://dash.cloudflare.com/{ACCOUNT}/billing/payment",
+    f"https://dash.cloudflare.com/{ACCOUNT}/settings/billing/payment",
+    f"https://dash.cloudflare.com/{ACCOUNT}/anything/billing/invoices",
+    f"https://dash.cloudflare.com/{ACCOUNT}/settings/billing/invoices/other",
 ])
 def test_does_not_request_data_from_an_unrecognized_tab(other_url):
     page = Page()
@@ -354,9 +361,10 @@ def test_a_dashboard_tab_off_the_invoices_page_is_told_to_open_invoices(tmp_path
     assert "Invoices and documents" in said and "not open" not in said, said
 
 
-def test_a_dashboard_tab_on_invoices_is_used_as_before(tmp_path, monkeypatch):
+@pytest.mark.parametrize("prefix", ["", "settings/"])
+def test_a_dashboard_tab_on_invoices_is_used(tmp_path, monkeypatch, prefix):
     app = _app(tmp_path, monkeypatch)
-    tab = _Tab(f"https://dash.cloudflare.com/{ACCOUNT}/billing/invoices")
+    tab = _Tab(f"https://dash.cloudflare.com/{ACCOUNT}/{prefix}billing/invoices")
     monkeypatch.setattr(app, "page", lambda: tab)
     assert app._on_its_site() is tab
 
