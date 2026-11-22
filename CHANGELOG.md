@@ -10,11 +10,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 ## [Unreleased]
 
 ### Fixed
-- **Sparkasse Pforzheim Calw:** Allow a page press up to 30 seconds for the
-  bank's navigation, so slow page turns do not stop `all` before downloads.
-  Prefer a signed-in Postfach tab over an older login tab and report progress
-  while reading all pages. Live validation listed 205 PDFs and downloaded
-  and verified two; a repeat limited to those two saved no new files.
+- **Sparkasse Pforzheim Calw turns slow Postfach pages (#175, #244).** A
+  page button's press now has 30 seconds, where every press had eight for
+  the browser's wait for the button and the bank's navigation together, so
+  Run All no longer stops partway through the listing before downloading
+  anything. The button is still pressed once and never again. With several
+  tabs open on the bank's site the app works in a signed-in Postfach tab
+  rather than a sign-in tab left open from before, and Run All says it
+  reads every page before downloading and logs each page read. Thanks to
+  @MelleD, who found the cause, sent the fix and ran it on their account.
 
 ## [0.70.0] - 2026-11-20
 

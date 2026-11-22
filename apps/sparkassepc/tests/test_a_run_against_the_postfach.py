@@ -139,6 +139,11 @@ class Bank:
         self.prepared = []
         self.fetched = []
         self.elsewhere = 0
+        # Signed-in pages that are not a Postfach folder, by path.
+        self.plain = {}
+        # Seconds the pager's buttons keep drifting after a page loads, so
+        # Playwright holds its press until they hold still.
+        self.drift = 0
 
     # -- the pages ---------------------------------------------------------
 
@@ -191,10 +196,13 @@ class Bank:
             '<a class="nbf-guided-tour-navigation_%s" href="%s?n=true">%s %d</a> ' % (
                 path.rsplit("/", 1)[-1].removesuffix(".html"), path, name, len(self.folders[name]))
             for name, path in site.FOLDERS.items())
-        return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>Postfach</title></head>"
+        drift = ("<style>.pagerbuttons input{animation:drift %ds linear}"
+                 "@keyframes drift{from{transform:translateX(0)}to{transform:translateX(3px)}}"
+                 "</style>" % self.drift if self.drift else "")
+        return ("<!doctype html><html><head><meta charset=\"utf-8\"><title>Postfach</title>%s</head>"
                 "<body><h1>Elektronisches Postfach</h1><nav>%s</nav>%s<script>"
                 "window.bankPagerScript = %s; window.bankMarksRead = %s;%s</script></body></html>"
-                % (nav, self.form(folder), "true" if self.pager == "script" else "false",
+                % (drift, nav, self.form(folder), "true" if self.pager == "script" else "false",
                    "true" if self.marks_read else "false", PAGE_JS))
 
     # -- what the bank answers ---------------------------------------------
@@ -213,6 +221,8 @@ class Bank:
         step = parts.path.endswith(".ajstep.html")
         path = parts.path.replace(".ajstep.html", ".html")
         folder = next((name for name, p in site.FOLDERS.items() if p == path), None)
+        if folder is None and path in self.plain and not self.signed_out:
+            return route.fulfill(status=200, content_type="text/html", body=self.plain[path])
         if folder is None:
             return route.fulfill(status=200, content_type="text/html", body=SIGN_IN)
         if self.signed_out:
@@ -781,3 +791,84 @@ def test_slow_page_navigation_finishes_before_listing_stops(home):
     assert code == 0, said
     assert len(home.store("discovery.json")) == 11, said
     assert len(home.bank.presses) == 1
+
+
+# -- #175, a page turn the bank holds back, and which tab a run takes ------------
+
+def test_a_page_button_held_back_past_eight_seconds_is_pressed_once_it_holds_still(home):
+    # #175's failure file said the turn's press did not go through after a
+    # timeout, the press itself held back, not the bank's answer to it. Here
+    # the pager's buttons drift for 11 seconds after the page loads, so
+    # Playwright waits that long before it presses, with nothing over them.
+    home.bank.pager = "form"
+    home.bank.drift = 11
+    home.bank.folders["Posteingang"] = many("P", 11)
+    home.page.reload()
+    code, said = home.run("--discover")
+    assert code == 0, said
+    assert len(home.store("discovery.json")) == 11, said
+    assert [press[1] for press in home.bank.presses] == [2]
+
+
+def test_a_page_turn_alone_gets_the_longer_press(home, monkeypatch):
+    from paperpull_core import pressing
+    asked = []
+    real = pressing.click
+
+    def click(page, locator, **kw):
+        asked.append((kw.get("step"), kw.get("timeout")))
+        return real(page, locator, **kw)
+    monkeypatch.setattr(pressing, "click", click)
+    home.bank.folders["Posteingang"] = many("P", 11)
+    code, said = home.run_all("--max-docs", "1")
+    assert code == 0, said
+    assert (site.TURN_STEP, 30000) in asked
+    assert {timeout for step, timeout in asked if step == site.TAKE_STEP} == {None}
+
+
+def test_a_postfach_address_that_draws_a_sign_in_is_passed_over(home):
+    home.bank.folders["Posteingang"] = [message("P1")]
+    home.page.evaluate("html => document.body.insertAdjacentHTML('beforeend', html)",
+                       SIGN_IN_PART)
+    assert site.looks_signed_out(home.page)
+    postfach = home.context.new_page()
+    postfach.goto(BASE + site.FOLDERS["Gesendet"])
+    code, said = home.run_all()
+    assert code == 0, said
+    assert home.on_disk() == ["P1"]
+    assert site.looks_signed_out(home.page)
+
+
+def test_a_postfach_tab_comes_before_another_signed_in_page(home, monkeypatch):
+    overview = urlsplit(site.URLS["home"]).path
+    home.bank.plain[overview] = (
+        "<!doctype html><html><body><h1>Finanzuebersicht</h1></body></html>")
+    home.bank.folders["Posteingang"] = [message("P1")]
+    # The folder's address in the query alone does not make it a folder tab.
+    home.page.goto(site.URLS["home"] + "?back=" + site.FOLDERS["Posteingang"])
+    postfach = home.context.new_page()
+    postfach.goto(BASE + site.FOLDERS["Gesendet"])
+    used = []
+    real = docs.App.page
+
+    def page(app):
+        tab = real(app)
+        used.append(tab)
+        return tab
+    monkeypatch.setattr(docs.App, "page", page)
+    code, said = home.run_all()
+    assert code == 0, said
+    assert home.on_disk() == ["P1"]
+    assert used and all(tab is postfach for tab in used)
+    assert urlsplit(home.page.url).path == overview
+
+
+def test_listing_progress_names_folders_and_counts_never_a_row(home, caplog):
+    import logging
+    home.bank.folders["Posteingang"] = many("P", 12, title="Geheimer Betreff %d")
+    with caplog.at_level(logging.INFO, logger="sparkassepc_docs.site"):
+        code, said = home.run("--discover")
+    assert code == 0, said
+    lines = [r.getMessage() for r in caplog.records if r.name == "sparkassepc_docs.site"]
+    assert "Postfach Posteingang page 2 read, 12 PDF(s) found so far" in lines
+    assert not [line for line in lines if "Geheimer" in line or "ID-P" in line]
