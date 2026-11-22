@@ -17,6 +17,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   not read as the bill. The failure file now names the check, with yes or
   no facts such as which of the bill's headings were found, and the run
   prints it. Nothing from the page goes in.
+- **Ziply Fiber's failure file says why its bill list stopped (#251).** A
+  list that stopped partway wrote only that it did. The failure file and
+  Diagnose's file now name the check that stopped it, the statement's
+  place in the list, and yes or no facts about the part it stopped on
+  (whether its address is on ziplyfiber.com, its invoice path, and names
+  its own id, whether its date is a calendar day or carries a time).
+  Nothing from the list goes in.
 
 ## [0.70.0] - 2026-11-20
 

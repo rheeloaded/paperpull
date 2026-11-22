@@ -494,7 +494,8 @@ class App:
                 print(f"\n!! The Ziply Fiber bill list stopped partway, since {stop}.")
                 print(f"   The {len(stop.docs)} bill(s) listed before it stopped are kept,")
                 print("   and this run stops rather than call the list read. Run it again.")
-            self.write_failure("read the documents list", "the list stopped partway")
+            self.write_failure("read the documents list", "the list stopped partway",
+                               extra=self._stop_facts(stop))
             raise SystemExit(1)
         for r in docs:
             n_new += self._record_rawdoc(r, site.BILLING_URL)
@@ -644,13 +645,23 @@ class App:
             "then run Resume to carry on from where this stopped.",
         ])
 
+    @staticmethod
+    def _stop_facts(stop) -> Optional[dict]:
+        """Which check stopped the list and the facts it gave, yes or no
+        and counts only, with how many bills were listed before it, for the
+        failure file (#251)."""
+        facts = dict(getattr(stop, "facts", None) or {})
+        facts[Fixed("listed before it stopped")] = len(getattr(stop, "docs", None) or [])
+        return {"list stop": facts}
+
     def list_changed(self, stop) -> None:
         """Stop the run because the list could not be read again while a
         bill was sought. Nothing is recorded against the bill, and the run
         leaves as one whose list did not end whole, which only a run that
         lists carries on from (listing.read_again_stopped)."""
         log.info("the list could not be read again: %s", stop)
-        self.write_failure("read the documents list again", "the list changed or stopped")
+        self.write_failure("read the documents list again", "the list changed or stopped",
+                           extra=self._stop_facts(stop))
         listing.read_again_stopped(self, (
             "The Ziply Fiber bill list could not be read again, so this "
             "run stops here."))
@@ -1032,6 +1043,9 @@ class App:
             info["stopped"] = {"step": stop.step, "reason": stop.reason, "facts": stop.facts}
         except Exception as e:
             info["error"] = str(e)[:300]
+            if isinstance(e, site.ListStopped):
+                # Which check stopped the list, as the failure file says it.
+                info["list_stop"] = self._stop_facts(e)["list stop"]
         self._diagnose_stopped = stopped
         out = self.paths.diagnostics / "diagnose-documents.json"
         write_shaped(out, info, words)

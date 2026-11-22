@@ -434,6 +434,122 @@ class Download(unittest.TestCase):
             self.assertFalse(self.out.exists())
 
 
+class WhyStopped(unittest.TestCase):
+    """A list that stops names its check, with yes or no facts and counts
+    only, so the failure file says which statement and which part of it
+    (#251, where the file said only "the list stopped partway")."""
+
+    def stop(self, a):
+        with self.assertRaises(site.ListStopped) as stop:
+            site.bills_of(a, FAKE_ACCOUNT)
+        return stop.exception
+
+    def test_each_statement_check_is_named_with_its_place(self):
+        url = "https://ziplyfiber.com/api/myacc/billinginvoice?invoiceId="
+        cases = [
+            ("not an object", "a string", site.NOT_AN_OBJECT, 2),
+            ("bad id", stmt("2026-07-13", "x1"), site.UNREADABLE_ID, 2),
+            ("no address", dict(stmt("2026-07-13", "50000009"), url=None), site.NOT_ITS_PDF, 2),
+            ("relative", dict(stmt("2026-07-13", "50000009"),
+                              url="/api/myacc/billinginvoice?invoiceId=50000009"), site.NOT_ITS_PDF, 2),
+            ("token", dict(stmt("2026-07-13", "50000009"), url=url + "50000009&token=abc"), site.NOT_ITS_PDF, 2),
+            ("time", stmt("2026-07-13T00:00:00Z", "50000009"), site.NOT_A_DAY, 2),
+            # The second statement of id 50000002 is the list's third.
+            ("twice", stmt("2026-07-13", "50000002"), site.ONE_ID_TWICE, 3),
+        ]
+        for name, row, check, at in cases:
+            rows = ROWS[:1] + [row] + ROWS[1:]
+            stop = self.stop(answer(rows))
+            self.assertEqual((stop.facts["check"], stop.facts["statement"], stop.facts["statements"]),
+                             (check, at, 4), name)
+            self.assertEqual(len(stop.docs), at - 1, name)
+
+    def test_the_address_and_date_are_told_as_yes_or_no(self):
+        row = dict(stmt("2026-07-13", "50000009"), url="/api/myacc/billinginvoice?invoiceId=50000009")
+        f = self.stop(answer(ROWS + [row])).facts
+        self.assertEqual((f["has address"], f["address is relative"], f["address on this host"],
+                          f["address is the invoice path"], f["address asks only for the invoice"],
+                          f["address names this id"], f["id is digits"], f["id digits"]),
+                         (True, True, False, True, True, True, True, 8))
+        f = self.stop(answer([stmt("2026-07-13T08:00:00Z", "50000009")])).facts
+        self.assertEqual((f["has date"], f["date is year first"], f["date has a time"],
+                          f["date is month first"]), (True, True, True, False))
+        f = self.stop(answer([stmt("7/13/2026", "50000009")])).facts
+        self.assertEqual((f["date is year first"], f["date is month first"]), (False, True))
+        f = self.stop(answer([dict(stmt("2026-07-13", "50000009"), url="")])).facts
+        self.assertEqual((f["has address"], f["address is https"]), (False, False))
+
+    def test_list_level_stops_name_their_check(self):
+        for a, check in ((answer([]), "a list with no bills"),
+                         (answer(ROWS, status=500), "the account api answered another status"),
+                         (answer(ROWS, error=True), "the account api answered the bill list with an error"),
+                         ({"data": {}}, "the account api answered with no bill list")):
+            self.assertEqual(self.stop(a).facts["check"], check)
+
+    def test_facts_that_cannot_be_taken_leave_the_stop(self):
+        original = site.statement_facts
+        site.statement_facts = lambda *a, **k: 1 / 0
+        try:
+            stop = self.stop(answer(ROWS + [stmt("2026-07-13", "x1")]))
+        finally:
+            site.statement_facts = original
+        self.assertEqual(stop.facts, {"check": site.UNREADABLE_ID, "statement": 4, "statements": 4})
+        self.assertEqual(len(stop.docs), 3)
+        self.assertEqual(site.ListStopped("Odd: 4417").facts, {})
+
+    def test_every_check_is_words_a_failure_file_keeps(self):
+        from paperpull_core import failure
+        for check in (site.NOT_AN_OBJECT, site.UNREADABLE_ID, site.NOT_ITS_PDF, site.NOT_A_DAY,
+                      site.ONE_ID_TWICE):
+            self.assertRegex(check, failure._STEP_RE)
+
+    def test_a_list_read_again_that_stops_names_its_check_too(self):
+        app = make_app(tempfile.mkdtemp(), "--resume")
+        stop = self.stop(answer(ROWS + [stmt("2026-07-13", "50000003")]))
+        with redirect_stdout(io.StringIO()):
+            try:
+                app.list_changed(stop)
+            except SystemExit:
+                pass
+        files = list(app.paths.diagnostics.glob("failure-*.json"))
+        self.assertEqual(len(files), 1)
+        report = json.loads(files[0].read_text(encoding="utf-8"))
+        self.assertEqual(report["reason"], "the list changed or stopped")
+        self.assertEqual((report["extra"]["list_stop"]["check"], report["extra"]["list_stop"]["statement"]),
+                         (site.ONE_ID_TWICE, 4))
+
+    def test_the_failure_file_and_diagnose_name_the_check_and_nothing_of_the_list(self):
+        canary_id, canary_url = "44174417", "https://ziplyfiber.com/zebulon/canary.pdf"
+        row = dict(stmt("2026-07-13", canary_id), url=canary_url, amount_due="4417.17")
+        page = Page(rows=ROWS + [row])
+        app = make_app(tempfile.mkdtemp(), "--discover")
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        with redirect_stdout(io.StringIO()) as said:
+            try:
+                app.cmd_discover()
+            except SystemExit:
+                pass
+        self.assertIn("is not its own PDF", said.getvalue())
+        files = list(app.paths.diagnostics.glob("failure-*.json"))
+        self.assertEqual(len(files), 1)
+        report = json.loads(files[0].read_text(encoding="utf-8"))
+        self.assertEqual(report["reason"], "the list stopped partway")
+        got = report["extra"]["list_stop"]
+        self.assertEqual((got["check"], got["statement"], got["statements"], got["listed_before_it_stopped"],
+                          got["address_on_this_host"], got["address_is_the_invoice_path"]),
+                         (site.NOT_ITS_PDF, 4, 4, 3, True, False))
+        app.page = lambda: page
+        with redirect_stdout(io.StringIO()):
+            app.cmd_diagnose()
+        diagnose = (app.paths.diagnostics / "diagnose-documents.json").read_text(encoding="utf-8")
+        self.assertIn('"list_stop"', diagnose)
+        self.assertIn("address is the invoice path", diagnose.replace("_", " "))
+        written = "".join(p.read_text(errors="ignore") for p in app.paths.diagnostics.rglob("*") if p.is_file())
+        for word in (canary_id, "zebulon", "canary", "4417", FAKE_ACCOUNT, FAKE_TOKEN):
+            self.assertNotIn(word, written, word)
+
+
 def make_app(tmp, *args):
     config = json.loads((HERE / "config.example.json").read_text())
     config.update({"owner": "Tester Example", "output_dir": str(Path(tmp) / "out"),
