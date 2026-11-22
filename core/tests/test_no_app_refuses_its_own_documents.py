@@ -32,7 +32,7 @@ APPS = sorted(d for d in (REPO / "apps").iterdir()
 # How a provider labels the control that gets you the document.
 VERBS = ("", "View ", "Download ")
 
-# Five apps refuse a document name on purpose, and all five are allowed
+# Six apps refuse a document name on purpose, and all six are allowed
 # to. On a military pay system "W-2", "SGLI", "FEGLI", "Beneficiary" and
 # "Net Pay" name a settings form as often as a document, and neither app
 # gates a click on this answer: myPay reads its documents from a JSON API

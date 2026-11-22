@@ -59,10 +59,12 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Bank, First Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo
     narrow the allowlist to the whole labels they press, and all of them but
     TreasuryDirect give each control a guard of its own built the same way.
-    Kaiser Permanente presses a selected billing row’s own viewer link and
-    narrowly identified dismiss buttons. The medical PDF is kept only when
-    it matches the selected statement date. Premium bills are rendered in
-    the core’s isolated PDF context.
+    Kaiser Permanente presses only the whole labels Premium Bills, Download
+    PDF and View statement on the selected row, My Documents' Next results
+    and Previous results, and the Close of Kaiser's survey popup and of the
+    medical statement viewer. The medical PDF is kept only when it matches
+    the selected statement date. Premium bills are rendered in the core's
+    isolated PDF context.
     Best Buy presses only its year menu and a year in it. Discover Bank
     presses only the keep-alive button of Discover's inactivity dialog, a
     button whose whole name is I'm still here, Stay signed in, Continue

@@ -695,12 +695,6 @@ def test_simmons_takes_its_document_from_the_folder(left, browser_context, provi
 DRIVEN_ELSEWHERE_HERE = {"verizon", "vanguard", "ibkr", "coinbase", "alpaca", "firsthorizon",
                          "chasebusiness", "simmons"}
 
-# Kaiser assigns the browser a fresh temporary directory for each press and
-# removes it at the end. There is no shared staging folder to clean at the
-# next run. Its own test_native_blob_archives_without_a_download_event_or_leftover_copy
-# drives the real Chromium press and requires the directory to disappear.
-DISPOSABLE_FOLDERS = {"kaiser"}
-
 # Apps that point the browser at a folder and take nothing from it, so
 # there is no capture here to drive, and why. Each is held to that below.
 TAKES_NOTHING = {
@@ -716,6 +710,10 @@ TAKES_NOTHING = {
     "optum": "every document is a plain link on the member site, fetched by GET of its own "
              "path with no redirect followed. Nothing is pressed and no download event or "
              "response is ever listened for",
+    "kaiser": "every My Documents file is the Blob the page made for the press of its own "
+              "Download PDF link, read from the page. The download that Blob begins is only "
+              "ended and deleted the moment it starts (see observes_only), in the app's own "
+              "folder outside the kind folders",
     "spectrum": "every Internet statement is the PDF in the page's own GraphQL answer, matched to "
                 "the Blob the page made of it, and every Mobile statement is its page printed with "
                 "receipt_pdf.print_page_to_pdf; nothing is downloaded through the browser, and a "
@@ -727,8 +725,7 @@ TAKES_NOTHING = {
 def test_every_app_that_points_the_browser_at_a_folder_is_driven_here(app):
     """A new app that points the browser at a folder has to be driven by
     this file, with its own capture, before it can pass."""
-    assert (app in SCAFFOLD or app.name in DRIVEN_ELSEWHERE_HERE
-            or app.name in TAKES_NOTHING or app.name in DISPOSABLE_FOLDERS), (
+    assert app in SCAFFOLD or app.name in DRIVEN_ELSEWHERE_HERE or app.name in TAKES_NOTHING, (
         "%s points the browser at a folder and nothing here drives its capture. "
         "Add a test like test_verizon_takes_its_bill_from_the_folder." % app.name)
 
@@ -1075,9 +1072,6 @@ def test_copies_an_earlier_version_left_are_cleared_on_the_next_run(app):
     browser from its site module and clears from its docs module."""
     modules = app_modules(app)
     assert any(calls_in(p, "set_download_dir") for p in modules)
-    if app.name in DISPOSABLE_FOLDERS:
-        assert any(calls_in(p, "TemporaryDirectory") for p in modules)
-        return
     assert any(calls_in(p, "clear_archived_copies") for p in modules), (
         "%s points the browser at a folder and never clears what earlier "
         "versions left there" % app.name)

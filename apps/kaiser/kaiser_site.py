@@ -8,7 +8,6 @@ from html import escape
 from pathlib import Path
 import re
 import sys
-from tempfile import TemporaryDirectory
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import Error as BrowserError
@@ -253,7 +252,9 @@ class NativeDocument:
 
     @property
     def document_id(self) -> str:
-        key = f"kaiser:pdf:{self.row.control_id}:{self.date_text}"
+        # The title is in the digest too, so two files of one day whose
+        # control numbers were to trade places are still told apart.
+        key = f"kaiser:pdf:{self.row.control_id}:{self.date_text}:{self.row.title}"
         return sha256(key.encode()).hexdigest()
 
 
@@ -599,7 +600,7 @@ def bill_source_url(bill: Bill | NativeDocument | medical.MedicalBill) -> str:
     return medical.SOURCE_URL if isinstance(bill, medical.MedicalBill) else DOCUMENTS_URL
 
 
-def _native_pdf(page, frame, row: BillRow, output_folder: Path) -> bytes | None:
+def _native_pdf(page, frame, row: BillRow, download_dir: Path | None) -> bytes | None:
     if _history_frame(page) is not frame or row not in _seek_page(frame, row.page_start, row.list_total).rows:
         raise ListStopped("The selected item is no longer on My Documents.")
     _dismiss_feedback(frame.page, frame)
@@ -619,33 +620,34 @@ def _native_pdf(page, frame, row: BillRow, output_folder: Path) -> bytes | None:
     key, date, title, native = observed
     if BillRow(key, _iso_date(date, "%b %d, %Y"), title, native, row.page_start, row.list_total) != row:
         return None
-    if shared_folder.on_server() and shared_folder.leads_out(output_folder):
+    if download_dir is None or (shared_folder.on_server() and shared_folder.leads_out(download_dir)):
         return None
-    # Isolate the browser's disposable copy from the archive and from earlier
-    # downloads. Only bytes tied to this press's own blob link are archived.
-    with TemporaryDirectory(prefix=".kaiser-download-", dir=output_folder, ignore_cleanup_errors=True) as scratch:
-        if not capture.set_download_dir(page, scratch):
-            raise ListStopped("The browser could not prepare a private Kaiser download folder.")
-        return _capture_native_pdf(page, frame, control, selector)
+    # The browser's own copy goes to the app's download folder, outside the
+    # kind folders, and is ended and deleted the moment it begins. What is
+    # archived is the blob the page made for this press, never that copy.
+    # A copy a stopped run left there goes at the next start when the
+    # archive holds the same bytes (capture.clear_archived_copies).
+    Path(download_dir).mkdir(parents=True, exist_ok=True)
+    if not capture.set_download_dir(page, download_dir):
+        raise ListStopped("The browser could not prepare a private Kaiser download folder.")
+    return _capture_native_pdf(page, frame, control, selector)
+
+
+def _end_download(download):
+    intake.discard(download)
 
 
 def _capture_native_pdf(page, frame, control, selector: str) -> bytes | None:
     if not blob_capture.arm(frame):
         return None
-    downloads = []
-
-    def record_download(download):
-        downloads.append(download)
-
-    page.on("download", record_download)
+    page.on("download", _end_download)
     try:
         press_document(page, control, selector, frame=frame)
         observed = frame.wait_for_function(
             f"() => ({blob_capture.SAVED_JS})()?.length > 0", timeout=_DOWNLOAD_WAIT_MS)
         observed.dispose()
         links = blob_capture.saved_links(frame) or []
-        if (len(links) != 1 or not links[0].startswith(f"blob:{BASE}/")
-                or len(downloads) > 1 or (downloads and downloads[0].url != links[0])):
+        if len(links) != 1 or not links[0].startswith(f"blob:{BASE}/"):
             raise ListStopped("Kaiser’s PDF could not be tied to the selected My Documents row.")
         payload = blob_capture.take(frame, urls=links)
         if not payload:
@@ -659,13 +661,15 @@ def _capture_native_pdf(page, frame, control, selector: str) -> bytes | None:
         # A late PDF from this action could otherwise be mistaken for the next row.
         raise ListStopped("Kaiser did not finish the selected PDF download. Run Continue to try it again.") from None
     finally:
-        page.remove_listener("download", record_download)
-        if len(downloads) == 1 and downloads[0].url in (blob_capture.saved_links(frame) or []):
-            intake.discard(downloads[0], page)
+        page.remove_listener("download", _end_download)
         blob_capture.arm(frame)
 
 def download_bill(page, bill: Bill | NativeDocument | medical.MedicalBill, out_path: Path,
-                  *, existing_pdfs: dict[str, Path] | None = None) -> Path | None:
+                  *, existing_pdfs: dict[str, Path] | None = None,
+                  download_dir: Path | None = None) -> Path | None:
+    """Save one listed document to out_path. A My Documents file needs
+    `download_dir`, the folder the browser's own copy is pointed at, and is
+    not pressed without one."""
     if isinstance(bill, medical.MedicalBill):
         try:
             return out_path if medical.download_bill(page, bill, out_path, press=press_named,
@@ -682,7 +686,7 @@ def download_bill(page, bill: Bill | NativeDocument | medical.MedicalBill, out_p
     frame = _require_history_frame(page)
     try:
         if isinstance(bill, NativeDocument):
-            data = _native_pdf(page, frame, bill.row, out_path.parent)
+            data = _native_pdf(page, frame, bill.row, download_dir)
         else:
             selected, html = _read_bill(page, frame, bill.row)
             if selected != bill:

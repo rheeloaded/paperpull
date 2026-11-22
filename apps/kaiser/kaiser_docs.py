@@ -1,7 +1,7 @@
 """Archive Kaiser Permanente My Documents from a manually signed-in browser."""
 from __future__ import annotations
 
-from paperpull_core import failure
+from paperpull_core import capture, failure
 from paperpull_core import listing, pressing
 from paperpull_core import renaming
 from paperpull_core import saved_copy
@@ -99,6 +99,20 @@ class Document:
         return cls(**d)
 
 
+def _checkpoint_ok(data) -> bool:
+    """Whether a sign-in checkpoint holds what Continue reads from it."""
+    if not isinstance(data, dict) or not isinstance(data.get("scope"), dict):
+        return False
+    if any(name not in data["scope"] for name in RESUME_SCOPE):
+        return False
+    pending, anchors = data.get("pending"), data.get("anchors")
+    if pending is not None and not (isinstance(pending, list)
+                                    and all(isinstance(x, str) for x in pending)):
+        return False
+    return (isinstance(anchors, list) and all(isinstance(x, str) for x in anchors)
+            and (data.get("source") is None or isinstance(data.get("source"), str)))
+
+
 class App:
     _journal = None
     _requests = None
@@ -117,6 +131,9 @@ class App:
         self.paths = Paths(Path(self.config["output_dir"]))
         self.paths.ensure()
         self._sign_in_resume = self.paths.last_listing.with_name("kaiser-sign-in-resume.json")
+        # Where the browser's own copy of a My Documents file is pointed,
+        # outside the kind folders. Nothing is taken from it.
+        self._dl_dir = Path(self.config["output_dir"]) / ".kaiser-downloads"
         self._setup_logging()
 
         self.progress = JsonStore(self.paths.progress_json, self.paths.backups)
@@ -195,6 +212,12 @@ class App:
         if self._work_page is not None and not self._work_page.is_closed():
             return self._work_page
         self._work_page = self._wait_for_bill_tab(ctx)
+        # A file here that is an exact copy of a document in the archive is
+        # one a stopped run left the browser holding, and goes. Nothing else
+        # is touched (capture.clear_archived_copies).
+        capture.clear_archived_copies(
+            self._dl_dir, [r.get("pdf_path") for r in self.progress.data.values()
+                           if isinstance(r, dict)])
         self.requests
         return self._work_page
 
@@ -299,11 +322,25 @@ class App:
             "anchors": sorted(self._listing_anchors),
         })
 
-    def _sign_in_checkpoint(self):
+    def _sign_in_checkpoint(self, *, strict: bool = True):
+        """Where a run that was signed out stopped, or None when none did.
+
+        A file that cannot be read as one stops Continue, since what it
+        holds is the proof of the account the run began on, and it is not
+        guessed at. Open sign-in window only reads where to open, and opens
+        the usual page then (strict False)."""
         try:
-            return whole_json(json.loads(self._sign_in_resume.read_text(encoding="utf-8")))
+            data = whole_json(json.loads(self._sign_in_resume.read_text(encoding="utf-8")))
         except FileNotFoundError:
             return None
+        except (OSError, ValueError):
+            data = None
+        if _checkpoint_ok(data):
+            return data
+        if not strict:
+            return None
+        listing.read_again_stopped(self, "PaperPull could not read where the last run stopped. "
+                                   "Check the account in the browser before choosing Get new documents.")
 
     # -- commands ----------------------------------------------------------
 
@@ -317,7 +354,7 @@ class App:
         port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9323")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
-        checkpoint = self._sign_in_checkpoint()
+        checkpoint = self._sign_in_checkpoint(strict=False)
         if checkpoint and checkpoint.get("source") == site.medical.SOURCE_URL:
             url = site.URLS["medical_billing"]
         # The account holder signs in using the dedicated Chrome or Edge profile.
@@ -401,10 +438,13 @@ class App:
             self._listing_source = source or self._listing_source
             self.check_session(page)
             docs = site.collect_download_docs(page)
-        except (site.SessionExpired, site.ListStopped) as stop:
-            if isinstance(stop, site.ListStopped) and not site.looks_signed_out(page):
+        except (site.SessionExpired, site.ListStopped, BrowserError) as stop:
+            if not isinstance(stop, site.SessionExpired) and not site.looks_signed_out(page):
                 self.write_failure("read My Documents", "My Documents did not answer")
-                print(f"Kaiser Permanente document discovery stopped. {stop}")
+                # A browser's own message can quote the page, so only the
+                # list's fixed words are said.
+                said = str(stop) if isinstance(stop, site.ListStopped) else site.OPEN_BILL_LIST
+                print(f"Kaiser Permanente document discovery stopped. {said}")
                 raise SystemExit(0)
             docs = None
         except pressing.Stop:
@@ -597,7 +637,8 @@ class App:
         bill = self._current_bills[doc.document_id]
         reuse = isinstance(bill, site.NativeDocument) and not self.args.redownload
         saved = site.download_bill(page, bill, out_path,
-                                   existing_pdfs=self._known_pdfs() if reuse else None)
+                                   existing_pdfs=self._known_pdfs() if reuse else None,
+                                   download_dir=self._dl_dir)
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):
@@ -941,7 +982,7 @@ class App:
                 # A tab that is not a document list stops here at once,
                 # with nothing pressed (ListStopped).
                 info["documents_total"] = len(site.collect_download_docs(page))
-        except (site.SessionExpired, site.ListStopped) as error:
+        except (site.SessionExpired, site.ListStopped, BrowserError) as error:
             info["error"] = type(error).__name__
         except pressing.Stop as stop:
             # A press the look would not make ends it there, and the file

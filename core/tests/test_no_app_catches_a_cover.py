@@ -43,9 +43,9 @@ KNOWN = {
     ("apps/kaiser/kaiser_medical.py", "_capture_inline_pdf"):
         "presses nothing again. A medical statement's link opens Kaiser's PDF viewer over "
         "itself, so the cover after the press is accepted only when the link heard the "
-        "browser's own trusted click, exactly one PDF answer came for it, and that answer's "
-        "frame is the viewer dialog's iframe now at the point pressed. Anything else, and "
-        "a cover before any press, is raised",
+        "browser's own trusted click, a PDF answer came for it in time with none refused, "
+        "and that answer's frame is the viewer dialog's iframe now at the point pressed. "
+        "Anything else, and a cover before any press, is raised",
 }
 
 

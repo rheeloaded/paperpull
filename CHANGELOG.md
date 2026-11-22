@@ -15,7 +15,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Statements & Billing, one list at a time. Open sign-in window, open My
   Documents or Statements, then Try the newest few first and Get new
   documents. Only what the site offers as a file or a bill is saved, never a
-  clinical record. A file is named by its kind and date alone, so a title
+  page Kaiser shows only in its viewer. A file is named by its kind and date alone, so a title
   from the page, which on a health account can hold a name or a condition,
   never names a file or reaches the run's output. Port 9323.
 

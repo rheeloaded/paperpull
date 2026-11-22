@@ -115,7 +115,7 @@ def test_all_pages_and_reopen_a_later_rows_exact_pdf(browser_page, tmp_path):
     assert docs[2].date_text == "2031-03-31"
     assert site._visible_page(frame).first == 1
     output = tmp_path / "last-page.pdf"
-    assert site.download_bill(browser_page, docs[-1], output) == output
+    assert site.download_bill(browser_page, docs[-1], output, download_dir=tmp_path / "dl") == output
     assert output.read_bytes() == PDF
     assert site._visible_page(frame).first == 5
 

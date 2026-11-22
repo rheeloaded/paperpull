@@ -108,12 +108,12 @@ def test_archive_preserves_premium_id_and_saves_both_same_day_notices(page, tmp_
     assert listed[1].date_text == listed[2].date_text
     for index, data in enumerate((FIRST, SECOND), start=1):
         output = tmp_path / f"notice-{index}.pdf"
-        assert site.download_bill(page, listed[index], output)
+        assert site.download_bill(page, listed[index], output, download_dir=tmp_path / "dl")
         assert output.read_bytes() == data
     existing = tmp_path / "previously archived.pdf"
     existing.write_bytes(FIRST)
     duplicate = tmp_path / "duplicate.pdf"
-    assert site.download_bill(page, listed[1], duplicate,
+    assert site.download_bill(page, listed[1], duplicate, download_dir=tmp_path / "dl",
                               existing_pdfs={sha256(FIRST).hexdigest(): existing}) == existing
     assert existing.read_bytes() == FIRST
     assert not duplicate.exists()
@@ -138,9 +138,34 @@ def test_native_blob_archives_without_a_download_event_or_leftover_copy(page, tm
     monkeypatch.setattr(page, "remove_listener",
                         lambda event, handler: remove_listener(event, handler) if event != "download" else None)
     archived = tmp_path / "notice.pdf"
-    assert site.download_bill(page, rows[1], archived) == archived
+    assert site.download_bill(page, rows[1], archived, download_dir=tmp_path / "dl") == archived
     assert archived.read_bytes() == FIRST
-    assert list(tmp_path.iterdir()) == [archived]
+    assert sorted(tmp_path.iterdir()) == [tmp_path / "dl", archived]
+    assert list((tmp_path / "dl").iterdir()) == []
+
+
+def test_a_native_document_is_not_pressed_without_a_download_folder(page, tmp_path):
+    page.goto(site.URLS["login"])
+    rows = site.collect_download_docs(page)
+    assert site.download_bill(page, rows[1], tmp_path / "notice.pdf") is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_the_browser_copy_is_ended_and_nothing_stays_in_the_folder(page, tmp_path, monkeypatch):
+    """The download the page's blob begins is handed to intake.discard, which
+    ends it and deletes the browser's copy, and what is archived is the blob."""
+    page.goto(site.URLS["login"])
+    rows = site.collect_download_docs(page)
+    ended = []
+    discard = site.intake.discard
+    monkeypatch.setattr(site.intake, "discard",
+                        lambda download, *rest: (ended.append(download.url), discard(download, *rest)))
+    archived = tmp_path / "notice.pdf"
+    assert site.download_bill(page, rows[2], archived, download_dir=tmp_path / "dl") == archived
+    assert archived.read_bytes() == SECOND
+    page.wait_for_timeout(500)
+    assert len(ended) == 1 and ended[0].startswith("blob:" + site.BASE + "/"), ended
+    assert list((tmp_path / "dl").iterdir()) == []
 
 
 def test_payment_history_is_outside_discovery(page):
