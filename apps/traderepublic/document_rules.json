@@ -1,0 +1,11 @@
+{
+  "statement_rules": [
+    {
+      "pattern": "\\baccount statement\\b",
+      "summary": "Account Statement"
+    }
+  ],
+  "tax_rules": [],
+  "insurance_rules": [],
+  "skip_patterns": []
+}

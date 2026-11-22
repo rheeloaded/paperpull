@@ -57,7 +57,7 @@ signed installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Eighty-nine providers are supported today, all built on the same pattern.
-Four more, SBA, American Family, Stripe and FedEx, are built and
+Five more, SBA, American Family, Stripe, FedEx and Trade Republic, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
@@ -157,6 +157,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`statefarm`](apps/statefarm) | State Farm | United States | Bills, renewal notices, ID cards, receipts, policy documents | **Confirmed by [@watling777](https://github.com/watling777)**, whose full run saved every document State Farm lists for his policies ([#37](https://github.com/rheeloaded/paperpull/issues/37)) |
 | [`target`](apps/target) | Target | United States | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | United States | Bill statements | Bill-history page; detailed-bill download |
+| [`traderepublic`](apps/traderepublic) | Trade Republic | Germany, may work elsewhere | Monthly account statements, about three years | **Untested, built without an account. Have one? [Help test it](apps/traderepublic/README.md#help-test-it-no-programming-needed)** One request a month from inside the signed-in tab, nothing clicked, each PDF saved only when it prints its month's first and last day. Routes first seen in the [Habeas sources](https://github.com/habeas-dev/sources) definition (CC0). Trade confirmations and other per-trade documents, behind the web app's WebSocket, are not covered |
 | [`treasurydirect`](apps/treasurydirect) | TreasuryDirect (savings bonds and Treasuries) | United States | Current Holdings, Security and Payment History, saved from its pages, taxable years listed for you | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 3 documents saved on a full run, every PDF opened. 1099 pages unconfirmed. Have a taxable year? [Help test it](apps/treasurydirect/README.md#help-test-it-no-programming-needed)** Its own links pressed in your tab, pages rendered to PDF |
 | [`tsp`](apps/tsp) | Thrift Savings Plan | United States | Participant statements, 1099-R | Secure Mailbox API from inside the page, nothing clicked; downloading marks the message read |
 | [`tualatin`](apps/tualatin) | City of Tualatin, Oregon (water, sewer, stormwater) | United States | Monthly utility bills, the two years CivicPay Online lists | **Built and run on a contributor's own account, 24 bills listed and the newest saved by a Pilot.** Activity's Billing rows, each bill's print page drawn as a PDF with its scripts taken out, nothing clicked |

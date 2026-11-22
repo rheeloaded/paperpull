@@ -1,0 +1,9 @@
+Trade Republic statement commands from the PaperPull checkout
+
+paperpull traderepublic login      Open the sign-in window
+paperpull traderepublic diagnose   Ask the newest months once and write what a tester sends
+paperpull traderepublic discover   List the months the statement route reaches
+paperpull traderepublic pilot      Save a sample of the newest monthly statements
+paperpull traderepublic all        Save every month the route reaches
+paperpull traderepublic resume     Continue an interrupted download
+paperpull traderepublic verify     Recheck saved PDFs

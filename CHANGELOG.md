@@ -82,6 +82,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   from the page, which on a health account can hold a name or a condition,
   never names a file or reaches the run's output, the Diagnose files or a
   failure file. It stays only in the archive's own index. Port 9323.
+- **Trade Republic monthly account statements, UNTESTED.** A new app,
+  `traderepublic`, built without an account and waiting for a tester. Once
+  you are signed in and the web app shows its home page, it asks for one
+  month's statement at a time from inside that tab, about three years back,
+  and saves each PDF only when it prints that month's first and last day. A
+  month that answers with no PDF is said and asked again next time, never
+  taken for a sign-out or for done, and Login says Success only once a
+  statement has answered. The routes were first seen in the Habeas sources
+  definition for Trade Republic (CC0). Trade confirmations and other
+  per-trade documents are not covered. Have an account? Run Login, Diagnose
+  and a Pilot and attach the files, see its README.
 
 ### Changed
 - **Meijer is confirmed on a contributor's account (#236).** A Pilot on

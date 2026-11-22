@@ -95,6 +95,7 @@
     "stripe": {"gets": "Fee invoices and tax forms such as the 1099-K", "group": "banks", "tested": false},
     "target": {"gets": "Online and in-store receipts", "group": "shopping"},
     "tmobile": {"gets": "Monthly bills", "group": "bills"},
+    "traderepublic": {"gets": "Monthly account statements, about three years online", "group": "investing", "tested": false, "note": "One account at a time"},
     "treasurydirect": {"gets": "Current holdings and security and payment history, saved from its pages", "group": "investing", "note": "Tested on one account so far, 1099s not yet"},
     "tsp": {"gets": "Participant statements, 1099-R", "group": "investing"},
     "tualatin": {"gets": "Monthly water and sewer bills, about two years online", "group": "bills"},
