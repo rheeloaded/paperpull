@@ -71,8 +71,9 @@ uses a config of their own (`--config`).
    anything in one looks personal, delete that line.
 8. Open a [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
    for Trade Republic, or comment on the one that is open, and attach both
-   Diagnose files, any `failure-*.json`, and what Login and the Pilot
-   printed.
+   Diagnose files, any `failure-*.json`, a sentence on what the newest few
+   run said for each month, and what the terminal login printed if you ran
+   it.
 
 **If a run stops early, send the file it wrote.** Every failed run leaves a
 `failure-*.json` in the `Diagnostics` folder and prints where it put it. It
