@@ -104,8 +104,9 @@ opens on another tab than the remembered one, so no account's documents
 are ever filed as yours. So does a Postbox that shows no tabs at all,
 since a hidden tab or a bar drawn late reads as none, and the signed-in
 site may still show the account an earlier run followed. When no account
-but your own is left, take `ing-accounts.json` out of the output folder. Discover says how many documents each account had, by its
-place, never its name.
+but your own is left, take `ing-accounts.json` out of the output folder.
+Discover says how many documents each account had, by its place, never
+its name.
 
 Your own account's documents are filed and named exactly as before. Each
 other account's go into a folder named after its tab inside the folder of
