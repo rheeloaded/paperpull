@@ -59,6 +59,8 @@ COLUMNS = [
     ("Order Number", "Order or Receipt Number"),
     ("Item", "Item Name"),
     ("Quantity", "Quantity"),
+    ("Pricing Quantity", "Pricing Quantity"),
+    ("Pricing Unit", "Pricing Unit"),
     ("Unit Price", "Unit Price"),
     ("Line Total", "Line Item Total"),
     ("Order Total", "Order Total"),
@@ -71,7 +73,7 @@ COLUMNS = [
     ("Processing", "Processing Status"),
     ("Notes", "Notes"),
 ]
-NUMERIC = {"Quantity", "Unit Price", "Line Total", "Order Total"}
+NUMERIC = {"Pricing Quantity", "Quantity", "Unit Price", "Line Total", "Order Total"}
 MONEY = {"Unit Price", "Line Total", "Order Total"}
 
 ORDER_COLUMNS = ["Provider", "Account", "Date", "Order Number", "Items", "Order Total",
@@ -138,8 +140,10 @@ def load_purchases(provider: str, path: Path) -> List[dict]:
                 value = provider if src is None else (read_stored(raw.get(src)) or "").strip()
                 if out in MONEY:
                     value = money(value)
-                elif out == "Quantity":
+                elif out in {"Quantity", "Pricing Quantity"}:
                     value = quantity(value)
+                elif out == "Pricing Unit" and not value:
+                    value = None
                 row[out] = value
             if not row["Date"] and not row["Item"] and not row["Order Number"]:
                 continue
@@ -273,7 +277,7 @@ def write_xlsx(path: Path, purchases: List[dict], orders: List[dict], summary: L
 
     sheet(wb.active, [c for c, _ in COLUMNS], purchases,
           {"Item": 60, "Order Number": 22, "Category": 26, "Receipt PDF": 44, "Notes": 30,
-           "Provider": 11, "Date": 11, "Quantity": 9, "Fulfillment": 14})
+           "Provider": 11, "Date": 11, "Quantity": 9, "Pricing Quantity": 18, "Pricing Unit": 14, "Fulfillment": 14})
     wb.active.title = "Purchases"
     sheet(wb.create_sheet("Orders"), ORDER_COLUMNS, orders,
           {"Order Number": 22, "Category": 26, "Receipt PDF": 44, "Provider": 11, "Date": 11})
