@@ -253,7 +253,7 @@ class App:
         saved session - so nothing is duplicated in the launcher scripts. You
         sign in; the tool attaches afterwards.
         """
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9319")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9324")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         # The account holder signs in using the dedicated Chrome or Edge profile.
