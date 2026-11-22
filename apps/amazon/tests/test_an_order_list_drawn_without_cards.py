@@ -496,3 +496,54 @@ def test_an_order_number_in_the_text_is_still_read_beside_the_menus(page):
                % DIG)
     found = read(page, orders_page([digital, order(A, "March 3, 2026", "$23.41")]))
     assert sorted(o for o, _ in found) == sorted([A, DIG])
+
+
+def test_an_order_named_only_by_its_details_link_is_read_in_the_list(page):
+    """A canceled order has no invoice menu, only its order-details link. It
+    sits in the list beside orders that have one, so it is read."""
+    site.set_marketplace("amazon.de")
+    canceled = order(B, "1. Februar 2026", "0,00 €", header=ship_to() + details(B))
+    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €"), canceled,
+                                    order(DIG, "1. Januar 2026", "4,99 €")]))
+    assert [o for o, _ in found] == [A, B, DIG]
+    assert "1. Februar 2026" in found[1][1]
+
+
+def test_a_buy_again_form_in_each_order_does_not_let_a_banner_in(page):
+    """Each order's item row holds a Buy it again form of its own. The
+    orders are still one list, so a banner's menu names no order and each
+    order keeps its own date."""
+    site.set_marketplace("amazon.de")
+    form = "<form action='/gp/buyagain'><input type='submit' value='Erneut kaufen'></form>"
+    # Each order's block with the form put in just before it closes.
+    blocks = [order(A, "3. März 2026", "23,41 €")[:-len("</div>")] + form + "</div>",
+              order(B, "1. Februar 2026", "58,20 €")[:-len("</div>")] + form + "</div>"]
+    found = read(page, orders_page(blocks, before=BANNER % menu(DECOY)))
+    assert [o for o, _ in found] == [A, B]
+    dates = [site.parse_date(t) for _, t in found]
+    assert dates == ["2026-03-03", "2026-02-01"]
+
+
+def test_a_page_that_showed_fewer_orders_than_its_count_says_so(page):
+    """Three orders counted on the page and two named. The third is not made
+    up, and the page says it showed fewer than its count."""
+    site.set_marketplace("amazon.de")
+    unnamed = order(DECOY, "2. Januar 2026", "1,00 €", header=ship_to())
+    html = orders_page([order(A, "3. März 2026", "1,00 €"), unnamed,
+                        order(B, "1. März 2026", "2,00 €")], count=3)
+    assert [o for o, _ in read(page, html)] == [A, B]
+    assert site.fewer_than_counted(page, 0, 2)
+    assert not site.fewer_than_counted(page, 0, 3)
+    # The last page of a year counts only what is left after the pages before.
+    page.set_content(orders_page([order(A, "3. März 2026", "1,00 €")], count=11))
+    assert not site.fewer_than_counted(page, 10, 1)
+    assert site.fewer_than_counted(page, 0, 1)
+
+
+def test_a_page_that_prints_its_order_numbers_is_never_called_short(page):
+    """A page whose text prints the numbers reads as it always did."""
+    site.set_marketplace("amazon.de")
+    page.set_content(orders_page(["<div>Bestellnr. %s</div>" % A], count=5))
+    assert not site.fewer_than_counted(page, 0, 1)
+    page.set_content("<div class='order-card'>x</div>" + orders_page([], count=5))
+    assert not site.fewer_than_counted(page, 0, 1)

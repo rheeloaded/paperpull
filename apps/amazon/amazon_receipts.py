@@ -255,6 +255,8 @@ class App:
         # rather than finish (see _stop_if_cut_short).
         self._list_cut_short = False
         self._years_cut_short = []
+        # Years whose list showed fewer orders than its count (#207).
+        self._years_short = []
         self.stats = {
             "mode": "", "started": now_iso(), "ended": "",
             "online_discovered": 0,
@@ -852,6 +854,19 @@ class App:
                     break
                 seen_ids_this_year |= page_ids
                 year_cards += len(cards)
+                # A list drawn without cards that showed fewer orders than
+                # its own count says this page holds. What was read is kept,
+                # and the run stops once it has downloaded it rather than
+                # take the year as read whole (#207).
+                if (site.fewer_than_counted(page, start_index, len(cards))
+                        and year not in self._years_short):
+                    self._list_cut_short = True
+                    self._years_short.append(year)
+                    print(f"\n!! Your {year} order list showed fewer orders than Amazon's")
+                    print("   own count, so some were not read. What was read is kept,")
+                    print("   and your list is not taken as read whole.")
+                    self.write_failure("read the order list",
+                                       "the order list showed fewer orders than its count")
                 # How many of this page's orders are dated before the cutoff.
                 before_floor = 0
                 for card in cards:
@@ -945,11 +960,16 @@ class App:
             try:
                 raise site.ListStopped("the order list ran past the page limit")
             except site.ListStopped:
-                years = " and ".join(str(y) for y in self._years_cut_short)
-                print("\n!! Not all of your order history was read, since the order list")
-                print(f"   of {years} ran past {YEAR_PAGES} pages, more than this app reads")
-                print("   of one year, so this run stops rather than finish. What was")
-                print("   read is kept.")
+                print("\n!! Not all of your order history was read.")
+                if self._years_cut_short:
+                    years = " and ".join(str(y) for y in self._years_cut_short)
+                    print(f"   The order list of {years} ran past {YEAR_PAGES} pages, more")
+                    print("   than this app reads of one year.")
+                if self._years_short:
+                    years = " and ".join(str(y) for y in self._years_short)
+                    print(f"   The order list of {years} showed fewer orders than Amazon's")
+                    print("   own count.")
+                print("   So this run stops rather than finish. What was read is kept.")
                 # Only Run All and Resume, Get new included, take every order
                 # they read. Pilot takes a few, a dry run saves nothing, alone
                 # or with --all or --resume, and Discover downloads nothing.

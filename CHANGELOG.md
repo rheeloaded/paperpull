@@ -17,8 +17,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   found by its own Invoice (Rechnung) menu or its order-details link, in
   every Amazon store, and never by the ship-to name beside it, which opens
   a card of the same shape. Order numbers printed with a Unicode hyphen are
-  read too and kept with plain hyphens. The app still presses nothing on
-  Amazon's pages, and a new check fails on any press added to it.
+  read too and kept with plain hyphens. Where such a list shows fewer
+  orders than Amazon's own count, the run keeps what it read, says so and
+  stops rather than take the year as read whole. The app still presses
+  nothing on Amazon's pages, and a new check fails on any press added to it.
 
 ## [0.70.0] - 2026-11-20
 

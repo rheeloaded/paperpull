@@ -736,6 +736,31 @@ def challenge_after_a_moment(page, wait_ms: Optional[int] = None,
             return found
 
 
+PAGE_SIZE = 10
+
+
+def fewer_than_counted(page, start_index: int, read: int) -> bool:
+    """Whether a list drawn without cards, whose orders print no order
+    number in its text, showed fewer orders than Amazon's own count says
+    this page holds (#207). Such a list is read from each order's invoice
+    menu or order-details link, and an order drawn with neither would go
+    missing with nothing said. False on a page with cards, a page whose
+    text prints the numbers, and a page with no count, which read as they
+    always did."""
+    try:
+        if page.locator(FALLBACK["order_card"]).count() > 0:
+            return False
+        body = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+        return False
+    if ORDER_ID_RE.search(body or ""):
+        return False
+    count = order_count(page)
+    if count is None:
+        return False
+    return read < min(PAGE_SIZE, count - start_index)
+
+
 def has_next_page(page) -> bool:
     try:
         loc = page.locator(FALLBACK["next_page"])
@@ -838,16 +863,17 @@ _DETAILS_PATH_RE = re.compile(
 # an orderID, with the address its data or href holds, and its ancestors by
 # their place in the document, the element itself first, up to and not
 # counting the body. A block that holds the page's own controls (the period
-# menu, a form, the header or the navigation) is never an order's, whatever
-# it holds.
+# menu's select, the header or the navigation) is never an order's, whatever
+# it holds. A form is not one of them, since an order's Buy it again button
+# can sit in a form of its own.
 _INVOICE_MENUS_JS = r"""() => {
   const all = document.getElementsByTagName('*');
   const place = new Map();
   for (let i = 0; i < all.length; i++) place.set(all[i], i);
   const wide = new Map();
   const isWide = (el) => {
-    if (!wide.has(el)) wide.set(el, !!(el.matches('form, header, nav, select, label') ||
-        el.querySelector('form, header, nav, select, label')));
+    if (!wide.has(el)) wide.set(el, !!(el.matches('header, nav, select') ||
+        el.querySelector('header, nav, select')));
     return wide.get(el);
   };
   // Whether a sibling has the same tag and the same attribute names, the
@@ -981,9 +1007,10 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
     named it the order is kept with that alone, no date or total rather
     than a neighbor's.
 
-    Where any invoice menu names an order, order-details links are not read
-    at all, and where the orders found sit in one list, a block outside it
-    (a banner naming an order) is not read. Empty when nothing names an
+    The list is the place holding the most orders' blocks, counted by their
+    invoice menus where any order has one, and an order whose block sits
+    outside it (a banner naming an order) is not read. An order named only
+    by its order-details link is read when its block is in the list. Empty when nothing names an
     order, or the page cannot be read."""
     try:
         found = page.evaluate(_INVOICE_MENUS_JS) or []
@@ -999,8 +1026,6 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
         oid = _order_of(f)
         if oid:
             named.append((oid, f))
-    if any(f["kind"] == "menu" for _oid, f in named):
-        named = [(oid, f) for oid, f in named if f["kind"] == "menu"]
     if not named:
         return []
     # Each place to the orders named under it.
@@ -1021,17 +1046,27 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
         blocks = [chain[i] for i in range(at) if f["alike"][i]] + [chain[at]]
         holder = chain[at + 1] if at + 1 < len(chain) else f.get("top")
         placed.append((oid, f, blocks, holder))
-    # The list, the holder of the most orders' blocks. Where it holds two or
-    # more, an order whose block is elsewhere is not read from there.
+    # The list, the holder of the most orders' blocks, counted by their
+    # invoice menus where any order has one. An order whose block is
+    # elsewhere is not read from there, and an order named only by its
+    # order-details link (a canceled one, say) is read when its block sits
+    # in that list. Where nothing settles which holder is the list (one
+    # order on the page, say), the orders named by a menu are read and a
+    # link alone names none. An order missed that way is said, since the
+    # page then shows fewer orders than its count (fewer_than_counted).
+    menus = [x for x in placed if x[1]["kind"] == "menu"]
+    votes = menus or placed
     held: dict = {}
-    for oid, _f, _block, holder in placed:
+    for oid, _f, _block, holder in votes:
         held.setdefault(holder, set()).add(oid)
     most = max(len(v) for v in held.values())
-    if most >= 2:
-        lists = [h for h, v in held.items() if len(v) == most]
-        if len(lists) != 1:
-            return []
+    lists = [h for h, v in held.items() if len(v) == most]
+    if len(lists) == 1 and most >= 2:
         placed = [x for x in placed if x[3] == lists[0]]
+    elif most >= 2:
+        return []
+    elif menus:
+        placed = menus
     asks, order = [], []
     for oid, f, blocks, _holder in placed:
         if oid in order:

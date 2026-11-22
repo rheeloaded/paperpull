@@ -691,3 +691,21 @@ def test_the_page_does_tell_of_a_press(attached, server):
             page.close()
     assert "/event?type=click" in SITE.seen
     assert any(s.startswith("/your-orders/address/popover") for s in SITE.seen)
+
+
+def test_a_list_that_showed_fewer_orders_than_its_count_stops_after_what_it_read(attached,
+                                                                                 tmp_path, capsys):
+    """Three orders counted, two named. The two are kept, and the run says so
+    and stops rather than take the year as read whole."""
+    SITE.years = {THIS_YEAR: new_layout(3, [(FIRST_ORDER, 2, "23,41"), (None, 3, "1,00"),
+                                            (SECOND_ORDER, 5, "58,20")])}
+    SITE.other_years = new_layout(0, [])
+    cfg = de_config(tmp_path, attached)
+    with pytest.raises(SystemExit) as stopped:
+        app_mod.main(["--discover", "--config", str(cfg)])
+    out = printed(capsys)
+    assert stopped.value.code == 0, out
+    assert sorted(known(tmp_path)) == ["Online:" + FIRST_ORDER, "Online:" + SECOND_ORDER], out
+    assert "showed fewer orders than Amazon's own count" in out, out
+    assert list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    assert touched() == []
