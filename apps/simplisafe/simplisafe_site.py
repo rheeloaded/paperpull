@@ -443,18 +443,18 @@ def bill_list_ready(page) -> bool:
     return True
 
 
-def bill_list_problem(page) -> str:
-    """What keeps the bill history from being ready, in words a person can
-    act on, or "" when it is ready. A table with no bills says that, not
-    where to find a page the person already has open."""
+def bill_list_status(page):
+    """Whether the bill history is ready, and when it is not, what keeps it
+    from being ready in words a person can act on. A table with no bills
+    says that, not where to find a page the person already has open."""
     try:
         _open_account(page)
         _view(page)
     except NoBills as stop:
-        return str(stop)
+        return False, str(stop)
     except (SessionExpired, ListStopped):
-        return "Open Manage Account → Monitoring Payments in that window."
-    return ""
+        return False, "Open Manage Account → Monitoring Payments in that window."
+    return True, ""
 
 
 def _show(page, bill: Bill) -> bool:

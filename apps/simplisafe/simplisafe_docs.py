@@ -277,8 +277,8 @@ class App:
             print("Connected, but SimpliSafe shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         else:
-            problem = site.bill_list_problem(page)
-            if not problem:
+            ok, problem = site.bill_list_status(page)
+            if ok:
                 print("Success: the SimpliSafe bill history answered.")
                 print("Keep the window open, then run: paperpull simplisafe pilot")
             else:
