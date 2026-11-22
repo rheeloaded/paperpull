@@ -88,19 +88,23 @@ click makes, and reads that account's list. Before it reads a list, and
 before each download, it checks that exactly one tab is shown selected and
 that it is the tab it followed, among the same tabs in the same order, and
 stops that list, saving nothing, when it is not or when a tab's link is not
-ING's own list page. An unread count such as "(2)" after a tab's name is
-not part of the name.
+ING's own list page. An unread count in brackets after a tab's name, such
+as "(2)", is not part of the name.
 
-When the tabs cannot be read as one row of accounts (which tab is selected
-cannot be told, two tabs carry one name, a tab offers to add or open an
-account, or there are more than 20), your own account is still read as it
-always was, since the list's own address opens it whatever the tabs show.
-Discover then says that only that account was read and why, and leaves a
-failure file for mapping the page. It also remembers which tab the Postbox
-opened on, as a salted fingerprint in `ing-accounts.json` rather than the
-name, and stops if a later run finds it opening on another, so no account's
-documents are ever filed as yours. Once it has, a run that finds no tabs at
-all says so. Discover says how many documents each account had, by its
+Until the tabs have once been read, tabs that cannot be read as one row of
+accounts (which tab is selected cannot be told, two tabs carry one name, a
+tab offers to add or open an account, or there are more than 20) leave
+your own account read as it always was, since the list's own address opens
+it. Discover then says that only that account was read and why, and leaves
+a failure file for mapping the page. The app remembers which tab the
+Postbox opened on, as a salted fingerprint in `ing-accounts.json` rather
+than the name. From then on, tabs that cannot be read stop the list rather
+than read a page that may show another account, and so does a Postbox that
+opens on another tab than the remembered one, so no account's documents
+are ever filed as yours. A Postbox that shows no tabs at all is read as
+your own and said, unless the run has just followed another account's tab.
+When no account but your own is left, take `ing-accounts.json` out of the
+output folder. Discover says how many documents each account had, by its
 place, never its name.
 
 Your own account's documents are filed and named exactly as before. Each
@@ -175,8 +179,9 @@ to the others, and the next run tries it again.
 This is a bank account, and may hold a credit card and a securities account.
 The site can transfer money, set up standing orders, buy and sell
 securities, change limits and lock cards. This app activates no control at
-all. It reads the rows of the two Postbox lists, follows the link of each
-account tab as a plain page load, and fetches the rows' download links. A link is fetched only when it is `https` on `banking.ing.de` under
+all. It reads the rows of the two Postbox lists, follows the link of
+each account tab as a plain page load, and fetches the rows' download
+links. A link is fetched only when it is `https` on `banking.ing.de` under
 `/app/`, and never when its address carries a word of an action, such as
 logout, delete, archive, move, mark read, unread, transfer, payment,
 setting, cancel or lock, in German or English, as written or decoded. The
@@ -198,8 +203,9 @@ The single-account test does not cover every case.
   not show how ING marks the selected tab. The app reads a mark in aria or
   a class word such as active or selected, or the one tab whose classes are
   the others' and more. When none of these tells, only your own account is
-  read. Diagnose counts the tab bars, tabs and marked tabs it finds, and
-  boxes of links it did not read as tabs, numbers only.
+  read, and once the tabs have been read, the list stops. Diagnose counts
+  the tab bars, tabs and marked tabs it finds, and boxes of links it did
+  not read as tabs, numbers only.
 - A tab renamed in ING is a new folder, and its documents are downloaded
   again into it. When the tab the Postbox opens on is renamed, the run
   stops. Take `ing-accounts.json` out of the output folder to go on.

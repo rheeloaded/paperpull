@@ -443,6 +443,50 @@ def test_tabs_gone_after_a_home_account_was_remembered_are_said(home):
     assert code == 0
     assert ("Only the account the Postbox opens on was read, since the Postbox showed no "
             "account tabs this time") in said
+    # It says how to stop it, and leaves no failure file on every run.
+    assert "take ing-accounts.json out of the output folder" in said
+    assert not list((home.out / "Diagnostics").glob("failure-*.json"))
+
+
+def test_tabs_unreadable_once_an_account_tab_was_read_stop_rather_than_read_as_yours(home):
+    """Once tabs were read, a page whose tabs cannot be read may show
+    another account, so its list is not read as the home account's."""
+    three_accounts(home)
+    assert home.run("--discover")[0] == 0
+    home.bank.mark = "none"
+    code, said = home.run("--resume")
+    assert home.stopped is not None
+    assert home.bank.fetched == []
+    assert home.files() == {}
+    assert "which account tab is selected cannot be told" in said
+
+
+def test_after_a_tab_was_followed_a_list_with_no_tabs_is_not_read_as_yours(home):
+    """A child's document fetched, then the Postbox shows no tabs at all.
+    The site may still show the child, so the next document, your own, is
+    not read from it."""
+    b = home.bank
+    b.accounts = [OWN, MIA]
+    b.by_account = {OWN: {"postbox": [statement("O1", 1)], "archive": []},
+                    MIA: {"postbox": [statement("M1", 5)], "archive": []}}
+    assert home.run("--discover")[0] == 0
+
+    def tabs_gone(bank):
+        bank.bars = 0
+    b.at_fetch["M1"] = tabs_gone
+    home.run("--resume")
+    assert "M1" in home.files().values()
+    assert "O1" not in home.files().values() and "O1" not in b.fetched
+
+
+@pytest.mark.parametrize("shown,name", [
+    ("Mia Muster (3)", "Mia Muster"), ("Mia Muster [12 neue]", "Mia Muster"),
+    ("Mia Muster (ausgewählt)", "Mia Muster"), ("Mia Inaktiv", "Mia Inaktiv"),
+    ("Max Proaktiv", "Max Proaktiv"), ("Leo Current", "Leo Current"),
+    ("Depot aktiv", "Depot aktiv"), ("Konto 2", "Konto 2"), ("(3)", "(3)"),
+])
+def test_only_a_count_or_selected_word_in_brackets_comes_off_a_tabs_name(shown, name):
+    assert site.tab_label(shown) == name
 
 
 def test_a_childs_document_that_fails_leaves_no_name_in_the_log(home, caplog):

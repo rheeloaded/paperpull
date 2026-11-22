@@ -231,8 +231,9 @@ class App:
         # documents as the home account's.
         self.accounts_json = self.paths.root / ACCOUNTS_FILE
         home, salt = self._home_remembered()
-        # A salt of this install's own, so the fingerprint is no lookup of a
-        # name. Written with the first home seen (_remember_home).
+        # A salt of this install's own, so one fingerprint cannot be looked
+        # up across installs. Written with the first home seen
+        # (_remember_home).
         self._home_salt = salt or secrets.token_hex(16)
         site.remember_home(home, self._home_salt)
 
@@ -603,11 +604,16 @@ class App:
                 print(f"  Account {n} ({which}): {count} document(s) listed")
         # Tabs shown that this run could not read leave the other accounts
         # unread, which is said, never passed over (#169).
+        gone = "the Postbox showed no account tabs this time"
         for why in site.tabs_not_read():
             print(f"\n!! Only the account the Postbox opens on was read, since {why}.")
+            if why == gone:
+                print(f"   When no account but your own is left in ING, take {ACCOUNTS_FILE}")
+                print("   out of the output folder and this is no longer said.")
+                continue
             print("   Any other account behind a tab was not read this run. Run Diagnose with")
             print("   the Postbox open and attach its support report to the ING issue.")
-        if site.tabs_not_read():
+        if any(why != gone for why in site.tabs_not_read()):
             self.write_failure("read the account tabs", "the account tabs could not be read")
 
         if not quiet:

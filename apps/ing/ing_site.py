@@ -560,7 +560,7 @@ _TABS_JS = r"""(a) => {
   const flat = (s) => String(s || "").replace(/\s+/g, " ").trim();
   const shown = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const list = document.querySelector(a.wrapper);
-  if (!list) return {bars: 0, loose: 0, tabs: []};
+  if (!list) return {bars: 0, loose: 0, count: 0, tabs: [], list: false};
   const pathOf = (p) => String(p || "").split(";")[0].replace(/\/+$/, "");
   const here = pathOf(location.pathname);
   const sameList = (link) => {
@@ -601,7 +601,8 @@ _TABS_JS = r"""(a) => {
         classes: Array.from(k.classList).slice(0, 40).map(c => String(c).slice(0, 100)),
       };
     });
-  return {bars: bars.length, loose, count: bars.length === 1 ? bars[0].children.length : 0, tabs};
+  return {bars: bars.length, loose, count: bars.length === 1 ? bars[0].children.length : 0, tabs,
+          list: true};
 }"""
 
 # Words of a tab that offers to add or open an account, which is not one.
@@ -609,12 +610,12 @@ _TAB_REFUSED = re.compile(r"hinzuf(ue|ü)g|er(oe|ö)ffn|\bneu(es|en)?\b|\bnew\b|
                           r"log\s*out|logout|sign\s*out|abmeld", re.I)
 
 
-# What a tab may show beside its name that is not the name, an unread count
-# such as "(2)" or a word saying it is the selected one. Taken off, so a
-# count that changes never makes the account another key and folder.
-_TAB_NOISE = re.compile(r"(?:\s*[(\[]\s*\d+(?:\s*(?:neue?n?|ungelesene?n?|new|unread))?\s*[)\]]"
-                        r"|\s*[(\[,]?\s*(?:ausgew(?:ä|ae)hlt|aktiv|selected|current)\s*[)\]]?)\s*$",
-                        re.I)
+# What a tab may show in brackets after its name that is not the name, an
+# unread count such as "(2)" or "(ausgewählt)" on the selected one. Taken
+# off, so a count that changes never makes the account another key and
+# folder. Only in brackets, so a name ending "Inaktiv" or "Current" stays.
+_TAB_NOISE = re.compile(r"\s*[(\[]\s*(?:\d+(?:\s*(?:neue?n?|ungelesene?n?|new|unread))?|"
+                        r"ausgew(?:ä|ae)hlt|aktiv|selected|current)\s*[)\]]\s*$", re.I)
 
 
 def tab_label(text: str) -> str:
@@ -631,13 +632,15 @@ def tab_label(text: str) -> str:
 def tab_digest(label: str, salt: str = "") -> str:
     """What the home account is remembered by, never its label, which is a
     person's name. Salted with a value of the install's own (remember_home),
-    so the fingerprint is no lookup of a name."""
+    so one fingerprint cannot be looked up across installs. The salt sits
+    beside it, so a list of names tried against this one install's file
+    can still find it."""
     return _digest("ing-tab", salt or _home["salt"], _flat(label))[:32]
 
 
 # The home account's tab, as remembered from an earlier run ("stored") and
 # as first seen in this one ("seen"), by tab_digest with "salt".
-_home: dict = {"stored": "", "seen": "", "salt": ""}
+_home: dict = {"stored": "", "seen": "", "salt": "", "followed": False}
 # What kept this listing to the home account although tabs were shown.
 _tabs_note: List[str] = []
 
@@ -648,6 +651,7 @@ def remember_home(digest: str, salt: str = "") -> None:
     _home["stored"] = digest or ""
     _home["seen"] = ""
     _home["salt"] = salt or ""
+    _home["followed"] = False
     del _tabs_note[:]
 
 
@@ -703,7 +707,8 @@ def account_tabs(page) -> dict:
             or type(seen.get("count")) is not int or not isinstance(seen.get("tabs"), list)):
         raise ListStopped(_STRANGE)
     if seen["bars"] == 0:
-        return {"labels": [], "hrefs": [], "selected": None}
+        return {"labels": [], "hrefs": [], "selected": None,
+                "list": seen.get("list") is not False}
     if seen["bars"] > 1:
         raise ListStopped("the Postbox shows more than one row of account tabs")
     if seen["count"] > _MAX_TABS:
@@ -730,7 +735,7 @@ def account_tabs(page) -> dict:
     if (len({label.casefold() for label in labels}) != len(labels)
             or len({f.casefold() for f in folders}) != len(folders)):
         raise ListStopped("two account tabs carry the same name")
-    return {"labels": labels, "hrefs": [t["href"] for t in tabs],
+    return {"list": True, "labels": labels, "hrefs": [t["href"] for t in tabs],
             "selected": _selected_of(tabs)}
 
 
@@ -761,21 +766,35 @@ def _safe_tab(href: str, source: str) -> bool:
 def _home_bar(page) -> Optional[dict]:
     """The tabs on a list just opened by its plain address, the home account
     checked against the one remembered, or None when the tabs cannot be
-    read. The plain address opens the first account whatever the tab bar
-    shows (MelleD, #169), so tabs this app cannot read leave the home
-    account to be read as it always was, and why is noted for Discover to
-    say (tabs_not_read). Only a home account other than the remembered one
-    stops the list."""
+    read.
+
+    The plain address opens the first account (MelleD, #169). So while no
+    account tab has ever been read, here or in an earlier run, tabs this
+    app cannot read leave the home account read as it always was, and why
+    is noted for Discover to say (tabs_not_read). Once one has been read, or
+    this run has followed another account's tab, which the site may keep
+    shown, tabs that cannot be read stop the list instead, since the page
+    may show another account. Only a list shown with no tab bar at all is
+    still read as the home account then, said too unless this run followed
+    a tab, when it stops."""
+    known = bool(_home["stored"] or _home["seen"] or _home["followed"])
     try:
         bar = account_tabs(page)
     except ListStopped as e:
+        if known:
+            raise
         _tabs_note.append(str(e))
         return None
     if not bar["labels"]:
-        if _home["stored"]:
-            _tabs_note.append("the Postbox showed no account tabs this time")
+        if not known:
+            return bar
+        if _home["followed"] or not bar["list"]:
+            raise ListStopped("the Postbox showed no account tabs where it showed them before")
+        _tabs_note.append("the Postbox showed no account tabs this time")
         return bar
     if bar["selected"] is None:
+        if known:
+            raise ListStopped("which account tab is selected cannot be told")
         _tabs_note.append("which account tab is selected cannot be told")
         return None
     _check_home(bar["labels"][bar["selected"]])
@@ -807,6 +826,7 @@ def _enter_account(page, source: str, tab: str) -> list:
     if not _safe_tab(href, source):
         raise ListStopped("an account tab links to an address this app does not follow")
     try:
+        _home["followed"] = True
         page.goto(href, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(1500)
     except Exception as e:

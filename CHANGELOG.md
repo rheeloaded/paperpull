@@ -20,9 +20,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   them there. Each tab is followed by the link the page shows for it right
   then, and before every list and every download the app checks that the
   tab shown as selected is the one it followed, and a list that lands
-  elsewhere stops, saving nothing. Tabs it cannot read as accounts leave
-  your own account read as before, and Discover says so and why. A
-  Postbox that opens on another account than before stops the run.
+  elsewhere stops, saving nothing. Until the tabs have been read once,
+  tabs it cannot read as accounts leave your own account read as before,
+  and Discover says so and why. After that, they stop the list, as a
+  Postbox that opens on another account than before does.
   Discover says how many documents each account had, by number, and the
   support report counts the tabs. Thanks to @MelleD for the recordings.
 
