@@ -59,7 +59,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Bank, First Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo
     narrow the allowlist to the whole labels they press, and all of them but
     TreasuryDirect give each control a guard of its own built the same way.
-    Starlink presses only the Invoices grid’s exact page controls. Invoice PDFs
+    Starlink presses only the Invoices grid's exact page controls. Invoice PDFs
     come from the same-origin invoice link, with redirects disabled, and
     must match the listed invoice number and show the Billing date or the
     following date as the issue date.

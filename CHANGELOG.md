@@ -9,6 +9,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Starlink invoices (#245).** A new app, contributed by @solkennedy, saves
+  the invoice PDFs of Starlink's Billing page. It reads every page of the
+  Invoices table, pressing only that table's own page buttons, and files a
+  PDF only when it prints the listed invoice number and an issue date of the
+  Billing date or the day after. Every password field of the page counts
+  when it checks for a sign-out, a hidden one too. Port 9322.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads

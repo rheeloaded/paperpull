@@ -150,7 +150,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`sparkassepc`](apps/sparkassepc) | Sparkasse Pforzheim Calw | Germany | Account statements and other Postfach PDFs | **Contributed by [@MelleD](https://github.com/MelleD), run on the contributor's own account** ([#216](https://github.com/rheeloaded/paperpull/pull/216)). Posteingang, Gesendet and Papierkorb read page by page, pressing only the Postfach's own page buttons and each document's own direct download link. Messages with no direct PDF are counted and left in the Postfach. A Pilot saved two statements, and a whole run has not been reported yet. Requested in [#175](https://github.com/rheeloaded/paperpull/issues/175) |
 | [`spectrum`](apps/spectrum) | Spectrum (Internet and Mobile) | United States | Internet statements, about a year online, and Mobile statements printed from their pages | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 11 Internet statements saved on a full run.** Mobile statements listed live, a whole Mobile run still to come. Each statement chosen by its own row. Two statements of one date, after an account transfer, are left for you to save by hand |
 | [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | United States, may work elsewhere | Fee invoices, tax forms such as the 1099-K | **Untested, built on an account with no documents yet. Have Stripe invoices or tax forms? [Help test it](apps/stripe/README.md#help-test-it-no-programming-needed)** Requested in [#53](https://github.com/rheeloaded/paperpull/issues/53) |
-| [`starlink`](apps/starlink) | Starlink | United States | Billing invoices | Reads all invoice pages and checks each PDF against the invoice number and Billing date. |
+| [`starlink`](apps/starlink) | Starlink | United States, may work elsewhere | Billing invoice PDFs | **Contributed by [@solkennedy](https://github.com/solkennedy), run on the contributor's own account** ([#245](https://github.com/rheeloaded/paperpull/pull/245)). Reads every page of the Billing page's Invoices table, pressing only that table's own page buttons. Each PDF is filed only when it prints the listed invoice number and an issue date of the Billing date or the day after |
 | [`statefarm`](apps/statefarm) | State Farm | United States | Bills, renewal notices, ID cards, receipts, policy documents | **Confirmed by [@watling777](https://github.com/watling777)**, whose full run saved every document State Farm lists for his policies ([#37](https://github.com/rheeloaded/paperpull/issues/37)) |
 | [`target`](apps/target) | Target | United States | Receipts (Online + In-Store) | Print-capture |
 | [`tmobile`](apps/tmobile) | T-Mobile | United States | Bill statements | Bill-history page; detailed-bill download |
@@ -968,11 +968,10 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ **Ninety-eight** apps share a test suite, including the eighty-nine
-  supported providers, the five still waiting for a tester and the Scalable
-  Capital, Consorsbank, CIBC and MBNA shells. The last recorded whole run
-  counted 47,569 tests across the repo. Most apps are in regular use by the
-  author. The rest were built or
+- ✅ All **ninety-eight** apps pass their tests, the eighty-nine that are
+  supported, the five still waiting for a tester and the Scalable Capital,
+  Consorsbank, CIBC and MBNA shells, 47,569 of them
+  across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
   and in [Thanks](#thanks).
 - ✅ **Self-hosted.** PaperPull Server, one Docker image published with
@@ -1055,7 +1054,8 @@ found a bug and diagnosed it to the line.
   a student loan account back to 2019, and the Interactive Brokers app,
   run against five years of monthly statements.
 - [@solkennedy](https://github.com/solkennedy), the Marin Water app, built and run on their own account,
-  bills that share a date told apart by their PDFs.
+  bills that share a date told apart by their PDFs, the Cloudflare app, and the
+  Starlink app, run on their own account.
 - [@JasperDale19](https://github.com/JasperDale19), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County
