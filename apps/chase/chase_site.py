@@ -66,6 +66,7 @@ import html as _html
 import json
 import logging
 import re
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -1565,18 +1566,26 @@ _BUTTON_OWNERS = r"""({buttons, headers}) => {
 
 def _statement_buttons(page):
     """Index visible date-only buttons by their verified card and date."""
-    if not _statements_path(page.url or ""):
-        return {}, False
     try:
-        candidates = page.get_by_role("button", name=DOWNLOAD_BUTTON_RE).and_(
-            page.locator("button[aria-label]")).element_handles()
-        if not candidates:
-            return {}, False
-        headers = page.get_by_role("button", name=CARD_RE).element_handles()
-        bindings = page.evaluate(_BUTTON_OWNERS, {"buttons": candidates, "headers": headers})
+        return _bound_buttons(page)
     except Exception as exc:
         log.info("could not bind Chase download buttons: %s", error_kind(exc))
         return {}, True
+
+
+def _bound_buttons(page):
+    """_statement_buttons, raising when the page cannot be asked."""
+    if not _statements_path(page.url or ""):
+        return {}, False
+    candidates = page.get_by_role("button", name=DOWNLOAD_BUTTON_RE).and_(
+        page.locator("button[aria-label]")).element_handles()
+    if not candidates:
+        return {}, False
+    headers = page.get_by_role("button", name=CARD_RE).element_handles()
+    try:
+        bindings = page.evaluate(_BUTTON_OWNERS, {"buttons": candidates, "headers": headers})
+    finally:
+        _let_go(headers)
 
     buttons = {}
     incomplete = False
@@ -1591,18 +1600,35 @@ def _statement_buttons(page):
     return buttons, incomplete
 
 
+def _let_go(handles) -> None:
+    """Drop element handles a look no longer needs, so a wait that polls
+    does not pile them up in the page."""
+    for handle in handles:
+        try:
+            handle.dispose()
+        except Exception:
+            pass
+
+
 def _wait_for_personal_card_rows(page, account: str, year: str) -> bool:
-    """Wait for evidence that this card's table has reached the chosen year."""
-    header = page.get_by_role("button", name=account, exact=True)
-    card = page.locator("mds-accordion-item").filter(has=header)
-    date_in_year = re.compile(rf",\s*{escape_for_locator(year)}\s+Download\s*$", re.I)
-    buttons = card.get_by_role("button", name=DOWNLOAD_BUTTON_RE).and_(
-        card.get_by_role("button", name=date_in_year))
+    """Wait for evidence that this card's table has reached the chosen year.
+
+    The evidence is what the reading itself counts, a year-dated row that
+    _statement_buttons binds to this card along the drawn relationships.
+    Chase draws a card's table through slots, so the table can sit outside
+    the card's accordion item in the document tree and inside it only on
+    screen, where a locator under the item never finds it (#232, 0.70.0)."""
+    deadline = time.monotonic() + _PERSONAL_ROWS_TIMEOUT_MS / 1000
     try:
-        if card.count() != 1:
-            return False
-        buttons.first.wait_for(timeout=_PERSONAL_ROWS_TIMEOUT_MS)
-        return True
+        while True:
+            buttons, _unbound = _bound_buttons(page)
+            found = any(card == account and date[:4] == year for card, date in buttons)
+            _let_go([h for handles in buttons.values() for h in handles])
+            if found:
+                return True
+            if time.monotonic() >= deadline:
+                raise TimeoutError("no row of the year was drawn")
+            page.wait_for_timeout(250)
     except Exception as exc:
         log.info("no confirmed statement rows for %s in %s: %s",
                  shape_label(account), year, error_kind(exc))
@@ -1615,27 +1641,51 @@ _PAGER_RE = re.compile(
     r"^\s*older\b|^\s*page\s+\d+\b", re.I)
 
 
+# Which of els are drawn inside an accordion item that holds the given card
+# header, following slots and open shadow roots as _BUTTON_OWNERS does. Every
+# enclosing item counts, so a pager in an outer item holding the cards counts
+# for each of them. Null for a header in no accordion item.
+_IN_CARD = r"""({els, header}) => {
+  const ancestors = el => {
+    const nodes = [];
+    for (; el; el = el.assignedSlot || el.parentElement || el.getRootNode().host) nodes.push(el);
+    return nodes;
+  };
+  const items = ancestors(header).filter(el => el.matches('mds-accordion-item'));
+  if (!items.length) return null;
+  return els.map(el => ancestors(el).some(node => items.includes(node)));
+}"""
+
+
 def _card_table_pages(page, account: str) -> bool:
     """Whether this card's table shows a pager, so the rows on screen may be
-    one page of the year (review of #232). A card that cannot be asked
-    answers yes, so its list is not noted whole."""
+    one page of the year (review of #232). A pager counts when it is drawn in
+    the card's own item, slotted into it included, or in the action bar every
+    card shares with the year button. A card that cannot be asked answers
+    yes, so its list is not noted whole."""
+    headers, pagers = [], []
     try:
-        header = page.get_by_role("button", name=account, exact=True)
-        card = page.locator("mds-accordion-item").filter(has=header)
-        if card.count() != 1:
+        headers = page.get_by_role("button", name=account, exact=True).element_handles()
+        if len(headers) != 1:
             return True
-        # In the card's own item, or in the action bar every card shares
-        # with the year button.
-        for where in (card, page.locator("mds-data-table-action-bar")):
-            pagers = (where.get_by_role("button", name=_PAGER_RE, disabled=False)
-                      .or_(where.get_by_role("link", name=_PAGER_RE))
-                      .or_(where.locator("mds-pagination, [role='navigation']")))
-            if pagers.count() > 0:
-                return True
-        return False
+        pagers = (page.get_by_role("button", name=_PAGER_RE, disabled=False)
+                  .or_(page.get_by_role("link", name=_PAGER_RE))
+                  .or_(page.locator("mds-pagination, [role='navigation']"))).element_handles()
+        if not pagers:
+            return False
+        inside = page.evaluate(_IN_CARD, {"els": pagers, "header": headers[0]})
+        if inside is None:
+            return True
+        bar = page.locator("mds-data-table-action-bar")
+        shared = (bar.get_by_role("button", name=_PAGER_RE, disabled=False)
+                  .or_(bar.get_by_role("link", name=_PAGER_RE))
+                  .or_(bar.locator("mds-pagination, [role='navigation']")))
+        return any(inside) or shared.count() > 0
     except Exception as exc:
         log.info("could not look for a pager on %s: %s", shape_label(account), error_kind(exc))
         return True
+    finally:
+        _let_go(headers + pagers)
 
 
 def read_card_rows(page, label: str, *, year: str = "") -> List[dict]:
