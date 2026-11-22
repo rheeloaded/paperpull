@@ -212,3 +212,49 @@ def test_refused_pdf_propagates_an_unreadable_or_signed_out_history(page, monkey
     with pytest.raises(read_error):
         site.download_bill(page, DATE, path, document_id=first.document_id)
     assert not path.exists()
+
+
+class _Fields:
+    def __init__(self, count=0, broken=False):
+        self._count, self._broken = count, broken
+        self.selectors = []
+
+    def locator(self, selector):
+        self.selectors.append(selector)
+        return self
+
+    def count(self):
+        if self._broken:
+            from playwright.sync_api import Error
+            raise Error("page went away")
+        return self._count
+
+
+@pytest.mark.parametrize("fields,signed_out", [
+    (_Fields(0), False), (_Fields(1), True), (_Fields(broken=True), True),
+])
+def test_signed_out_counts_every_password_field(fields, signed_out):
+    fields.url = site.DOCUMENTS_URL
+    assert site.looks_signed_out(fields) is signed_out
+    # Hidden fields count too, so the selector asks for no drawn state.
+    assert fields.selectors == ['input[type="password"]']
+
+
+def test_a_hidden_password_field_on_billing_reads_as_signed_out(page):
+    assert not site.looks_signed_out(page)
+    page.evaluate("""() => {
+        const field = document.createElement('input');
+        field.type = 'password';
+        field.style.display = 'none';
+        document.body.appendChild(field);
+    }""")
+    assert site.looks_signed_out(page)
+    with pytest.raises(site.SessionExpired):
+        site.collect_download_docs(page)
+
+
+def test_refuses_pager_that_shows_the_same_page_again(page):
+    page.locator('#invoices [aria-label="Go to next page"]').evaluate(
+        "el => { el.onclick = () => renderInvoicePage(0); }")
+    with pytest.raises(site.ListStopped):
+        site.collect_download_docs(page)

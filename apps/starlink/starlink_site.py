@@ -138,9 +138,15 @@ def looks_signed_out(page) -> bool:
     if not is_session_url(page.url):
         return False
     path = urlsplit(page.url).path.rstrip("/") + "/"
-    return any(marker.rstrip("/") + "/" in path for marker in LOGIN_URL_MARKERS) or bool(
-        page.locator('input[type="password"]:visible').count()
-    )
+    if any(marker.rstrip("/") + "/" in path for marker in LOGIN_URL_MARKERS):
+        return True
+    # Every password field counts, a hidden one too, since a field kept out
+    # of sight may be the next step of a sign-in. A page whose fields cannot
+    # be counted is not taken as signed in.
+    try:
+        return bool(page.locator('input[type="password"]').count())
+    except BrowserError:
+        return True
 
 
 def detect_security_challenge(page):
