@@ -301,3 +301,85 @@ def test_a_loading_overlay_on_an_empty_footer_is_not_an_empty_history(page):
         .innerHTML = '<span role="progressbar"></span>'""")
     with pytest.raises(site.ListStopped):
         site.collect_download_docs(page)
+
+
+# -- review repairs, findings 3 and 4 -----------------------------------------
+
+import json  # noqa: E402
+
+import starlink_docs as app_mod  # noqa: E402
+
+
+def _app(tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({
+        "owner": "Synthetic Owner", "output_dir": str(tmp_path), "min_pdf_bytes": 100,
+    }), encoding="utf-8")
+    monkeypatch.setattr(app_mod.App, "_setup_logging", lambda self: None)
+    app = app_mod.App(app_mod.build_parser().parse_args(["--config", str(config)]))
+    monkeypatch.setattr(app, "check_session", lambda _page: None)
+    monkeypatch.setattr(app, "_delay", lambda: None)
+    return app
+
+
+def _download_first(tmp_path, monkeypatch, page, data, text):
+    app = _app(tmp_path, monkeypatch)
+    monkeypatch.setattr(app, "_on_its_site", lambda: page)
+    app.cmd_discover(quiet=True)
+    monkeypatch.setattr(site, "_fetch_pdf", lambda _page, _bill: data)
+    monkeypatch.setattr(site.pdf_reader, "page_texts", lambda *a, **k: [text])
+    doc = next(d for d in app._select() if d.document_id == site.Bill(FIRST, DATE).key)
+    app.download_one(page, doc, "invoice.pdf")
+    return app, app.progress.get(doc.key)
+
+
+def test_a_pdf_of_another_invoice_is_counted_as_a_wrong_document(page, tmp_path, monkeypatch):
+    app, rec = _download_first(tmp_path, monkeypatch, page, b"%PDF-1.7 synthetic",
+                               f"Invoice\n{SECOND}\nInvoice Date: Friday, March 5, 2032")
+    assert app.stats.get("wrong_document") == 1 and app.stats["failed"] == 1
+    assert "did not show this invoice" in rec["notes"], rec["notes"]
+    assert site.last_refusal() == "wrong"
+
+
+def test_a_refused_pdf_is_said_as_refused_not_wrong(page, tmp_path, monkeypatch):
+    app, rec = _download_first(tmp_path, monkeypatch, page, b"", "")
+    assert not app.stats.get("wrong_document") and app.stats["failed"] == 1
+    assert "refused" in rec["notes"], rec["notes"]
+
+
+def test_an_unreadable_pdf_is_said_as_unreadable_not_wrong(page, tmp_path, monkeypatch):
+    app, rec = _download_first(tmp_path, monkeypatch, page, b"<html>not a pdf</html>", "")
+    assert not app.stats.get("wrong_document")
+    assert "could not be read" in rec["notes"], rec["notes"]
+
+
+class _Tab:
+    """A Starlink tab of the person's, on some page, never closed."""
+
+    def __init__(self, url):
+        self.url = url
+        self.moved = []
+
+    def is_closed(self):
+        return False
+
+    def goto(self, url, **_options):
+        self.moved.append(url)
+
+
+def test_a_starlink_tab_off_billing_is_told_to_open_billing_not_moved(tmp_path, monkeypatch, capsys):
+    app = _app(tmp_path, monkeypatch)
+    tab = _Tab(site.BASE + "/account/support")
+    monkeypatch.setattr(app, "page", lambda: tab)
+    with pytest.raises(SystemExit):
+        app._on_its_site()
+    said = capsys.readouterr().out
+    assert "not on Billing" in said and "not open" not in said, said
+    assert tab.moved == []
+
+
+def test_a_starlink_tab_on_billing_is_used_as_before(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    tab = _Tab(site.DOCUMENTS_URL)
+    monkeypatch.setattr(app, "page", lambda: tab)
+    assert app._on_its_site() is tab

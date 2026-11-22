@@ -409,8 +409,19 @@ class App:
     # -- processing --------------------------------------------------------
 
     def _on_its_site(self):
-        """Use the account's Bills tab already open in the PaperPull browser."""
-        return tabs.on_its_site(self, site.is_session_url, "Starlink")
+        """Use the Billing tab already open in the PaperPull browser."""
+        page = self.page()
+        # A Starlink tab of the person's that is open but not on Billing is
+        # theirs to leave where it is (a half-filled form, a support chat),
+        # so the run stops and asks rather than moving it.
+        if (tabs.on_site(page, site.is_session_url) and not tabs.is_own(page)
+                and not site.is_history_page_url(page.url or "")):
+            tabs.stop(self, [
+                "The Starlink tab is open but not on Billing.",
+                "Open Billing in that tab, keep the window open, and run this "
+                "again. Nothing was asked of Starlink.",
+            ])
+        return tabs.on_its_site(self, site.is_history_page_url, "Starlink")
 
     def process(self, docs: List[Document], dry_run: bool = False):
         for i, doc in enumerate(docs, 1):
@@ -465,6 +476,20 @@ class App:
         listing.read_again_stopped(self, (
             f"Starlink bill download stopped. {stop}"))
 
+    # What a refusal of download_bill is recorded and said as, by
+    # site.last_refusal(): the record's note, the failure file's step and
+    # its reason.
+    _REFUSED = {
+        "refused": ("Starlink refused this invoice's PDF",
+                    "fetch the invoice pdf", "the invoice pdf was refused"),
+        "unreadable": ("The PDF's text could not be read",
+                       "read the invoice pdf", "the invoice pdf could not be read"),
+        "wrong": ("The PDF did not show this invoice's number and date",
+                  "check the invoice pdf", "the pdf did not name the listed invoice"),
+        "": ("Could not capture the document PDF",
+             "capture the document", "the document would not render"),
+    }
+
     def download_one(self, page, doc: Document, filename: str):
         """Save one statement. The site layer asks for the PDF from
         inside the signed-in page and hands back the bytes."""
@@ -496,12 +521,16 @@ class App:
             out_path.unlink()
             saved = False
         if not saved:
-            self._record(doc, State.FAILED,
-                         notes="Could not capture the document PDF")
+            note, step, reason = self._REFUSED.get(site.last_refusal(), self._REFUSED[""])
+            if site.last_refusal() == "wrong":
+                # A PDF that arrived and was not this invoice, which puts the
+                # run's other invoices in doubt too (run_reporting).
+                self.stats["wrong_document"] = self.stats.get("wrong_document", 0) + 1
+            self._record(doc, State.FAILED, notes=note)
             self._write_row(doc, "Capture failed", State.FAILED.value)
-            self.write_failure('capture the document', 'the document would not render')
+            self.write_failure(step, reason)
             self.stats["failed"] += 1
-            print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
+            print(f"  {note}. Nothing was saved, and the next run tries it again.")
             return
 
         doc.pdf_path, doc.pdf_filename = str(out_path), out_path.name

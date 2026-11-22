@@ -316,26 +316,45 @@ def bill_list_ready(page) -> bool:
     return True
 
 
+# Why the last download_bill saved nothing, one of REFUSALS, so the run
+# records and says it rather than calling every refusal a capture failure.
+REFUSALS = ("refused", "unreadable", "wrong")
+_REFUSAL = {"why": ""}
+
+
+def last_refusal() -> str:
+    return _REFUSAL["why"]
+
+
 def _pdf_matches(data: bytes, bill: Bill) -> bool:
+    return _pdf_verdict(data, bill) == ""
+
+
+def _pdf_verdict(data: bytes, bill: Bill) -> str:
+    """Empty when the PDF is this invoice, else the refusal it earns."""
+    if not data:
+        return "refused"
     if not data.startswith(b"%PDF-"):
-        return False
+        return "unreadable"
     try:
         pages = pdf_reader.page_texts(data, pages=1)
     except Exception:
-        return False
+        return "unreadable"
     if not pages:
-        return False
+        return "unreadable"
     lines = [" ".join(line.split()) for line in pages[0].splitlines() if line.strip()]
     numbers = [value for label, value in zip(lines, lines[1:]) if label.casefold() == "invoice"]
     dates = [line.split(":", 1)[1].strip() for line in lines if line.casefold().startswith("invoice date:")]
     if numbers != [bill.number] or len(dates) != 1:
-        return False
+        return "wrong"
     issued = _date(dates[0])
     if not issued:
-        return False
+        return "wrong"
     # Starlink can print an issue date one calendar day after the date in
     # Billing. Keep the exact invoice number and the billing date for filing.
-    return (date.fromisoformat(issued) - date.fromisoformat(bill.date)).days in (0, 1)
+    if (date.fromisoformat(issued) - date.fromisoformat(bill.date)).days in (0, 1):
+        return ""
+    return "wrong"
 
 
 def _fetch_pdf(page, bill: Bill) -> bytes:
@@ -373,6 +392,7 @@ def _refresh_invoices(page) -> list[RawDoc]:
 
 
 def download_bill(page, date: str, out_path: Path, *, document_id: str) -> bool:
+    _REFUSAL["why"] = ""
     if _RUN.get("page") is not page or _view(page) != _RUN["first"]:
         collect_download_docs(page)
     bill = _RUN["bills"].get(document_id)
@@ -384,8 +404,11 @@ def download_bill(page, date: str, out_path: Path, *, document_id: str) -> bool:
         # A refusal for one PDF can be specific to that invoice. Only the
         # refreshed history can tell if the whole session or list is gone.
         refused.list_again(lambda: _refresh_invoices(page), SessionExpired, ListStopped)
+        _REFUSAL["why"] = "refused"
         return False
-    if not _pdf_matches(data, bill):
+    why = _pdf_verdict(data, bill)
+    if why:
+        _REFUSAL["why"] = why
         return False
     shared_folder.write_bytes(out_path, data)
     return True
