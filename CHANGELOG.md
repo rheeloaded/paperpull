@@ -40,6 +40,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Postbox that opens on another account than before does.
   Discover says how many documents each account had, by number, and the
   support report counts the tabs. Thanks to @MelleD for the recordings.
+- **Mercury (#241).** Monthly checking and savings statement PDFs for the
+  organization selected in Mercury, read from Documents & Data. The app
+  presses only the checkbox of a statement row it has verified, takes the
+  PDF from the link Mercury makes for that row, and files it only once
+  the PDF shows the row's account ending and month. Resume reads the
+  open organization's list again first. A row of an account it does not
+  know, a table with no rows and a list shown a page at a time stop the
+  run rather than pass for the whole list. It signs in on port 9324.
+  Contributed by @solkennedy.
 
 ### Changed
 - **Meijer is confirmed on a contributor's account (#236).** A Pilot on

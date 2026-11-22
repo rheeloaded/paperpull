@@ -123,6 +123,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`marinwater`](apps/marinwater) | Marin Water (CA) | United States | Water bills | **Contributed by [@solkennedy](https://github.com/solkennedy), run on the contributor's own account** ([#233](https://github.com/rheeloaded/paperpull/pull/233)). Bill History read on Marin Water's Paymentus portal for a sign-in with one account, nothing clicked, and each bill's PDF fetched from its own View Bill link without the portal's cookies. Bills that share a date are told apart by their PDFs. Requested in [#231](https://github.com/rheeloaded/paperpull/issues/231) |
 | [`mbna`](apps/mbna) | MBNA (Canada, credit cards) | Canada | Credit card statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/mbna/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a statement. Requested in [#205](https://github.com/rheeloaded/paperpull/issues/205) |
 | [`meijer`](apps/meijer) | Meijer | United States | Order receipts, in-store digital receipts where mPerks lists them | **Confirmed by [@cmcculloh](https://github.com/cmcculloh), whose Pilot on their own account saved five in-store receipts from Meijer's current orders page** ([#236](https://github.com/rheeloaded/paperpull/pull/236)). Requested by [@jpfieber](https://github.com/jpfieber), whose reports on [#42](https://github.com/rheeloaded/paperpull/issues/42) shaped it. Nothing clicked but its two tabs and each receipt's own button. Not yet seen on a real account are online orders, the naming repairs released with it in 0.70.0, and a receipt saved from the old orders page kept under its new record rather than saved again |
+| [`mercury`](apps/mercury) | Mercury | United States, may work elsewhere | Monthly deposit statements | **Contributed by [@solkennedy](https://github.com/solkennedy), run on the contributor's own account** ([#241](https://github.com/rheeloaded/paperpull/pull/241)). Reads Documents & Data for the selected organization and checks the account suffix and period in each PDF. Presses only a verified statement row's own checkbox |
 | [`myecp`](apps/myecp) | MILITARY STAR (Exchange Credit Program) | United States | Card statements | **Built on the maintainer's own account, 25 statements back to 2023.** The MyECP statements list and download from inside the page, nothing clicked |
 | [`mypay`](apps/mypay) | DFAS myPay | United States | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | United States | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
@@ -1055,7 +1056,8 @@ found a bug and diagnosed it to the line.
   a student loan account back to 2019, and the Interactive Brokers app,
   run against five years of monthly statements.
 - [@solkennedy](https://github.com/solkennedy), the Marin Water app, built and run on their own account,
-  bills that share a date told apart by their PDFs.
+  bills that share a date told apart by their PDFs, the Cloudflare invoices
+  app and the Mercury statements app, each run on their own account.
 - [@JasperDale19](https://github.com/JasperDale19), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County
