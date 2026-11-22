@@ -594,8 +594,12 @@ def _turn(page, target, config=None):
     button = page.locator('%s[value="%d"]:enabled' % (PAGER_CSS, target))
     if button.count() != 1:
         raise ListStopped("The Postfach page control is missing or ambiguous.")
+    # The default eight second press budget covers both Playwright's wait for
+    # the button to take the press and the navigation the press starts, and
+    # the bank can need longer for either (#175). The button is still pressed
+    # once, after the same cover checks, and never pressed again.
     pressing.click(page, button, css=pressing.BUTTONS, words=_words(), step=TURN_STEP,
-                   what="the Postfach's page %d button" % target)
+                   what="the Postfach's page %d button" % target, timeout=30000)
     return _settled(page, target)
 
 
@@ -639,6 +643,7 @@ def _collect(page, config=None):
     listed = skipped = 0
     full = 0
     for folder in FOLDERS:
+        log.info("listing the Postfach folder %s", folder)
         _folder(page, folder, fresh=True)
         result = _goto_page(page, _settled(page), 1, config)
         expected = 1
@@ -654,6 +659,8 @@ def _collect(page, config=None):
                     skipped += 1
                     continue
                 rows.append(_normalize(dict(row, folder=folder, number=number)))
+            log.info("Postfach %s page %d read, %d PDF(s) found so far",
+                     folder, number, len(rows))
             target = result["next"]
             if not target:
                 break

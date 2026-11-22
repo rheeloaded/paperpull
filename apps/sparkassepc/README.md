@@ -6,12 +6,23 @@ Postfach, the ones it offers as a direct download. Requested in
 [@MelleD](https://github.com/MelleD) in
 [#216](https://github.com/rheeloaded/paperpull/pull/216). Its CDP port is 9316.
 
-**Run on the contributor's own account.** Discover read the history of
-Posteingang, Gesendet and Papierkorb, back to 2019, and counted the
-messages with no direct PDF. A Pilot saved two statements, both verified,
-and a second Pilot saved nothing new. A whole run has not been reported yet.
-The page turns and the download press were reworked before merging (below)
-and have not been run against the bank since.
+**Run on the contributor's own account, 2026-11-20.** Run All read all
+three folders, 22 Posteingang pages plus Gesendet and Papierkorb. It found
+205 PDFs back to 2019 and counted 13 messages with no direct PDF. A run
+limited with `--max-docs 2` saved two statements, Verify found nothing
+wrong with either, and Resume limited to the same two saved nothing new.
+Downloading all 205 PDFs has not been run yet.
+
+The run before that stopped while turning from page 12 to page 13, before
+any download ([#175](https://github.com/rheeloaded/paperpull/issues/175)).
+Its failure file says the page button's press did not go through in the
+eight seconds a press is given, which also has to cover the navigation the
+press starts. A page turn now has 30 seconds for both, fixed in
+[#244](https://github.com/rheeloaded/paperpull/pull/244). The failure file
+shows the press was never made, not why it waited. The tests turn a page
+whose button the browser holds back from the press for 11 seconds, one way
+that happens, and a page the bank answers after 8.5 seconds. A press held
+back for longer than 30 seconds still stops the run.
 
 ## Commands in a checkout
 
@@ -33,6 +44,17 @@ any search in the Postfach and select Gesamtzeitraum before running.
 ./paperpull --root ./apps sparkassepc all
 ```
 
+`all` first reads every page of Posteingang, Gesendet and Papierkorb, then
+starts downloading. While it reads, its log names each folder and each page
+read with the number of PDFs found so far. `--max-docs` limits how many
+documents are downloaded and does not shorten that first reading.
+`discover` only lists documents and downloads nothing.
+
+With several tabs open on the bank's site, the app works in a signed-in
+Postfach tab first, then any tab not on a sign-in address, and passes over
+a sign-in tab left open from before. Only the Postfach tabs are read for a
+sign-in form, the others are judged by their address.
+
 Check the Pilot's PDFs first. Resume carries on with a run that stopped,
 and Verify checks the saved PDFs on this computer. Progress and the
 document index are kept on this computer.
@@ -47,7 +69,10 @@ own, which shares your session.
   own link and read from its first page to its last. A page is turned only
   by pressing the Postfach's own numbered page button, the press you would
   make, and read once it shows that page number. Page turns wait the same
-  pause the config sets between documents.
+  pause the config sets between documents. A page button's press may take
+  up to 30 seconds, the browser's wait for the button and the bank's
+  navigation together, and a press that runs out of time is never made
+  again.
 - A row that offers no direct PDF download, a message with only text say,
   is counted, said and left in the Postfach.
 - A document is known by its row's own identity, kept only as a digest, so
