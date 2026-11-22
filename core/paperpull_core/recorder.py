@@ -1601,8 +1601,7 @@ RECORDING - what this does and does not capture
                option you pick in a dropdown, a box you tick, the
                addresses and shapes of the provider's own answers, those
                from another host named by the provider's name included,
-               and where
-               a downloaded file came from.
+               and where a downloaded file came from.
   It keeps     a word off the page only when it is on PaperPull's fixed
                list of words. Any other word, a name, an address, an
                account number, is written as its shape, a for a letter
