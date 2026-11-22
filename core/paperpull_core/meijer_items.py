@@ -4,8 +4,6 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from paperpull_core.models import Item
 
-MAX_LINE = 400
-
 
 def parse_items(text, expected_date='', expected_total=''):
     """Return items only when date and item/discount/tax totals reconcile.
@@ -18,11 +16,7 @@ def parse_items(text, expected_date='', expected_total=''):
         if not text or len(text) > 100000:
             return []
         lines = [re.sub(r'\s+', ' ', s.strip()) for s in text.splitlines() if s.strip()]
-        # A till receipt's lines are short. A long one is not a receipt this
-        # reads, and the name patterns below would take long over it.
-        if any(len(s) > MAX_LINE for s in lines):
-            return []
-        date =re.match(r'^(\d{2})/(\d{2})/(\d{2}) ', lines[0])
+        date = re.match(r'^(\d{2})/(\d{2})/(\d{2}) ', lines[0])
         if not date or not any(re.match(r'^Tx:\d+ Op:\d+ Tm:\d+ St:\d+ ', s) for s in lines):
             return []
         printed_date = f'20{date[3]}-{date[1]}-{date[2]}'
