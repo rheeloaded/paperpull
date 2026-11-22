@@ -9,6 +9,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Mercury (#241).** Monthly checking and savings statement PDFs for the
+  organization selected in Mercury, read from Documents & Data. The app
+  presses only the checkbox of a statement row it has verified, takes the
+  PDF from the link Mercury makes for that row, and files it only once
+  the PDF shows the row's account ending and month. Resume reads the
+  open organization's list again first. It signs in on port 9324.
+  Contributed by @solkennedy.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
