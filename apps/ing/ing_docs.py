@@ -37,8 +37,10 @@ from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING
                                           report_run_result)
 
 import argparse
+import json
 import logging
 import random
+import secrets
 import re
 import sys
 import time
@@ -63,6 +65,9 @@ log = logging.getLogger("ing_docs")
 
 DONE_STATES = {State.COMPLETED.value, State.NO_RECEIPT_AVAILABLE.value}
 
+# Where the home account's tab is remembered, beside progress.json (#169).
+ACCOUNTS_FILE = "ing-accounts.json"
+
 
 def ask(prompt: str) -> str:
     try:
@@ -79,7 +84,7 @@ class Document:
     def __init__(self, title="", category="", summary="", date="", period="",
                  href="", row_index=-1, confidence="", account="",
                  date_text="", document_id="", item_id="", client_id="",
-                 occurrence=0, **kw):
+                 occurrence=0, tab="", account_folder="", **kw):
         self.title = title
         self.account = account
         self.category = category
@@ -91,6 +96,12 @@ class Document:
         self.item_id = item_id          # names its row in one listing only, a hint, re-resolved
         self.client_id = client_id      # the list it was read from, the Postbox or its archive
         self.occurrence = occurrence    # nth document with this title and date
+        # The Postbox tab of the account it was listed under, "" for the
+        # home account the plain address opens (#169), and the folder inside
+        # the folder of its kind that account's documents are filed in
+        # (storage.build_pdf_filename reads account_folder).
+        self.tab = tab or ""
+        self.account_folder = account_folder or ""
         # Sticky "was successfully downloaded at least once" marker. Once set,
         # the document is never re-downloaded even if you delete the PDF (e.g.
         # after importing it into paperless-ngx).
@@ -117,6 +128,11 @@ class Document:
         # are two documents.
         acct = f"{sanitize_component(self.account)}:" if self.account else ""
         base = f"{self.category}:{self.date}:{acct}{sanitize_component(self.title)}"
+        # Another account tab's documents lead with the tab, so no two
+        # accounts share a key. The home account's keys are what they
+        # always were, so nothing saved before is fetched again (#169).
+        if self.tab:
+            base = f"@{sanitize_component(self.tab)}:{base}"
         return base if not self.occurrence else f"{base}#{self.occurrence}"
 
     def to_dict(self) -> dict:
@@ -132,7 +148,7 @@ class Document:
 # documents alike but for their account or their kind are never one group
 # whose numbers one of them takes from the other (#122). App._numbered
 # writes the same out where it numbers.
-ALIKE = ("title", "date", "account", "category")
+ALIKE = ("title", "date", "account", "category", "tab")
 
 # What Discover says of the rows the Postbox list passed over, by why
 # (site.skipped). Each is a document this run saves nothing for.
@@ -153,6 +169,18 @@ def tidy(text) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
 
+def _in_account_folder(out_path, folder, account_folder: str) -> bool:
+    """Whether a path is inside `account_folder` right inside `folder`, the
+    folder of its kind, as another account tab's document must be (#169)."""
+    if not account_folder:
+        return False
+    try:
+        parts = Path(out_path).relative_to(Path(folder)).parts
+    except ValueError:
+        return False
+    return len(parts) >= 2 and parts[0].casefold() == account_folder.casefold()
+
+
 def row_category(d: dict, title: str) -> str:
     """The category a listed row is recorded under, as _record_statement_doc
     reads it before the rules choose its words (site.filed_category)."""
@@ -166,7 +194,8 @@ def listed_key(d: dict) -> str:
     number by this key then."""
     title = tidy(d.get("title")) or "Statement"
     return Document(title=title, category=row_category(d, title),
-                    date=(d.get("date") or "").strip(), account=tidy(d.get("account"))).key
+                    date=(d.get("date") or "").strip(), account=tidy(d.get("account")),
+                    tab=tidy(d.get("tab"))).key
 
 
 class App:
@@ -196,6 +225,17 @@ class App:
         self.index_csv = CsvFile(self.paths.document_index_csv,
                                  DOCUMENT_INDEX_COLUMNS, self.paths.backups, once=True)
         self.rules = doc_types.load_rules()
+        # Which Postbox tab is the home account, as a digest, never its name
+        # (#169). A Postbox whose plain address opens another tab than the
+        # one remembered here stops rather than file another account's
+        # documents as the home account's.
+        self.accounts_json = self.paths.root / ACCOUNTS_FILE
+        home, salt = self._home_remembered()
+        # A salt of this install's own, so one fingerprint cannot be looked
+        # up across installs. Written with the first home seen
+        # (_remember_home).
+        self._home_salt = salt or secrets.token_hex(16)
+        site.remember_home(home, self._home_salt)
 
         self._pw = None
         self._browser = None
@@ -211,6 +251,40 @@ class App:
         }
 
     # -- infrastructure ----------------------------------------------------
+
+    def _home_remembered(self) -> tuple:
+        """The home account's tab digest an earlier run wrote and its salt,
+        or ("", "") when there is none or the file cannot be read as one."""
+        try:
+            data = json.loads(self.accounts_json.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return "", ""
+        if not isinstance(data, dict):
+            return "", ""
+        home, salt = data.get("home"), data.get("salt")
+        if not (isinstance(home, str) and re.fullmatch(r"[0-9a-f]{32}", home)
+                and isinstance(salt, str) and re.fullmatch(r"[0-9a-f]{32}", salt)):
+            return "", ""
+        return home, salt
+
+    def _remember_home(self) -> None:
+        """Write down the home account's tab this listing saw, the first
+        time one is seen."""
+        seen = site.home_seen()
+        # One remembered already is kept. A listing that saw another home
+        # stopped before it got here (ing_site._check_home).
+        if not seen or self._home_remembered()[0]:
+            return
+        atomic_write_text(self.accounts_json,
+                          json.dumps({"home": seen, "salt": self._home_salt}) + "\n")
+
+    @staticmethod
+    def _shown_key(doc) -> str:
+        """A record's key for a log line or the screen, with the account tab,
+        a person's name, left out (#169)."""
+        if not doc.tab:
+            return doc.key
+        return doc.key.replace("@%s:" % sanitize_component(doc.tab), "@(account tab):", 1)
 
     def _setup_logging(self):
         logfile = self.paths.logs / f"run-{datetime.now():%Y%m%d-%H%M%S}.log"
@@ -397,7 +471,7 @@ class App:
         Numbered by every field the key holds but the number (ALIKE), each
         row by the kind its record holds (site.filed_category), so a row
         and its record are alike."""
-        alike = ("title", "date", "account", "category")
+        alike = ("title", "date", "account", "category", "tab")
         saved = {key: rec for key, rec in self.progress.data.items()
                  if saved_copy.holding(self, key)}
         filed = [dict(r, category=site.filed_category(r)) for r in rows]
@@ -441,7 +515,8 @@ class App:
                        date=date, confidence=confidence, account=account,
                        date_text=date, item_id=d.get("item_id", "") if sure else "",
                        client_id=d.get("client_id", ""), occurrence=occurrence,
-                       href=d.get("href", ""))
+                       href=d.get("href", ""), tab=tidy(d.get("tab")),
+                       account_folder=d.get("account_folder") or "")
         existing = self.discovery.get(doc.key)
         if existing is None:
             rec = doc.to_dict()
@@ -517,7 +592,24 @@ class App:
         # The whole list is in, and only now may a Resume that carries on
         # from it call the run finished (paperpull_core.listing).
         listing.read_whole(self)
+        self._remember_home()
         self.stats["discovered"] = len(self.discovery.data)
+        # With account tabs, how many documents each account's lists had,
+        # by its place, never its name (#169).
+        per_account = site.accounts_read()
+        if len(per_account) > 1:
+            print(f"\nING shows {len(per_account)} accounts as tabs, each read on its own:")
+            for n, count in enumerate(per_account, 1):
+                which = "the one the Postbox opens on" if n == 1 else f"tab {n}"
+                print(f"  Account {n} ({which}): {count} document(s) listed")
+        # Tabs shown that this run could not read leave the other accounts
+        # unread, which is said, never passed over (#169).
+        for why in site.tabs_not_read():
+            print(f"\n!! Only the account the Postbox opens on was read, since {why}.")
+            print("   Any other account behind a tab was not read this run. Run Diagnose with")
+            print("   the Postbox open and attach its support report to the ING issue.")
+        if site.tabs_not_read():
+            self.write_failure("read the account tabs", "the account tabs could not be read")
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -624,7 +716,7 @@ class App:
                 # run stops here, with nothing recorded against this one.
                 self.list_changed(stop)
             except Exception as e:
-                log.exception("Failed on %s", doc.key)
+                log.exception("Failed on %s", self._shown_key(doc))
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
@@ -667,6 +759,17 @@ class App:
                                distinguisher=(doc.document_id or "")[-6:])
         if out_path.name != filename:
             self.stats["duplicate_filenames"] += 1
+        if doc.tab and not _in_account_folder(out_path, folder, doc.account_folder):
+            # Another account's document is filed in its tab's folder or not
+            # at all. The naming core leaves a name in the folder of its kind
+            # when the folder would leave no room under max_path_length, and
+            # there it would sit among the home account's documents (#169).
+            self._record(doc, State.FAILED,
+                         notes="Its account's folder could not be used, so nothing was saved")
+            self.stats["failed"] += 1
+            print("  !! This account's folder could not be used here, the path may be too long")
+            print("     (max_path_length). Nothing was saved, and the next run tries it again.")
+            return
 
         # Each PDF is fetched from inside the Postbox page, by the link its
         # row shows. Nothing is clicked. The document is looked up again by
@@ -686,7 +789,7 @@ class App:
                                            account=doc.account,
                                            category=doc.category,
                                            number_rows=self._numbered, twins=alike,
-                                           config=self.config)
+                                           config=self.config, tab=doc.tab)
         except site.SessionExpired:
             # The tab, or the list opened again after the document was
             # refused, shows ING's sign-in page. Stop the whole run.
@@ -830,9 +933,9 @@ class App:
             # A Download again that saved nothing kept the saved copy's
             # record as it was, so it is said here (paperpull_core.saved_copy).
             if saved_copy.tried(self, d.key):
-                problems.append(f"{d.key}: {saved_copy.tried(self, d.key)}")
+                problems.append(f"{self._shown_key(d)}: {saved_copy.tried(self, d.key)}")
             if state != State.COMPLETED.value:
-                problems.append(f"{d.key}: {state} - {rec.get('notes', '')}")
+                problems.append(f"{self._shown_key(d)}: {state} - {rec.get('notes', '')}")
         print("\n" + "-" * 70)
         if problems:
             print("Needs attention:")

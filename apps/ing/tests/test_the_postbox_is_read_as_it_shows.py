@@ -94,6 +94,9 @@ class Page:
             if isinstance(seen, Exception):
                 raise seen
             return copy.deepcopy(seen)
+        if isinstance(arg, dict) and "mark" in arg and js == site._TABS_JS:
+            # A Postbox of one account shows no tab bar (#169).
+            return {"bars": 0, "loose": 0, "count": 0, "tabs": []}
         if isinstance(arg, dict) and "url" in arg:
             assert "const ppLimit" in js          # read through intake, to its limit
             assert arg["host"] == "banking.ing.de"
@@ -674,7 +677,7 @@ def test_nothing_on_the_page_is_pressed_typed_into_or_changed():
                  ".dblclick(", ".check(", ".select_option(", ".set_input_files(",
                  ".dispatch_event(", ".type("):
         assert word not in src, word
-    for js in (site._ROWS_JS, site._POSTBOX_CENSUS_JS, site._FETCH_JS):
+    for js in (site._ROWS_JS, site._POSTBOX_CENSUS_JS, site._FETCH_JS, site._TABS_JS):
         for word in ("click", "submit", "focus(", "innerHTML", ".remove(", ".value =",
                      "setAttribute", "classList.add", "classList.remove"):
             assert word not in js, word

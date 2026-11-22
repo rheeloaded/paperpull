@@ -24,6 +24,22 @@ All notable changes to PaperPull are recorded here. Versioning follows
   left as it is, with the new rows kept beside it. Rows saved before keep
   the two columns blank. A gallon line ("18.45 gal x $3.09 each") now
   keeps its unit price too.
+- **ING reads every account's Postbox tab (#169).** When ING's Postbox
+  shows one tab per account, your own and each child's say, a run reads
+  each tab's Postbox and archive in turn. Your own account, the one the
+  Postbox opens on, is read and named exactly as before, so nothing saved
+  already is downloaded again or renamed. Every other account's documents
+  go into a folder named after its tab inside the folder of their kind,
+  such as `Kontoauszuege\<tab>`, and Rename and the documents folder keep
+  them there. Each tab is followed by the link the page shows for it right
+  then, and before every list and every download the app checks that the
+  tab shown as selected is the one it followed, and a list that lands
+  elsewhere stops, saving nothing. Until the tabs have been read once,
+  tabs it cannot read as accounts leave your own account read as before,
+  and Discover says so and why. After that, they stop the list, as a
+  Postbox that opens on another account than before does.
+  Discover says how many documents each account had, by number, and the
+  support report counts the tabs. Thanks to @MelleD for the recordings.
 
 ### Changed
 - **Meijer is confirmed on a contributor's account (#236).** A Pilot on

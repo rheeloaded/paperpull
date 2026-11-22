@@ -1556,6 +1556,29 @@ def _folder_name(text: str) -> str:
     return sanitize_component(cleaned, max_len=FOLDER_MAX).strip(" .")
 
 
+def account_folder_name(text: str) -> str:
+    """The folder an account's documents are filed in, inside the folder of
+    their kind, made safe as a folder a naming pattern names is, or "" when
+    nothing is left of it. An app whose one sign-in shows several accounts
+    (ING's Postbox tabs, #169) writes it into a record as account_folder,
+    and build_pdf_filename puts it ahead of the pattern's own folders."""
+    return _folder_name(text)
+
+
+def _account_folder_of(record) -> str:
+    """The record's account_folder, when it is one folder already made safe,
+    else "". Read from a dict or an object, as naming.fields_of reads a
+    record. Text that is not safe as it stands is not made safe here, since
+    a record changed by hand must not file a document anywhere new."""
+    if record is None:
+        return ""
+    value = record.get("account_folder") if isinstance(record, dict) \
+        else getattr(record, "account_folder", None)
+    if not isinstance(value, str) or not value:
+        return ""
+    return value if _folder_name(value) == value else ""
+
+
 NAME_MAX = 120
 
 
@@ -1725,6 +1748,12 @@ def build_pdf_filename(purchase_date: str, summary: str,
     except naming.PatternError:
         parts = [naming.render(naming.DEFAULT_RECEIPTS if receipts
                                else naming.DEFAULT_STATEMENTS, fields)]
+    # The account a record is filed under, ahead of the pattern's folders
+    # (account_folder_name). A download, Rename and the Move all name a
+    # file here, so they agree on its folder. No record without it changes.
+    lead = _account_folder_of(record)
+    if lead:
+        parts = [lead] + list(parts)
     return file_name_of(parts)
 
 
