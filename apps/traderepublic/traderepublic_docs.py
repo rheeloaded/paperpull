@@ -266,7 +266,7 @@ class App:
 
     def cmd_open_browser(self):
         """Open a sign-in window on THIS config's own port and profile."""
-        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9320")
+        port = browser_launcher.port_from_cdp_url(self.config.get("cdp_url", ""), "9325")
         profile = self.config["profile_dir"]
         url = site.URLS.get("login") or site.URLS.get("documents") or site.URLS["home"]
         name = browser_launcher.open_signin_browser(profile, port, url,
