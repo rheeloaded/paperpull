@@ -730,8 +730,9 @@ _ITEMS_START_RE = re.compile(r"^item\s+details\b", re.I)
 _ITEMS_END_RE = re.compile(r"^(payment\s+details|alcoholic\s+beverages\s+fulfilled|order\s+summary|"
                            r"terminal\s+id)\b", re.I)
 # The line under an item's price, "3 x $2.49 each", or for something weighed
-# "0.62 lbs x $8.99 each (approx.)", which is one item, not 0.62 of one.
-_QTY_LINE_RE = re.compile(r"^(?P<n>\d+(?:\.\d+)?)\s*(?P<unit>lbs?|oz|kg|g)?\s*x\s*\$\s*(?P<each>[\d,]+\.\d{2})",
+# "0.62 lbs x $8.99 each (approx.)", one purchased item priced using
+# 0.62 lb. Preserve both bases.
+_QTY_LINE_RE = re.compile(r"^(?P<n>\d+(?:\.\d+)?)\s*(?P<unit>lbs?|oz|kg|g|gal)?\s*x\s*\$\s*(?P<each>[\d,]+\.\d{2})",
                           re.I)
 
 
@@ -793,12 +794,18 @@ def items_from_lines(lines: List[str]) -> List[Item]:
             name = _clean_item_name(ln, in_items)
             if name and not MONEY_RE.search(ln):
                 qty, each = "1", ""
+                pricing_quantity, pricing_unit = "", ""
                 q = _QTY_LINE_RE.match(lines[i + 2]) if i + 2 < len(lines) else None
                 if q:
                     each = "$" + q.group("each")
+                    pricing_quantity = q.group("n")
+                    pricing_unit = (q.group("unit") or "each").lower()
+                    if pricing_unit == "lbs":
+                        pricing_unit = "lb"
                     if not q.group("unit"):
                         qty = str(int(float(q.group("n")))) if float(q.group("n")) >= 1 else "1"
                 items.append(Item(name=name[:300], quantity=qty, unit_price=each,
+                                  pricing_quantity=pricing_quantity, pricing_unit=pricing_unit,
                                   line_total="$" + re.sub(r"[^\d.,-]", "", lines[i + 1])))
     return items
 

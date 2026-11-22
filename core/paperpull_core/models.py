@@ -52,6 +52,9 @@ class Item:
     status: str = ""
     return_status: str = ""
     fulfillment: str = ""
+    # Printed basis for unit_price, separate from the purchased item/package count.
+    pricing_quantity: str = ""
+    pricing_unit: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

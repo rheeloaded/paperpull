@@ -305,3 +305,65 @@ def test_a_second_print_that_passes_takes_the_first_ones_place(tmp_path, monkeyp
     assert out.read_bytes() == RECEIPT
     assert printed == [out.name + ".second"], "printed beside the first, never over it"
     assert sorted(f.name for f in out.parent.iterdir()) == [out.name]
+
+
+def test_verified_direct_pdf_replaces_list_placeholder_before_history_write(tmp_path):
+    from paperpull_core.models import Item
+    purchase = _purchase()
+    purchase.items = [Item(name="In-Store:", quantity="1", line_total="$22.37")]
+    app = _app(tmp_path)
+    pdf = tmp_path / "receipt.pdf"
+    pdf.write_bytes(_text_pdf([
+        "09/19/26 Fastlane1", "GROCERY", "12345678901 MILK 22.37 F",
+        "mPerks # -- ********00", "TOTAL TOTAL TAX .00", "TOTAL 22.37",
+        "PAYMENTS", "Tx:1 Op:2 Tm:3 St:4 12:00:00",
+    ]))
+    assert app._finish_pdf(PAGE, purchase, pdf)
+    app._write_csv_rows(purchase, receipt_status="Downloaded", processing_status="Completed")
+    rows = app.order_csv.read_all()
+    assert len(rows) == 1
+    assert rows[0]["Item Name"] == "MILK"
+    assert rows[0]["Line Item Total"] == "$22.37"
+    # The purchase and its record keep the list's words, which its row is
+    # pressed by and a record of the earlier page is matched by (#236).
+    assert purchase.items[0].name == "In-Store:"
+    assert app.progress.get(purchase.key)["items"][0]["name"] == "In-Store:"
+
+
+def test_a_reader_that_fails_keeps_the_list_s_row_and_the_saved_receipt(tmp_path, monkeypatch):
+    from paperpull_core import meijer_items
+    from paperpull_core.models import Item
+
+    def broken(*args):
+        raise TypeError("invented")
+    monkeypatch.setattr(meijer_items, "read_items", broken)
+    purchase = _purchase()
+    listed = [Item(name="4400 Invented Avenue", quantity="1", line_total="$22.37")]
+    purchase.items = list(listed)
+    app = _app(tmp_path)
+    pdf = tmp_path / "receipt.pdf"
+    pdf.write_bytes(_text_pdf([
+        "09/19/26 Fastlane1", "GROCERY", "12345678901 MILK 22.37 F",
+        "mPerks # -- ********00", "TOTAL TOTAL TAX .00", "TOTAL 22.37",
+        "PAYMENTS", "Tx:1 Op:2 Tm:3 St:4 12:00:00",
+    ]))
+    assert app._finish_pdf(PAGE, purchase, pdf)
+    assert purchase.items == listed
+    assert app.progress.get(purchase.key)["downloaded_ok"] is True
+
+
+def test_a_purchase_with_no_total_is_not_read_from_its_receipt(tmp_path, monkeypatch):
+    """The reader checks the total only when it is given one (review NIT)."""
+    from paperpull_core import meijer_items
+    read = []
+    monkeypatch.setattr(meijer_items, "read_items", lambda *a: read.append(a) or [])
+    # The receipt passes its check, so only the missing total keeps it unread.
+    monkeypatch.setattr(mr.receipt_pdf, "validate_pdf", lambda *a, **k: SimpleNamespace(
+        ok=True, reason="", size_bytes=5000, page_count=1))
+    purchase = _purchase()
+    purchase.total = ""
+    app = _app(tmp_path)
+    pdf = tmp_path / "receipt.pdf"
+    pdf.write_bytes(_text_pdf(["09/19/26 Fastlane1", "TOTAL 22.37"]))
+    app._finish_pdf(PAGE, purchase, pdf)
+    assert read == []

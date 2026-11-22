@@ -146,6 +146,25 @@ already on your machine is used and not the bundled one.
   receipt's lines where they can be read. The receipt's line shape is the
   main thing the first support report will settle.
 
+## Quantities and pricing units
+
+`Quantity` still counts the items or packages bought. A weighed item can
+therefore have `Quantity` 1 while its price is per pound. `Pricing Quantity` and `Pricing Unit` preserve the printed
+basis separately, for example 1.75 and `lb`. They are included in the order
+history and the Purchases CSV and spreadsheet. Printed line totals are kept
+unchanged, since approximate prices and discounts need not multiply out
+exactly.
+
+An existing order-history header is backed up and upgraded before new rows
+are appended. Old rows keep blank pricing fields, and exporting them again
+cannot recover a weight that was never recorded. No weight or unit is
+guessed from a product name or by dividing its total by its price. Rows
+waiting beside the history from a run while Excel had it open go in once,
+after the upgrade. While Excel holds the file the run waits the usual
+minute once, then the new rows wait beside it and the next run upgrades it. A header the app never wrote is
+left as it is, and the new rows wait beside it until it is put back from a
+copy in Backups.
+
 ## When Kroger changes its website
 
 All Kroger selectors/URLs live in **`kroger_site.py`** only. Run

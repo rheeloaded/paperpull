@@ -47,7 +47,7 @@ from paperpull_core import browser as browser_launcher
 import kroger_site as site
 from paperpull_core.models import (IN_STORE, ONLINE, Item, Purchase, State)
 from paperpull_core.words import Fixed, shape_tree, words_for, write_shaped
-from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths,
+from storage import (CsvFile, JsonStore, ORDER_HISTORY_COLUMNS, Paths, PricingCsvFile,
                      RECEIPT_INDEX_COLUMNS, atomic_write_text, build_pdf_filename, load_config, now_iso, unique_path)
 
 from storage import ensure_owner, PROJECT_DIR, set_filename_owner
@@ -100,8 +100,8 @@ class App:
         self.progress.load()
         self.discovery.load()
 
-        self.order_csv = CsvFile(self.paths.order_history_csv,
-                                 ORDER_HISTORY_COLUMNS, self.paths.backups)
+        self.order_csv = PricingCsvFile(self.paths.order_history_csv,
+                                        ORDER_HISTORY_COLUMNS, self.paths.backups)
         self.index_csv = CsvFile(self.paths.receipt_index_csv,
                                  RECEIPT_INDEX_COLUMNS, self.paths.backups)
         self.rules = classification.load_rules()
@@ -918,6 +918,8 @@ class App:
             "Order Status": purchase.status,
             "Item Name": it.name,
             "Quantity": it.quantity,
+            "Pricing Quantity": it.pricing_quantity,
+            "Pricing Unit": it.pricing_unit,
             "Unit Price": it.unit_price,
             "Line Item Total": it.line_total,
             "Order Total": purchase.total,

@@ -1668,6 +1668,26 @@ class App:
                     raise stopped
             return False
 
+        # A direct PDF download bypasses the HTML details reader. Read the
+        # verified receipt before the history writer sees the list placeholder.
+        # The receipt is saved and verified by now, so a reading that fails
+        # in a way nobody foresaw leaves the list's row, as 0.70.0 wrote it,
+        # and never the receipt unsaved. The products go into the order
+        # history only. The purchase and its records keep the list's words,
+        # which its row is pressed by and a record of the earlier orders
+        # page is matched by, from progress alone after a move (#236).
+        try:
+            from paperpull_core.meijer_items import read_items
+            # The reader checks a date and a total only when it is given
+            # them, so a purchase missing either is not read.
+            extracted = (read_items(out_path, purchase.purchase_date, purchase.total)
+                         if purchase.purchase_date and purchase.total else [])
+        except Exception:
+            log.warning("The receipt's items could not be read, so the list's row is kept")
+            extracted = []
+        if extracted:
+            self._receipt_items()[purchase.key] = extracted
+
         purchase.receipt_count = 1
         # Sticky marker: a valid PDF was produced, so this purchase is done for
         # good and will not be re-downloaded even if the file is later deleted.
@@ -1701,10 +1721,18 @@ class App:
         self.progress.update(purchase.key, rec)  # atomic save on every update
         self.discovery.update(purchase.key, {"state": state.value})
 
+    def _receipt_items(self) -> dict:
+        """The products read from each receipt saved in this run, by key,
+        for its order history rows (_finish_pdf)."""
+        held = getattr(self, "_items_read", None)
+        if held is None:
+            held = self._items_read = {}
+        return held
+
     def _write_csv_rows(self, purchase: Purchase, receipt_status: str,
                         processing_status: str, notes_extra: str = ""):
         notes = "; ".join(x for x in (purchase.notes, notes_extra) if x)
-        items = purchase.items or [Item(name="")]
+        items = self._receipt_items().get(purchase.key) or purchase.items or [Item(name="")]
         self.order_csv.append_rows([{
             "Account Holder": self.config.get("owner", ""),
             "Purchase Date": purchase.purchase_date,
