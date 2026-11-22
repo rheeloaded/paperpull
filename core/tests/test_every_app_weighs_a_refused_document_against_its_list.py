@@ -124,6 +124,7 @@ MENDED = {
     ("sdge", "download_bill"): "_fetch",
     ("simmons", "download_document"): "_fetch_asked",
     ("sonic", "download_bill"): "_fetch_pdf",
+    ("starlink", "download_bill"): "_fetch_pdf",
     ("stripe", "download_bill"): "_fetch_file",
     ("tualatin", "download_bill"): "_fetch",
     ("ups", "download_bill"): "_post",

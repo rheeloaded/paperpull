@@ -151,6 +151,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`sonic`](apps/sonic) | Sonic | United States | Internet bills | **Contributed by [@solkennedy](https://github.com/solkennedy), a Pilot saved a bill on the contributor's account and a second run skipped it** ([#242](https://github.com/rheeloaded/paperpull/pull/242)). Reads Member Tools' Bill History, nothing clicked. Checks the invoice number and a labeled date before filing each PDF |
 | [`sparkassepc`](apps/sparkassepc) | Sparkasse Pforzheim Calw | Germany | Account statements and other Postfach PDFs | **Contributed by [@MelleD](https://github.com/MelleD), run on the contributor's own account** ([#216](https://github.com/rheeloaded/paperpull/pull/216)). Posteingang, Gesendet and Papierkorb read page by page, pressing only the Postfach's own page buttons and each document's own direct download link. Messages with no direct PDF are counted and left in the Postfach. A Pilot saved two statements, and a whole run has not been reported yet. Requested in [#175](https://github.com/rheeloaded/paperpull/issues/175) |
 | [`spectrum`](apps/spectrum) | Spectrum (Internet and Mobile) | United States | Internet statements, about a year online, and Mobile statements printed from their pages | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 11 Internet statements saved on a full run.** Mobile statements listed live, a whole Mobile run still to come. Each statement chosen by its own row. Two statements of one date, after an account transfer, are left for you to save by hand |
+| [`starlink`](apps/starlink) | Starlink | United States, may work elsewhere | Billing invoice PDFs | **Contributed by [@solkennedy](https://github.com/solkennedy), run on the contributor's own account** ([#245](https://github.com/rheeloaded/paperpull/pull/245)). Reads every page of the Billing page's Invoices table, pressing only that table's own page buttons. Each PDF is filed only when it prints the listed invoice number and an issue date of the Billing date or the day after |
 | [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | United States, may work elsewhere | Fee invoices, tax forms such as the 1099-K | **Untested, built on an account with no documents yet. Have Stripe invoices or tax forms? [Help test it](apps/stripe/README.md#help-test-it-no-programming-needed)** Requested in [#53](https://github.com/rheeloaded/paperpull/issues/53) |
 | [`statefarm`](apps/statefarm) | State Farm | United States | Bills, renewal notices, ID cards, receipts, policy documents | **Confirmed by [@watling777](https://github.com/watling777)**, whose full run saved every document State Farm lists for his policies ([#37](https://github.com/rheeloaded/paperpull/issues/37)) |
 | [`target`](apps/target) | Target | United States | Receipts (Online + In-Store) | Print-capture |
@@ -1059,9 +1060,9 @@ found a bug and diagnosed it to the line.
   run against five years of monthly statements.
 - [@solkennedy](https://github.com/solkennedy), the Marin Water app, built and run on their own account,
   bills that share a date told apart by their PDFs, the Cloudflare invoices
-  app and the Mercury statements app, each run on their own account, and
-  the Sonic app, run on their own internet bills, each PDF checked against
-  its listed invoice.
+  app and the Mercury statements app, each run on their own account, the
+  Sonic app, run on their own internet bills, each PDF checked against its
+  listed invoice, and the Starlink app, run on their own account.
 - [@JasperDale19](https://github.com/JasperDale19), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County

@@ -342,10 +342,10 @@ def test_resume_after_a_run_that_listed_nothing_is_not_clean(home):
     home.run_all_stopped()
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
-    if home.app.name in ("cloudflare", "mercury", "simplisafe", "sonic"):
+    if home.app.name in ("cloudflare", "mercury", "simplisafe", "sonic", "starlink"):
         # Cloudflare rechecks the account that is open before interpreting
         # listing state, since the previous run may have used another account.
-        # SimpliSafe does the same for its signed-in account.
+        # SimpliSafe and Starlink do the same for their signed-in account.
         # Mercury refreshes the visible organization on Resume. The prior
         # list could have come from a different organization. Sonic reads its
         # list again before a Resume consults what an earlier run noted.
@@ -370,7 +370,7 @@ def test_resume_after_a_run_that_stopped_listing_is_not_clean(home):
         "the Run All that stopped left the earlier listing noted as whole")
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
-    if home.app.name in ("cloudflare", "mercury", "simplisafe", "sonic"):
+    if home.app.name in ("cloudflare", "mercury", "simplisafe", "sonic", "starlink"):
         assert home.listings == 2
         assert "Resume reads it before anything else" in said and stopped(result), said[-1500:]
         assert not told_to_list(said, result), said[-1500:]

@@ -66,6 +66,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   page by page through the table's own Next page button, and a page whose
   rows do not change, repeat or disagree with the count stops the run. It
   signs in on port 9321. Contributed by @solkennedy.
+- **Starlink invoices (#245).** A new app, contributed by @solkennedy, saves
+  the invoice PDFs of Starlink's Billing page. It reads every page of the
+  Invoices table, pressing only that table's own page buttons, and files a
+  PDF only when it prints the listed invoice number and an issue date of the
+  Billing date or the day after. Every password field of the page counts
+  when it checks for a sign-out, a hidden one too, and an empty Invoices
+  table counts only once the table itself says it has no rows. Port 9322.
 
 ### Changed
 - **Meijer is confirmed on a contributor's account (#236).** A Pilot on
