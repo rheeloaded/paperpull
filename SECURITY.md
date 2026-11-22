@@ -109,7 +109,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Home Depot, ING, Invest529, IRS, Kroger, Lowe's, Marin Water, MBNA, MILITARY STAR, myPay,
     NetBenefits, NW Natural, Optum Bank, Paylocity, Portland General Electric,
     Renault Bank direkt,
-    Scalable Capital, SDG&E, Stripe, TSP, Tualatin Water, Uber, UKG, UPS,
+    Scalable Capital, SDG&E, Sonic, Stripe, TSP, Tualatin Water, Uber, UKG, UPS,
     Verizon Mobile and Ziply Fiber) open the provider's
     pages by their address and read them, or ask for the same lists and
     files the provider's own page asks for, from inside the signed-in page or

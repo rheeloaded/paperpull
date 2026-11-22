@@ -49,6 +49,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
   know, a table with no rows and a list shown a page at a time stop the
   run rather than pass for the whole list. It signs in on port 9324.
   Contributed by @solkennedy.
+- **Sonic internet bills (#242).** A new app saves the internet bill PDFs
+  of Sonic Member Tools, read from the Bill History page and each bill's
+  own PDF link, with nothing clicked. Each PDF is filed only once its first
+  page shows the listed invoice number and a labeled date or the start of
+  the service period that matches the history, and two bills of one day
+  are kept apart. A bill that saved nothing is said by its kind, refused,
+  unreadable or not the listed bill, and a PDF that is not the listed bill
+  counts as a wrong document. A history that shows another page stops
+  the run rather than being taken as whole. It signs in on port 9320.
+  Contributed by @solkennedy.
 
 ### Changed
 - **Meijer is confirmed on a contributor's account (#236).** A Pilot on
@@ -157,6 +167,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   orders than Amazon's own count, the run keeps what it read, says so and
   stops rather than take the year as read whole. The app still presses
   nothing on Amazon's pages, and a new check fails on any press added to it.
+
 
 ## [0.70.0] - 2026-11-20
 

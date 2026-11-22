@@ -1,0 +1,7 @@
+Sonic internet bills
+
+  paperpull sonic login       open Sonic Member Tools
+  paperpull sonic discover    list available internet bills
+  paperpull sonic pilot       download the newest bill
+  paperpull sonic all         download bills in scope
+  paperpull sonic resume      continue from a stopped run
