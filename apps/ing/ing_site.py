@@ -686,12 +686,12 @@ def tab_folder(label: str) -> str:
     return account_folder_name(label)
 
 
-def account_tabs(page) -> dict:
-    """The account tabs above the list on screen, as {"labels", "hrefs",
-    "selected"}, with no labels when the list shows no tab bar. Raises
-    ListStopped for anything not read as one tab bar of accounts, and
-    for a selected tab that cannot be told. No message names a tab, since a
-    tab's label is a person's name."""
+def _tabs_or_why(page) -> tuple:
+    """The account tabs above the list on screen, as ({"labels", "hrefs",
+    "selected", "list"}, ""), with no labels when the list shows no tab bar,
+    or (None, why) for anything not read as one tab bar of accounts. The
+    why names no tab, since a tab's label is a person's name. A tab that
+    ING answers as signed out raises SessionExpired."""
     try:
         seen = page.evaluate(_TABS_JS, dict(wrapper=_PARTS["wrapper"],
                                             rows=_PARTS["rowSelectors"],
@@ -701,41 +701,50 @@ def account_tabs(page) -> dict:
         log.info("the account tabs could not be read: %s", type(e).__name__)
         if looks_signed_out(page):
             raise SessionExpired("ING shows its sign-in page") from None
-        raise ListStopped("the account tabs could not be read") from None
+        return None, "the account tabs could not be read"
     if (not isinstance(seen, dict) or type(seen.get("bars")) is not int
             or type(seen.get("count")) is not int or not isinstance(seen.get("tabs"), list)):
-        raise ListStopped(_STRANGE)
+        return None, _STRANGE
     if seen["bars"] == 0:
         return {"labels": [], "hrefs": [], "selected": None,
-                "list": seen.get("list") is not False}
+                "list": seen.get("list") is not False}, ""
     if seen["bars"] > 1:
-        raise ListStopped("the Postbox shows more than one row of account tabs")
+        return None, "the Postbox shows more than one row of account tabs"
     if seen["count"] > _MAX_TABS:
-        raise ListStopped("the Postbox shows more account tabs than this app reads")
+        return None, "the Postbox shows more account tabs than this app reads"
     tabs = []
     for t in seen["tabs"]:
         if (not isinstance(t, dict) or type(t.get("label")) is not str
                 or type(t.get("href")) is not str or type(t.get("marked")) is not bool
                 or not isinstance(t.get("classes"), list)
                 or any(type(c) is not str for c in t["classes"])):
-            raise ListStopped(_STRANGE)
+            return None, _STRANGE
         tabs.append({"label": tab_label(t["label"]), "href": t["href"], "marked": t["marked"],
                      "classes": list(t["classes"])})
     labels = [t["label"] for t in tabs]
     if any(not label or len(label) > 120 for label in labels):
-        raise ListStopped("an account tab carries no name this app reads")
+        return None, "an account tab carries no name this app reads"
     if any(_TAB_REFUSED.search(label) for label in labels):
-        raise ListStopped("the account tabs hold a link that is not an account's")
+        return None, "the account tabs hold a link that is not an account's"
     folders = [tab_folder(label) for label in labels]
     # A folder the core takes as it stands, so a record keeps it for good
     # (storage._account_folder_of reads it again by the same rule).
     if any(not f or tab_folder(f) != f for f in folders):
-        raise ListStopped("an account tab's name leaves no folder name")
+        return None, "an account tab's name leaves no folder name"
     if (len({label.casefold() for label in labels}) != len(labels)
             or len({f.casefold() for f in folders}) != len(folders)):
-        raise ListStopped("two account tabs carry the same name")
+        return None, "two account tabs carry the same name"
     return {"list": True, "labels": labels, "hrefs": [t["href"] for t in tabs],
-            "selected": _selected_of(tabs)}
+            "selected": _selected_of(tabs)}, ""
+
+
+def account_tabs(page) -> dict:
+    """The account tabs above the list on screen (_tabs_or_why). Raises
+    ListStopped for anything not read as one tab bar of accounts."""
+    bar, why = _tabs_or_why(page)
+    if bar is None:
+        raise ListStopped(why)
+    return bar
 
 
 def _check_home(label: str) -> None:
@@ -778,12 +787,11 @@ def _home_bar(page) -> Optional[dict]:
     site may still show the account an earlier run followed."""
     # A tab followed in this run was read first, so it is seen as well.
     known = bool(_home["stored"] or _home["seen"])
-    try:
-        bar = account_tabs(page)
-    except ListStopped as e:
+    bar, why = _tabs_or_why(page)
+    if bar is None:
         if known:
-            raise
-        _tabs_note.append(str(e))
+            raise ListStopped(why)
+        _tabs_note.append(why)
         return None
     if not bar["labels"]:
         if not known:
