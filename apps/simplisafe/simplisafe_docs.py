@@ -771,7 +771,7 @@ class App:
         print("  Read it through, then attach it to this provider's issue on")
         print("  GitHub. It is the one thing that saves a round of guessing.")
 
-    def write_survey(self) -> None:
+    def write_survey(self, stopped=None) -> None:
         """The survey Diagnose is safe to send.
 
         Diagnose writes a detailed file for repairing this provider, and
@@ -789,7 +789,8 @@ class App:
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
             requests=self._requests,
-            provider='SimpliSafe')
+            provider='SimpliSafe',
+            stopped=stopped or getattr(self, "_diagnose_stopped", None))
 
     def cmd_diagnose(self):
         """Report only statement counts and page state, without recording a screenshot."""
@@ -798,13 +799,23 @@ class App:
         page = self.page()
         info = {"timestamp": now_iso(), "signed_out": site.looks_signed_out(page),
                 "documents_page_found": site.is_safe_url(page.url) and not site.looks_signed_out(page)}
+        stopped = None
         if info["documents_page_found"]:
             try:
                 info["documents_total"] = len(site.collect_download_docs(page))
             except (site.SessionExpired, site.ListStopped) as error:
                 info["error"] = type(error).__name__
+            except pressing.Stop as stop:
+                # A press the look would not make, a paginator button the
+                # guard refused, ends it there, and the file still says what
+                # was seen and why it stopped.
+                stopped = stop
+                info["stopped"] = {"step": stop.step, "reason": stop.reason, "facts": stop.facts}
+        self._diagnose_stopped = stopped
         out = self.paths.diagnostics / "diagnose-documents.json"
         write_shaped(out, info, words)
+        if stopped is not None:
+            pressing.say(stopped)
         print(f"Wrote {out}")
         print("Text that is not on PaperPull's fixed list is shown as its shape.")
         print(f"Bills recognized: {shape_tree(info.get('documents_total', 'unavailable'), words)}")

@@ -438,3 +438,36 @@ def test_discover_tells_an_empty_history_from_a_broken_one(monkeypatch, stop, re
     with pytest.raises(SystemExit):
         app.cmd_discover()
     assert written == [reason]
+
+
+def test_diagnose_writes_its_file_when_a_press_is_refused(monkeypatch, tmp_path, capsys):
+    """A paginator press the guard refuses during Diagnose's look ends the
+    look there. The detailed file is still written and says why, the stop is
+    said, and the survey beside it carries the same stop."""
+    import simplisafe_docs as docs
+    from paperpull_core import failure, pressing
+    app = docs.App.__new__(docs.App)
+    app.stats = {}
+    app.paths = type("P", (), {"diagnostics": tmp_path})()
+    app._journal = app._requests = None
+    app.page = lambda: type("Tab", (), {"url": site.DOCUMENTS_URL})()
+    monkeypatch.setattr(docs.site, "looks_signed_out", lambda _page: False)
+    monkeypatch.setattr(docs.site, "is_safe_url", lambda _url: True)
+    # Words on the fixed list, as every stop's own are, so the file keeps them.
+    stop = pressing.Covered("choose a year", "something on the page is over the control",
+                            ["The Next page button changed, so it was not pressed."],
+                            {"hidden": 1}, after_a_press=True)
+
+    def refused(_page):
+        raise stop
+    monkeypatch.setattr(docs.site, "collect_download_docs", refused)
+    app.cmd_diagnose()
+    info = json.loads((tmp_path / "diagnose-documents.json").read_text(encoding="utf-8"))
+    assert info["stopped"] == {"step": stop.step, "reason": stop.reason, "facts": stop.facts}
+    assert "documents_total" not in info
+    said = " ".join(capsys.readouterr().out.split())
+    assert "The Next page button changed, so it was not pressed." in said, said
+    surveyed = {}
+    monkeypatch.setattr(failure, "write_survey", lambda *_a, **kw: surveyed.update(kw))
+    app.write_survey()
+    assert surveyed["stopped"] is stop
