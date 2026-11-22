@@ -31,6 +31,7 @@ from typing import List, Optional, Tuple
 from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import page_check as _page_check
+from paperpull_core.characters import whole_json
 from paperpull_core import redirects
 from paperpull_core.models import ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -969,7 +970,7 @@ def invoice_menu_order_id(raw: str) -> Optional[str]:
     for anything that does not read cleanly."""
     import json
     try:
-        data = json.loads(raw)
+        data = whole_json(json.loads(raw))
     except (TypeError, ValueError):
         return None
     url = data.get("url") if isinstance(data, dict) else None
