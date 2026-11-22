@@ -57,12 +57,12 @@ signed installer and automatic updates. Or download it free from the
 is held back from the free build. See [Support](#support).
 
 Eighty-nine providers are supported today, all built on the same pattern.
-Five more, SBA, American Family, Stripe, FedEx and Trade Republic, are built and
+Six more, SBA, American Family, Stripe, FedEx, Trade Republic and Raisin, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
 [#53](https://github.com/rheeloaded/paperpull/issues/53),
-[#54](https://github.com/rheeloaded/paperpull/issues/54)), and Scalable Capital, Consorsbank,
+[#54](https://github.com/rheeloaded/paperpull/issues/54), and for Raisin a new issue), and Scalable Capital, Consorsbank,
 CIBC and MBNA are first shells waiting for a tester to Record a trip to a document
 ([#170](https://github.com/rheeloaded/paperpull/issues/170),
 [#178](https://github.com/rheeloaded/paperpull/issues/178),
@@ -138,6 +138,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`paylocity`](apps/paylocity) | Paylocity | United States | **Pay statements** | Escher JSON API, enqueue-poll-fetch PDF; nothing clicked |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | United States | Billing statements | Salesforce portal with a paginated history. Contributed by [@appchamp](https://github.com/appchamp). Repaired in 0.37.1 and confirmed on a real account by [@watling777](https://github.com/watling777) ([#33](https://github.com/rheeloaded/paperpull/issues/33)) |
 | [`portlandgeneral`](apps/portlandgeneral) | Portland General Electric (Oregon) | United States | Monthly bills, the Detailed Bill PDF | **Built and run on a contributor's own account, 36 bills listed and the newest saved by a Pilot.** The list and each PDF are asked of PGE's own account API from inside the signed-in page, nothing clicked. One account at a time |
+| [`raisin`](apps/raisin) | Raisin (Weltsparen) | Germany | Deposit documents, statements, confirmations, contracts, tax certificates | **Untested, built without an account. Have one? [Help test it](apps/raisin/README.md#help-test-it-no-programming-needed)** The routes were first seen in [Habeas sources](https://github.com/habeas-dev/sources) (CC0). Every deposit's document list and each PDF are asked for from inside your signed-in dashboard with the page's own sign-in, nothing clicked, and each PDF is checked for Raisin and its own date before it is filed |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | United States | Billing statements | Statements table; per-year switcher |
 | [`renaultbank`](apps/renaultbank) | Renault Bank direkt | Germany | Statements, tax documents, confirmations and other Postfach and archive documents, and the PDF attachments of messages | **Contributed by [@MelleD](https://github.com/MelleD), run on the contributor's own account** ([#212](https://github.com/rheeloaded/paperpull/pull/212)). The Postfach's own API from inside the page, nothing clicked. An archive document and a message attachment were saved, and a whole run has not been reported yet. Requested in [#172](https://github.com/rheeloaded/paperpull/issues/172) |
 | [`robinhood`](apps/robinhood) | Robinhood | United States | Account statements, tax docs | "View More" pagination |

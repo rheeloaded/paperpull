@@ -1,0 +1,37 @@
+{
+  "_comment": "Editable rules mapping Raisin document titles (and their document_type) to filename summaries. Case-insensitive regexes, checked in order: tax, then statement. Contract and confirmation titles are told apart in raisin_docs.CONTRACT_RE. Written without an account, so every pattern is a guess at German or English wording that a tester's first Diagnose confirms or repairs.",
+  "tax_rules": [
+    {
+      "pattern": "jahressteuerbescheinigung",
+      "summary": "Jahressteuerbescheinigung"
+    },
+    {
+      "pattern": "verlustbescheinigung",
+      "summary": "Verlustbescheinigung"
+    },
+    {
+      "pattern": "freistellungsauftrag",
+      "summary": "Freistellungsauftrag"
+    },
+    {
+      "pattern": "steuerbescheinigung|\\bsteuer(?!\\s*-?\\s*id)|\\btax\\b(?!\\s*-?\\s*id)",
+      "summary": "Steuerbescheinigung"
+    }
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "kontoauszug|account\\s+statement|\\bstatement\\b",
+      "summary": "Kontoauszug"
+    },
+    {
+      "pattern": "zinsbescheinigung|zinsabrechnung|interest\\s+(certificate|statement)",
+      "summary": "Zinsbescheinigung"
+    },
+    {
+      "pattern": "\\b(?:rechnungs|jahres|quartals|konto)?abschluss\\b|saldenbest(ae|ä)tigung|balance\\s+confirmation",
+      "summary": "Kontoabschluss"
+    }
+  ],
+  "skip_patterns": []
+}

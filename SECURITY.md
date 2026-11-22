@@ -123,7 +123,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     DKB, E-ZPass Virginia, FedEx, Fidelity, Gap, GitHub,
     Home Depot, ING, Invest529, IRS, Kroger, Lowe's, Marin Water, MBNA, MILITARY STAR, myPay,
     NetBenefits, NW Natural, Optum Bank, Paylocity, Portland General Electric,
-    Renault Bank direkt,
+    Raisin, Renault Bank direkt,
     Scalable Capital, SDG&E, Sonic, Stripe, Trade Republic, TSP, Tualatin Water, Uber, UKG, UPS,
     Verizon Mobile and Ziply Fiber) open the provider's
     pages by their address and read them, or ask for the same lists and

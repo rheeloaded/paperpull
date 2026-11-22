@@ -76,6 +76,7 @@
     "paypal": {"gets": "Monthly statements, about three years online", "group": "banks", "note": "Business accounts not tested yet"},
     "pge": {"gets": "Monthly bills", "group": "bills"},
     "portlandgeneral": {"gets": "Monthly bills, about three years online", "group": "bills", "note": "Reads one account"},
+    "raisin": {"gets": "Deposit documents, statements, confirmations, contracts and tax certificates", "group": "banks", "tested": false},
     "redcard": {"gets": "Target RedCard and Circle Card statements", "group": "banks"},
     "renaultbank": {"gets": "Statements, tax documents, confirmations and message attachments", "group": "banks", "note": "Tested on one account so far"},
     "robinhood": {"gets": "Statements for individual, retirement and crypto accounts and tax forms", "group": "investing"},

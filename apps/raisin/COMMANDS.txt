@@ -1,0 +1,9 @@
+Raisin deposit document commands from the PaperPull checkout
+
+paperpull raisin login      Open the sign-in window
+paperpull raisin discover   List every deposit's documents
+paperpull raisin pilot      Save a sample of the newest documents
+paperpull raisin all        Save every document in scope
+paperpull raisin resume     Continue an interrupted download
+paperpull raisin verify     Recheck saved PDFs
+paperpull raisin diagnose   Count what the dashboard lists, for a tester to send
