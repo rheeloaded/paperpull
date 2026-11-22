@@ -496,7 +496,10 @@ see while downloading, in an `<Provider> Order History.csv` beside the PDFs.
 `tools/export_purchases.py` gathers all of them into one workbook, one row
 per item across every provider and account, newest first, with an Orders
 sheet and a Summary of spend per provider per year. Amounts are numbers, so
-Excel can sum them. Nothing reads a PDF and it takes about a second.
+Excel can sum them. A weighed item's printed weight and unit sit in Pricing
+Quantity and Pricing Unit, beside its Quantity. The one PDF it reads is a
+Meijer receipt saved by a version that wrote down the order list's words
+instead of the products, and only inside that Meijer folder.
 
 ```
 python tools/export_purchases.py --root "C:\path\to\your\installs"

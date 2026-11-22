@@ -4,6 +4,8 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from paperpull_core.models import Item
 
+MAX_LINE = 400
+
 
 def parse_items(text, expected_date='', expected_total=''):
     """Return items only when date and item/discount/tax totals reconcile.
@@ -16,7 +18,11 @@ def parse_items(text, expected_date='', expected_total=''):
         if not text or len(text) > 100000:
             return []
         lines = [re.sub(r'\s+', ' ', s.strip()) for s in text.splitlines() if s.strip()]
-        date = re.match(r'^(\d{2})/(\d{2})/(\d{2}) ', lines[0])
+        # A till receipt's lines are short. A long one is not a receipt this
+        # reads, and the name patterns below would take long over it.
+        if any(len(s) > MAX_LINE for s in lines):
+            return []
+        date =re.match(r'^(\d{2})/(\d{2})/(\d{2}) ', lines[0])
         if not date or not any(re.match(r'^Tx:\d+ Op:\d+ Tm:\d+ St:\d+ ', s) for s in lines):
             return []
         printed_date = f'20{date[3]}-{date[1]}-{date[2]}'
@@ -53,6 +59,7 @@ def parse_items(text, expected_date='', expected_total=''):
                 return []
             code, name = heading.groups()
             qty, amount, unit = '1', None, ''
+            basis_qty, basis_unit, basis_price = '', '', ''
             inline = re.fullmatch(r'(.+?) (\d*\.\d{2}) [ +]*[A-Z]+', name)
             if inline:
                 name, amount = inline[1], Decimal(inline[2])
@@ -84,13 +91,18 @@ def parse_items(text, expected_date='', expected_total=''):
                 i += 1
                 name += f' ({weight[1]} lb)'
                 qty = ''
+                # The printed basis too, in the fields Kroger's weighed
+                # items keep it in (#247), which the Purchases export shows.
+                basis_qty, basis_unit, basis_price = weight[1], 'lb', '$' + weight[2]
             elif re.fullmatch(r'2[12]\d{9}|\d{4}', code):
                 qty = ''
             if amount < 0 or (qty and Decimal(qty) <= 0):
                 return []
             if qty:
                 unit = '$' + str((amount / Decimal(qty)).quantize(Decimal('.01'), rounding=ROUND_HALF_UP))
-            items.append(Item(name=name, quantity=qty, unit_price=unit, line_total=f'${amount:.2f}'))
+            items.append(Item(name=name, quantity=qty, unit_price=unit or basis_price,
+                              line_total=f'${amount:.2f}', pricing_quantity=basis_qty,
+                              pricing_unit=basis_unit))
             amounts.append(amount)
             i += 1
         totals = [s.split()[-1] for s in lines[end:] if re.fullmatch(r'TOTAL \d*\.\d{2}', s)]

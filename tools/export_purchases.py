@@ -151,41 +151,110 @@ def load_purchases(provider: str, path: Path) -> List[dict]:
     return recover_meijer_items(provider, path, without_unsaved_writes(rows))
 
 
+# The names a Meijer list row gave its one item before 0.70.0, "In-Store:"
+# and, for a row with no store line, "Meijer order".
+_MEIJER_PLACEHOLDER = re.compile(r"in[ -]?store\s*:?|meijer order", re.I)
+# Where a Meijer receipt is filed, by its purchase type (apps/meijer/storage.py).
+_MEIJER_FOLDERS = {"In-Store": "In-Store", "Online": "Online"}
+_RECOVERED = ("Recovered locally from the Meijer receipt PDF. Review weights and coupons, "
+              "a blank price is unknown.")
+_UNRECOVERED = "Meijer product details unavailable. Review the original receipt PDF."
+
+
+def _meijer_placeholder(row: dict, order_rows: List[dict]) -> bool:
+    """Whether a Meijer history row is the order list's words priced at the
+    receipt's whole total rather than a product. Before 0.70.0 that row was
+    named "In-Store:" or "Meijer order". 0.70.0 names it after the store's
+    address line (#236), an in-store purchase's only row, quantity 1, no
+    unit price and the whole total as its line total, a shape the receipt
+    reader never gives a product, since it prices every counted item. A
+    row with no item, a canceled order's, is not one."""
+    name = (row.get("Item") or "").strip()
+    if not name:
+        return False
+    if _MEIJER_PLACEHOLDER.fullmatch(name):
+        return True
+    return (len(order_rows) == 1 and row.get("Type") == "In-Store"
+            and row.get("Quantity") == 1 and row.get("Unit Price") is None
+            and row.get("Line Total") is not None
+            and row.get("Line Total") == row.get("Order Total"))
+
+
+def _saved_meijer_receipt(history: Path, row: dict) -> Optional[Path]:
+    """The saved receipt a Meijer row names, a plain file inside the
+    history's own folder, or None. A row names its file by name alone, so
+    anything else it holds, a folder, "..", a drive or a full path, names no
+    receipt here, and so does a name a link or a junction leads out of the
+    folder from. Asked so it never raises, a folder the export may not
+    search counting as no receipt."""
+    name = row.get("Receipt PDF") or ""
+    if not name:
+        return None
+    try:
+        ref = Path(name)
+        if ref.anchor or len(ref.parts) != 1 or ref.name in (".", ".."):
+            return None
+        base = history.parent.resolve()
+        folders = [_MEIJER_FOLDERS.get(row.get("Type") or "", "In-Store"), "In-Store", "Online", ""]
+        for folder in dict.fromkeys(folders):
+            candidate = base / folder / ref if folder else base / ref
+            if shared_folder.linked(candidate) or not candidate.resolve().is_relative_to(base):
+                continue
+            if candidate.is_file():
+                return candidate
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return None
+
+
+def _noted(row: dict, note: str) -> str:
+    return "; ".join(x for x in (row.get("Notes") or "", note) if x)
+
 
 def recover_meijer_items(provider: str, history: Path, rows: List[dict]) -> List[dict]:
-    """Older Meijer histories retained the list label instead of PDF items.
+    """Meijer histories written before the app read its receipts hold the
+    order list's words as the one item, priced at the receipt's total. Such
+    a row is read again from its saved receipt, when that receipt's date,
+    total, items, discounts and tax agree (paperpull_core.meijer_items),
+    and otherwise shows no product and no price and asks for review. The
+    history and the receipts are only read, never written.
 
-    Read only their saved receipts; keep histories and PDF files unchanged.
-    Failed recovery remains explicitly incomplete, never a priced product.
-    """
-    if provider.lower() != 'meijer':
+    An order that has products written down as well, from a later download,
+    keeps those and its placeholder is not read again, and an order written
+    down twice is read once, so its items are not listed twice."""
+    if provider.lower() != "meijer":
         return rows
     from paperpull_core.meijer_items import read_items
-    recovered = []
+    orders: Dict[tuple, List[dict]] = {}
     for row in rows:
-        if not re.fullmatch(r'in[ -]store\s*:?|meijer order|', row['Item'], re.I):
+        key = (row.get("Account"), row.get("Order Number")) if row.get("Order Number") else id(row)
+        orders.setdefault(key, []).append(row)
+    recovered, read_once = [], set()
+    for row in rows:
+        key = (row.get("Account"), row.get("Order Number")) if row.get("Order Number") else id(row)
+        order_rows = orders[key]
+        if not _meijer_placeholder(row, order_rows):
             recovered.append(row)
             continue
-        reference = Path(row['Receipt PDF'])
-        base = history.parent.resolve()
-        candidates = [base / reference, base / 'In-Store' / reference]
+        products = [r for r in order_rows if r is not row and (r.get("Item") or "").strip()
+                    and not _meijer_placeholder(r, order_rows)]
         items = []
-        if row['Receipt PDF'] and not reference.is_absolute() and '..' not in reference.parts:
-            for candidate in candidates:
-                if candidate.resolve().is_relative_to(base) and candidate.is_file():
-                    items = read_items(candidate, row['Date'], row['Order Total'])
-                    if items:
-                        break
+        receipt = None if products or key in read_once else _saved_meijer_receipt(history, row)
+        if receipt is not None:
+            items = read_items(receipt, row.get("Date") or "", row.get("Order Total") or "")
         if items:
+            read_once.add(key)
             for item in items:
-                recovered.append({**row, 'Item': item.name, 'Quantity': quantity(item.quantity),
-                                  'Unit Price': money(item.unit_price), 'Line Total': money(item.line_total),
-                                  'Processing': 'Review Needed',
-                                  'Notes': 'Recovered locally from Meijer receipt PDF. Review weights and coupons; blank prices are unknown.'})
+                recovered.append({**row, "Item": item.name, "Quantity": quantity(item.quantity),
+                                  "Pricing Quantity": quantity(item.pricing_quantity),
+                                  "Pricing Unit": item.pricing_unit or None,
+                                  "Unit Price": money(item.unit_price),
+                                  "Line Total": money(item.line_total),
+                                  "Processing": "Review Needed", "Notes": _noted(row, _RECOVERED)})
         else:
-            recovered.append({**row, 'Item': '', 'Quantity': None, 'Unit Price': None,
-                              'Line Total': None, 'Processing': 'Review Needed',
-                              'Notes': 'Meijer product details unavailable. Review the original receipt PDF.'})
+            recovered.append({**row, "Item": "", "Quantity": None, "Pricing Quantity": None,
+                              "Pricing Unit": None, "Unit Price": None, "Line Total": None,
+                              "Processing": "Review Needed", "Notes": _noted(row, _UNRECOVERED)})
     return recovered
 
 

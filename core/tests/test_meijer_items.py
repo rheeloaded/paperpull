@@ -33,3 +33,23 @@ def test_requires_complete_matching_reconciled_receipt():
     assert parse_items(text, '2026-07-04', '6.00') == []
     assert parse_items(text.replace('5.00 F', '4.00 F')) == []
     assert parse_items(text.replace('mPerks #', 'unknown\nmPerks #')) == []
+
+
+def test_a_weighed_item_keeps_its_printed_basis():
+    """The fields Kroger's weighed items keep it in (#247), price per pound."""
+    item = parse_items(receipt('4069 CABBAGE 5.00 F\n2.50 lb @ 1 lb / 2.00'))[0]
+    assert (item.pricing_quantity, item.pricing_unit, item.unit_price) == ('2.50', 'lb', '$2.00')
+    assert (item.quantity, item.line_total) == ('', '$5.00')
+
+
+def test_a_counted_item_has_no_pricing_basis():
+    item = parse_items(receipt('12345678901 MILK\n2 @ 2.50 5.00 F'))[0]
+    assert (item.quantity, item.unit_price, item.pricing_quantity, item.pricing_unit) == ('2', '$2.50', '', '')
+
+
+def test_a_long_line_is_refused_quickly():
+    import time
+    started = time.monotonic()
+    text = receipt('12345678901 ' + '9' * 50000 + ' F')
+    assert parse_items(text) == []
+    assert time.monotonic() - started < 1.0

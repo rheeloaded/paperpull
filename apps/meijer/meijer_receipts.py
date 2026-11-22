@@ -1670,8 +1670,17 @@ class App:
 
         # A direct PDF download bypasses the HTML details reader. Read the
         # verified receipt before the history writer sees the list placeholder.
-        from paperpull_core.meijer_items import read_items
-        extracted = read_items(out_path, purchase.purchase_date, purchase.total)
+        # The receipt is saved and verified by now, so a reading that fails
+        # in a way nobody foresaw leaves the list's row, as 0.70.0 wrote it,
+        # and never the receipt unsaved. Only the purchase written down
+        # takes the items. Discovery keeps the list's words, which the row
+        # is pressed by and an earlier page's record is matched by (#236).
+        try:
+            from paperpull_core.meijer_items import read_items
+            extracted = read_items(out_path, purchase.purchase_date, purchase.total)
+        except Exception:
+            log.warning("The receipt's items could not be read, so the list's row is kept")
+            extracted = []
         if extracted:
             purchase.items = extracted
 
