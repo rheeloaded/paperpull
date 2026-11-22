@@ -9,6 +9,34 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Kroger keeps a weighed item's printed weight and unit (#247, thanks
+  cmcculloh).** A receipt line such as "1.75 lbs x $2.29 each (approx.)"
+  keeps 1.75 and lb in the new Pricing Quantity and Pricing Unit columns
+  of Kroger's order history and of the Purchases spreadsheet and CSV,
+  while Quantity still counts items (1) and the printed line total is kept
+  as printed. A counted item reads "3" and "each". An order history from
+  an earlier version is copied into Backups and given the two new columns
+  before the next row goes in, every row and value kept, and rows waiting
+  beside it from a run while Excel had it open go in once. While Excel
+  holds it the upgrade waits for the next run, and a header the app never
+  wrote is left as it is, with the new rows kept beside it. Rows saved
+  before keep the two columns blank.
+
+### Fixed
+- **Meijer's Purchases rows are the products on the receipt (#246, thanks
+  cmcculloh).** A Meijer receipt downloaded as a PDF was written down as one
+  item, the order list's words ("In-Store:", or on 0.70.0 the store's
+  address) priced at the whole total. The app now reads the products from
+  a till receipt it has verified, when its date and total match and its
+  items, discounts and tax add up to the total exactly, and otherwise
+  writes the row as before. The Purchases spreadsheet reads such a row
+  from an earlier version again from its saved receipt, inside that
+  Meijer folder only and without changing the history or the PDF, and
+  marks it Review Needed. When the receipt is gone or does not add up, the
+  row shows no product and no price rather than the total as one product.
+  A weighed item shows its weight and price per pound.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads

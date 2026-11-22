@@ -55,21 +55,28 @@ def test_legacy_history_is_backed_up_and_upgraded_before_append(tmp_path):
 
 
 def test_unknown_header_is_never_overwritten(tmp_path):
+    """Refused without raising into the download, its row kept beside the file."""
     path = tmp_path / 'history.csv'
     path.write_text('Unexpected,Header\nprivate,value\n', encoding='utf-8')
     original = path.read_bytes()
     ledger = storage.PricingCsvFile(path, ['Quantity', 'Pricing Quantity', 'Pricing Unit'])
-    with pytest.raises(ValueError, match='unknown header'):
-        ledger._ensure_header()
+    with pytest.raises(storage.UnknownHeader):
+        ledger._upgrade()
+    ledger.append_rows([{'Quantity': '1'}])
+    with pytest.raises(storage.UnknownHeader):
+        ledger.rewrite([{'Quantity': '1'}])
     assert path.read_bytes() == original
+    assert ledger.waiting_path.exists()
 
 
-def test_queued_legacy_writes_must_be_flushed_before_migration(tmp_path):
+def test_queued_legacy_writes_go_in_once_after_the_upgrade(tmp_path):
+    """Rows kept beside the file before the upgrade are neither refused nor lost."""
     path = tmp_path / 'history.csv'
     path.write_text('Quantity\n1\n', encoding='utf-8')
-    original = path.read_bytes()
     ledger = storage.PricingCsvFile(path, ['Quantity', 'Pricing Quantity', 'Pricing Unit'])
-    ledger.waiting_path.write_text('{}', encoding='utf-8')
-    with pytest.raises(ValueError, match='queued Kroger CSV writes'):
-        ledger._ensure_header()
-    assert path.read_bytes() == original
+    ledger._keep([{'id': 'a' * 16, 'row': {'Quantity': '2'}}])
+    ledger.append_rows([{'Quantity': '3', 'Pricing Quantity': '1.5', 'Pricing Unit': 'lb'}])
+    with path.open(encoding='utf-8-sig', newline='') as fh:
+        rows = list(csv.DictReader(fh))
+    assert [(r['Quantity'], r['Pricing Quantity']) for r in rows] == [('1', ''), ('2', ''), ('3', '1.5')]
+    assert not ledger.waiting_path.exists()
