@@ -31,6 +31,7 @@ from typing import List, Optional, Tuple
 from paperpull_core import shared_folder
 from paperpull_core import intake
 from paperpull_core import page_check as _page_check
+from paperpull_core.characters import whole_json
 from paperpull_core import redirects
 from paperpull_core.models import ONLINE, Item, Purchase
 from paperpull_core.urls import is_safe_url as _host_allows
@@ -142,9 +143,27 @@ def order_details_url(order_id: str) -> str:
     return _with_language(f"{BASE}/gp/your-account/order-details?orderID={order_id}")
 
 
-# Amazon order ids: 111-2223333-4445555 (retail) or D01-... (digital)
-ORDER_ID_RE = re.compile(r"\b((?:D)?\d{2,3}-\d{7}-\d{7})\b")
-ORDER_ID_IN_URL_RE = re.compile(r"orderID=((?:D)?\d{2,3}-\d{7}-\d{7})", re.I)
+# Amazon order ids: 111-2223333-4445555 (retail) or D01-... (digital).
+# A page can print the hyphens as one of Unicode's own (a non-breaking
+# hyphen keeps the number on one line), so those are read too, and every id
+# the app keeps is written with ASCII hyphens and ASCII digits (order_id_of),
+# the way the order's addresses and the saved records write it (#207).
+_DASHES = "‐‑‒–—―−﹣－"
+_DASH = "[-" + _DASHES + "]"
+ORDER_ID_RE = re.compile(r"\b((?:D)?[0-9]{2,3}%s[0-9]{7}%s[0-9]{7})\b" % (_DASH, _DASH))
+ORDER_ID_IN_URL_RE = re.compile(r"orderID=((?:D)?[0-9]{2,3}-[0-9]{7}-[0-9]{7})", re.I)
+_ORDER_ID_WHOLE_RE = re.compile(r"D?[0-9]{2,3}-[0-9]{7}-[0-9]{7}")
+_TO_ASCII = str.maketrans({c: "-" for c in _DASHES})
+
+
+def order_id_of(text: str) -> str:
+    """An order id as the app keeps it, its hyphens ASCII."""
+    return (text or "").translate(_TO_ASCII)
+
+
+def order_ids_in(text: str) -> List[str]:
+    """Every order id the text prints, in its order, as the app keeps them."""
+    return [order_id_of(m) for m in ORDER_ID_RE.findall(text or "")]
 
 # ---------------------------------------------------------------------------
 # Accessible names / labels
@@ -235,6 +254,12 @@ FALLBACK = {
     "page_ready": ".order-card, .js-order-card, [data-component='orderCard'], "
                   "span.num-orders, label.time-filter__label b, "
                   "#ordersContainer, .your-orders-content",
+    # An order's invoice menu and its order-details link, which name the
+    # order on a list drawn without cards (#207). Read by
+    # invoice_menu_orders from their data, and counted here so a failure
+    # file says whether a list had them.
+    "invoice_menu": "[data-a-popover*='invoice/popover']",
+    "details_link": "a[href*='order-details']",
     # printable summary page
     "print_page_body": "body",
 }
@@ -680,6 +705,10 @@ def orders_listed(page, start_index: int = 0) -> bool:
     count = order_count(page)
     if count is not None and count <= start_index:
         return True
+    # Orders drawn without a card the app knows, each found by its own
+    # invoice menu or order-details link (#207).
+    if invoice_menu_orders(page):
+        return True
     # The orders read off the page's text, the way collect_cards falls back
     # to doing when the cards are drawn some other way.
     try:
@@ -706,6 +735,31 @@ def challenge_after_a_moment(page, wait_ms: Optional[int] = None,
             page.wait_for_timeout(500)
         except Exception:
             return found
+
+
+PAGE_SIZE = 10
+
+
+def fewer_than_counted(page, start_index: int, read: int) -> bool:
+    """Whether a list drawn without cards, whose orders print no order
+    number in its text, showed fewer orders than Amazon's own count says
+    this page holds (#207). Such a list is read from each order's invoice
+    menu or order-details link, and an order drawn with neither would go
+    missing with nothing said. False on a page with cards, a page whose
+    text prints the numbers, and a page with no count, which read as they
+    always did."""
+    try:
+        if page.locator(FALLBACK["order_card"]).count() > 0:
+            return False
+        body = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+        return False
+    if ORDER_ID_RE.search(body or ""):
+        return False
+    count = order_count(page)
+    if count is None:
+        return False
+    return read < min(PAGE_SIZE, count - start_index)
 
 
 def has_next_page(page) -> bool:
@@ -740,7 +794,7 @@ def collect_cards(page, purchase_type: str = ONLINE) -> List[RawCard]:
             order_id = ""
             m = ORDER_ID_RE.search(text)
             if m:
-                order_id = m.group(1)
+                order_id = order_id_of(m.group(1))
             if not order_id:
                 try:
                     href = c.locator(FALLBACK["order_link"]).first.get_attribute(
@@ -759,19 +813,364 @@ def collect_cards(page, purchase_type: str = ONLINE) -> List[RawCard]:
             continue
     if cards:
         return cards
-    # Fallback: scan the whole page for order ids + their surrounding block.
+    # Orders drawn without a card the app knows, each read from its own
+    # invoice menu or order-details link and the block that holds it (#207).
+    # Not on a page whose own count says it holds no orders, where whatever
+    # names one is not in the list.
+    if order_count(page) != 0:
+        for oid, text in invoice_menu_orders(page):
+            if oid in seen:
+                continue
+            seen.add(oid)
+            cards.append(RawCard(href=order_details_url(oid), text=text, order_id=oid))
+    # Then the whole page for order ids + their surrounding block, the block
+    # found where the id is printed, whichever hyphens it has. Any the menus
+    # did not name are read this way as they always were.
     try:
         body = page.locator("body").inner_text(timeout=8000)
     except Exception:
         body = ""
-    for oid in dict.fromkeys(ORDER_ID_RE.findall(body)):
+    for m in ORDER_ID_RE.finditer(body or ""):
+        oid = order_id_of(m.group(1))
         if oid in seen:
             continue
         seen.add(oid)
-        idx = body.find(oid)
+        idx = m.start(1)
         chunk = body[max(0, idx - 400): idx + 400]
         cards.append(RawCard(href=order_details_url(oid), text=chunk, order_id=oid))
     return cards
+
+
+# ---------------------------------------------------------------------------
+# Orders drawn without a card the app knows (#207)
+# ---------------------------------------------------------------------------
+#
+# A tester's amazon.de list (2026-11) draws each order as a plain block with
+# no card class, no orderID= link the old selector finds and no order number
+# its text gives the reader. Each order's header still carries the order's
+# own invoice menu, Amazon's popover trigger whose data-a-popover names
+# /your-orders/invoice/popover?orderId=<id>, and an order-details link. The
+# ship-to name beside it is a popover trigger of the same shape, so a trigger
+# is never taken by its place or its words, only by the address its data
+# names. Nothing here is pressed or hovered, the attributes are read.
+
+_INVOICE_MENU_PATH_RE = re.compile(
+    r"(?:/-/[a-z]{2}(?:[_-][A-Za-z]{2})?)?/your-orders/invoice/popover")
+_DETAILS_PATH_RE = re.compile(
+    r"(?:/-/[a-z]{2}(?:[_-][A-Za-z]{2})?)?/(?:gp/your-account|your-orders)/order-details"
+    r"(?:/ref=[^/]*)?")
+
+# Each element whose data names a popover, and each link whose address has
+# an orderID, with the address its data or href holds, and its ancestors by
+# their place in the document, the element itself first, up to and not
+# counting the body. A block that holds the page's own controls (the period
+# menu's select, the header or the navigation) is never an order's, whatever
+# it holds. A form is not one of them, since an order's Buy it again button
+# can sit in a form of its own.
+_INVOICE_MENUS_JS = r"""() => {
+  const all = document.getElementsByTagName('*');
+  const place = new Map();
+  for (let i = 0; i < all.length; i++) place.set(all[i], i);
+  const wide = new Map();
+  const isWide = (el) => {
+    if (!wide.has(el)) wide.set(el, !!(el.matches('header, nav, select') ||
+        el.querySelector('header, nav, select')));
+    return wide.get(el);
+  };
+  // Whether a sibling has the same tag and the same attribute names, the
+  // mark of one block in a list of blocks drawn alike, an order among orders.
+  const shapeOf = (el) => el.tagName + '|' + el.getAttributeNames().sort().join(',');
+  const twin = new Map();
+  const hasTwin = (el) => {
+    if (!twin.has(el)) {
+      const p = el.parentElement, mine = shapeOf(el);
+      twin.set(el, !!p && Array.from(p.children).some(s => s !== el && shapeOf(s) === mine));
+    }
+    return twin.get(el);
+  };
+  const out = [];
+  const found = Array.from(document.querySelectorAll('[data-a-popover], a[href]'));
+  for (const el of found) {
+    let kind, raw;
+    if (el.hasAttribute('data-a-popover')) {
+      kind = 'menu'; raw = el.getAttribute('data-a-popover') || '';
+    } else {
+      raw = el.getAttribute('href') || '';
+      if (!/orderid=/i.test(raw)) continue;
+      kind = 'link';
+    }
+    if (raw.length > 4000) continue;
+    const chain = [], alike = [], shape = [];
+    let top = null;
+    for (let up = el; up && up !== document.body && up !== document.documentElement;
+         up = up.parentElement) {
+      if (isWide(up)) { top = place.get(up); break; }
+      chain.push(place.get(up));
+      alike.push(hasTwin(up));
+      shape.push(shapeOf(up));
+    }
+    if (top === null && chain.length) top = -1;
+    out.push({kind: kind, raw: raw, chain: chain, alike: alike, shape: shape, top: top});
+    if (out.length >= 2000) break;
+  }
+  return out;
+}"""
+
+# The texts of each order's blocks, by their places, once each still holds
+# the element that was read there and that still names what it named, else
+# null.
+_BLOCK_TEXT_JS = r"""(asks) => {
+  const all = document.getElementsByTagName('*');
+  return asks.map(([blocks, member, raw, kind]) => {
+    const m = all[member];
+    if (!m) return null;
+    const now = kind === 'menu' ? m.getAttribute('data-a-popover') : m.getAttribute('href');
+    if (now !== raw) return null;
+    const said = [];
+    for (const block of blocks) {
+      const b = all[block];
+      if (!b || !b.contains(m)) return null;
+      said.push((b.innerText || '').slice(0, 6000));
+    }
+    return said;
+  });
+}"""
+
+
+def _own_store(url: str) -> Optional[str]:
+    """The path of an address on this store, relative or on its own host
+    over https, else None."""
+    from urllib.parse import urlsplit
+    if not isinstance(url, str) or "\\" in url:
+        return None
+    if url.startswith("/") and not url.startswith("//"):
+        return urlsplit(url).path
+    if not is_safe_url(url):
+        return None
+    return urlsplit(url).path
+
+
+def _the_one_order_id(url: str) -> Optional[str]:
+    """The order id the address's own orderID parameter names, its name read
+    in any case, when it names exactly one well-formed id, else None."""
+    from urllib.parse import parse_qsl, urlsplit
+    query = urlsplit(url).query
+    named = [v for k, v in parse_qsl(query, keep_blank_values=True)
+             if k.lower() == "orderid"]
+    if len(set(named)) != 1:
+        return None
+    oid = order_id_of(named[0].strip())
+    return oid if _ORDER_ID_WHOLE_RE.fullmatch(oid) else None
+
+
+def invoice_menu_order_id(raw: str) -> Optional[str]:
+    """The order an invoice menu belongs to, from its data-a-popover, when
+    that names this store's /your-orders/invoice/popover for exactly one
+    order. None for any other popover, the ship-to name's among them, and
+    for anything that does not read cleanly."""
+    import json
+    try:
+        data = whole_json(json.loads(raw))
+    except (TypeError, ValueError):
+        return None
+    url = data.get("url") if isinstance(data, dict) else None
+    path = _own_store(url) if isinstance(url, str) else None
+    if path is None or not _INVOICE_MENU_PATH_RE.fullmatch(path):
+        return None
+    return _the_one_order_id(url)
+
+
+def details_link_order_id(href: str) -> Optional[str]:
+    """The order an order-details link on this store names, else None. A
+    product link that happens to carry an orderID is not one."""
+    path = _own_store(href)
+    if path is None or not _DETAILS_PATH_RE.fullmatch(path):
+        return None
+    return _the_one_order_id(href)
+
+
+def _order_of(found: dict) -> Optional[str]:
+    if found.get("kind") == "menu":
+        return invoice_menu_order_id(found.get("raw"))
+    if found.get("kind") == "link":
+        return details_link_order_id(found.get("raw"))
+    return None
+
+
+def invoice_menu_orders(page) -> List[Tuple[str, str]]:
+    """(order id, its block's text) for each order on the page found by its
+    invoice menu or order-details link, in the page's order.
+
+    An order's block is found going up from what named it, never past a
+    block that names another order or holds the page's own controls, and it
+    stops at the first block drawn like one of its siblings, an order in a
+    list of orders, so an unnamed neighbor's date is not taken. Its text
+    gives the order's date and total. Where no block is wider than what
+    named it the order is kept with that alone, no date or total rather
+    than a neighbor's.
+
+    The list is the place holding the most orders' blocks, counted by their
+    invoice menus where any order has one, and an order whose block sits
+    outside it (a banner naming an order) is not read. An order named only
+    by its order-details link is read when a block around it is drawn like
+    an order block the menus found and sits beside it. Empty when nothing
+    names an order, or the page cannot be read."""
+    try:
+        found = page.evaluate(_INVOICE_MENUS_JS) or []
+    except Exception:
+        return []
+    named = []
+    for f in found:
+        if not isinstance(f, dict) or not isinstance(f.get("chain"), list) or not f["chain"]:
+            continue
+        alike, shape = f.get("alike"), f.get("shape")
+        if not isinstance(alike, list) or len(alike) != len(f["chain"]):
+            continue
+        if not isinstance(shape, list) or len(shape) != len(f["chain"]):
+            continue
+        oid = _order_of(f)
+        if oid:
+            named.append((oid, f))
+    if not named:
+        return []
+    menus = [(oid, f) for oid, f in named if f["kind"] == "menu"]
+    by_menu = {oid for oid, _f in menus}
+    links = [(oid, f) for oid, f in named if f["kind"] == "link" and oid not in by_menu]
+    if not menus:
+        # No invoice menu on the page. The orders are named by their links
+        # alone and the list is the holder of the most of them.
+        placed = _placed(links, links)
+        kept = _the_list(placed)
+        return _read_blocks(page, kept)[0] if kept is not None else []
+    # The menus settle the list and each order's block, as though no link
+    # were there, so a link to another order inside an order's block takes
+    # nothing from it.
+    placed = _placed(menus, menus)
+    kept = _the_list(placed)
+    if kept is None:
+        return []
+    read, _chosen = _read_blocks(page, kept)
+    if read is None:
+        return []
+    # An order named only by its order-details link (a canceled one, say)
+    # is read only where two or more menu orders settled the list. Each of
+    # their blocks is then a child of the list, and the link-only order's
+    # block is the child of the list around it, drawn like theirs, naming
+    # no other order and not one of theirs. A link inside a menu order's
+    # block, and a notice or a banner drawn some other way, name no order.
+    # Where the list is not settled (one invoiced order on the page) no link
+    # alone names an order. An order missed either way is said, since the
+    # page then shows fewer orders than its count (fewer_than_counted).
+    extra = []
+    holders = {holder for _oid, _f, _blocks, holder in kept}
+    if links and len({oid for oid, _f, _b, _h in kept}) >= 2 and len(holders) == 1:
+        (the_list,) = holders
+        tops = {b[-1] for _oid, _f, b, _h in kept}
+        shapes = {f["shape"][f["chain"].index(b[-1])] for _oid, f, b, _h in kept}
+        under: dict = {}
+        for oid, f in menus + links:
+            for p in f["chain"]:
+                under.setdefault(p, set()).add(oid)
+        for oid, f in links:
+            chain = f["chain"]
+            parents = chain[1:] + [f.get("top")]
+            if the_list not in parents:
+                continue
+            i = parents.index(the_list)
+            if (chain[i] in tops or f["shape"][i] not in shapes
+                    or under.get(chain[i]) != {oid}):
+                continue
+            blocks = [chain[j] for j in range(i) if f["alike"][j]] + [chain[i]]
+            extra.append((oid, f, blocks, the_list))
+    more, _ = _read_blocks(page, extra) if extra else ([], [])
+    if more is None:
+        return []
+    # In the page's order, by where each order's own block is.
+    where = {}
+    for oid, f, _blocks, _holder in kept + extra:
+        where.setdefault(oid, f["chain"][0])
+    out, seen = [], set()
+    for oid, text in read + more:
+        if oid not in seen:
+            seen.add(oid)
+            out.append((oid, text))
+    out.sort(key=lambda pair: where.get(pair[0], 0))
+    log.info("orders read from their invoice menus: %d", len(out))
+    return out
+
+
+def _placed(these, all_named) -> list:
+    """(order id, found, its blocks lowest first, the place holding the
+    largest) for each of `these`, whose block grows up from what named it
+    while it names no other order of `all_named`."""
+    under: dict = {}
+    for oid, f in all_named:
+        for p in f["chain"]:
+            under.setdefault(p, set()).add(oid)
+    out = []
+    for oid, f in these:
+        chain, at = f["chain"], 0
+        for i, p in enumerate(chain):
+            if under.get(p) != {oid}:
+                break
+            at = i
+        blocks = [chain[i] for i in range(at) if f["alike"][i]] + [chain[at]]
+        holder = chain[at + 1] if at + 1 < len(chain) else f.get("top")
+        out.append((oid, f, blocks, holder))
+    return out
+
+
+def _the_list(placed) -> Optional[list]:
+    """Those of `placed` in the list, the holder of the most orders' blocks.
+    All of them where each holds one (one order on the page, say), None
+    where two holders tie for the most."""
+    if not placed:
+        return []
+    held: dict = {}
+    for oid, _f, _blocks, holder in placed:
+        held.setdefault(holder, set()).add(oid)
+    most = max(len(v) for v in held.values())
+    lists = [h for h, v in held.items() if len(v) == most]
+    if most < 2:
+        return placed
+    if len(lists) != 1:
+        return None
+    return [x for x in placed if x[3] == lists[0]]
+
+
+def _read_blocks(page, placed) -> tuple:
+    """([(order id, text)], [its chosen block's (shape, holder) or None])
+    for `placed`, each order once, its text the lowest of its blocks that
+    gives a date, else the largest. (None, None) when the page moved
+    between the looks or cannot be read."""
+    asks, kept = [], []
+    for oid, f, blocks, holder in placed:
+        if any(k[0] == oid for k in kept):
+            continue
+        kept.append((oid, f, blocks, holder))
+        asks.append([blocks, f["chain"][0], f["raw"], f["kind"]])
+    try:
+        texts = page.evaluate(_BLOCK_TEXT_JS, asks) or []
+    except Exception:
+        return None, None
+    if len(texts) != len(kept):
+        return None, None
+    out, chosen = [], []
+    for (oid, f, blocks, _holder), said in zip(kept, texts):
+        if not isinstance(said, list) or len(said) != len(blocks) or any(
+                not isinstance(t, str) for t in said):
+            # The page moved between the two looks, so nothing it says now
+            # is taken for this order.
+            return None, None
+        k = next((n for n, t in enumerate(said) if parse_date(t)), len(said) - 1)
+        out.append((oid, said[k].strip()))
+        i = f["chain"].index(blocks[k])
+        if f["alike"][i]:
+            parent = f["chain"][i + 1] if i + 1 < len(f["chain"]) else f.get("top")
+            chosen.append((f["shape"][i], parent))
+        else:
+            chosen.append(None)
+    return out, chosen
 
 
 def card_to_purchase(card: RawCard, purchase_type: str,
@@ -859,7 +1258,7 @@ def extract_details(page, purchase: Purchase) -> Purchase:
     # Order id
     m = ORDER_ID_RE.search(body)
     if m and not purchase.order_number:
-        purchase.order_number = m.group(1)
+        purchase.order_number = order_id_of(m.group(1))
 
     # "Order Placed: January 5, 2025"
     placed = None
@@ -1088,7 +1487,7 @@ def not_this_purchase(page, order_id: str) -> str:
     order's summary prints its own id. See paperpull_core.page_check."""
     if not _page_check.address_names(page.url, order_id, query="orderID"):
         return _page_check.NOT_ITS_ADDRESS
-    shown = ORDER_ID_RE.findall(_page_check.page_text(page, "print"))
+    shown = order_ids_in(_page_check.page_text(page, "print"))
     return _page_check.names_only(shown, order_id)
 
 

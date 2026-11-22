@@ -100,7 +100,15 @@ Orders with no invoice PDF fall back to Amazon's printable order summary at
 `printToPDF` and saved as `YYYY-MM-DD Amazon <Category> Receipt.pdf`.
 
 Either way no buttons are clicked and the native print dialog is never
-involved. Files land in `Online\`.
+involved. Files land in `Online\`. Nothing on Amazon's pages is pressed,
+hovered or typed into at all, and tests/test_amazon_presses_nothing.py
+fails on any press added to the app.
+
+Where a store draws its order list without the order cards this app knows
+(seen on amazon.de in 2026-11, #207), each order is found by its own
+Invoice menu, whose data names `/your-orders/invoice/popover?orderId=<id>`,
+or by its order-details link. The ship-to name beside it opens a card of
+the same shape, and it is never taken for an order or an invoice.
 
 Canceled orders are recorded in the CSVs with no PDF (nothing to print).
 

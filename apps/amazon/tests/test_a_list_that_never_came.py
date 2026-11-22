@@ -97,6 +97,53 @@ LISTED = orders_page(2, CARD % (THIS_YEAR, "23.41", FIRST_ORDER, FIRST_ORDER)
                      + CARD % (THIS_YEAR, "58.20", SECOND_ORDER, SECOND_ORDER))
 EMPTY = orders_page(0)
 
+# The list a tester's amazon.de drew (#207). No card class the app knows, no
+# order number in the text, no orderID= link. Each order's header holds the
+# ship-to name and the invoice menu (Rechnung), both Amazon popover triggers
+# of the same shape, and only the invoice menu's data names the order. The
+# page tells the server of any press, key or focus, and pressing either
+# trigger fetches its popover, so a press shows in SITE.seen as well.
+WATCHED = """<script>
+['click','dblclick','auxclick','mousedown','mouseup','pointerdown','pointerup',
+ 'keydown','keyup','input','change','submit','touchstart','focusin'].forEach(t =>
+  document.addEventListener(t, () => fetch('/event?type=' + t), true));
+document.addEventListener('click', e => {
+  const s = e.target.closest('[data-a-popover]');
+  if (s) fetch(JSON.parse(s.getAttribute('data-a-popover')).url || '/your-orders/address/popover');
+}, true);
+</script>"""
+
+NEW_CARD = """<div class="x1" data-a="1" data-b="2" data-c="3" data-d="4"><div class="h">
+<div><div>Bestellung aufgegeben</div><div>%(day)s. Januar %(year)d</div></div>
+<div><div>Summe</div><div>%(total)s €</div></div>
+<ul><li>
+<span data-action="a-popover" data-a-popover='{"url":"/your-orders/address/popover?addressId=X1","position":"triggerBottom"}'><a href="javascript:void(0)">Dana Example<i></i></a></span>
+%(menu)s
+</li></ul></div>
+<div><a href="/dp/B000000001">Invented Product</a></div></div>"""
+
+INVOICE_MENU = ("""<span data-action="a-popover" data-a-popover='{"url":"/your-orders/invoice/"""
+                """popover?orderId=%s","position":"triggerBottom"}'><a href="javascript:void(0)">"""
+                """Rechnung<i></i></a></span>""")
+
+
+def new_layout(count: int, orders) -> str:
+    """The tester's list, `orders` as (order id, day, total), or with no
+    invoice menu where the id is None."""
+    cards = "".join(NEW_CARD % {"day": day, "year": THIS_YEAR, "total": total,
+                                "menu": INVOICE_MENU % oid if oid else ""}
+                    for oid, day, total in orders)
+    return """<!doctype html><html><head><title>Meine Bestellungen</title></head><body>
+<section><form action="/your-orders/orders"><label class="time-filter__label" for="t">
+<b>%d Bestellungen</b> aufgegeben in</label><select id="t"><option>%d</option></select></form>
+%s</section>%s</body></html>""" % (count, THIS_YEAR, cards, WATCHED)
+
+
+NEW_LISTED = new_layout(2, [(FIRST_ORDER, 2, "23,41"), (SECOND_ORDER, 5, "58,20")])
+# The page as the tester's failure files count it, the count and the
+# products, and nothing on it naming an order.
+NEW_UNNAMED = new_layout(16, [(None, 2, "23,41"), (None, 5, "58,20")])
+
 HOME = """<!doctype html><html><head><title>Amazon.com</title></head>
 <body><h1>Amazon.com</h1></body></html>"""
 
@@ -157,6 +204,8 @@ class _Handler(BaseHTTPRequestHandler):
             body, kind = HOME, "text/html; charset=utf-8"
         elif parts.path == "/decision":
             body, kind = ("decided" if SITE.decided.is_set() else "wait"), "text/plain"
+        elif parts.path == "/event" or parts.path.startswith("/your-orders/"):
+            body, kind = "", "text/plain"
         else:
             self.send_error(404)
             return
@@ -562,3 +611,101 @@ def test_a_year_that_ends_on_the_last_page_the_limit_allows_is_whole(attached, t
     out = printed(capsys)
     assert len(known(tmp_path)) == total and "ran past" not in out, out
     assert listing_note(tmp_path)["complete"] is True
+
+
+# -- an order list drawn without cards (#207) -----------------------------------------
+
+def de_config(tmp_path, cdp_url):
+    cfg = config_for(tmp_path, cdp_url)
+    data = json.loads(cfg.read_text(encoding="utf-8"))
+    data["marketplace"] = "amazon.de"
+    cfg.write_text(json.dumps(data), encoding="utf-8")
+    return cfg
+
+
+def touched():
+    """What the page reported pressed, typed or focused, and any popover a
+    press fetched."""
+    return [s for s in SITE.seen if s.startswith(("/event", "/your-orders/"))]
+
+
+def test_discovery_reads_the_testers_list_from_its_invoice_menus(attached, tmp_path, capsys):
+    """The tester's list, which stopped Discover at "did not appear", is
+    read, each order with its own date and total, and nothing on the page is
+    pressed, typed into or focused."""
+    SITE.years = {THIS_YEAR: NEW_LISTED}
+    SITE.other_years = new_layout(0, [])
+    cfg = de_config(tmp_path, attached)
+    assert app_mod.main(["--discover", "--config", str(cfg)]) == 0
+
+    out = printed(capsys)
+    records = known(tmp_path)
+    assert sorted(records) == ["Online:" + FIRST_ORDER, "Online:" + SECOND_ORDER], (records, out)
+    first = records["Online:" + FIRST_ORDER]
+    second = records["Online:" + SECOND_ORDER]
+    assert first["purchase_date"] == "%d-01-02" % THIS_YEAR and "23.41" in first["total"]
+    assert second["purchase_date"] == "%d-01-05" % THIS_YEAR and "58.20" in second["total"]
+    assert "did not load" not in out
+    assert touched() == [], touched()
+
+
+def test_login_takes_the_testers_list_as_a_signed_in_list(attached, tmp_path, capsys):
+    SITE.front = NEW_LISTED
+    cfg = de_config(tmp_path, attached)
+    assert app_mod.main(["--login", "--config", str(cfg)]) == 0
+    out = printed(capsys)
+    assert claims_a_session(out), out
+    assert touched() == []
+
+
+def test_the_testers_page_with_nothing_naming_an_order_still_did_not_appear(attached, tmp_path,
+                                                                            capsys):
+    """Ship-to names, products and a count of sixteen, and no invoice menu.
+    No order is made up from it, and the run stops as before."""
+    SITE.years = {THIS_YEAR: NEW_UNNAMED}
+    SITE.other_years = NEW_UNNAMED
+    out = stopped_run(tmp_path, attached, capsys, "--pilot", "--year", str(THIS_YEAR))
+
+    assert "orders did not load" in out, out
+    assert not known(tmp_path)
+    assert touched() == []
+
+
+def test_the_page_does_tell_of_a_press(attached, server):
+    """The control for the three above. A press of the ship-to name is seen
+    by the page and fetches the ship-to card, so an empty touched() means
+    nothing was pressed, not that nothing could be seen."""
+    sync = pytest.importorskip("playwright.sync_api")
+    SITE.years = {THIS_YEAR: NEW_LISTED}
+    with sync.sync_playwright() as pw:
+        browser = pw.chromium.connect_over_cdp(attached)
+        page = browser.contexts[0].new_page()
+        try:
+            page.goto(server + HISTORY + "?timeFilter=year-%d" % THIS_YEAR)
+            page.get_by_text("Dana Example").first.click()
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not any(
+                    s.startswith("/your-orders/address/popover") for s in SITE.seen):
+                page.wait_for_timeout(100)
+        finally:
+            page.close()
+    assert "/event?type=click" in SITE.seen
+    assert any(s.startswith("/your-orders/address/popover") for s in SITE.seen)
+
+
+def test_a_list_that_showed_fewer_orders_than_its_count_stops_after_what_it_read(attached,
+                                                                                 tmp_path, capsys):
+    """Three orders counted, two named. The two are kept, and the run says so
+    and stops rather than take the year as read whole."""
+    SITE.years = {THIS_YEAR: new_layout(3, [(FIRST_ORDER, 2, "23,41"), (None, 3, "1,00"),
+                                            (SECOND_ORDER, 5, "58,20")])}
+    SITE.other_years = new_layout(0, [])
+    cfg = de_config(tmp_path, attached)
+    with pytest.raises(SystemExit) as stopped:
+        app_mod.main(["--discover", "--config", str(cfg)])
+    out = printed(capsys)
+    assert stopped.value.code == 0, out
+    assert sorted(known(tmp_path)) == ["Online:" + FIRST_ORDER, "Online:" + SECOND_ORDER], out
+    assert "showed fewer orders than Amazon's own count" in out, out
+    assert list((tmp_path / "out" / "Diagnostics").glob("failure-*.json"))
+    assert touched() == []

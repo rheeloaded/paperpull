@@ -121,6 +121,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
   (whether its address is on ziplyfiber.com, its invoice path, and names
   its own id, whether its date is a calendar day or carries a time).
   Nothing from the list goes in.
+- **Amazon reads an order list drawn without order cards (#207).** On an
+  amazon.de account the order list came with none of the order cards the
+  app knows and no order number it could read, so Discover stopped at "the
+  order list did not appear" with the orders on screen. Each order is now
+  found by its own Invoice (Rechnung) menu or its order-details link, in
+  every Amazon store, and never by the ship-to name beside it, which opens
+  a card of the same shape. Order numbers printed with a Unicode hyphen are
+  read too and kept with plain hyphens. Where such a list shows fewer
+  orders than Amazon's own count, the run keeps what it read, says so and
+  stops rather than take the year as read whole. The app still presses
+  nothing on Amazon's pages, and a new check fails on any press added to it.
 
 ## [0.70.0] - 2026-11-20
 
