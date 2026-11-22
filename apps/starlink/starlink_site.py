@@ -57,7 +57,10 @@ _READ_PAGE = r"""() => {
         row.querySelector('[role=gridcell][data-field=payableEntityReferenceId]')?.innerText.trim(),
         row.querySelector('[role=gridcell][data-field=payableEntityCreatedDate]')?.innerText.trim()
     ]);
-    return {range, rows, previous: enabled('Go to previous page'), next: enabled('Go to next page')};
+    // An empty table counts only when the grid draws its own no-rows
+    // overlay, never from a footer drawn before the invoices arrive.
+    const empty = [...root.querySelectorAll('.MuiDataGrid-overlay')].some(visible);
+    return {range, rows, empty, previous: enabled('Go to previous page'), next: enabled('Go to next page')};
 }"""
 
 _WAIT_PAGE = r"""before => {
@@ -70,6 +73,7 @@ _WAIT_PAGE = r"""before => {
     const last = Number(bounds[2]);
     if (current.rows.length !== (first === 0 ? 0 : last - first + 1)
         || current.rows.some(([id,date]) => !id || !date)) return false;
+    if (first === 0 && !current.empty) return false;
     if (!before) return current;
     const previousIds = new Set(before.ids);
     return current.range !== before.range && current.rows.length > 0
@@ -186,7 +190,8 @@ def _parse_view(raw) -> InvoicePage:
     first, last = int(match[1]), int(match[2])
     total = int(match[3]) if match[3] is not None else None
     if first == 0:
-        if last or raw["rows"] or total not in (None, 0) or raw["previous"] or raw["next"]:
+        if (last or raw["rows"] or total not in (None, 0) or raw["previous"] or raw["next"]
+                or raw.get("empty") is not True):
             raise ListStopped("Starlink's empty invoice list could not be verified.")
     elif (last < first or len(raw["rows"]) != last - first + 1
           or raw["previous"] != (first > 1)

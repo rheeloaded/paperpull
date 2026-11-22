@@ -258,3 +258,38 @@ def test_refuses_pager_that_shows_the_same_page_again(page):
         "el => { el.onclick = () => renderInvoicePage(0); }")
     with pytest.raises(site.ListStopped):
         site.collect_download_docs(page)
+
+
+@pytest.mark.parametrize("empty,whole", [(True, True), (False, False), (None, False)])
+def test_an_empty_table_needs_the_grids_own_no_rows_overlay(empty, whole):
+    raw = {"range": "0 - 0 of 0", "rows": [], "previous": False, "next": False}
+    if empty is not None:
+        raw["empty"] = empty
+    if whole:
+        assert site._parse_view(raw).bills == ()
+    else:
+        with pytest.raises(site.ListStopped):
+            site._parse_view(raw)
+
+
+def _empty_table(page, overlay):
+    page.evaluate("""overlay => {
+        const invoice = document.querySelector('#invoices');
+        invoice.querySelector('#rows').innerHTML = overlay
+            ? '<div class="MuiDataGrid-overlay">No rows</div>' : '';
+        invoice.querySelector('.MuiTablePagination-displayedRows').textContent = '0 - 0 of 0';
+        for (const button of invoice.querySelectorAll('.MuiTablePagination-root button')) {
+            button.disabled = true;
+        }
+    }""", overlay)
+
+
+def test_an_empty_footer_without_the_overlay_is_not_an_empty_history(page):
+    _empty_table(page, overlay=False)
+    with pytest.raises(site.ListStopped):
+        site.collect_download_docs(page)
+
+
+def test_an_empty_table_the_grid_says_is_empty_lists_nothing(page):
+    _empty_table(page, overlay=True)
+    assert site.collect_download_docs(page) == []

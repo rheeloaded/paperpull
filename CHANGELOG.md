@@ -15,7 +15,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Invoices table, pressing only that table's own page buttons, and files a
   PDF only when it prints the listed invoice number and an issue date of the
   Billing date or the day after. Every password field of the page counts
-  when it checks for a sign-out, a hidden one too. Port 9322.
+  when it checks for a sign-out, a hidden one too, and an empty Invoices
+  table counts only once the table itself says it has no rows. Port 9322.
 
 ## [0.70.0] - 2026-11-20
 
