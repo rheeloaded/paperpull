@@ -293,3 +293,11 @@ def test_an_empty_footer_without_the_overlay_is_not_an_empty_history(page):
 def test_an_empty_table_the_grid_says_is_empty_lists_nothing(page):
     _empty_table(page, overlay=True)
     assert site.collect_download_docs(page) == []
+
+
+def test_a_loading_overlay_on_an_empty_footer_is_not_an_empty_history(page):
+    _empty_table(page, overlay=True)
+    page.evaluate("""() => document.querySelector('#invoices .MuiDataGrid-overlay')
+        .innerHTML = '<span role="progressbar"></span>'""")
+    with pytest.raises(site.ListStopped):
+        site.collect_download_docs(page)
