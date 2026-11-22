@@ -139,7 +139,7 @@ def is_safe_control(name: str) -> bool:
 
 
 def looks_signed_out(page) -> bool:
-    return is_safe_url(page.url) and bool(page.locator("input[type=password]:visible").count())
+    return is_safe_url(page.url) and bool(page.locator("input[type='password']").count())
 
 
 def detect_security_challenge(page):

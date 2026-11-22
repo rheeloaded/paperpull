@@ -284,3 +284,22 @@ def test_login_words_print_in_a_plain_windows_console(tmp_path, monkeypatch, cap
     said = capsys.readouterr().out
     assert "Could not read the Sonic bill history" in said
     said.encode("cp1252")
+
+
+class _Fields:
+    """A page's password fields, drawn or not, as a locator counts them."""
+
+    def __init__(self, url, drawn, hidden):
+        self.url, self.drawn, self.hidden = url, drawn, hidden
+
+    def locator(self, selector):
+        count = self.drawn + (0 if ":visible" in selector else self.hidden)
+        return SimpleNamespace(count=lambda: count)
+
+
+def test_a_password_field_reads_as_signed_out_whether_drawn_or_not():
+    url = site.URLS["documents"]
+    assert site.looks_signed_out(_Fields(url, drawn=0, hidden=1))
+    assert site.looks_signed_out(_Fields(url, drawn=1, hidden=0))
+    assert not site.looks_signed_out(_Fields(url, drawn=0, hidden=0))
+    assert not site.looks_signed_out(_Fields("https://example.test/login", drawn=1, hidden=1))
