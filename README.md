@@ -56,7 +56,7 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-eight providers are supported today, all built on the same pattern.
+Eighty-nine providers are supported today, all built on the same pattern.
 Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
@@ -147,7 +147,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`shelbycounty`](apps/shelbycounty) | Shelby County Trustee (Memphis, TN) | United States | Property tax receipts, one per payment, and the current tax notice while a balance is due | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 17 receipts across 16 tax years saved on a full run.** A public lookup with no sign-in, the parcel ID goes in config.json. The page builds each PDF itself and the app keeps it, one guarded press per document |
 | [`simmons`](apps/simmons) | Simmons Bank (Banno online banking) | United States | Loan statements, notices, tax forms | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 27 documents saved on a full run.** Only a document row's own button is pressed, and the download taken only when it is that document's own. One loan so far, so a sign-in with a second account stops the list. A paid-off loan's documents stay online only until a date the bank names |
 | [`smud`](apps/smud) | SMUD (Sacramento Municipal Utility District) | United States | Monthly bills | **Confirmed by [@watling777](https://github.com/watling777)**, whose Pilot took the newest five and whose full run took the rest of the history ([#34](https://github.com/rheeloaded/paperpull/issues/34)) |
-| [`sonic`](apps/sonic) | Sonic | United States | Internet bills | Reads Member Tools history and checks the invoice number and listed date before filing each PDF |
+| [`sonic`](apps/sonic) | Sonic | United States | Internet bills | **Contributed by [@solkennedy](https://github.com/solkennedy), a Pilot saved a bill on the contributor's account and a second run skipped it** ([#242](https://github.com/rheeloaded/paperpull/pull/242)). Reads Member Tools' Bill History, nothing clicked. Checks the invoice number and a labeled date before filing each PDF |
 | [`sparkassepc`](apps/sparkassepc) | Sparkasse Pforzheim Calw | Germany | Account statements and other Postfach PDFs | **Contributed by [@MelleD](https://github.com/MelleD), run on the contributor's own account** ([#216](https://github.com/rheeloaded/paperpull/pull/216)). Posteingang, Gesendet and Papierkorb read page by page, pressing only the Postfach's own page buttons and each document's own direct download link. Messages with no direct PDF are counted and left in the Postfach. A Pilot saved two statements, and a whole run has not been reported yet. Requested in [#175](https://github.com/rheeloaded/paperpull/issues/175) |
 | [`spectrum`](apps/spectrum) | Spectrum (Internet and Mobile) | United States | Internet statements, about a year online, and Mobile statements printed from their pages | **Contributed by [@JasperDale19](https://github.com/JasperDale19), 11 Internet statements saved on a full run.** Mobile statements listed live, a whole Mobile run still to come. Each statement chosen by its own row. Two statements of one date, after an account transfer, are left for you to save by hand |
 | [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | United States, may work elsewhere | Fee invoices, tax forms such as the 1099-K | **Untested, built on an account with no documents yet. Have Stripe invoices or tax forms? [Help test it](apps/stripe/README.md#help-test-it-no-programming-needed)** Requested in [#53](https://github.com/rheeloaded/paperpull/issues/53) |
@@ -968,7 +968,7 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-seven** apps pass their tests, the eighty-eight that are
+- ✅ All **ninety-eight** apps pass their tests, the eighty-nine that are
   supported, the five still waiting for a tester and the Scalable Capital,
   Consorsbank, CIBC and MBNA shells, 47,569 of them
   across the repo. Most are in regular use by the author. The rest were built or
@@ -1054,7 +1054,9 @@ found a bug and diagnosed it to the line.
   a student loan account back to 2019, and the Interactive Brokers app,
   run against five years of monthly statements.
 - [@solkennedy](https://github.com/solkennedy), the Marin Water app, built and run on their own account,
-  bills that share a date told apart by their PDFs.
+  bills that share a date told apart by their PDFs, and the Sonic app,
+  run on their own internet bills, each PDF checked against its listed
+  invoice.
 - [@JasperDale19](https://github.com/JasperDale19), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County

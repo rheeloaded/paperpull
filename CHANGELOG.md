@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **Sonic internet bills (#242).** A new app saves the internet bill PDFs
+  of Sonic Member Tools, read from the Bill History page and each bill's
+  own PDF link, with nothing clicked. Each PDF is filed only once its first
+  page shows the listed invoice number and a labeled date or the start of
+  the service period that matches the history, and two bills of one day
+  are kept apart. A bill that saved nothing is said by its kind, refused,
+  unreadable or not the listed bill, and a PDF that is not the listed bill
+  counts as a wrong document. It signs in on port 9320. Contributed by
+  @solkennedy.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
