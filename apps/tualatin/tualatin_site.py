@@ -870,17 +870,18 @@ def text_facts(said: str, iso_date: str) -> dict:
 def left_out_facts(dropped: list) -> dict:
     """How many stylesheets and images the print script left out, and why
     the first stylesheet was, in the script's own words or as the status it
-    was answered with."""
+    was answered with. The keys are words a failure file keeps (css for
+    stylesheet, which it would write as its shape)."""
     sheets = [d for d in dropped if d.get("kind") == "stylesheet"]
-    facts = {"stylesheets left out": len(sheets),
+    facts = {"css left out": len(sheets),
              "images left out": sum(1 for d in dropped if d.get("kind") == "image")}
     if sheets:
         why = str(sheets[0].get("why") or "")
         m = re.fullmatch(r"answered ([0-9]{1,3})", why)
         if m:
-            facts["stylesheet answered"] = int(m.group(1))
+            facts["css answered"] = int(m.group(1))
         else:
-            facts["stylesheet why"] = why if why in _LEFT_OUT_WHYS else "other"
+            facts["css why"] = why if why in _LEFT_OUT_WHYS else "other"
     return facts
 
 

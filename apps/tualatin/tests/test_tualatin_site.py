@@ -536,7 +536,7 @@ class WhyRefused(unittest.TestCase):
         got, trace = self.why(Page(dropped=[{"kind": "image", "why": "not fetched"}]), render=capitals_lost)
         self.assertEqual(got["why"], site.DRAWN_NOT_THE_BILL)
         self.assertEqual((got["text read"], got["has total amount due"], got["same billing date"],
-                          got["images left out"], got["stylesheets left out"]), (True, False, True, 1, 0))
+                          got["images left out"], got["css left out"]), (True, False, True, 1, 0))
         self.assertIn({"note": "drawn pdf is not the bill"}, trace)
 
     def test_a_drawn_pdf_whose_text_cannot_be_read_says_so(self):
@@ -547,11 +547,11 @@ class WhyRefused(unittest.TestCase):
 
     def test_a_stylesheet_left_out_says_how(self):
         got, _ = self.why(Page(dropped=[{"kind": "stylesheet", "why": "answered 404"}]))
-        self.assertEqual((got["stylesheets left out"], got["stylesheet answered"]), (1, 404))
+        self.assertEqual((got["css left out"], got["css answered"]), (1, 404))
         got, _ = self.why(Page(dropped=[{"kind": "stylesheet", "why": "timed out"}]))
-        self.assertEqual(got["stylesheet why"], "timed out")
+        self.assertEqual(got["css why"], "timed out")
         got, _ = self.why(Page(dropped=[{"kind": "stylesheet", "why": "Jane Q Example"}]))
-        self.assertEqual(got["stylesheet why"], "other")
+        self.assertEqual(got["css why"], "other")
 
     def test_a_kept_bill_leaves_no_refusal(self):
         trace = []
@@ -560,6 +560,26 @@ class WhyRefused(unittest.TestCase):
                                     document_id="10000002", trace=trace)
         self.assertTrue(ok)
         self.assertIsNone(site.refusal(trace))
+
+    def test_every_fact_comes_back_whole(self):
+        """A failure file writes any word not on its list as its shape, so
+        every key a refusal can carry is sent through a real one."""
+        from paperpull_core import failure
+        keys = set(site.text_facts("", "2026-08-31"))
+        keys |= set(site.left_out_facts([{"kind": "stylesheet", "why": "answered 404"}]))
+        keys |= set(site.left_out_facts([{"kind": "stylesheet", "why": "timed out"}]))
+        keys |= {"error", "status", "html type", "pdf written", "matches", "sign in page"}
+        whys = sorted(site._LEFT_OUT_WHYS | {"other"})
+        tmp = Path(tempfile.mkdtemp())
+        with redirect_stdout(io.StringIO()):
+            path = failure.write_failure(tmp, command="all", step="capture the document",
+                                         reason=site.DRAWN_NOT_THE_BILL, provider="Tualatin Water",
+                                         extra={"refused": {k: True for k in sorted(keys)},
+                                                "words": {f"w{i}": w for i, w in enumerate(whys)}})
+        got = json.loads(Path(path).read_text(encoding="utf-8"))
+        self.assertEqual(got["reason"], site.DRAWN_NOT_THE_BILL)
+        self.assertEqual(set(got["extra"]["refused"]), {k.replace(" ", "_") for k in keys})
+        self.assertEqual(sorted(got["extra"]["words"].values()), whys)
 
     def test_every_why_is_words_a_failure_file_keeps(self):
         from paperpull_core import failure
