@@ -468,8 +468,8 @@ class WhyStopped(unittest.TestCase):
         row = dict(stmt("2026-07-13", "50000009"), url="/api/myacc/billinginvoice?invoiceId=50000009")
         f = self.stop(answer(ROWS + [row])).facts
         self.assertEqual((f["has address"], f["address is relative"], f["address on this host"],
-                          f["address is the invoice path"], f["address asks only for the invoice"],
-                          f["address names this id"], f["id is digits"], f["id digits"]),
+                          f["address is the invoice path"], f["address query is only the invoice"],
+                          f["address names this id"], f["id is a number"], f["id length"]),
                          (True, True, False, True, True, True, True, 8))
         f = self.stop(answer([stmt("2026-07-13T08:00:00Z", "50000009")])).facts
         self.assertEqual((f["has date"], f["date is year first"], f["date has a time"],
@@ -496,6 +496,42 @@ class WhyStopped(unittest.TestCase):
         self.assertEqual(stop.facts, {"check": site.UNREADABLE_ID, "statement": 4, "statements": 4})
         self.assertEqual(len(stop.docs), 3)
         self.assertEqual(site.ListStopped("Odd: 4417").facts, {})
+
+    def test_every_fact_and_check_comes_back_whole(self):
+        """A failure file writes any word not on its list as its shape, so
+        every key and check a stop can carry is sent through a real one."""
+        import re
+        from paperpull_core import failure
+        source = (HERE / "ziply_site.py").read_text(encoding="utf-8")
+        checks = set(re.findall(r'"check": "([a-z ]+)"', source))
+        checks |= {site.NOT_AN_OBJECT, site.UNREADABLE_ID, site.NOT_ITS_PDF, site.NOT_A_DAY, site.ONE_ID_TWICE}
+        checks |= {"the account api answered the bill list with errors", "the bill list holds no statements",
+                   "billing settled off its own address", "the bill list names no account number"}
+        keys = set(site.statement_facts({"id": "1", "url": "u", "date": "d"}, "c", 1, 1))
+        keys.add("listed before it stopped")
+        others = {"accounts", "status", "error"}
+        tmp = Path(tempfile.mkdtemp())
+        extra = {"list stop": {k: True for k in sorted(keys)}, "other": {k: True for k in sorted(others)},
+                 "checks": {f"c{i}": c for i, c in enumerate(sorted(checks))}}
+        # The failure file keeps 20 keys of a dict and drops the rest.
+        self.assertLessEqual(len(keys), 20)
+        with redirect_stdout(io.StringIO()):
+            path = failure.write_failure(tmp, command="discover", step="read the documents list",
+                                         reason="the list stopped partway", provider="Ziply Fiber",
+                                         extra=extra)
+        got = json.loads(Path(path).read_text(encoding="utf-8"))["extra"]
+        self.assertEqual(set(got["list_stop"]), {k.replace(" ", "_") for k in keys})
+        self.assertEqual(set(got["other"]), others)
+        self.assertEqual(set(got["checks"].values()), checks)
+
+    def test_several_accounts_and_an_address_written_otherwise_say_so(self):
+        stop = site.SeveralAccounts(2)
+        self.assertEqual((stop.facts["check"], stop.facts["accounts"], stop.count), ("more than one account", 2, 2))
+        url = "https://ziplyfiber.com/api/myacc/billinginvoice?invoiceId=50000009"
+        for written, otherwise in ((url + "#top", True), (url + "&", True),
+                                   ("https://ziplyfiber.com/other?invoiceId=50000009", False)):
+            f = self.stop(answer(ROWS + [dict(stmt("2026-07-13", "50000009"), url=written)])).facts
+            self.assertEqual((f["check"], f["address written otherwise"]), (site.NOT_ITS_PDF, otherwise), written)
 
     def test_every_check_is_words_a_failure_file_keeps(self):
         from paperpull_core import failure

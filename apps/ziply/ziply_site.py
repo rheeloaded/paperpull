@@ -400,7 +400,8 @@ class SeveralAccounts(ListStopped):
     """Billing asked about more than one account, and this app reads one."""
 
     def __init__(self, count: int):
-        super().__init__(f"Billing asked about {count} accounts, and this app reads one")
+        super().__init__(f"Billing asked about {count} accounts, and this app reads one", None,
+                         {"check": "more than one account", "accounts": count})
         self.count = count
 
 
@@ -482,7 +483,8 @@ def _open(page, timeout_ms: int = 45000) -> _Session:
     if looks_signed_out(page):
         raise SessionExpired("ziplyfiber.com showed its sign-in page")
     if not got:
-        raise ListStopped("Billing did not ask for its account")
+        raise ListStopped("Billing did not ask for its account", None,
+                          {"check": "billing named no account"})
     if not _settled_here(page):
         raise ListStopped("Billing settled off its own address")
     accounts = sorted({_account_request(r.method, r.url, r.post_data) for r in got})
@@ -529,7 +531,8 @@ def _ask_statements(page, session: _Session) -> dict:
     try:
         got = intake.evaluate(page, _ASK_JS, [API_URL, session.headers, body], limit=MAX_LIST_BYTES) or {}
     except intake.TooLarge:
-        raise ListStopped("the bill list is larger than any history")
+        raise ListStopped("the bill list is larger than any history", None,
+                          {"check": "the bill list is over the size limit"})
     except Exception as e:
         # The page went away under the script, a sign-out among the ways.
         if looks_signed_out(page):
@@ -576,7 +579,10 @@ _MONTH_FIRST_RE = re.compile(r"[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}")
 def statement_facts(row, check: str, at: int, of: int) -> dict:
     """What one statement the list stopped on looks like, as yes or no and
     counts only, never its id, address, date or amount. `at` is its place
-    in the list from 1, `of` the list's length."""
+    in the list from 1, `of` the list's length. "address written otherwise"
+    is an address whose parts are all right that still is not written as
+    the bill's own PDF address, a fragment or an escape say. Every key is
+    words a failure file keeps as they are (test_every_fact_and_check_comes_back_whole)."""
     facts = {"check": check, "statement": at, "statements": of}
     if not isinstance(row, dict):
         return facts
@@ -590,18 +596,22 @@ def statement_facts(row, check: str, at: int, of: int) -> dict:
         parts, q = None, {}
     day = str(row.get("date") or "")
     facts.update({
-        "has id": bool(inv), "id is digits": digits, "id digits": len(inv) if digits else 0,
+        "has id": bool(inv), "id is a number": digits, "id length": len(inv),
         "has address": bool(url),
         "address is relative": url.startswith("/") and not url.startswith("//"),
         "address is https": bool(parts) and parts.scheme == "https",
         "address on this host": bool(parts) and parts.netloc == "ziplyfiber.com",
         "address is the invoice path": bool(parts) and parts.path == DOWNLOAD_PATH,
-        "address asks only for the invoice": set(q) == {"invoiceId"},
+        "address query is only the invoice": set(q) == {"invoiceId"},
         "address names this id": bool(inv) and q.get("invoiceId") == [inv],
         "has date": bool(day), "date is year first": bool(_YEAR_FIRST_RE.match(day)),
         "date has a time": bool(_WITH_TIME_RE.match(day)),
         "date is month first": bool(_MONTH_FIRST_RE.match(day)),
     })
+    facts["address written otherwise"] = bool(
+        parts and parts.scheme == "https" and parts.netloc == "ziplyfiber.com"
+        and parts.path == DOWNLOAD_PATH and facts["address names this id"]
+        and set(q) == {"invoiceId"} and url != invoice_url(inv))
     return facts
 
 
@@ -678,7 +688,7 @@ def bills_of(answer, account: str) -> List[RawDoc]:
                            document_id=f"bill-{last4}-{inv}"))
     if len(rows) >= BILLS_ASKED:
         raise ListStopped(f"the bill list holds all {BILLS_ASKED} asked for, so there may be more", docs,
-                          {"check": "a list as long as was asked for", "statements": len(rows)})
+                          {"check": "the list holds as many as were asked for", "statements": len(rows)})
     return docs
 
 
