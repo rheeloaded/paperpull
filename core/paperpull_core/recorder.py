@@ -31,7 +31,7 @@ WHAT IS RECORDED
     a print            when a step made the page ask to print
     the requests       each step caused, as names and shapes, each call of
                        a batch on its own, and a call the provider's page
-                       made to another host named like the provider's,
+                       made to another host named by the provider's name,
                        marked as off the site, its parameters named only
 
 WHAT IS NOT, AND CANNOT BE
@@ -133,9 +133,10 @@ _KINDS = {list: "list", dict: "dict", str: "str", int: "int", float: "float",
 
 # The request kinds a page's own script makes. An answer from a host the app
 # does not list is kept only for one of these, asked by the provider's own
-# page from a host named like the provider's, since that is where a provider's
-# API lives when it has a host of its own (BBVA's list, messages and PDFs). A navigation, a script or an image
-# from another host is not the provider's API, and stays counted.
+# page from a host named by the provider's own name, since that is where a
+# provider's API lives when it has a host of its own (BBVA's list, messages
+# and PDFs). A navigation, a script or an image from another host is not the
+# provider's API, and stays counted.
 _PAGE_CALLS = frozenset(("xhr", "fetch"))
 
 # ---------------------------------------------------------------------------
@@ -1322,9 +1323,12 @@ class Recorder:
                 return False
             # A vendor's tag runs in the provider's own frame too, analytics,
             # a chat window, and its calls look like the page's. The host
-            # has to carry the provider's own name, the label its site sits
-            # under, as BBVA's data host does beside its site.
-            return _named_like(_host_of(response.url or ""), _brand(_host_of(where)))
+            # has to be named by the provider's own name, the label its site
+            # sits under, as BBVA's data host de-net.bbva.com is beside
+            # web.bbva.de. A vendor that names a customer's host after the
+            # customer, bbva.tt.vendor.net, is still named by the vendor.
+            brand = _brand(_host_of(where))
+            return bool(brand) and _brand(_host_of(response.url or "")) == brand
         except Exception:
             return False
 
@@ -1581,23 +1585,13 @@ def _brand(host: str) -> str:
     """The label a site's host is named by, bbva in web.bbva.de and bank in
     online.bank.co.uk, or "" when there is none to tell."""
     labels = [p for p in (host or "").lower().split(".") if p]
-    if len(labels) < 2:
+    # An address of numbers names nothing.
+    if len(labels) < 2 or labels[-1].isdigit():
         return ""
     name = labels[-2]
     if name in _UNDER and len(labels) >= 3:
         name = labels[-3]
     return name if len(name) >= 3 else ""
-
-
-def _named_like(host: str, brand: str) -> bool:
-    """Whether a host carries `brand` as one of its labels, or one part of
-    a label written with dashes, leaving out the last label."""
-    if not brand:
-        return False
-    for label in (host or "").lower().split(".")[:-1]:
-        if label == brand or brand in label.split("-"):
-            return True
-    return False
 
 
 _CONSENT = """\
@@ -1606,7 +1600,8 @@ RECORDING - what this does and does not capture
   It records   the controls you click, by the name you read on them, the
                option you pick in a dropdown, a box you tick, the
                addresses and shapes of the provider's own answers, those
-               from a host named like the provider's included, and where
+               from another host named by the provider's name included,
+               and where
                a downloaded file came from.
   It keeps     a word off the page only when it is on PaperPull's fixed
                list of words. Any other word, a name, an address, an

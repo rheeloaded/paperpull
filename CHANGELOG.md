@@ -19,7 +19,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and whether it was off the provider's site, even when the tab it came
   from closes at once (a tab that started a download as it opened could
   have the download pass unseen). A call the provider's own page makes to
-  another host named like the provider's, where a bank can keep its API
+  another host named by the provider's own name, where a bank can keep its API
   apart from its site, is kept and marked as another host, with the names
   of its parameters only, rather than dropped. A call to any other host, or
   from anyone else's frame, stays counted only, and the kept calls to

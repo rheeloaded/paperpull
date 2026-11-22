@@ -614,33 +614,40 @@ def test_the_recorder_still_subscribes_to_the_same_events():
 @pytest.mark.parametrize("url", ["https://www.google-analytics.test/g/collect?cid=1",
                                  "https://widget.vendor.test/api/chat",
                                  "https://bankcdn.test/v1/docs",
-                                 "https://bank.vendor.test/x"])
-def test_a_tags_call_from_the_providers_own_frame_to_a_host_not_named_like_it_is_counted(url):
+                                 "https://bank.vendor.test/x",
+                                 "https://bank.tt.vendor.test/x",
+                                 "https://zn9-bank.intercept.vendor.test/x",
+                                 "https://bank-tracker.analytics.test/x",
+                                 "https://10.0.0.5/x"])
+def test_a_tags_call_from_the_providers_own_frame_to_a_host_not_named_by_it_is_counted(url):
     """A vendor's tag runs in the provider's frame, and its calls look like
-    the page's. Only a host carrying the provider's own name is kept, and
-    bank.vendor.test carries it only as the vendor's last label but one."""
+    the page's. A vendor can name a customer's host after the customer,
+    and that host is still named by the vendor. Only a host named by the
+    same label as the provider's site is kept."""
     rec, page = recording()
     page.emit("response", api(url=url))
-    kept = [r for r in rec.requests if r.get("url", "").startswith("https://bank.vendor")]
-    if url.startswith("https://bank.vendor"):
-        # Named like the provider, so kept, and still marked and shaped.
-        assert kept and kept[0]["on_the_providers_own_site"] is False
-    else:
-        assert rec.requests == [] and rec.dropped["off_host_request"] == 1
+    assert rec.requests == [] and rec.dropped["off_host_request"] == 1
 
 
 @pytest.mark.parametrize("host,brand", [("web.bbva.de", "bbva"), ("online.bank.co.uk", "bank"),
                                         ("bank.example", "bank"), ("localhost", ""),
-                                        ("a.io", ""), ("", "")])
+                                        ("a.io", ""), ("", ""), ("10.0.100.5", ""),
+                                        ("de-net.bbva.com", "bbva")])
 def test_the_name_a_site_is_known_by(host, brand):
     assert recorder._brand(host) == brand
 
 
-@pytest.mark.parametrize("host,yes", [("de-net.bbva.com", True), ("bbva.com", True),
-                                      ("api.bbva-data.net", True), ("bbvacdn.com", False),
-                                      ("tracker.com", False), ("x.y.bbva", False)])
-def test_a_host_named_like_the_provider(host, yes):
-    assert recorder._named_like(host, "bbva") is yes
+@pytest.mark.parametrize("host", ["de-net.bbva.com", "api.bbva.de", "bbva.co.uk"])
+def test_the_providers_data_host_named_by_its_name_is_kept(host):
+    """BBVA's site is web.bbva.de and its data comes from de-net.bbva.com."""
+    page = FakePage("https://web.bbva.de/postfach")
+    bbva = lambda u: (urlsplit(u or "").hostname or "") == "web.bbva.de"  # noqa: E731
+    rec = Recorder(page, is_safe_url=bbva, provider="BBVA")
+    rec.start()
+    page.emit("response", api(url="https://%s/v1/messages" % host,
+                              frame=FakeFrame("https://web.bbva.de/postfach")))
+    assert len(rec.requests) == 1
+    assert rec.requests[0]["on_the_providers_own_site"] is False
 
 
 def test_another_hosts_parameters_are_named_never_given():

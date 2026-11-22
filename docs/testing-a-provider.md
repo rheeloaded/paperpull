@@ -348,9 +348,9 @@ the list below. "The link called Statement for Zorvex 0400" is recorded as
   whether each one held a number or some text. Never the contents. When the
   page sends several calls in one request, each call's field names and the
   name of what it asks for, never what it asks with.
-- A data request the provider's page sends to another host named like the
-  provider's own (a bank whose site is on one host and whose data comes from
-  another with the bank's name in it), the same way, marked as another host,
+- A data request the provider's page sends to another host named by the
+  provider's own name (a bank whose site is web.bank.de and whose data comes
+  from data.bank.com), the same way, marked as another host,
   with the names of its parameters only. A request to any other host is
   counted and not described.
 - The **structure** of the page around each control you used. What kind of
