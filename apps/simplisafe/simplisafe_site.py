@@ -556,8 +556,11 @@ def _pdf_matches(data, bill):
     expected = bill.invoice_id.lower()
     if not any(_invoice_number(line) == expected for line in lines):
         return False
+    # The listed date only as a number of its own, never inside a longer
+    # one, so 1/1/2032 is not found in 11/1/2032 (identity.on_its_own).
+    variants = identity.date_variants(bill.date)
     return any(label.casefold().rstrip(":").strip() == "date"
-               and identity.contains(value, identity.date_variants(bill.date), "date")
+               and any(identity.on_its_own(v, value.lower()) for v in variants)
                for label, value in zip(lines, lines[1:]))
 
 

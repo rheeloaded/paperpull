@@ -340,7 +340,9 @@ def _text_matches(text: str, bill: Bill) -> bool:
         dates = _PDF_DATE.findall(line)
         if period := _PERIOD.fullmatch(line):
             dates.append(period[1])
-        if any(identity.contains(value, variants, "date") for value in dates):
+        # Each date only as a number of its own, never inside a longer one,
+        # so 1/1/2032 is not found in 11/1/2032 (identity.on_its_own).
+        if any(identity.on_its_own(v, value.lower()) for value in dates for v in variants):
             return True
     return False
 
