@@ -8,7 +8,8 @@
 
 The receipt apps (Amazon, Target, Walmart, Gap) already record every line
 item they saw while downloading, one row per item, in an `<Provider> Order
-History.csv` beside the PDFs. Nothing here reads a PDF. This walks the
+History.csv` beside the PDFs. Legacy Meijer summary rows are recovered
+locally from their saved PDFs when possible. This walks the
 installs folder, finds those files, including the ones in second-account
 folders, and writes them out as one long table with a Provider column, plus
 an Orders sheet with one row per order and a Summary sheet with a total per
@@ -143,7 +144,45 @@ def load_purchases(provider: str, path: Path) -> List[dict]:
             if not row["Date"] and not row["Item"] and not row["Order Number"]:
                 continue
             rows.append(row)
-    return without_unsaved_writes(rows)
+    return recover_meijer_items(provider, path, without_unsaved_writes(rows))
+
+
+
+def recover_meijer_items(provider: str, history: Path, rows: List[dict]) -> List[dict]:
+    """Older Meijer histories retained the list label instead of PDF items.
+
+    Read only their saved receipts; keep histories and PDF files unchanged.
+    Failed recovery remains explicitly incomplete, never a priced product.
+    """
+    if provider.lower() != 'meijer':
+        return rows
+    from paperpull_core.meijer_items import read_items
+    recovered = []
+    for row in rows:
+        if not re.fullmatch(r'in[ -]store\s*:?|meijer order|', row['Item'], re.I):
+            recovered.append(row)
+            continue
+        reference = Path(row['Receipt PDF'])
+        base = history.parent.resolve()
+        candidates = [base / reference, base / 'In-Store' / reference]
+        items = []
+        if row['Receipt PDF'] and not reference.is_absolute() and '..' not in reference.parts:
+            for candidate in candidates:
+                if candidate.resolve().is_relative_to(base) and candidate.is_file():
+                    items = read_items(candidate, row['Date'], row['Order Total'])
+                    if items:
+                        break
+        if items:
+            for item in items:
+                recovered.append({**row, 'Item': item.name, 'Quantity': quantity(item.quantity),
+                                  'Unit Price': money(item.unit_price), 'Line Total': money(item.line_total),
+                                  'Processing': 'Review Needed',
+                                  'Notes': 'Recovered locally from Meijer receipt PDF. Review weights and coupons; blank prices are unknown.'})
+        else:
+            recovered.append({**row, 'Item': '', 'Quantity': None, 'Unit Price': None,
+                              'Line Total': None, 'Processing': 'Review Needed',
+                              'Notes': 'Meijer product details unavailable. Review the original receipt PDF.'})
+    return recovered
 
 
 def without_unsaved_writes(rows: List[dict]) -> List[dict]:

@@ -1668,6 +1668,13 @@ class App:
                     raise stopped
             return False
 
+        # A direct PDF download bypasses the HTML details reader. Read the
+        # verified receipt before the history writer sees the list placeholder.
+        from paperpull_core.meijer_items import read_items
+        extracted = read_items(out_path, purchase.purchase_date, purchase.total)
+        if extracted:
+            purchase.items = extracted
+
         purchase.receipt_count = 1
         # Sticky marker: a valid PDF was produced, so this purchase is done for
         # good and will not be re-downloaded even if the file is later deleted.
