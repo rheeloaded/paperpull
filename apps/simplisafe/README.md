@@ -13,6 +13,6 @@ Bills are stored in the provider's **Bills** folder. The connector uses the
 table's own Next page and Previous page buttons to reach older invoices,
 and changes none of SimpliSafe's requests. A page whose rows do not
 change after a press, or that disagrees with the invoice count, stops the
-run with nothing filed from it.
+run with nothing filed from it, and so does a table that shows no bills.
 An offline preview uses the saved discovery list and keeps the previous
 download's file list.

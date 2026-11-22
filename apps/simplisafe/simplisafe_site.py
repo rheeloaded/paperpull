@@ -177,9 +177,14 @@ def is_history_page_url(url: str) -> bool:
 
 
 def looks_signed_out(page) -> bool:
-    return _origin(page.url) == ("https", AUTH_HOST) or (
-        is_safe_url(page.url) and bool(page.locator("input[type=password]:visible").count())
-    )
+    if _origin(page.url) == ("https", AUTH_HOST):
+        return True
+    try:
+        return is_safe_url(page.url) and bool(page.locator("input[type=password]:visible").count())
+    except BrowserError:
+        # A page between two documents cannot be read. Nothing is taken
+        # from it, and the read of the list that follows decides.
+        return False
 
 
 def detect_security_challenge(page):
@@ -316,7 +321,10 @@ def _settled(page) -> Shown:
                 return now
             empty_since = empty_since or time.monotonic()
             if time.monotonic() - empty_since >= _EMPTY_SETTLE_S:
-                return now
+                # A table that still prints "0 of 0" cannot be told from one
+                # whose history has not arrived, so it is never a whole list.
+                raise ListStopped("SimpliSafe shows no monitoring bills yet. Run again once "
+                                  "Monitoring Payments lists them.")
         elif now is None or now.total:
             empty_since = None
         last = now

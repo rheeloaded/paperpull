@@ -312,9 +312,13 @@ def test_bills_on_any_page_are_saved_in_any_order(browser, tmp_path):
         assert not tab.locator(site._DIALOG).count()
 
 
-def test_an_empty_history_lists_nothing_and_presses_nothing(browser):
+def test_a_table_that_stays_empty_is_never_a_whole_list(browser):
+    """"0 of 0" is also what the table prints before its history arrives,
+    so it stops the list, and nothing is pressed."""
     tab = open_history(browser, [], 10)
-    assert site.collect_download_docs(tab) == []
+    with pytest.raises(site.ListStopped, match="no monitoring bills"):
+        site.collect_download_docs(tab)
+    assert not site.bill_list_ready(tab)
     assert tab.evaluate("window.presses") == 0
 
 
@@ -376,13 +380,16 @@ def test_a_table_that_never_settles_stops_the_list(browser):
 def test_a_bill_whose_page_moved_is_listed_again_not_hunted_for(browser, tmp_path):
     tab = open_history(browser, FIVE, 2)
     records = {r.document_id: r for r in site.collect_download_docs(tab)}
-    last = site.Bill(FIVE[4][0], site._date(FIVE[4][1]))
-    site._RUN["size"] = 3  # as if the pages had grown since the listing
+    # Listed on page 2 of pages of two, looked for at row 4 as if the pages
+    # held three. Pages start at rows 1, 3 and 5, so the walk passes row 4,
+    # turns back once and then lists again.
+    last = site.Bill(FIVE[2][0], site._date(FIVE[2][1]))
+    site._RUN["size"] = 3
     presses = tab.evaluate("window.presses")
     path = tmp_path / "last.pdf"
     assert site.download_bill(tab, records[last.key].date_text, path, document_id=last.key)
     assert site._pdf_matches(path.read_bytes(), last)
-    assert tab.evaluate("window.presses") - presses < 12
+    assert tab.evaluate("window.presses") - presses < 10
 
 
 def test_a_sign_in_while_an_invoice_is_open_is_said_as_a_sign_in(page, tmp_path, monkeypatch):
@@ -392,4 +399,6 @@ def test_a_sign_in_while_an_invoice_is_open_is_said_as_a_sign_in(page, tmp_path,
                         " f.type = 'password'; document.body.append(f); throw new Error('gone'); }")
     with pytest.raises(site.SessionExpired):
         site.download_bill(page, first.date_text, tmp_path / "bill.pdf", document_id=first.document_id)
+    # No Close was pressed on the signed-out page, so the dialog is still there.
+    assert page.locator("mat-dialog-container").count() == 1
     assert real

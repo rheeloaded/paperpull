@@ -831,7 +831,11 @@ def _simplisafe(monkeypatch):
 
 def _simplisafe_link(off: bool) -> str:
     # A link with no address, as SimpliSafe draws it, has no role of its own
-    # that can be turned off, so the made-up one names its role.
+    # that can be turned off, so on SimpliSafe's own page this press is never
+    # left as turned off. The made-up one names its role so that the path
+    # that leaves the bill, kept for a page that ever turns one off, runs.
+    # The driver also reads the row outside SimpliSafe's own table, since
+    # the page here is the census's own.
     return ('<a id="get" class="ctl" role="link"%s '
             'onclick="window.presses++; fetch(\'/statement.pdf\');">%s</a>'
             % (' aria-disabled="true"' if off else "", SIMPLISAFE_ID))
