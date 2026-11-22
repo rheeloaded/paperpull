@@ -49,6 +49,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
+from urllib.parse import urlsplit
 
 from paperpull_core import doc_types, receipt_pdf, scope
 from paperpull_core import browser as browser_launcher
@@ -259,7 +260,12 @@ class App:
             # matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
             mine = [p for p in live if site.is_safe_url(p.url or "")]
-            self._work_page = mine[0] if mine else tabs.new_tab(ctx)
+            # Prefer the signed-in Postfach over an older login tab left
+            # open by a previous browser launch.
+            signed_in = [p for p in mine if not site.looks_signed_out(p)]
+            postfach = [p for p in signed_in if
+                        urlsplit(p.url).path in site.FOLDERS.values()]
+            self._work_page = (postfach or signed_in or mine)[0] if mine else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self.requests
@@ -853,9 +859,10 @@ class App:
             if ask("> ").strip().upper() != "YES":
                 print("Aborted. (Run the pilot first if you haven't: --pilot)")
                 return
+        print("Reading all Postfach pages before starting downloads...", flush=True)
         self.cmd_discover()
         docs = self._select()
-        print(f"\nDownloading {len(docs)} document(s)...")
+        print(f"\nDownloading {len(docs)} document(s)...", flush=True)
         self.process(docs, dry_run=self.args.dry_run)
 
     def cmd_resume(self):

@@ -6,12 +6,17 @@ Postfach, the ones it offers as a direct download. Requested in
 [@MelleD](https://github.com/MelleD) in
 [#216](https://github.com/rheeloaded/paperpull/pull/216). Its CDP port is 9316.
 
-**Run on the contributor's own account.** Discover read the history of
-Posteingang, Gesendet and Papierkorb, back to 2019, and counted the
-messages with no direct PDF. A Pilot saved two statements, both verified,
-and a second Pilot saved nothing new. A whole run has not been reported yet.
-The page turns and the download press were reworked before merging (below)
-and have not been run against the bank since.
+**Live validation on 2026-11-20.** The `all` path read all three folders:
+22 Posteingang pages plus Gesendet and Papierkorb. It found 205 PDFs back
+to 2019 and counted 13 messages with no direct PDF. A run limited with
+`--max-docs 2` saved two statements; Verify checked both with no problems,
+and Resume limited to those same two saved nothing new. Downloading all
+205 PDFs has not been tested.
+
+The initial attempt stopped while turning from page 12 to page 13, before
+any download. The default eight-second click timeout also covered the
+bank's navigation. Page presses now allow 30 seconds, and an automated
+slow-navigation test reproduces the old failure and verifies the fix.
 
 ## Commands in a checkout
 
@@ -33,6 +38,15 @@ any search in the Postfach and select Gesamtzeitraum before running.
 ./paperpull --root ./apps sparkassepc all
 ```
 
+`all` first reads every page of Posteingang, Gesendet and Papierkorb, then
+starts downloading. During this initial phase it reports the folder, page
+number and running PDF count. `--max-docs` limits the number of documents
+selected for download; it does not shorten the initial listing. `discover`
+only lists documents and downloads nothing.
+
+When several Sparkasse tabs are open, the provider prefers a signed-in
+Postfach tab over an older login tab.
+
 Check the Pilot's PDFs first. Resume carries on with a run that stopped,
 and Verify checks the saved PDFs on this computer. Progress and the
 document index are kept on this computer.
@@ -47,7 +61,9 @@ own, which shares your session.
   own link and read from its first page to its last. A page is turned only
   by pressing the Postfach's own numbered page button, the press you would
   make, and read once it shows that page number. Page turns wait the same
-  pause the config sets between documents.
+  pause the config sets between documents. A single press can wait up to
+  30 seconds for the bank's navigation to finish; it is never automatically
+  pressed again after a timeout.
 - A row that offers no direct PDF download, a message with only text say,
   is counted, said and left in the Postfach.
 - A document is known by its row's own identity, kept only as a digest, so

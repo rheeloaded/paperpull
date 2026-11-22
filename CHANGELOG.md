@@ -9,6 +9,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Sparkasse Pforzheim Calw:** Allow a page press up to 30 seconds for the
+  bank's navigation, so slow page turns do not stop `all` before downloads.
+  Prefer a signed-in Postfach tab over an older login tab and report progress
+  while reading all pages. Live validation listed 205 PDFs and downloaded
+  and verified two; a repeat limited to those two saved no new files.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
