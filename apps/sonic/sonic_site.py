@@ -76,6 +76,10 @@ class _HistoryHTML(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.groups = []
         self.signed_out = False
+        # Another page of the history, or a way to one. This app reads one
+        # page, so a history that shows a pager, a "next" link or a link to
+        # the history with a query is never taken as the whole list.
+        self.more = False
         self._list_depth = 0
         self._group = None
         self._row = None
@@ -85,6 +89,11 @@ class _HistoryHTML(HTMLParser):
         classes = (attrs.get("class") or "").split()
         if tag == "input" and (attrs.get("type") or "").lower() == "password":
             self.signed_out = True
+        if {"pagination", "pager"} & set(classes) or (
+                tag in ("a", "link") and "next" in (attrs.get("rel") or "").lower().split()):
+            self.more = True
+        if tag == "a" and _another_history_page(attrs.get("href") or ""):
+            self.more = True
         if tag == "ul":
             if self._list_depth or "list-group" in classes:
                 if not self._list_depth:
@@ -117,6 +126,17 @@ class _HistoryHTML(HTMLParser):
     def handle_data(self, data):
         if self._row is not None and self._list_depth == 1:
             self._row[0].append(data)
+
+
+def _another_history_page(href: str) -> bool:
+    """A link to the history page itself with a query, such as ?page=2."""
+    try:
+        parsed = urlsplit(href)
+    except ValueError:
+        return False
+    if (parsed.scheme, parsed.netloc) not in {("", ""), ("https", HOST)}:
+        return False
+    return bool(parsed.query) and parsed.path.rstrip("/") in ("", HISTORY_PATH.rstrip("/"))
 
 
 def is_safe_url(url: str) -> bool:
@@ -185,6 +205,8 @@ def _parse_history(html: str) -> dict[str, Bill]:
     parser.close()
     if parser.signed_out:
         raise SessionExpired()
+    if parser.more:
+        raise ListStopped("Sonic's bill history has more than one page, which this app does not read yet.")
     if parser._list_depth:
         raise ListStopped("Sonic's bill history ended before the list closed.")
     groups = [rows for rows in parser.groups if any(links for _, links in rows)]
@@ -275,12 +297,15 @@ def _fetch_pdf(page, invoice_id: str) -> bytes:
 
 
 def _first_page(data: bytes):
-    """The first page's text, or None when the PDF cannot be read."""
+    """The first page's text, or None when the PDF cannot be read or holds
+    too little text to say which bill it is (identity.MIN_TEXT)."""
     try:
         pages = pdf_reader.page_texts(data, pages=1, layout=True)
     except Exception:
         return None
-    return pages[0] if pages else None
+    if not pages or len("".join(pages[0].split())) < identity.MIN_TEXT:
+        return None
+    return pages[0]
 
 
 def _pdf_matches(data: bytes, bill: Bill) -> bool:

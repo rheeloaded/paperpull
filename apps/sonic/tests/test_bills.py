@@ -303,3 +303,35 @@ def test_a_password_field_reads_as_signed_out_whether_drawn_or_not():
     assert site.looks_signed_out(_Fields(url, drawn=1, hidden=0))
     assert not site.looks_signed_out(_Fields(url, drawn=0, hidden=0))
     assert not site.looks_signed_out(_Fields("https://example.test/login", drawn=1, hidden=1))
+
+
+@pytest.mark.parametrize("more", [
+    '<ul class="pagination"><li><a href="?page=2">Next</a></li></ul>',
+    '<nav><ul class="pager"><li><a href="#">2</a></li></ul></nav>',
+    '<a rel="next" href="#">Next</a>',
+    f'<a href="{site.HISTORY_PATH}?page=2">Older bills</a>',
+    f'<a href="{site.DOCUMENTS_URL}?start=12">Older bills</a>',
+])
+def test_a_history_with_another_page_is_never_taken_as_whole(more):
+    with pytest.raises(site.ListStopped, match="more than one page"):
+        site._parse_history(history(row()) + more)
+
+
+def test_a_link_back_to_the_history_page_itself_is_not_another_page():
+    html = f'<a href="{site.HISTORY_PATH}">View Bill History</a>' + history(row())
+    assert len(site._parse_history(html)) == 1
+
+
+def test_a_pdf_with_no_text_is_unreadable_not_a_wrong_document(tmp_path, monkeypatch):
+    from pypdf import PdfWriter
+    import io
+
+    blank = io.BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    writer.write(blank)
+    page = Page()
+    doc = site.collect_download_docs(page)[0]
+    page.pdfs[FIRST] = blank.getvalue()
+    assert not site.download_bill(page, doc.date_text, tmp_path/"bill.pdf", document_id=doc.document_id)
+    assert site.last_refusal() == "unreadable"
