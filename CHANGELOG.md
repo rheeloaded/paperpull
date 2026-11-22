@@ -18,8 +18,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   are kept apart. A bill that saved nothing is said by its kind, refused,
   unreadable or not the listed bill, and a PDF that is not the listed bill
   counts as a wrong document. A history that shows another page stops
-  the run rather than being taken as whole. It signs in on port 9320. Contributed by
-  @solkennedy.
+  the run rather than being taken as whole. It signs in on port 9320.
+  Contributed by @solkennedy.
 
 ## [0.70.0] - 2026-11-20
 

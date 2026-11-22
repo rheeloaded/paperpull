@@ -335,3 +335,27 @@ def test_a_pdf_with_no_text_is_unreadable_not_a_wrong_document(tmp_path, monkeyp
     page.pdfs[FIRST] = blank.getvalue()
     assert not site.download_bill(page, doc.date_text, tmp_path/"bill.pdf", document_id=doc.document_id)
     assert site.last_refusal() == "unreadable"
+
+
+@pytest.mark.parametrize("more", [
+    '<a href="../history/?page=2">Older bills</a>',
+    '<a href="history/index.php?page=2">Older bills</a>',
+    f'<a href="{site.HISTORY_PATH}all/">All bills</a>',
+    '<a href="https://MEMBERS.sonic.net/account/billing/history/?page=2">Older bills</a>',
+    '<li class="page-item"><a class="page-link" href="#">2</a></li>',
+    '<a href="?year=2031">2031</a>',
+])
+def test_more_shapes_of_another_page_stop_the_list(more):
+    with pytest.raises(site.ListStopped, match="more than one page"):
+        site._parse_history(history(row()) + more)
+
+
+@pytest.mark.parametrize("link", [
+    '<a href="?logout=1">Sign out</a>',
+    '<a href="?lang=es">Espanol</a>',
+    f'<a href="{site.HISTORY_PATH}?print=1">Print</a>',
+    '<a href="/account/billing/?tab=1">Billing</a>',
+    '<a href="#top">Top</a>',
+])
+def test_a_link_that_is_not_another_page_leaves_the_list_whole(link):
+    assert len(site._parse_history(link + history(row()))) == 1

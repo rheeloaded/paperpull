@@ -10,7 +10,7 @@ import re
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import Error as BrowserError
-from paperpull_core import identity, intake, pdf_reader, refused, shared_folder
+from paperpull_core import identity, intake, pdf_reader, refused, shared_folder, urls
 from paperpull_core.controls import AUTH_CONTROL_RE, SETTINGS_CONTROL_RE
 
 HOST = "members.sonic.net"
@@ -89,7 +89,7 @@ class _HistoryHTML(HTMLParser):
         classes = (attrs.get("class") or "").split()
         if tag == "input" and (attrs.get("type") or "").lower() == "password":
             self.signed_out = True
-        if {"pagination", "pager"} & set(classes) or (
+        if {"pagination", "pager", "page-item", "page-link"} & set(classes) or (
                 tag in ("a", "link") and "next" in (attrs.get("rel") or "").lower().split()):
             self.more = True
         if tag == "a" and _another_history_page(attrs.get("href") or ""):
@@ -128,15 +128,31 @@ class _HistoryHTML(HTMLParser):
             self._row[0].append(data)
 
 
+# Query keys that choose a page, a range or a year of a list. A link to the
+# history with one of these, or to an address under the history, is another
+# page of it. Other queries (a print view, a language, a sign-out) are not.
+_PAGING_KEYS = {"page", "p", "pg", "start", "offset", "from", "skip", "year",
+                "before", "after", "cursor", "older"}
+
+
 def _another_history_page(href: str) -> bool:
-    """A link to the history page itself with a query, such as ?page=2."""
+    """A link to another page of the history, such as ?page=2, resolved
+    against the history's own address the way the browser would."""
+    if not href or href.startswith("#"):
+        return False
     try:
-        parsed = urlsplit(href)
+        parsed = urlsplit(urls.join(DOCUMENTS_URL, href))
+        host = parsed.hostname or ""
+        keys = set(parse_qs(parsed.query, keep_blank_values=True))
     except ValueError:
         return False
-    if (parsed.scheme, parsed.netloc) not in {("", ""), ("https", HOST)}:
+    if parsed.scheme not in ("http", "https") or host != HOST:
         return False
-    return bool(parsed.query) and parsed.path.rstrip("/") in ("", HISTORY_PATH.rstrip("/"))
+    path = parsed.path
+    base = HISTORY_PATH.rstrip("/")
+    if path.rstrip("/") in (base, base + "/index.php"):
+        return bool({key.lower() for key in keys} & _PAGING_KEYS)
+    return path.startswith(HISTORY_PATH)
 
 
 def is_safe_url(url: str) -> bool:
