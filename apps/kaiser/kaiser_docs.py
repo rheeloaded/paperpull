@@ -430,6 +430,7 @@ class App:
     def cmd_discover(self, quiet: bool = False, *, checkpoint: dict | None = None) -> int:
         listing.started(self)
         n_new = 0
+        page = None
         try:
             page = self._on_its_site()
             source = site.list_source_url(page)
@@ -439,7 +440,8 @@ class App:
             self.check_session(page)
             docs = site.collect_download_docs(page)
         except (site.SessionExpired, site.ListStopped, BrowserError) as stop:
-            if not isinstance(stop, site.SessionExpired) and not site.looks_signed_out(page):
+            if not isinstance(stop, site.SessionExpired) and (
+                    page is None or not site.looks_signed_out(page)):
                 self.write_failure("read My Documents", "My Documents did not answer")
                 # A browser's own message can quote the page, so only the
                 # list's fixed words are said.

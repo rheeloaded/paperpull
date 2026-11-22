@@ -712,8 +712,10 @@ TAKES_NOTHING = {
              "response is ever listened for",
     "kaiser": "every My Documents file is the Blob the page made for the press of its own "
               "Download PDF link, read from the page. The download that Blob begins is only "
-              "ended and deleted the moment it starts (see observes_only), in the app's own "
-              "folder outside the kind folders",
+              "ended (see observes_only), in the app's own folder outside the kind folders, "
+              "and the file the browser wrote there is deleted once it is found to be an exact "
+              "copy of the bytes taken from the Blob. Nothing is read from that folder into "
+              "the archive",
     "spectrum": "every Internet statement is the PDF in the page's own GraphQL answer, matched to "
                 "the Blob the page made of it, and every Mobile statement is its page printed with "
                 "receipt_pdf.print_page_to_pdf; nothing is downloaded through the browser, and a "

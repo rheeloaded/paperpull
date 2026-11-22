@@ -46,7 +46,11 @@ VERBS = ("", "View ", "Download ")
 # guard of their own. Coinbase's guard refuses "card" and "one" for every
 # control, since the account can spend through its card, and its One Card
 # statements are pressed by their rows' own PDF buttons, whose label is
-# "PDF", under a guard of their own. Written down as names so the list can
+# "PDF", under a guard of their own. Kaiser Permanente's guard takes only
+# the whole labels its rows and pager show, Premium Bills, Download PDF,
+# View statement, Next results, Previous results and Close, and every
+# document is pressed by its own row's control, never by its name. Written
+# down as names so the list can
 # shrink and cannot quietly grow.
 ALLOWED_TO = {
     "mypay": {"Annuitant Account Statement", "FEGLI Document", "Net Pay Advice",

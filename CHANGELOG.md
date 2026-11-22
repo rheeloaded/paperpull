@@ -17,7 +17,8 @@ All notable changes to PaperPull are recorded here. Versioning follows
   documents. Only what the site offers as a file or a bill is saved, never a
   page Kaiser shows only in its viewer. A file is named by its kind and date alone, so a title
   from the page, which on a health account can hold a name or a condition,
-  never names a file or reaches the run's output. Port 9323.
+  never names a file or reaches the run's output, the Diagnose files or a
+  failure file. It stays only in the archive's own index. Port 9323.
 
 ## [0.70.0] - 2026-11-20
 

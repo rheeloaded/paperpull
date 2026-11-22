@@ -191,3 +191,28 @@ def test_scope_includes_notices_and_excludes_records_from_other_pages():
     app.discovery = SimpleNamespace(data={item.key: item.to_dict() for item in (notice, medical)})
     assert [d.document_id for d in app._select()] == ["notice-id"]
     assert len(app.discovery.data) == 2
+
+
+def test_a_turned_off_premium_bills_link_is_left_and_the_list_still_reads(page, monkeypatch):
+    """Discovery opens each Premium Bills row in Kaiser's viewer. One whose
+    link Kaiser has turned off is not pressed, and only that row is left."""
+    from paperpull_core import pressing
+    monkeypatch.setattr(pressing, "PRESS_MS", 500)
+    page.goto(site.URLS["login"])
+    frame = site._history_frame(page)
+    frame.locator("#getdoc_10").evaluate("e => e.setAttribute('aria-disabled', 'true')")
+    listed = site.collect_download_docs(page)
+    assert [type(doc).__name__ for doc in listed] == ["NativeDocument", "NativeDocument"]
+    assert site.urlsplit(frame.url).path.endswith("my-documents-myc")
+
+
+def test_the_browser_copy_is_found_by_its_bytes_and_nothing_else_is_touched(tmp_path):
+    data = b"%PDF-1.4 synthetic taken bytes"
+    folder = tmp_path / "dl"
+    folder.mkdir()
+    (folder / "statement.pdf").write_bytes(data)
+    (folder / "other.pdf").write_bytes(b"%PDF-1.4 another document")
+    (folder / "late.pdf.crdownload").write_bytes(data)
+    assert site._drop_browser_copy(folder, data, wait_seconds=0.2) == 1
+    assert sorted(p.name for p in folder.iterdir()) == ["late.pdf.crdownload", "other.pdf"]
+    assert site._drop_browser_copy(tmp_path / "missing", data, wait_seconds=0.2) == 0

@@ -8,6 +8,7 @@ from html import escape
 from pathlib import Path
 import re
 import sys
+from time import monotonic, sleep
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import Error as BrowserError
@@ -569,8 +570,20 @@ def collect_download_docs(page) -> list[Bill | NativeDocument | medical.MedicalB
         if len(taken) != len(rows):
             print(f"Left {len(rows) - len(taken)} My Documents item(s) Kaiser shows only in its "
                   "viewer, not as a file.", flush=True)
-        bills = [NativeDocument(row) if row.native_pdf else _read_bill(page, frame, row)[0]
-                 for row in taken]
+        bills, left = [], 0
+        for row in taken:
+            if row.native_pdf:
+                bills.append(NativeDocument(row))
+                continue
+            try:
+                bills.append(_read_bill(page, frame, row)[0])
+            except DocumentLeft:
+                # Kaiser turned this Premium Bills link off. It is left, and
+                # the rest of the list is still read.
+                left += 1
+        if left:
+            print(f"Left {left} Premium Bills item(s) whose link Kaiser has turned off. "
+                  "The next run tries them again.", flush=True)
         _seek_page(frame, 1, total)
         return bills
     except (BrowserError, BillMismatch, ValueError) as error:
@@ -623,21 +636,58 @@ def _native_pdf(page, frame, row: BillRow, download_dir: Path | None) -> bytes |
     if download_dir is None or (shared_folder.on_server() and shared_folder.leads_out(download_dir)):
         return None
     # The browser's own copy goes to the app's download folder, outside the
-    # kind folders, and is ended and deleted the moment it begins. What is
-    # archived is the blob the page made for this press, never that copy.
-    # A copy a stopped run left there goes at the next start when the
-    # archive holds the same bytes (capture.clear_archived_copies).
+    # kind folders. What is archived is the blob the page made for this
+    # press, never that copy, and the copy is deleted once found as an
+    # exact copy of those bytes (_drop_browser_copy). A copy a stopped run
+    # left there goes at the next start when the archive holds the same
+    # bytes (capture.clear_archived_copies).
     Path(download_dir).mkdir(parents=True, exist_ok=True)
     if not capture.set_download_dir(page, download_dir):
         raise ListStopped("The browser could not prepare a private Kaiser download folder.")
-    return _capture_native_pdf(page, frame, control, selector)
+    return _capture_native_pdf(page, frame, control, selector, download_dir)
 
 
 def _end_download(download):
     intake.discard(download)
 
 
-def _capture_native_pdf(page, frame, control, selector: str) -> bytes | None:
+_COPY_WAIT_SECONDS = 5
+
+
+def _drop_browser_copy(download_dir, data: bytes, wait_seconds: float = _COPY_WAIT_SECONDS) -> int:
+    """Delete the file the browser itself wrote in the app's own download
+    folder for this press, found as an exact copy of `data`, the bytes just
+    taken from the page's Blob. A blob download is finished before anything
+    can end it, so the browser's file is there in full. Nothing else in the
+    folder is touched, a file still being written is waited for a moment,
+    and how many were deleted is returned."""
+    folder = Path(download_dir)
+    started = monotonic()
+    deadline = started + wait_seconds
+    dropped = 0
+    while True:
+        try:
+            here = [p for p in folder.iterdir() if p.is_file()]
+        except OSError:
+            return dropped
+        for path in here:
+            if path.name.lower().endswith((".crdownload", ".tmp", ".part")):
+                continue
+            try:
+                if path.stat().st_size == len(data) and path.read_bytes() == data:
+                    path.unlink()
+                    dropped += 1
+            except OSError:
+                continue
+        busy = any(p.name.lower().endswith((".crdownload", ".tmp", ".part")) for p in here)
+        now = monotonic()
+        # Found, or a second with nothing being written, or out of time.
+        if dropped or (not busy and now - started >= 1.0) or now >= deadline:
+            return dropped
+        sleep(0.1)
+
+
+def _capture_native_pdf(page, frame, control, selector: str, download_dir=None) -> bytes | None:
     if not blob_capture.arm(frame):
         return None
     page.on("download", _end_download)
@@ -653,6 +703,8 @@ def _capture_native_pdf(page, frame, control, selector: str) -> bytes | None:
         if not payload:
             return None
         data, _ = payload
+        if download_dir is not None:
+            _drop_browser_copy(download_dir, data)
         pdf = pdf_reader.read(data)
         return data if pdf.opened and pdf.pages else None
     except BrowserError:
