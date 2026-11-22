@@ -56,11 +56,10 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-eight providers are supported today, all built on the same pattern.
-Five more, SBA, Meijer, American Family, Stripe and FedEx, are built and
+Eighty-nine providers are supported today, all built on the same pattern.
+Four more, SBA, American Family, Stripe and FedEx, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
-[#42](https://github.com/rheeloaded/paperpull/issues/42),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
 [#53](https://github.com/rheeloaded/paperpull/issues/53),
 [#54](https://github.com/rheeloaded/paperpull/issues/54)), and Scalable Capital, Consorsbank,
@@ -123,7 +122,7 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`ibkr`](apps/ibkr) | Interactive Brokers | United States, may work elsewhere | Monthly Activity Statements | **Contributed by [@tylerverry](https://github.com/tylerverry), 60 of 61 months saved on a full run.** The Statements page's own Activity Statement dialog, Monthly chosen and each month's own Download PDF button pressed once, and nothing else is clicked. Regional hosts `.com`, `.co.uk` and `.ie` |
 | [`marinwater`](apps/marinwater) | Marin Water (CA) | United States | Water bills | **Contributed by [@solkennedy](https://github.com/solkennedy), run on the contributor's own account** ([#233](https://github.com/rheeloaded/paperpull/pull/233)). Bill History read on Marin Water's Paymentus portal for a sign-in with one account, nothing clicked, and each bill's PDF fetched from its own View Bill link without the portal's cookies. Bills that share a date are told apart by their PDFs. Requested in [#231](https://github.com/rheeloaded/paperpull/issues/231) |
 | [`mbna`](apps/mbna) | MBNA (Canada, credit cards) | Canada | Credit card statements | **Untested, a first shell waiting for a tester. Have an account? [Help test it](apps/mbna/README.md#help-test-it-no-programming-needed)** It opens the site for you to sign in and nothing more, so Record can follow one trip to a statement. Requested in [#205](https://github.com/rheeloaded/paperpull/issues/205) |
-| [`meijer`](apps/meijer) | Meijer | United States | Order receipts, in-store digital receipts where mPerks lists them | **Untested, built without an account. Have one? [Help test it](apps/meijer/README.md#help-test-it-no-programming-needed)** Being tested by [@jpfieber](https://github.com/jpfieber). Nothing clicked but its two tabs and an in-store receipt's own icon |
+| [`meijer`](apps/meijer) | Meijer | United States | Order receipts, in-store digital receipts where mPerks lists them | **Confirmed by [@cmcculloh](https://github.com/cmcculloh), whose Pilot on their own account saved five in-store receipts from Meijer's current orders page** ([#236](https://github.com/rheeloaded/paperpull/pull/236)). Requested by [@jpfieber](https://github.com/jpfieber), whose reports on [#42](https://github.com/rheeloaded/paperpull/issues/42) shaped it. Nothing clicked but its two tabs and each receipt's own button. Not yet seen on a real account are online orders, the naming repairs released with it in 0.70.0, and a receipt saved from the old orders page kept under its new record rather than saved again |
 | [`myecp`](apps/myecp) | MILITARY STAR (Exchange Credit Program) | United States | Card statements | **Built on the maintainer's own account, 25 statements back to 2023.** The MyECP statements list and download from inside the page, nothing clicked |
 | [`mypay`](apps/mypay) | DFAS myPay | United States | eRAS, CRSC, 1099-R, 1095 | Government pay system; JSON API, nothing clicked |
 | [`mtb`](apps/mtb) | M&T Bank | United States | Mortgage statements, escrow, 1098 | Own online banking; you list, app expands all years |
@@ -967,8 +966,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-seven** apps pass their tests, the eighty-eight that are
-  supported, the five still waiting for a tester and the Scalable Capital,
+- ✅ All **ninety-seven** apps pass their tests, the eighty-nine that are
+  supported, the four still waiting for a tester and the Scalable Capital,
   Consorsbank, CIBC and MBNA shells, 47,569 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above

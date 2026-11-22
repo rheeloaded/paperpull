@@ -242,6 +242,23 @@ def test_no_part_of_ci_plans_far_longer_than_the_others():
     assert max(rat.expected(n, times) for n in names) < sum(loads) / parts
 
 
+def test_no_part_of_ci_plans_past_33_minutes_of_tests():
+    """On the v0.70.0 tag part 1 of eight was cancelled at the job's 45
+    minute limit with nothing failed, on main too, planned from a file whose
+    times had fallen behind CI's own (core-censuses 1,224 s against 1,209 to
+    1,915 on CI, kroger 278 against 465, gui 234 against 582). Refreshed
+    from CI, the longest of eight parts planned 2,042 s of tests, about
+    35 minutes a job, with no room for a slow runner. A part planned past 33 minutes of
+    tests is the sign to run more parts, so refreshing the file from CI
+    says so here rather than in a cancelled run."""
+    parts = ci_parts()
+    times = rat.load_times(REPO / "tools" / "suite_times.json")
+    names = [n for n, _d, _kind in rat.suites(False)] + ["a_new_app"]
+    loads = [sum(rat.expected(n, times) for n in rat.shard_of(names, times, k, parts))
+             for k in range(1, parts + 1)]
+    assert max(loads) <= 33 * 60, (parts, [round(x) for x in loads])
+
+
 def test_a_part_runs_only_its_own_suites(fake_run, tmp_path, monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(rat, "run_suite", lambda d, py, timeout=rat.SUITE_LIMIT_S, **_: (seen.append(d.name) or ("1 passed", 0, [])))

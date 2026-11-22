@@ -8,11 +8,11 @@
 # It runs on a push to main, on a pull request, and on a version tag, so the
 # packaging workflows and this one both answer for the same commit.
 #
-# The suites are split into eight parts that run on eight runners at once.
+# The suites are split into ten parts that run on ten runners at once.
 # On one runner the suite grew from 37 minutes on 2026-09-27 to 82 by
 # 2026-10-03, and twice a run that passed every test was cut off by the job
 # limit and ended CANCELLED. Each part is balanced by tools/suite_times.json,
-# and the job named "tests" answers for all eight, as the single job did.
+# and the job named "tests" answers for all ten, as the single job did.
 #
 # There were four parts until 2026-10-11. By then the suites took about
 # 8,500 s on CI, so even an even split of four was 35 minutes of tests a
@@ -44,6 +44,14 @@
 # six parts plan at 38.3 minutes with setup, 50 on a runner 1.3 times slow,
 # and eight at 29.1, 38 on that runner, the room six had when they began.
 #
+# By 2026-11-20, with 0.70.0, the suites took about 16,300 s on CI. Part 1
+# of the tag and of main was cancelled at the limit with nothing failed,
+# planned from times that had fallen behind CI's own again. Core-censuses
+# took 1,209 to 1,915 s on one commit, Kroger 465 against 278 planned and
+# gui 582 against 234. Refreshed from that commit's runs and two pull
+# requests' just before, eight parts plan at 35.4 minutes with setup, and
+# ten at 28.5, 37.7 on the slowest of those runs' own times.
+#
 # The runner's own tests also run on Linux and macOS, and "tests" answers
 # for them too. The parts run on Windows, where the runner's POSIX branches
 # (process groups, fcntl locks, signals) never run. On 2026-10-03 one of
@@ -65,15 +73,15 @@ permissions:
 
 jobs:
   part:
-    name: tests part ${{ matrix.part }} of 8
+    name: tests part ${{ matrix.part }} of 10
     runs-on: windows-latest
-    # A guard against a run that hangs, not a budget. A part takes about an
-    # eighth of the whole.
+    # A guard against a run that hangs, not a budget. A part takes about a
+    # tenth of the whole.
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4, 5, 6, 7, 8]
+        part: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -113,7 +121,7 @@ jobs:
         # opens with a click. The log is all there is of a CI run, and a
         # failure that does not come back on a rerun has to be explained
         # from it.
-        run: python tools/run_all_tests.py --shard ${{ matrix.part }}/8 --jobs 1
+        run: python tools/run_all_tests.py --shard ${{ matrix.part }}/10 --jobs 1
 
   posix:
     name: the runner on ${{ matrix.system }}

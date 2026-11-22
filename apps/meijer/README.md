@@ -1,12 +1,15 @@
 # Meijer Receipts Downloader (local, supervised)
 
-**Not yet tested against a real account.** This app was built without a
-Meijer account, from the orders page the requester named, so that someone
-who holds one can test it without writing code. It runs, its guards are
-tested, and every guess about meijer.com is marked in `meijer_site.py`.
-What it needs is a support report from a signed-in account, which contains
-no personal data. The conversation is
-[issue #42](https://github.com/rheeloaded/paperpull/issues/42).
+**Working on a contributor's account.** This app was built without a
+Meijer account, from the orders page the requester named, and repaired
+over several rounds from a tester's reports on
+[issue #42](https://github.com/rheeloaded/paperpull/issues/42). When Meijer moved its orders to a new
+page, a contributor's Pilot on their own account saved five in-store
+receipts from it ([#236](https://github.com/rheeloaded/paperpull/pull/236)). That run came before
+the repairs released with it in 0.70.0, which tie each receipt to its own
+row and name it for its store, and those have not yet run on a real
+account. A receipt saved from the old orders page is kept under its new
+record rather than saved again, which no real account has shown yet either.
 
 Downloads your Meijer orders and receipts as PDFs, plus two CSV files:
 

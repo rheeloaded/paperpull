@@ -9,6 +9,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Changed
+- **Meijer is confirmed on a contributor's account (#236).** A Pilot on
+  their own account saved five in-store receipts from Meijer's current
+  orders page, so Meijer moves from waiting for a tester to supported in
+  PROVIDERS.md, the README and the panel's list. That run came before the
+  naming repairs released with it in 0.70.0, and no real account has yet
+  shown those repairs, an online order, or a receipt saved from the old
+  orders page kept under its new record rather than saved again.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
