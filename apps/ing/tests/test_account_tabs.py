@@ -435,17 +435,22 @@ def test_a_tab_name_the_folder_rule_would_change_again_is_not_an_account_folder(
     home_only(home, said, "")
 
 
-def test_tabs_gone_after_a_home_account_was_remembered_are_said(home):
+def test_tabs_gone_after_a_home_account_was_remembered_stop_and_say_how_to_go_on(home):
+    """A hidden tab or a bar drawn late reads as no bar, and the signed-in
+    site may still show the account an earlier run followed, so a page with
+    no tabs is not read as yours once tabs were read."""
     three_accounts(home)
     assert home.run("--discover")[0] == 0
+    known = home.store("discovery.json")
     home.bank.bars = 0
     code, said = home.run("--discover")
-    assert code == 0
-    assert ("Only the account the Postbox opens on was read, since the Postbox showed no "
-            "account tabs this time") in said
-    # It says how to stop it, and leaves no failure file on every run.
+    assert code == 1 and home.store("discovery.json") == known
+    assert "the Postbox showed no account tabs where it showed them before" in said
     assert "take ing-accounts.json out of the output folder" in said
-    assert not list((home.out / "Diagnostics").glob("failure-*.json"))
+    # Taken out, the Postbox of one account reads as it always did.
+    (home.out / docs.ACCOUNTS_FILE).unlink()
+    code, said = home.run("--discover")
+    assert code == 0, said
 
 
 def test_tabs_unreadable_once_an_account_tab_was_read_stop_rather_than_read_as_yours(home):

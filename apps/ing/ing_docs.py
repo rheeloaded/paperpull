@@ -604,16 +604,11 @@ class App:
                 print(f"  Account {n} ({which}): {count} document(s) listed")
         # Tabs shown that this run could not read leave the other accounts
         # unread, which is said, never passed over (#169).
-        gone = "the Postbox showed no account tabs this time"
         for why in site.tabs_not_read():
             print(f"\n!! Only the account the Postbox opens on was read, since {why}.")
-            if why == gone:
-                print(f"   When no account but your own is left in ING, take {ACCOUNTS_FILE}")
-                print("   out of the output folder and this is no longer said.")
-                continue
             print("   Any other account behind a tab was not read this run. Run Diagnose with")
             print("   the Postbox open and attach its support report to the ING issue.")
-        if any(why != gone for why in site.tabs_not_read()):
+        if site.tabs_not_read():
             self.write_failure("read the account tabs", "the account tabs could not be read")
 
         if not quiet:

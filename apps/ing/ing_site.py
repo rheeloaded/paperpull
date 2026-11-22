@@ -640,7 +640,7 @@ def tab_digest(label: str, salt: str = "") -> str:
 
 # The home account's tab, as remembered from an earlier run ("stored") and
 # as first seen in this one ("seen"), by tab_digest with "salt".
-_home: dict = {"stored": "", "seen": "", "salt": "", "followed": False}
+_home: dict = {"stored": "", "seen": "", "salt": ""}
 # What kept this listing to the home account although tabs were shown.
 _tabs_note: List[str] = []
 
@@ -651,7 +651,6 @@ def remember_home(digest: str, salt: str = "") -> None:
     _home["stored"] = digest or ""
     _home["seen"] = ""
     _home["salt"] = salt or ""
-    _home["followed"] = False
     del _tabs_note[:]
 
 
@@ -774,10 +773,11 @@ def _home_bar(page) -> Optional[dict]:
     is noted for Discover to say (tabs_not_read). Once one has been read, or
     this run has followed another account's tab, which the site may keep
     shown, tabs that cannot be read stop the list instead, since the page
-    may show another account. Only a list shown with no tab bar at all is
-    still read as the home account then, said too unless this run followed
-    a tab, when it stops."""
-    known = bool(_home["stored"] or _home["seen"] or _home["followed"])
+    may show another account. So does a list shown with no tab bar at all,
+    since a hidden tab or a bar drawn late reads as none, and the signed-in
+    site may still show the account an earlier run followed."""
+    # A tab followed in this run was read first, so it is seen as well.
+    known = bool(_home["stored"] or _home["seen"])
     try:
         bar = account_tabs(page)
     except ListStopped as e:
@@ -788,10 +788,9 @@ def _home_bar(page) -> Optional[dict]:
     if not bar["labels"]:
         if not known:
             return bar
-        if _home["followed"] or not bar["list"]:
-            raise ListStopped("the Postbox showed no account tabs where it showed them before")
-        _tabs_note.append("the Postbox showed no account tabs this time")
-        return bar
+        raise ListStopped("the Postbox showed no account tabs where it showed them before. "
+                          "When no account but your own is left in ING, take "
+                          "ing-accounts.json out of the output folder")
     if bar["selected"] is None:
         if known:
             raise ListStopped("which account tab is selected cannot be told")
@@ -826,7 +825,6 @@ def _enter_account(page, source: str, tab: str) -> list:
     if not _safe_tab(href, source):
         raise ListStopped("an account tab links to an address this app does not follow")
     try:
-        _home["followed"] = True
         page.goto(href, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(1500)
     except Exception as e:

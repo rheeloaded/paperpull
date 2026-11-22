@@ -101,10 +101,10 @@ Postbox opened on, as a salted fingerprint in `ing-accounts.json` rather
 than the name. From then on, tabs that cannot be read stop the list rather
 than read a page that may show another account, and so does a Postbox that
 opens on another tab than the remembered one, so no account's documents
-are ever filed as yours. A Postbox that shows no tabs at all is read as
-your own and said, unless the run has just followed another account's tab.
-When no account but your own is left, take `ing-accounts.json` out of the
-output folder. Discover says how many documents each account had, by its
+are ever filed as yours. So does a Postbox that shows no tabs at all,
+since a hidden tab or a bar drawn late reads as none, and the signed-in
+site may still show the account an earlier run followed. When no account
+but your own is left, take `ing-accounts.json` out of the output folder. Discover says how many documents each account had, by its
 place, never its name.
 
 Your own account's documents are filed and named exactly as before. Each
