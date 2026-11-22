@@ -1,0 +1,7 @@
+Kaiser Permanente bills
+
+  paperpull kaiser login       open the sign-in window
+  paperpull kaiser discover    list available bills
+  paperpull kaiser pilot       save the newest bill
+  paperpull kaiser all         save bills in scope
+  paperpull kaiser resume      continue a stopped run

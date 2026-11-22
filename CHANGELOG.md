@@ -73,6 +73,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   Billing date or the day after. Every password field of the page counts
   when it checks for a sign-out, a hidden one too, and an empty Invoices
   table counts only once the table itself says it has no rows. Port 9322.
+- **Kaiser Permanente (#252).** Contributed by @solkennedy. Bills, notices
+  and forms from My Documents, and medical billing statements from
+  Statements & Billing, one list at a time. Open sign-in window, open My
+  Documents or Statements, then Try the newest few first and Get new
+  documents. Only what the site offers as a file or a bill is saved, never a
+  page Kaiser shows only in its viewer. A file is named by its kind and date alone, so a title
+  from the page, which on a health account can hold a name or a condition,
+  never names a file or reaches the run's output, the Diagnose files or a
+  failure file. It stays only in the archive's own index. Port 9323.
 
 ### Changed
 - **Meijer is confirmed on a contributor's account (#236).** A Pilot on

@@ -56,6 +56,7 @@
     "ibkr": {"gets": "Monthly activity statements", "group": "investing"},
     "ing": {"gets": "Kontoauszüge, card statements, securities documents and tax certificates", "group": "banks", "note": "Tested on one account so far, a populated archive not yet"},
     "irs": {"gets": "Account, return, wage and income, and record of account transcripts", "group": "bills", "note": "Tested on one account so far"},
+    "kaiser": {"gets": "My Documents and medical billing statements", "group": "insurance", "note": "Tested in Northern California. Reads one document list at a time"},
     "kroger": {"gets": "In-store, fuel, pickup and delivery receipts", "group": "shopping"},
     "lowes": {"gets": "Store and online receipts and returns, back to 2023", "group": "shopping"},
     "marinwater": {"gets": "Water bill PDFs from Paymentus", "group": "bills", "note": "Reads one account"},

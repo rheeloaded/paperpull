@@ -158,6 +158,11 @@ STOPS = {
     ("simplisafe", "_close_invoice", "click", ""): (1,
         "closes an invoice's dialog once it has been read, and an open dialog covers every "
         "press after it"),
+    ("kaiser", "press_named", "click", "press a list control"): (1,
+        "My Documents' Next results and Previous results, Kaiser's survey popup Close and "
+        "the medical statement viewer's Close. A turned off pager would leave every "
+        "document past it unread, and a popup left open covers every press after it. "
+        "A document's own link goes through press_document, which leaves it"),
     ("sparkassepc", "_turn", "click", ""): (1,
         "the Postfach's numbered page button, found only when it is turned on, a step "
         "to the page a document is on, so a turned off one where the pager offers that "
@@ -187,7 +192,7 @@ LEAVES = {
     ("simmons", "_catch_document"), ("simplisafe", "_invoice_html"), ("smud", "_catch_pdf"), ("sparkassepc", "_press_link"),
     ("statefarm", "_catch_pdf"),
     ("vanguard", "download_document"),
-    ("venmo", "show_all"), ("wellsfargo", "_catch_pdf")}
+    ("venmo", "show_all"), ("wellsfargo", "_catch_pdf"), ("kaiser", "press_document")}
 
 
 # ---------------------------------------------------------------------------
@@ -808,6 +813,23 @@ def _sparkassepc(site, page, out, staging, trace):
         return False
 
 
+def _kaiser(site, page, out, staging, trace):
+    """Kaiser Permanente's press of one My Documents row's own Download PDF
+    link. A turned off link leaves the document (DocumentLeft), which its
+    download records as failed and goes on from."""
+    try:
+        site.press_document(page, page.locator("#get"), "#get")
+    except site.DocumentLeft:
+        return False
+    return True
+
+
+def _kaiser_link(off: bool) -> str:
+    return ('<a id="get" class="ctl download-pdf-link" href="#"%s '
+            'onclick="window.presses++; return false;">Download PDF</a>'
+            % (' aria-disabled="true"' if off else ""))
+
+
 def _sparkassepc_link(off: bool) -> str:
     return ('<a id="get" class="ctl postbox-message-direct-download" href="#"%s '
             'onclick="window.presses++; return false;">Kontoauszug Juni 2026</a>'
@@ -886,6 +908,8 @@ def _how(app: str, function: str, monkeypatch):
         return "simplisafe_site", _simplisafe(monkeypatch), _simplisafe_link, "06/30/26"
     if (app, function) == ("sparkassepc", "_press_link"):
         return "sparkassepc_site", _sparkassepc, _sparkassepc_link, "30.06.2026"
+    if (app, function) == ("kaiser", "press_document"):
+        return "kaiser_site", _kaiser, _kaiser_link, "Jun 30, 2026"
     return None
 
 

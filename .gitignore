@@ -22,6 +22,9 @@ discovery.json
 progress.json
 # Whether the last listing was read whole, and when.
 last-listing.json
+kaiser-sign-in-resume.json
+kaiser-sign-in-resume.json.*
+**/.kaiser-downloads/
 panel-runs.json
 # NetBenefits keeps the plans of a sign-in with several here, with the
 # site's own plan and employer numbers in their addresses.

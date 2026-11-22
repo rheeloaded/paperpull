@@ -32,7 +32,7 @@ APPS = sorted(d for d in (REPO / "apps").iterdir()
 # How a provider labels the control that gets you the document.
 VERBS = ("", "View ", "Download ")
 
-# Five apps refuse a document name on purpose, and all five are allowed
+# Six apps refuse a document name on purpose, and all six are allowed
 # to. On a military pay system "W-2", "SGLI", "FEGLI", "Beneficiary" and
 # "Net Pay" name a settings form as often as a document, and neither app
 # gates a click on this answer: myPay reads its documents from a JSON API
@@ -46,7 +46,11 @@ VERBS = ("", "View ", "Download ")
 # guard of their own. Coinbase's guard refuses "card" and "one" for every
 # control, since the account can spend through its card, and its One Card
 # statements are pressed by their rows' own PDF buttons, whose label is
-# "PDF", under a guard of their own. Written down as names so the list can
+# "PDF", under a guard of their own. Kaiser Permanente's guard takes only
+# the whole labels its rows and pager show, Premium Bills, Download PDF,
+# View statement, Next results, Previous results and Close, and every
+# document is pressed by its own row's control, never by its name. Written
+# down as names so the list can
 # shrink and cannot quietly grow.
 ALLOWED_TO = {
     "mypay": {"Annuitant Account Statement", "FEGLI Document", "Net Pay Advice",
@@ -60,6 +64,9 @@ ALLOWED_TO = {
     # Mercury's active controls are a guarded row checkbox and the exact
     # Download link Mercury generates for that row.
     "mercury": {"Checking Statement", "Savings Statement", "Statement"},
+    # Kaiser presses exact controls on the row, including Download PDF for
+    # forms and notices. The names below describe the resulting files.
+    "kaiser": {"Medical Bill", "Premium Bill", "Explanation of Benefits", "Tax Form 1095"},
 }
 
 

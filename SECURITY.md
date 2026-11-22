@@ -46,7 +46,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
   - **Apps that hold a control to an allowlist** (AAFMAA, ADP, Ally, Alpaca,
     American Family, Apple Card, AT&T, Bank of America, Best Buy, Bilt, Chase, Chase Business,
     Coinbase, Costco, Discover, Discover Bank, Dominion, eBay, E*TRADE, Fairfax Water, First
-    Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Mercury, Nelnet, Newrez,
+    Horizon, Golden 1, Interactive Brokers, Kaiser Permanente, M&T, Meijer, Mercury, Nelnet, Newrez,
     PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SimpliSafe, SMUD,
     Sparkasse Pforzheim Calw, Spectrum, Starlink,
     State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
@@ -71,6 +71,12 @@ The `.gitignore` already blocks all of the following. Do not override it.
     come from the same-origin invoice link, with redirects disabled, and
     must match the listed invoice number and show the Billing date or the
     following date as the issue date.
+    Kaiser Permanente presses only the whole labels Premium Bills, Download
+    PDF and View statement on the selected row, My Documents' Next results
+    and Previous results, and the Close of Kaiser's survey popup and of the
+    medical statement viewer. The medical PDF is kept only when it matches
+    the selected statement date. Premium bills are rendered in the core's
+    isolated PDF context.
     Best Buy presses only its year menu and a year in it. Discover Bank
     presses only the keep-alive button of Discover's inactivity dialog, a
     button whose whole name is I'm still here, Stay signed in, Continue
