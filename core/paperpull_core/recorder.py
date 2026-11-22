@@ -31,7 +31,8 @@ WHAT IS RECORDED
     a print            when a step made the page ask to print
     the requests       each step caused, as names and shapes, each call of
                        a batch on its own, and a call the provider's page
-                       made to a host of its own marked as off the site
+                       made to another host named like the provider's,
+                       marked as off the site, its parameters named only
 
 WHAT IS NOT, AND CANNOT BE
 
@@ -132,8 +133,8 @@ _KINDS = {list: "list", dict: "dict", str: "str", int: "int", float: "float",
 
 # The request kinds a page's own script makes. An answer from a host the app
 # does not list is kept only for one of these, asked by the provider's own
-# page, since that is where a provider's API lives when it has a host of its
-# own (BBVA's list, messages and PDFs). A navigation, a script or an image
+# page from a host named like the provider's, since that is where a provider's
+# API lives when it has a host of its own (BBVA's list, messages and PDFs). A navigation, a script or an image
 # from another host is not the provider's API, and stays counted.
 _PAGE_CALLS = frozenset(("xhr", "fetch"))
 
@@ -1138,17 +1139,23 @@ class Recorder:
             return {"download_from": "data:" + (shape(head, self.words)[:60] if head else "")}
         # An address can be as long as a page likes, and shaping it is done
         # word by word, so only a head long enough for any real one is read.
-        inner = (url[5:] if scheme == "blob" else url)[:4096]
+        whole = url[5:] if scheme == "blob" else url
+        inner = whole[:4096]
         out = {"download_from": ((scheme + ":" if scheme == "blob" else "")
                                  + shape_url(inner, self.words, query=False))[:200]}
+        if len(whole) > len(inner):
+            out["download_from_truncated"] = True
         keys = self._param_names(inner)
         if keys:
             out["download_query_keys"] = keys
         try:
             # Only http and https can be the provider's. Anything else, or a
             # check that fails, reads as off the site, never as on it.
-            web = inner.split(":", 1)[0].lower() in ("http", "https")
-            out["download_off_host"] = not (web and bool(self._is_safe_url(inner)))
+            # Judged on the whole address, never the head kept for its
+            # shape, which a long one could cut before its real host.
+            web = whole.split(":", 1)[0].lower() in ("http", "https")
+            out["download_off_host"] = not (web and len(whole) == len(inner)
+                                            and bool(self._is_safe_url(whole)))
         except Exception:
             out["download_off_host"] = True
         return out
@@ -1201,8 +1208,10 @@ class Recorder:
             }
             if off_host:
                 entry["on_the_providers_own_site"] = False
-            if html:
-                keys = _query_keys(url)
+            if html or off_host:
+                # Another host's parameters are named, never their values,
+                # since the host is the provider's only by its name.
+                keys = self._param_names(url) if off_host else _query_keys(url)
                 if keys:
                     entry["query_keys"] = keys
             else:
@@ -1309,7 +1318,13 @@ class Recorder:
                 return False
             frame = request.frame
             where = frame.url if frame is not None else ""
-            return bool(where) and bool(self._is_safe_url(where))
+            if not where or not self._is_safe_url(where):
+                return False
+            # A vendor's tag runs in the provider's own frame too, analytics,
+            # a chat window, and its calls look like the page's. The host
+            # has to carry the provider's own name, the label its site sits
+            # under, as BBVA's data host does beside its site.
+            return _named_like(_host_of(response.url or ""), _brand(_host_of(where)))
         except Exception:
             return False
 
@@ -1557,13 +1572,42 @@ def _host_of(url: str) -> str:
         return ""
 
 
+# Second-level labels a country's registry puts its names under, co.uk and
+# com.au, so the name in bank.co.uk is bank and not co.
+_UNDER = frozenset(("co", "com", "net", "org", "gov", "ac", "edu", "or", "ne", "go"))
+
+
+def _brand(host: str) -> str:
+    """The label a site's host is named by, bbva in web.bbva.de and bank in
+    online.bank.co.uk, or "" when there is none to tell."""
+    labels = [p for p in (host or "").lower().split(".") if p]
+    if len(labels) < 2:
+        return ""
+    name = labels[-2]
+    if name in _UNDER and len(labels) >= 3:
+        name = labels[-3]
+    return name if len(name) >= 3 else ""
+
+
+def _named_like(host: str, brand: str) -> bool:
+    """Whether a host carries `brand` as one of its labels, or one part of
+    a label written with dashes, leaving out the last label."""
+    if not brand:
+        return False
+    for label in (host or "").lower().split(".")[:-1]:
+        if label == brand or brand in label.split("-"):
+            return True
+    return False
+
+
 _CONSENT = """\
 RECORDING - what this does and does not capture
 
   It records   the controls you click, by the name you read on them, the
                option you pick in a dropdown, a box you tick, the
-               addresses and shapes of the answers the provider's own
-               pages asked for, and where a downloaded file came from.
+               addresses and shapes of the provider's own answers, those
+               from a host named like the provider's included, and where
+               a downloaded file came from.
   It keeps     a word off the page only when it is on PaperPull's fixed
                list of words. Any other word, a name, an address, an
                account number, is written as its shape, a for a letter

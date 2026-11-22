@@ -28,7 +28,7 @@ SMALLINT = 73517
 CANARIES = (MERCHANT, LETTERS, SURNAME, str(SMALLINT))
 
 PROVIDER = "https://bank.example/accounts"
-API = "https://api.bankcdn.test/v1/docs?acct=%s" % MERCHANT
+API = "https://api.bank.test/v1/docs?acct=%s" % MERCHANT
 VENDOR = "https://widget.vendor.test/embed"
 
 
@@ -571,7 +571,7 @@ def test_another_hosts_answer_before_any_step():
 def test_every_part_of_another_hosts_call_is_shaped():
     rec, page = recording()
     page.emit("response", api(
-        url="https://%s.%s.test/%s/docs?%s=%s" % (LETTERS, SURNAME.lower(), MERCHANT,
+        url="https://%s.%s.bank.test/%s/docs?%s=%s" % (LETTERS, SURNAME.lower(), MERCHANT,
                                                    SURNAME, LETTERS),
         body={MERCHANT: {SURNAME: 1}}, post=json.dumps(BODY2)))
     assert rec.requests[0]["batch"] == 2
@@ -607,3 +607,54 @@ def test_the_new_fields_read_as_themselves_and_the_file_is_a_fixed_point():
 def test_the_recorder_still_subscribes_to_the_same_events():
     rec, page = recording()
     assert set(page.handlers) == {"framenavigated", "response", "download", "page"}
+
+
+# -- review repairs --------------------------------------------------------------
+
+@pytest.mark.parametrize("url", ["https://www.google-analytics.test/g/collect?cid=1",
+                                 "https://widget.vendor.test/api/chat",
+                                 "https://bankcdn.test/v1/docs",
+                                 "https://bank.vendor.test/x"])
+def test_a_tags_call_from_the_providers_own_frame_to_a_host_not_named_like_it_is_counted(url):
+    """A vendor's tag runs in the provider's frame, and its calls look like
+    the page's. Only a host carrying the provider's own name is kept, and
+    bank.vendor.test carries it only as the vendor's last label but one."""
+    rec, page = recording()
+    page.emit("response", api(url=url))
+    kept = [r for r in rec.requests if r.get("url", "").startswith("https://bank.vendor")]
+    if url.startswith("https://bank.vendor"):
+        # Named like the provider, so kept, and still marked and shaped.
+        assert kept and kept[0]["on_the_providers_own_site"] is False
+    else:
+        assert rec.requests == [] and rec.dropped["off_host_request"] == 1
+
+
+@pytest.mark.parametrize("host,brand", [("web.bbva.de", "bbva"), ("online.bank.co.uk", "bank"),
+                                        ("bank.example", "bank"), ("localhost", ""),
+                                        ("a.io", ""), ("", "")])
+def test_the_name_a_site_is_known_by(host, brand):
+    assert recorder._brand(host) == brand
+
+
+@pytest.mark.parametrize("host,yes", [("de-net.bbva.com", True), ("bbva.com", True),
+                                      ("api.bbva-data.net", True), ("bbvacdn.com", False),
+                                      ("tracker.com", False), ("x.y.bbva", False)])
+def test_a_host_named_like_the_provider(host, yes):
+    assert recorder._named_like(host, "bbva") is yes
+
+
+def test_another_hosts_parameters_are_named_never_given():
+    rec, page = recording()
+    page.emit("response", api(url="https://api.bank.test/docs?acct=%s&page=2" % MERCHANT))
+    entry = rec.requests[0]
+    assert entry["query_keys"] == ["acct", "page"] and "query" not in entry
+    assert_none_came_out(rec.stop())
+
+
+def test_an_address_cut_for_its_shape_never_reads_as_on_the_site():
+    # The head kept for the shape ends among the zeros, before the real host.
+    url = "https://bank.example:" + "0" * 4090 + "443@evil.test/dl/statement.pdf"
+    assert "@" not in url[:4096]
+    eff, report, _ = effect_of(url)
+    assert eff["download_off_host"] is True
+    assert eff["download_from_truncated"] is True

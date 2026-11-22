@@ -36,10 +36,12 @@ DOCS = """
 <button id="list" onclick='fetch("%s/graphql", {method: "POST",
   headers: {"content-type": "text/plain"}, body: %s});
   const f = document.createElement("iframe"); f.src = "%s/widget";
-  document.body.appendChild(f);'>Show documents</button>
+  document.body.appendChild(f);
+  const s = document.createElement("script"); s.src = "%s/tag.js";
+  document.head.appendChild(s);'>Show documents</button>
 <a id="open" href="%s/dl" target="_blank">Download statement</a>
 <a id="inline" href="data:application/pdf;base64,JVBERi0xLjQK%s" download="s.pdf">Save PDF</a>
-""" % (API, json.dumps(BATCH), VENDOR, HOST, MERCHANT)
+""" % (API, json.dumps(BATCH), VENDOR, VENDOR, HOST, MERCHANT)
 
 # The tab a download button opens. It starts the file and closes itself, so
 # the person sees a blank tab come and go.
@@ -52,6 +54,11 @@ WIDGET = """
 <script>fetch("%s/graphql", {method: "POST", headers: {"content-type": "text/plain"},
   body: "[]"});</script>
 """ % API
+
+# A vendor's tag, loaded into the provider's own frame, calling home. Its
+# call comes from the provider's frame and is still not the provider's.
+TAG = """fetch("%s/collect", {method: "POST", headers: {"content-type": "text/plain"},
+  body: "[]"});""" % VENDOR
 
 
 def safe(url: str) -> bool:
@@ -69,6 +76,11 @@ def _route(route):
                       headers={"Access-Control-Allow-Origin": "*"},
                       body=json.dumps([{"data": {"documents": [{"id": MERCHANT}]}},
                                        {"data": {"unread": 1}}]))
+    elif url.startswith(VENDOR + "/tag.js"):
+        route.fulfill(status=200, content_type="application/javascript", body=TAG)
+    elif url.startswith(VENDOR + "/collect"):
+        route.fulfill(status=200, content_type="application/json",
+                      headers={"Access-Control-Allow-Origin": "*"}, body="{\"ok\": 1}")
     elif url.startswith(VENDOR):
         route.fulfill(status=200, content_type="text/html", body=WIDGET)
     elif "/files/" in url:
@@ -112,9 +124,20 @@ def _no_value_in(report):
 
 def test_the_pages_own_call_to_its_api_host_is_kept_and_a_vendors_is_not(context):
     page, rec = _start(context)
-    with page.expect_response(lambda r: r.url.startswith(API) and r.request.post_data != "[]"):
-        page.click("#list")
-    page.wait_for_timeout(1500)
+    seen = []
+    context.on("response", lambda r: seen.append((r.url, r.request.post_data)))
+    page.click("#list")
+    # The page's own batch, the widget's call from its frame and the tag's
+    # call from the provider's frame, all three answered before Stop.
+    for _ in range(100):
+        if (any(u.startswith(API) and p != "[]" for u, p in seen)
+                and any(u.startswith(API) and p == "[]" for u, p in seen)
+                and any(u.startswith(VENDOR + "/collect") for u, p in seen)):
+            break
+        page.wait_for_timeout(100)
+    else:
+        pytest.fail("the three calls were never answered, so this proves nothing")
+    page.wait_for_timeout(300)
     report = rec.stop()
 
     kept = [r for r in report["requests"] if r.get("on_the_providers_own_site") is False]
@@ -125,7 +148,7 @@ def test_the_pages_own_call_to_its_api_host_is_kept_and_a_vendors_is_not(context
     assert call["shape"][0] == "batch of 2" and len(call["shape"]) == 3
     # The widget's own call to the same host, from a vendor's frame, and the
     # widget's page itself, are counted and not described.
-    assert report["dropped"]["off_host_request"] >= 1
+    assert report["dropped"]["off_host_request"] >= 2
     _no_value_in(report)
 
 

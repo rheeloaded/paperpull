@@ -19,12 +19,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   and whether it was off the provider's site, even when the tab it came
   from closes at once (a tab that started a download as it opened could
   have the download pass unseen). A call the provider's own page makes to
-  a host the app does not list yet, where a provider keeps its API, is kept
-  and marked as another host, rather than dropped. Calls from anyone else's
-  frame stay counted only, and those calls may take at most half of a
-  recording's room. Every new field is built from the fixed word list as it
-  is made, and the query text, variables, data in an address and parameter
-  values are never read into it. `tools/read_recording.py` prints them.
+  another host named like the provider's, where a bank can keep its API
+  apart from its site, is kept and marked as another host, with the names
+  of its parameters only, rather than dropped. A call to any other host, or
+  from anyone else's frame, stays counted only, and the kept calls to
+  another host may take at most half of a recording's room. Every new field
+  is built from the fixed word list as it is made, and the query text,
+  variables, data in an address and the values of a download's or another
+  host's parameters are never read into it. `tools/read_recording.py` prints
+  them.
 
 ## [0.70.0] - 2026-11-20
 

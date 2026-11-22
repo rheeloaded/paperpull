@@ -444,6 +444,9 @@ def render(report: dict) -> str:
                     if r.get("on_the_providers_own_site") is False else ""))
                 if r.get("query"):
                     L.append("          query  %s" % r["query"])
+                if isinstance(r.get("query_keys"), list) and r["query_keys"]:
+                    L.append("          parameters  %s"
+                             % ", ".join(str(k) for k in r["query_keys"]))
                 if r.get("post_keys"):
                     L.append("          sent   %s" % ", ".join(r["post_keys"]))
                 if isinstance(r.get("operation"), str) and r["operation"]:

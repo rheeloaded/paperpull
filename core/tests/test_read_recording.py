@@ -597,3 +597,10 @@ def test_junk_in_the_new_request_fields_does_not_raise(junk):
 def test_junk_in_the_new_download_fields_does_not_raise(eff):
     assert isinstance(rr.effects(step(effect=eff)), list)
     assert "WHAT THE PERSON DID" in rr.render(report(steps=[step(effect=eff)]))
+
+
+def test_another_hosts_parameter_names_are_printed():
+    r = report(requests=[{"step": 0, "url": "https://api.x.test/docs", "status": 200,
+                          "method": "GET", "on_the_providers_own_site": False,
+                          "query_keys": ["acct", "page"]}])
+    assert "parameters  acct, page" in rr.render(r)

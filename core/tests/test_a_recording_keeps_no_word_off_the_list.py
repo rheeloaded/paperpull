@@ -306,14 +306,14 @@ _CHANNELS = {
     "an answer's key and value, last call": lambda: _batch(
         {"operationName": "documents"}, [{}] * 9 + [{MERCHANT: SURNAME, "a": LETTERS}]),
     "another host's name": lambda: _PageCall(
-        "https://%s.%s.%s.test/docs" % (MERCHANT, SURNAME, LETTERS), body={"a": 1}),
+        "https://%s.%s.bank.%s/docs" % (MERCHANT, SURNAME, LETTERS), body={"a": 1}),
     "another host's path": lambda: _PageCall(
-        "https://api.bankcdn.test/%s/%s/%s" % (MERCHANT, SURNAME, LETTERS), body={"a": 1}),
+        "https://api.bank.test/%s/%s/%s" % (MERCHANT, SURNAME, LETTERS), body={"a": 1}),
     "another host's query": lambda: _PageCall(
-        "https://api.bankcdn.test/docs?%s=%s&acct=%s" % (SURNAME, MERCHANT, LETTERS),
+        "https://api.bank.test/docs?%s=%s&acct=%s" % (SURNAME, MERCHANT, LETTERS),
         body={"a": 1}),
     "another host's answer": lambda: _PageCall(
-        "https://api.bankcdn.test/docs", body={MERCHANT: {SURNAME: LETTERS}}),
+        "https://api.bank.test/docs", body={MERCHANT: {SURNAME: LETTERS}}),
 }
 
 
