@@ -155,6 +155,46 @@ def told_apart_by(record: dict) -> str:
     return m.group(1) if m else doc_id[-6:]
 
 
+_WHY = {
+    "no recorded bill": "the record has no bill id",
+    "no single bill matches the record": "no bill in the history has its id",
+    "too large for a bill": "the bill is too large",
+    "fetch failed": "the bill could not be fetched",
+    "no pdf address": "no pdf address could be made for the bill",
+    "refused, the history still reads": "the bill was refused while the history still reads",
+}
+
+
+def why_not_saved(trace: list):
+    """Which way a bill was not saved, from download_bill's trace, as a
+    reason in the failure file's own words, and the trace's own notes,
+    PDF statuses and match counts as facts (#249). Never a host, a content
+    type or anything else the site answered with."""
+    notes, statuses, matched = [], [], None
+    for entry in trace or []:
+        if not isinstance(entry, dict):
+            continue
+        note = str(entry.get("note") or "")
+        notes.append(re.sub(r"[^a-z ]+", "", note.lower()).strip())
+        status = entry.get("status")
+        if note == "fetched" and isinstance(status, int) and not isinstance(status, bool):
+            statuses.append(status)
+        if isinstance(entry.get("matches"), int):
+            matched = entry["matches"]
+    facts = {"bill_notes": notes[:10], "pdf_status": statuses[-1] if statuses else None}
+    if matched is not None:
+        facts["bills_matched"] = matched
+    for entry in reversed(trace or []):
+        note = entry.get("note") if isinstance(entry, dict) else None
+        if note in _WHY:
+            return _WHY[note], facts
+    if statuses and statuses[-1] != 200:
+        return "the bill answered with a status", facts
+    if statuses:
+        return "the bill was not a pdf", facts
+    return "the document would not render", facts
+
+
 class App:
     _journal = None
     _requests = None
@@ -518,6 +558,23 @@ class App:
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         docs = [d for d in docs if self._in_scope(d)]
+        # A record with no id at all, as a build before 0.62.0 wrote them,
+        # names no account, so download_bill never asks for it, and it was
+        # failed on every run as a document that would not render (#249).
+        # It is left as it is, in discovery.json and progress.json, and the
+        # same bill is listed again by its id. Only that one shape is left
+        # out, since no build wrote another. A record with an id of another
+        # shape still reaches download_bill, which refuses it and says so
+        # (recorded_bill). Only those not already saved are said, so an
+        # archive whose old records were all saved is not told of them on
+        # every run.
+        old = [d for d in docs if not str(d.document_id or "").strip()]
+        docs = [d for d in docs if str(d.document_id or "").strip()]
+        unsaved = [d for d in old if not self._already_done(d)]
+        if unsaved:
+            print(f"\n{len(unsaved)} bill record(s) from an earlier build name no account, so "
+                  "this run leaves them as they are. A bill the history still lists is "
+                  "taken from the record that names its account.")
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs
@@ -715,7 +772,8 @@ class App:
             self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
             self._write_row(doc, "Capture failed", State.FAILED.value)
-            self.write_failure('capture the document', 'the document would not render')
+            reason, facts = why_not_saved(trace)
+            self.write_failure('capture the document', reason, postmortem=facts)
             self.stats["failed"] += 1
             print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return

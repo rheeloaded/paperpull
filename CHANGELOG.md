@@ -89,6 +89,24 @@ All notable changes to PaperPull are recorded here. Versioning follows
   marks it Review Needed. When the receipt is gone or does not add up, the
   row shows no product and no price rather than the total as one product.
   A weighed item shows its weight and price per pound.
+- **Bank of America says why it cannot read which account a list is for
+  (#248).** When the statements page's own list call names its account in
+  a way the app does not know, the run still stops without guessing, and
+  its failure file and Diagnose now say which way it was, in counts and
+  yes or no only (how many other fields the call sent, how many accounts
+  are listed and shown as current, and whether the current one carries
+  the same text). The failure file's reason no longer loses a word to the
+  word list.
+- **Verizon Mobile no longer fails bills an earlier build recorded (#249).**
+  A bill record written before 0.62.0 names no account, so the app could
+  never ask for it, and every Pilot, Run and Resume failed it as a
+  document that would not render, taking a Pilot's places from bills it
+  could save. Such records are now left as they are, the run says how many
+  unsaved ones it left, and a bill the history still lists is taken from
+  the record that names its account. A bill that does fail to save now
+  says in its failure file which way, with no recorded bill, no bill in
+  the history with its id, no PDF address, the status the PDF answered
+  with, or a refusal.
 
 ## [0.70.0] - 2026-11-20
 

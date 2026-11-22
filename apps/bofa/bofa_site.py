@@ -576,6 +576,36 @@ def account_key_of(body: dict, answer: dict) -> str:
     return k
 
 
+def account_key_facts(body, answer) -> dict:
+    """Which of account_key_of's four ways left it without a name, as
+    counts and yes or no, for the failure file and Diagnose (#248). No
+    name or value from the body or the list is kept. Never raises."""
+    body = body if isinstance(body, dict) else {}
+    accounts = answer.get("accountList") if isinstance(answer, dict) else None
+    accounts = [a for a in accounts if isinstance(a, dict)] if isinstance(accounts, list) else []
+    others = [k for k in body if k not in BODY_NAMES]
+    selected = [a for a in accounts if a.get("selected") is True]
+    facts = {"list_fields_found": sum(1 for k in BODY_NAMES if k in body),
+             "other_list_fields": len(others),
+             "accounts_in_the_list": len(accounts),
+             "accounts_shown_as_current": len(selected)}
+    if len(others) == 1:
+        k = others[0]
+        value = body.get(k)
+        text = isinstance(value, str) and bool(value)
+        facts["account_field_is_text"] = text
+        facts["accounts_with_that_field"] = sum(
+            1 for a in accounts if isinstance(a.get(k), str) and a.get(k))
+        facts["accounts_with_the_same_text"] = sum(1 for a in accounts if text and a.get(k) == value)
+        facts["current_account_has_that_field"] = len(selected) == 1 and k in selected[0]
+        facts["current_account_has_the_same_text"] = (len(selected) == 1 and text
+                                                    and selected[0].get(k) == value)
+    else:
+        facts["other_fields_also_in_an_account"] = sum(
+            1 for k in others if any(k in a for a in accounts))
+    return facts
+
+
 # Whether a link and every element around it up to the body are shown on
 # the page, not inside a hidden or zero-height panel.
 _SHOWN_LINK_JS = r"""a => {
@@ -1398,7 +1428,11 @@ def learn(page, wait_ms: int = 25000, form: bool = True, press_link: bool = True
             raise NotLearned("the list call's body was not one this app can read")
         key = account_key_of(got["body"], got["answer"])
         if not key:
-            raise NotLearned("the list call names its account in a way this app cannot tell")
+            # Which of the four ways it was, in counts, so the failure file
+            # and Diagnose say what the next round needs (#248).
+            raise NotLearned("the list call names its account in a way this app cannot tell",
+                             facts=account_key_facts(got["body"], got["answer"]),
+                             reason="the list gives its account in a form this cannot read")
         if any(not (isinstance(a, dict) and isinstance(a.get(key), str) and a.get(key))
                for a in got["answer"].get("accountList") or []):
             # An account it could not ask for would be missing from a list
