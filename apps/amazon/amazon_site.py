@@ -253,6 +253,12 @@ FALLBACK = {
     "page_ready": ".order-card, .js-order-card, [data-component='orderCard'], "
                   "span.num-orders, label.time-filter__label b, "
                   "#ordersContainer, .your-orders-content",
+    # An order's invoice menu and its order-details link, which name the
+    # order on a list drawn without cards (#207). Read by
+    # invoice_menu_orders from their data, and counted here so a failure
+    # file says whether a list had them.
+    "invoice_menu": "[data-a-popover*='invoice/popover']",
+    "details_link": "a[href*='order-details']",
     # printable summary page
     "print_page_body": "body",
 }
@@ -783,15 +789,17 @@ def collect_cards(page, purchase_type: str = ONLINE) -> List[RawCard]:
         return cards
     # Orders drawn without a card the app knows, each read from its own
     # invoice menu or order-details link and the block that holds it (#207).
-    for oid, text in invoice_menu_orders(page):
-        if oid in seen:
-            continue
-        seen.add(oid)
-        cards.append(RawCard(href=order_details_url(oid), text=text, order_id=oid))
-    if cards:
-        return cards
-    # Fallback: scan the whole page for order ids + their surrounding block,
-    # the block found where the id is printed, whichever hyphens it has.
+    # Not on a page whose own count says it holds no orders, where whatever
+    # names one is not in the list.
+    if order_count(page) != 0:
+        for oid, text in invoice_menu_orders(page):
+            if oid in seen:
+                continue
+            seen.add(oid)
+            cards.append(RawCard(href=order_details_url(oid), text=text, order_id=oid))
+    # Then the whole page for order ids + their surrounding block, the block
+    # found where the id is printed, whichever hyphens it has. Any the menus
+    # did not name are read this way as they always were.
     try:
         body = page.locator("body").inner_text(timeout=8000)
     except Exception:
@@ -842,6 +850,17 @@ _INVOICE_MENUS_JS = r"""() => {
         el.querySelector('form, header, nav, select, label')));
     return wide.get(el);
   };
+  // Whether a sibling has the same tag and the same attribute names, the
+  // mark of one block in a list of blocks drawn alike, an order among orders.
+  const shapeOf = (el) => el.tagName + '|' + el.getAttributeNames().sort().join(',');
+  const twin = new Map();
+  const hasTwin = (el) => {
+    if (!twin.has(el)) {
+      const p = el.parentElement, mine = shapeOf(el);
+      twin.set(el, !!p && Array.from(p.children).some(s => s !== el && shapeOf(s) === mine));
+    }
+    return twin.get(el);
+  };
   const out = [];
   const found = Array.from(document.querySelectorAll('[data-a-popover], a[href]'));
   for (const el of found) {
@@ -854,28 +873,38 @@ _INVOICE_MENUS_JS = r"""() => {
       kind = 'link';
     }
     if (raw.length > 4000) continue;
-    const chain = [];
+    const chain = [], alike = [];
+    let top = null;
     for (let up = el; up && up !== document.body && up !== document.documentElement;
          up = up.parentElement) {
-      if (isWide(up)) break;
+      if (isWide(up)) { top = place.get(up); break; }
       chain.push(place.get(up));
+      alike.push(hasTwin(up));
     }
-    out.push({kind: kind, raw: raw, chain: chain});
+    if (top === null && chain.length) top = -1;
+    out.push({kind: kind, raw: raw, chain: chain, alike: alike, top: top});
     if (out.length >= 2000) break;
   }
   return out;
 }"""
 
-# The text of each block, by its place, once the place still holds the
-# element that was read there, else null.
+# The texts of each order's blocks, by their places, once each still holds
+# the element that was read there and that still names what it named, else
+# null.
 _BLOCK_TEXT_JS = r"""(asks) => {
   const all = document.getElementsByTagName('*');
-  return asks.map(([block, member, raw, kind]) => {
-    const b = all[block], m = all[member];
-    if (!b || !m || !b.contains(m)) return null;
+  return asks.map(([blocks, member, raw, kind]) => {
+    const m = all[member];
+    if (!m) return null;
     const now = kind === 'menu' ? m.getAttribute('data-a-popover') : m.getAttribute('href');
     if (now !== raw) return null;
-    return (b.innerText || '').slice(0, 6000);
+    const said = [];
+    for (const block of blocks) {
+      const b = all[block];
+      if (!b || !b.contains(m)) return null;
+      said.push((b.innerText || '').slice(0, 6000));
+    }
+    return said;
   });
 }"""
 
@@ -944,12 +973,18 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
     """(order id, its block's text) for each order on the page found by its
     invoice menu or order-details link, in the page's order.
 
-    An order's block is the largest one around what named it that names no
-    other order and holds none of the page's own controls. Its text gives
-    the order's date and total. Where no such block is wider than what named
-    it the order is kept with that alone, no date or total rather than a
-    neighbor's. Empty when nothing names an order, or the page cannot be
-    read."""
+    An order's block is found going up from what named it, never past a
+    block that names another order or holds the page's own controls, and it
+    stops at the first block drawn like one of its siblings, an order in a
+    list of orders, so an unnamed neighbor's date is not taken. Its text
+    gives the order's date and total. Where no block is wider than what
+    named it the order is kept with that alone, no date or total rather
+    than a neighbor's.
+
+    Where any invoice menu names an order, order-details links are not read
+    at all, and where the orders found sit in one list, a block outside it
+    (a banner naming an order) is not read. Empty when nothing names an
+    order, or the page cannot be read."""
     try:
         found = page.evaluate(_INVOICE_MENUS_JS) or []
     except Exception:
@@ -958,9 +993,14 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
     for f in found:
         if not isinstance(f, dict) or not isinstance(f.get("chain"), list) or not f["chain"]:
             continue
+        alike = f.get("alike")
+        if not isinstance(alike, list) or len(alike) != len(f["chain"]):
+            continue
         oid = _order_of(f)
         if oid:
             named.append((oid, f))
+    if any(f["kind"] == "menu" for _oid, f in named):
+        named = [(oid, f) for oid, f in named if f["kind"] == "menu"]
     if not named:
         return []
     # Each place to the orders named under it.
@@ -968,17 +1008,36 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
     for oid, f in named:
         for p in f["chain"]:
             under.setdefault(p, set()).add(oid)
-    asks, order = [], []
+    # Each naming's blocks to choose from, lowest first, the ones drawn like
+    # a sibling and the largest that names no other order, and the place
+    # that holds that largest one.
+    placed = []
     for oid, f in named:
-        if oid in order:
-            continue
-        block = f["chain"][0]
-        for p in f["chain"]:
+        chain, at = f["chain"], 0
+        for i, p in enumerate(chain):
             if under.get(p) != {oid}:
                 break
-            block = p
+            at = i
+        blocks = [chain[i] for i in range(at) if f["alike"][i]] + [chain[at]]
+        holder = chain[at + 1] if at + 1 < len(chain) else f.get("top")
+        placed.append((oid, f, blocks, holder))
+    # The list, the holder of the most orders' blocks. Where it holds two or
+    # more, an order whose block is elsewhere is not read from there.
+    held: dict = {}
+    for oid, _f, _block, holder in placed:
+        held.setdefault(holder, set()).add(oid)
+    most = max(len(v) for v in held.values())
+    if most >= 2:
+        lists = [h for h, v in held.items() if len(v) == most]
+        if len(lists) != 1:
+            return []
+        placed = [x for x in placed if x[3] == lists[0]]
+    asks, order = [], []
+    for oid, f, blocks, _holder in placed:
+        if oid in order:
+            continue
         order.append(oid)
-        asks.append([block, f["chain"][0], f["raw"], f["kind"]])
+        asks.append([blocks, f["chain"][0], f["raw"], f["kind"]])
     try:
         texts = page.evaluate(_BLOCK_TEXT_JS, asks) or []
     except Exception:
@@ -986,11 +1045,14 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
     if len(texts) != len(order):
         return []
     out = []
-    for oid, text in zip(order, texts):
-        if text is None:
+    for oid, said in zip(order, texts):
+        if not isinstance(said, list) or not said or any(not isinstance(t, str) for t in said):
             # The page moved between the two looks, so nothing it says now
             # is taken for this order.
             return []
+        # The lowest block that gives a date is the order's own, else the
+        # largest that names it alone.
+        text = next((t for t in said if parse_date(t)), said[-1])
         out.append((oid, text.strip()))
     log.info("orders read from their invoice menus: %d", len(out))
     return out

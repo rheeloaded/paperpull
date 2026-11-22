@@ -412,8 +412,8 @@ def test_the_summary_check_reads_order_numbers_with_unicode_hyphens(page):
 
 
 class _Moving:
-    """A page whose first look finds two invoice menus and whose second
-    finds the place of one of them holding something else."""
+    """A page whose first look finds two invoice menus in one list and whose
+    second finds the place of one of them holding something else."""
 
     def __init__(self, second):
         self.second = second
@@ -422,16 +422,77 @@ class _Moving:
     def evaluate(self, js, arg=None):
         self.looks += 1
         if self.looks == 1:
-            return [{"kind": "menu", "chain": [5, 4],
+            return [{"kind": "menu", "chain": [5, 4], "alike": [True, False], "top": 1,
                      "raw": popover("/your-orders/invoice/popover?orderId=%s" % A)},
-                    {"kind": "menu", "chain": [9, 8],
+                    {"kind": "menu", "chain": [9, 8], "alike": [True, False], "top": 1,
                      "raw": popover("/your-orders/invoice/popover?orderId=%s" % B)}]
         return self.second
 
 
 def test_a_page_that_moved_between_the_two_looks_gives_no_order():
     site.set_marketplace("amazon.de")
-    assert site.invoice_menu_orders(_Moving(["3. März 2026", "1. März 2026"])) == [
+    a, b = ["Rechnung", "3. März 2026"], ["Rechnung", "1. März 2026"]
+    assert site.invoice_menu_orders(_Moving([a, b])) == [
         (A, "3. März 2026"), (B, "1. März 2026")]
-    assert site.invoice_menu_orders(_Moving(["3. März 2026", None])) == []
-    assert site.invoice_menu_orders(_Moving(["3. März 2026"])) == []
+    assert site.invoice_menu_orders(_Moving([a, None])) == []
+    assert site.invoice_menu_orders(_Moving([a, ["Rechnung", None]])) == []
+    assert site.invoice_menu_orders(_Moving([a])) == []
+
+
+BANNER = ("<div class='banner'><div>Lieferung am 9. Mai 2026</div><div>Summe 77,77 €</div>%s</div>")
+
+
+def test_a_banner_outside_the_list_names_no_order_and_takes_no_date(page):
+    """An order named in a block outside the list of orders, a banner about a
+    delivery, adds no order and lends no order its words."""
+    site.set_marketplace("amazon.de")
+    for named in (menu(DECOY), details(DECOY), menu(A), details(A)):
+        found = read(page, orders_page([order(A, "3. März 2026", "23,41 €"),
+                                        order(B, "1. Februar 2026", "58,20 €")],
+                                       before=BANNER % named))
+        assert [o for o, _ in found] == [A, B], named
+        assert "3. März 2026" in found[0][1] and "Mai" not in found[0][1], named
+
+
+def test_details_links_are_not_read_where_invoice_menus_name_the_orders(page):
+    site.set_marketplace("amazon.de")
+    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €")], 1,
+                                   after=BANNER % details(DECOY)))
+    assert [o for o, _ in found] == [A]
+
+
+def test_a_year_whose_count_is_nought_reads_nothing_from_a_menu(page):
+    """Amazon's own count says the year holds no orders. Whatever names an
+    order on that page is not in the list, so the year stays empty and the
+    walk back through the years still ends there."""
+    site.set_marketplace("amazon.de")
+    html = orders_page([], count=0, before=BANNER % (menu(DECOY) + details(DECOY)))
+    page.set_content(html)
+    assert site.orders_listed(page, 0)
+    assert site.collect_cards(page) == []
+
+
+def test_an_unnamed_order_beside_the_only_named_one_lends_it_nothing(page):
+    """A digital order whose link the reader does not take, listed first,
+    and a retail order named by its menu. The retail order keeps its own
+    date and total, and the digital one is still read from the text where
+    its number is printed."""
+    site.set_marketplace("amazon.de")
+    digital = order(DIG, "7. April 2026", "4,99 €",
+                    header="<a href='/gp/digital/your-account/order-summary.html?orderID=%s'>"
+                           "Bestellnr. %s</a>" % (DIG, DIG))
+    found = read(page, orders_page([digital, order(A, "3. März 2026", "23,41 €")]))
+    assert [o for o, _ in found] == [A, DIG]
+    a = site.card_to_purchase(site.RawCard(href="", text=found[0][1], order_id=A), "Online")
+    assert (a.purchase_date, a.total) == ("2026-03-03", "€23.41")
+
+
+def test_an_order_number_in_the_text_is_still_read_beside_the_menus(page):
+    """On amazon.com with no card class, the text names a digital order and
+    the menu names a retail one. Both are read, as the text alone was."""
+    site.set_marketplace("amazon.com")
+    digital = ("<div class='x1' data-a='1' data-b='2' data-c='3' data-d='4'><div>Order placed</div>"
+               "<div>April 7, 2026</div><div>Total</div><div>$4.99</div><div>Order # %s</div></div>"
+               % DIG)
+    found = read(page, orders_page([digital, order(A, "March 3, 2026", "$23.41")]))
+    assert sorted(o for o, _ in found) == sorted([A, DIG])
