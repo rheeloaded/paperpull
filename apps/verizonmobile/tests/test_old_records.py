@@ -56,8 +56,7 @@ def failures(r):
 def test_old_records_are_left_and_every_bill_saved(run, how):
     page = Page()
     r = run(page)
-    old = seed(r, [legacy("2026-11-11"), legacy("2026-10-11"),
-                   legacy("2026-10-12", document_id="bill-1111-00001-2026-10-09")])
+    old = seed(r, [legacy("2026-11-11"), legacy("2026-10-11"), legacy("2026-10-12", document_id="  ")])
     old_progress_key = next(iter(old))
     (r.out / "progress.json").write_text(json.dumps(
         {old_progress_key: {"state": "failed", "notes": "Could not capture the document PDF"}}),
@@ -93,9 +92,9 @@ def test_old_records_never_take_a_pilots_place(run):
     ("id:bill-1111-2026-10-11", "2026-10-11"), ("BILL-1111-2026-10-11", "2026-10-11"),
     ("", "2026-10-11"), (None, "2026-10-11"), (7, "2026-10-11"),
 ])
-def test_a_run_and_download_bill_agree_on_which_records_are_bills(doc_id, date):
-    """One predicate. What a run leaves out is exactly what download_bill
-    would refuse before it opens the history."""
+def test_download_bill_refuses_a_record_whose_id_is_no_bill(doc_id, date):
+    """One predicate, recorded_bill, and download_bill refuses each of
+    these before it opens the history, saying no recorded bill."""
     assert site.recorded_bill(doc_id, date) == ""
     page = Page()
     trace = []
@@ -263,3 +262,16 @@ def test_a_done_old_record_beside_an_unsaved_one_counts_only_the_unsaved(run):
         {first: {"state": "completed", "downloaded_ok": True}}), encoding="utf-8")
     said, result, _ = r.main("--pilot")
     assert said.count(LEFT) == 1 and ("1 " + LEFT) in said, said
+
+
+def test_a_record_with_an_id_of_another_shape_is_still_tried_and_says_why(run):
+    """Only a record with no id is left out. One whose id is of another
+    shape, which no build wrote, still reaches download_bill, is refused
+    there with nothing asked of Verizon, and its failure file says so."""
+    page = Page()
+    r = run(page)
+    seed(r, [legacy("2026-11-11", document_id="bill-1111-00001-2026-10-09")])
+    said, result, _ = r.main("--pilot")
+    assert result["failed"] == 1 and result["new_files"] == len(ENDS) and LEFT not in said, said
+    report, _ = _failure(r)
+    assert report["reason"] == "the record has no bill id"

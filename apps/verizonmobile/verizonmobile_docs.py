@@ -558,15 +558,18 @@ class App:
     def _select(self, limit: Optional[int] = None) -> List[Document]:
         docs = [Document.from_dict(v) for v in self.discovery.data.values()]
         docs = [d for d in docs if self._in_scope(d)]
-        # A record with no bill id download_bill can ask for, as a build
-        # before 0.62.0 wrote them, names no account, so it is never asked
-        # for, and was failed on every run as a document that would not
-        # render (#249). It is left as it is, in discovery.json and
-        # progress.json, and the same bill is listed again by its id.
-        # Only those not already saved are said, so an archive whose old
-        # records were all saved is not told of them on every run.
-        old = [d for d in docs if not site.recorded_bill(d.document_id, d.date)]
-        docs = [d for d in docs if site.recorded_bill(d.document_id, d.date)]
+        # A record with no id at all, as a build before 0.62.0 wrote them,
+        # names no account, so download_bill never asks for it, and it was
+        # failed on every run as a document that would not render (#249).
+        # It is left as it is, in discovery.json and progress.json, and the
+        # same bill is listed again by its id. Only that one shape is left
+        # out, since no build wrote another. A record with an id of another
+        # shape still reaches download_bill, which refuses it and says so
+        # (recorded_bill). Only those not already saved are said, so an
+        # archive whose old records were all saved is not told of them on
+        # every run.
+        old = [d for d in docs if not str(d.document_id or "").strip()]
+        docs = [d for d in docs if str(d.document_id or "").strip()]
         unsaved = [d for d in old if not self._already_done(d)]
         if unsaved:
             print(f"\n{len(unsaved)} bill record(s) from an earlier build name no account, so "
