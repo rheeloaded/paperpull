@@ -570,14 +570,40 @@ def test_a_notice_in_the_list_drawn_unlike_an_order_names_none(page):
     assert [o for o, _ in found] == [A, B]
 
 
-def test_a_canceled_order_beside_the_only_invoiced_one_is_read(page):
+def test_a_canceled_order_beside_the_only_invoiced_one_is_said_not_made_up(page):
     """One order with an invoice menu and one canceled order with only its
-    details link, drawn alike side by side. Both are read, so the page is
-    not short of its count."""
+    details link. One invoiced order does not settle which block is the
+    list, so the link alone names no order, and the page says it showed
+    fewer orders than its count rather than drop the canceled one quietly."""
     site.set_marketplace("amazon.de")
-    canceled = order(B, "1. Februar 2026", "0,00 €", header=ship_to() + details(B))
-    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €"), canceled],
+    canceled = order(B, "1. Februar 2026", "0,00 \u20ac", header=ship_to() + details(B))
+    found = read(page, orders_page([order(A, "3. M\u00e4rz 2026", "23,41 \u20ac"), canceled],
                                    count=2))
-    assert [o for o, _ in found] == [A, B]
+    assert [o for o, _ in found] == [A]
+    assert site.fewer_than_counted(page, 0, len(found))
+
+
+def twin_order(order_id, when, total, header, ship=""):
+    """An order drawn as Amazon's cards are, a dated header box beside a
+    shipment box of the same tag and attribute names."""
+    return ("<div class='x1' data-a='1' data-b='2' data-c='3' data-d='4'>"
+            "<div class='hdr'><div>Bestellung aufgegeben</div><div>%s</div>"
+            "<div>Summe</div><div>%s</div><ul><li>%s</li></ul></div>"
+            "<div class='ship'><a href='/dp/B000000001'>Invented Product</a>%s</div></div>"
+            % (when, total, header, ship))
+
+
+def test_a_canceled_order_between_twin_boxed_orders_is_read_and_a_link_in_a_box_is_not(page):
+    """Two invoiced orders settle the list. The canceled order between them
+    is read with its own date. A replacement order linked from inside an
+    invoiced order's shipment box, drawn like its header box, names no
+    order."""
+    site.set_marketplace("amazon.de")
+    ship = "<div>Ersatzbestellung %s</div>" % details(DECOY)
+    blocks = [twin_order(A, "3. M\u00e4rz 2026", "23,41 \u20ac", menu(A), ship),
+              twin_order(B, "1. Februar 2026", "0,00 \u20ac", details(B)),
+              twin_order(DIG, "1. Januar 2026", "4,99 \u20ac", menu(DIG))]
+    found = read(page, orders_page(blocks, count=3))
+    assert [o for o, _ in found] == [A, B, DIG]
     assert site.parse_date(found[1][1]) == "2026-02-01"
     assert not site.fewer_than_counted(page, 0, len(found))

@@ -1048,36 +1048,52 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
     kept = _the_list(placed)
     if kept is None:
         return []
-    read, chosen = _read_blocks(page, kept)
+    read, _chosen = _read_blocks(page, kept)
     if read is None:
         return []
     # An order named only by its order-details link (a canceled one, say)
-    # is read where a block around it is drawn like an order block the
-    # menus found, beside it in the same place. A notice or a banner drawn
-    # some other way names no order. An order missed this way is said, since
-    # the page then shows fewer orders than its count (fewer_than_counted).
-    cards = {c for c in chosen if c is not None}
+    # is read only where two or more menu orders settled the list. Each of
+    # their blocks is then a child of the list, and the link-only order's
+    # block is the child of the list around it, drawn like theirs, naming
+    # no other order and not one of theirs. A link inside a menu order's
+    # block, and a notice or a banner drawn some other way, name no order.
+    # Where the list is not settled (one invoiced order on the page) no link
+    # alone names an order. An order missed either way is said, since the
+    # page then shows fewer orders than its count (fewer_than_counted).
     extra = []
-    for oid, f, blocks, _holder in _placed(links, menus + links):
-        chain, shape = f["chain"], f["shape"]
-        for i in range(chain.index(blocks[-1]) + 1):
-            parent = chain[i + 1] if i + 1 < len(chain) else f.get("top")
-            if f["alike"][i] and (shape[i], parent) in cards:
-                extra.append((oid, f, [b for b in blocks if b in chain[:i + 1]], parent))
-                break
+    holders = {holder for _oid, _f, _blocks, holder in kept}
+    if links and len({oid for oid, _f, _b, _h in kept}) >= 2 and len(holders) == 1:
+        (the_list,) = holders
+        tops = {b[-1] for _oid, _f, b, _h in kept}
+        shapes = {f["shape"][f["chain"].index(b[-1])] for _oid, f, b, _h in kept}
+        under: dict = {}
+        for oid, f in menus + links:
+            for p in f["chain"]:
+                under.setdefault(p, set()).add(oid)
+        for oid, f in links:
+            chain = f["chain"]
+            parents = chain[1:] + [f.get("top")]
+            if the_list not in parents:
+                continue
+            i = parents.index(the_list)
+            if (chain[i] in tops or f["shape"][i] not in shapes
+                    or under.get(chain[i]) != {oid}):
+                continue
+            blocks = [chain[j] for j in range(i) if f["alike"][j]] + [chain[i]]
+            extra.append((oid, f, blocks, the_list))
     more, _ = _read_blocks(page, extra) if extra else ([], [])
     if more is None:
         return []
+    # In the page's order, by where each order's own block is.
+    where = {}
+    for oid, f, _blocks, _holder in kept + extra:
+        where.setdefault(oid, f["chain"][0])
     out, seen = [], set()
     for oid, text in read + more:
         if oid not in seen:
             seen.add(oid)
             out.append((oid, text))
-    # In the page's order.
-    first = {}
-    for oid, f in named:
-        first.setdefault(oid, f["chain"][0])
-    out.sort(key=lambda pair: first.get(pair[0], 0))
+    out.sort(key=lambda pair: where.get(pair[0], 0))
     log.info("orders read from their invoice menus: %d", len(out))
     return out
 
