@@ -9,6 +9,16 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Bank of America says why it cannot read which account a list is for
+  (#248).** When the statements page's own list call names its account in
+  a way the app does not know, the run still stops without guessing, and
+  its failure file and Diagnose now say which way it was, in counts and
+  yes or no only (how many other fields the call sent, how many accounts
+  are listed and shown as current, and whether the current one carries
+  the same text). The failure file's reason no longer loses a word to the
+  word list.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
