@@ -17,6 +17,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   naming repairs released with it in 0.70.0, and no real account has yet
   shown those repairs, an online order, or a receipt saved from the old
   orders page kept under its new record rather than saved again.
+
 ### Fixed
 - **Record steps for support keeps three things a recording lost (#170,
   #178).** A site that sends its calls in a batch, one list of several
@@ -36,6 +37,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   variables, data in an address and the values of a download's or another
   host's parameters are never read into it. `tools/read_recording.py` prints
   them.
+- **Cloudflare opens Invoices at the Dashboard's settings address (#238).**
+  A Dashboard that draws Invoices and documents at
+  `/<account>/settings/billing/invoices` was told the tab was open but not on
+  Invoices. That address is now read as the same account's Invoices page,
+  and the older one still is. A signed-out browser, which the Dashboard
+  answers 403 with its error code 10000, now reads as signed out rather than
+  as a user without billing access.
+- **Chase confirms a card's statement rows drawn through slots (#232).**
+  Chase draws a card's statement table through slots, and the wait for the
+  open card's rows of the chosen year looked only inside the card's
+  accordion in the page's tree, so a year whose rows were all on screen
+  could end as not read whole. The wait now confirms the year by the same
+  rows the reading binds to the card, and a pager drawn through the slot
+  still leaves the list not read whole.
 
 ## [0.70.0] - 2026-11-20
 

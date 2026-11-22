@@ -294,10 +294,13 @@ class App:
             print("Connected, but Cloudflare shows a signed-out page.")
             print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
         else:
-            ok = site.invoice_list_ready(page)
+            ok, answer = site.invoice_list_look(page)
             if ok:
                 print("Success: the Cloudflare invoice list answered.")
                 print("Keep the window open, then run: paperpull cloudflare pilot")
+            elif answer == "signed out":
+                print("Connected, but Cloudflare answered the invoice list as signed out.")
+                print("Sign in in the open browser window (keep it OPEN), then re-run --login.")
             else:
                 print("Could not read the Cloudflare invoice list.")
                 print("Open Manage Account > Billing > Invoices and documents in that window.")

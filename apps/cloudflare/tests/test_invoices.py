@@ -462,3 +462,186 @@ def test_a_history_text_with_a_lone_surrogate_half_is_made_whole():
     page.context = SimpleNamespace(request=SimpleNamespace(
         get=lambda url, **kw: Response(body)))
     assert len(site.collect_download_docs(page)) == 1
+
+
+# -- 0.70.0 reports on #238 ---------------------------------------------------
+# A contributor's Dashboard draws Invoices and documents at
+# /<account>/settings/billing/invoices, and a signed-out browser's history
+# request is answered 403 with the Dashboard API's error code 10000.
+
+SETTINGS = f"https://dash.cloudflare.com/{ACCOUNT}/settings/billing/invoices"
+
+
+def _errors(*codes):
+    return json.dumps({"success": False, "result": None,
+                       "errors": [{"code": c, "message": "Synthetic error"} for c in codes]}).encode()
+
+
+def _answering(page, status, body):
+    """page whose history answers status with body, every response kept."""
+    def get(url, **kw):
+        page.fetched.append((urlsplit(url).path, kw.get("params")))
+        response = Response(body, status=status)
+        page.responses.append(response)
+        return response
+    page.context = SimpleNamespace(request=SimpleNamespace(get=get))
+    return page
+
+
+@pytest.mark.parametrize("url", [SETTINGS, SETTINGS + "/", SETTINGS.replace(ACCOUNT, ACCOUNT.upper())])
+def test_the_settings_route_of_invoices_is_the_invoices_page(url):
+    page = Page()
+    page.url = url
+    assert site.is_invoice_page_url(url)
+    assert site.invoice_list_ready(page)
+    assert len(site.collect_download_docs(page)) == 2
+    assert {path for path, _ in page.fetched} == {f"/api/v4/accounts/{ACCOUNT}/billing/history"}
+
+
+def test_the_settings_route_is_the_same_account_as_the_billing_route(tmp_path):
+    listed = Page()
+    doc = site.collect_download_docs(listed)[0]
+    moved = Page()
+    moved.url = SETTINGS
+    assert site.account_tag(moved) == site.account_tag(listed) == doc.account
+    target = tmp_path / "invoice.pdf"
+    assert site.download_bill(moved, DATE, target, account=doc.account, document_id=doc.document_id)
+    assert target.read_bytes() == moved.pdfs[FIRST]
+
+
+def test_another_accounts_settings_route_downloads_nothing(tmp_path):
+    doc = site.collect_download_docs(Page())[0]
+    other = Page(OTHER)
+    other.url = SETTINGS.replace(ACCOUNT, OTHER)
+    with pytest.raises(site.ListStopped):
+        site.download_bill(other, DATE, tmp_path / "other.pdf", account=doc.account,
+                           document_id=doc.document_id)
+    assert not other.fetched and not (tmp_path / "other.pdf").exists()
+
+
+@pytest.mark.parametrize("other_url", [
+    f"https://dash.cloudflare.com/{ACCOUNT}/settings/billing/invoices/extra",
+    f"https://dash.cloudflare.com/{ACCOUNT}/settings/billing/invoicesx",
+    f"https://dash.cloudflare.com/{ACCOUNT}/settingsx/billing/invoices",
+    f"https://dash.cloudflare.com/{ACCOUNT}/settings/billing",
+    f"https://dash.cloudflare.com/{ACCOUNT}/settings/billing/payment",
+    f"https://dash.cloudflare.com/{ACCOUNT}/settings/settings/billing/invoices",
+    f"https://dash.cloudflare.com/{ACCOUNT}/settings//billing/invoices",
+    f"https://dash.cloudflare.com/{ACCOUNT}/foo/settings/billing/invoices",
+    f"https://dash.cloudflare.com/{ACCOUNT}%2Fsettings/billing/invoices",
+    "https://dash.cloudflare.com/settings/billing/invoices",
+    f"https://dash.cloudflare.com/settings/billing/invoices?account={ACCOUNT}",
+    f"https://dash.cloudflare.com/{ACCOUNT[:31]}/settings/billing/invoices",
+    f"https://dash.cloudflare.com/{ACCOUNT}0/settings/billing/invoices",
+    f"https://dash.cloudflare.com.attacker.example/{ACCOUNT}/settings/billing/invoices",
+    f"https://x.dash.cloudflare.com/{ACCOUNT}/settings/billing/invoices",
+    f"http://dash.cloudflare.com/{ACCOUNT}/settings/billing/invoices",
+    f"https://dash.cloudflare.com:8443/{ACCOUNT}/settings/billing/invoices",
+    f"https://dash.cloudflare.com@evil.example/{ACCOUNT}/settings/billing/invoices",
+])
+def test_a_lookalike_of_the_settings_route_requests_nothing(other_url):
+    page = Page()
+    page.url = other_url
+    assert not site.is_invoice_page_url(other_url)
+    with pytest.raises(site.ListStopped):
+        site.collect_download_docs(page)
+    assert not page.fetched
+
+
+def test_the_query_or_fragment_of_the_settings_route_cannot_choose_the_account():
+    page = Page()
+    page.url = SETTINGS + f"?account={OTHER}#/{OTHER}/billing/invoices"
+    site.collect_download_docs(page)
+    assert {path for path, _ in page.fetched} == {f"/api/v4/accounts/{ACCOUNT}/billing/history"}
+
+
+def test_a_dashboard_tab_on_the_settings_route_is_used(tmp_path, monkeypatch, capsys):
+    app = _app(tmp_path, monkeypatch)
+    tab = _Tab(SETTINGS)
+    monkeypatch.setattr(app, "page", lambda: tab)
+    assert app._on_its_site() is tab
+    assert "not on Invoices" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("codes", [(10000,), (9109, 10000)])
+def test_a_history_refused_with_the_signed_out_code_reads_as_signed_out(codes):
+    page = _answering(Page(), 403, _errors(*codes))
+    with pytest.raises(site.SessionExpired):
+        site.collect_download_docs(page)
+    assert not site.invoice_list_ready(_answering(Page(), 403, _errors(*codes)))
+    assert page.responses and all(r.disposed for r in page.responses)
+
+
+def test_discover_says_signed_out_on_the_signed_out_code(tmp_path, monkeypatch, capsys):
+    app = _app(tmp_path, monkeypatch)
+    page = _answering(Page(), 403, _errors(10000))
+    monkeypatch.setattr(app, "_on_its_site", lambda: page)
+    with pytest.raises(SystemExit):
+        app.cmd_discover(quiet=True)
+    said = capsys.readouterr().out
+    assert "signed out before the invoice list could be read" in said, said
+    assert "billing access" not in said and "discovery stopped" not in said
+
+
+def test_a_pdf_refused_while_signed_out_stops_the_run_as_signed_out(tmp_path):
+    page = Page()
+    [first, _] = site.collect_download_docs(page)
+    page.pdf_status = 403
+    _answering(page, 403, _errors(10000))
+    with pytest.raises(site.SessionExpired):
+        site.download_bill(page, DATE, tmp_path / "invoice.pdf", account=first.account,
+                           document_id=first.document_id)
+    assert not (tmp_path / "invoice.pdf").exists()
+
+
+@pytest.mark.parametrize("body", [
+    _errors(9109), _errors(10001), _errors(1000), _errors(100000), _errors(),
+    _errors("10000"), _errors(10000.0), _errors(True),
+    b"", b"<html>Forbidden</html>", b'{"errors": [{"code": 10000', b"[10000]",
+    json.dumps({"errors": {"code": 10000}}).encode(),
+    json.dumps({"errors": "10000"}).encode(),
+    json.dumps({"errors": [10000, "10000"]}).encode(),
+    json.dumps({"errors": [{"message": "10000"}]}).encode(),
+    json.dumps({"result": {"errors": [{"code": 10000}]}}).encode(),
+    b'{"errors": [{"code": 10000}]}\xff',
+    json.dumps({"errors": [{"code": 10000}], "pad": "x" * site.LIST_BYTES}).encode(),
+], ids=lambda body: f"body{len(body)}")
+def test_any_other_refusal_of_the_history_still_says_billing_access(body):
+    page = _answering(Page(), 403, body)
+    with pytest.raises(site.ListStopped, match="billing access"):
+        site.collect_download_docs(page)
+    assert page.responses and all(r.disposed for r in page.responses)
+
+
+def test_a_refusal_whose_body_cannot_be_read_still_says_billing_access():
+    class Unreadable(Response):
+        def body(self):
+            raise OSError("synthetic read failure")
+    page = Page()
+    page.context = SimpleNamespace(request=SimpleNamespace(
+        get=lambda url, **kw: page.responses.append(Unreadable(b"", status=403)) or page.responses[-1]))
+    with pytest.raises(site.ListStopped, match="billing access"):
+        site.collect_download_docs(page)
+    assert page.responses[0].disposed
+
+
+@pytest.mark.parametrize("status, error", [(200, site.ListStopped), (500, site.ListStopped),
+                                           (401, site.SessionExpired)])
+def test_the_signed_out_code_outside_a_refusal_keeps_its_old_meaning(status, error):
+    with pytest.raises(error):
+        site.collect_download_docs(_answering(Page(), status, _errors(10000)))
+
+
+@pytest.mark.parametrize("body, said, not_said", [
+    (_errors(10000), "answered the invoice list as signed out", "Open Manage Account"),
+    (_errors(9109), "Open Manage Account", "signed out"),
+])
+def test_login_says_signed_out_only_on_the_signed_out_code(tmp_path, monkeypatch, capsys, body, said,
+                                                           not_said):
+    app = _app(tmp_path, monkeypatch)
+    page = _answering(Page(), 403, body)
+    monkeypatch.setattr(app, "page", lambda: page)
+    monkeypatch.setattr(app, "close", lambda: None)
+    app.cmd_login()
+    out = capsys.readouterr().out
+    assert said in out and not_said not in out and "Success" not in out, out
