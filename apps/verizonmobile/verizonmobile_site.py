@@ -464,6 +464,18 @@ def account_in(document_id) -> str:
     return m.group(1) if m else ""
 
 
+def recorded_bill(document_id, iso_date) -> str:
+    """The account a record's bill id names, "4321-00001", when the id is
+    one download_bill can ask for, of the shape BILL_ID_RE reads and of
+    the record's own day. "" otherwise, as for a record a build before
+    0.62.0 wrote with no id (#249). A run and download_bill both ask this,
+    so they agree on which records are bills."""
+    m = BILL_ID_RE.fullmatch(document_id if isinstance(document_id, str) else "")
+    if not m or m.group(2) != (iso_date or ""):
+        return ""
+    return m.group(1)
+
+
 def account_shown(page) -> str:
     """The account Bill & payment history shows, named the way a bill's id
     names it, from the page's own answer. Raises SessionExpired or
@@ -666,13 +678,12 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
     does not answer, lists no bill, or reaches a page that stops answering
     raises ListStopped, since it says neither (refused.list_again)."""
     out_path = Path(out_path)
-    m = BILL_ID_RE.fullmatch(document_id or "")
-    if not m or m.group(2) != (iso_date or ""):
+    wanted = recorded_bill(document_id, iso_date)
+    if not wanted:
         log.info("no bill was recorded for this document")
         if trace is not None:
             trace.append({"note": "no recorded bill"})
         return False
-    wanted = m.group(1)
     history = _open(page)
     shown = account_of(history.answer)
     if shown != wanted:

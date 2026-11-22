@@ -18,6 +18,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
   are listed and shown as current, and whether the current one carries
   the same text). The failure file's reason no longer loses a word to the
   word list.
+- **Verizon Mobile no longer fails bills an earlier build recorded (#249).**
+  A bill record written before 0.62.0 names no account, so the app could
+  never ask for it, and every Pilot, Run and Resume failed it as a
+  document that would not render, taking a Pilot's places from bills it
+  could save. Such records are now left as they are, the run says once how
+  many it left, and the same bills are taken from the records that name
+  their account. A bill that does fail to save now says in its failure
+  file which way, with no recorded bill, no bill in the history with its
+  id, the status the PDF answered with, or a refusal.
 
 ## [0.70.0] - 2026-11-20
 
