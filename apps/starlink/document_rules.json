@@ -1,0 +1,6 @@
+{
+  "statement_rules": [{"pattern": "\\binvoice\\b", "summary": "Invoice"}],
+  "tax_rules": [],
+  "insurance_rules": [],
+  "skip_patterns": []
+}

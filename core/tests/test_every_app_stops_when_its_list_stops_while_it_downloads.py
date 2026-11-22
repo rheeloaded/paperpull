@@ -248,6 +248,9 @@ ITS_OWN = {
         "list unread (listing.read_again_stopped), a list of another account stops it as "
         "Discover does, and a list that still answers leaves the refusal that document's "
         "alone",
+    ("starlink", "download_bill", ("_fetch_pdf",)):
+        "a refusal of one invoice PDF triggers a fresh invoice list read. Sign-out or "
+        "an unread list reaches the run, and a readable list leaves only that invoice pending",
     ("stripe", "download_bill", ("_fetch_file", "row_link")):
         "a refusal of one document's file, after which both lists are read again. A "
         "sign-out shows there and reaches the run, and lists that still read leave the "
