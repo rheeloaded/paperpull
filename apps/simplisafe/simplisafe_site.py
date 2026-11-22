@@ -51,6 +51,9 @@ _TURNS = {1: ("button.mat-mdc-paginator-navigation-next", "Next page"),
           -1: ("button.mat-mdc-paginator-navigation-previous", "Previous page")}
 _TURN_WAIT_S = 15.0
 _TURN_PAUSE_MS = 800
+_SETTLE_S = 15.0
+_EMPTY_SETTLE_S = 6.0
+_SETTLE_EVERY_MS = 500
 _LIST_STEP = "read the monitoring history"
 _OPEN_STEP = "open a monitoring invoice"
 
@@ -228,45 +231,53 @@ class Shown:
         return frozenset(self.bills)
 
 
-def _parse_view(view) -> Shown:
+def _parsed(view):
     """Read one drawn page. A page has to print its range, "1 – 10 of 37"
     or "0 of 0", and show exactly the rows that range names, each with one
-    invoice number and a readable date, no number twice."""
+    invoice number and a readable date, no number twice. Gives the page,
+    or None and what is wrong with it."""
     range_label = " ".join(str(view.get("range") or "").split()) if isinstance(view, dict) else ""
     rows = view.get("rows") if isinstance(view, dict) else None
     if not isinstance(rows, list):
-        raise ListStopped("The Monitoring Payments table or its bill count was unavailable.")
+        return None, "The Monitoring Payments table or its bill count was unavailable."
     if range_label == "0 of 0":
         start = end = total = 0
     else:
         shown = _RANGE.fullmatch(range_label)
         if not shown:
-            raise ListStopped("The Monitoring Payments table or its bill count was unavailable.")
+            return None, "The Monitoring Payments table or its bill count was unavailable."
         start, end, total = (int(part) for part in shown.groups())
         if not 1 <= start <= end <= total:
-            raise ListStopped("The monitoring table prints a range it cannot hold.")
+            return None, "The monitoring table prints a range it cannot hold."
     bills = {}
     for row in rows:
         invoice_id = (row.get("id") if isinstance(row, dict) else None) or ""
         if not _INVOICE_ID.fullmatch(invoice_id):
-            raise ListStopped("A monitoring bill is missing its invoice number.")
+            return None, "A monitoring bill is missing its invoice number."
         date = _date(row.get("date"))
         if not date:
-            raise ListStopped("A monitoring bill has an unreadable date.")
+            return None, "A monitoring bill has an unreadable date."
         bill = Bill(invoice_id, date)
         if bill.key in bills:
-            raise ListStopped("SimpliSafe listed the same invoice more than once.")
+            return None, "SimpliSafe listed the same invoice more than once."
         bills[bill.key] = bill
     if len(bills) != (end - start + 1 if total else 0):
-        raise ListStopped("The monitoring table disagrees with the invoice count.")
-    return Shown(start, end, total, bills)
+        return None, "The monitoring table disagrees with the invoice count."
+    return Shown(start, end, total, bills), ""
+
+
+def _parse_view(view) -> Shown:
+    shown, wrong = _parsed(view)
+    if shown is None:
+        raise ListStopped(wrong)
+    return shown
 
 
 def _read(page):
     """The page as drawn right now, or None while it cannot be read."""
     try:
-        return _parse_view(page.evaluate(_TABLE_VIEW))
-    except (BrowserError, ListStopped):
+        return _parsed(page.evaluate(_TABLE_VIEW))[0]
+    except BrowserError:
         return None
 
 
@@ -277,11 +288,41 @@ def _view(page) -> Shown:
         raise ListStopped("Open Manage Account → Monitoring Payments in SimpliSafe.")
     try:
         page.locator(_MONITORING + " table:visible").first.wait_for(state="visible", timeout=12000)
-        return _parse_view(page.evaluate(_TABLE_VIEW))
     except BrowserError:
         if looks_signed_out(page):
             raise SessionExpired() from None
         raise ListStopped("The visible Monitoring Payments table did not load.") from None
+    return _settled(page)
+
+
+def _settled(page) -> Shown:
+    """The table once two reads in a row agree. Angular Material draws the
+    table's header and prints "0 of 0" before the history arrives, so an
+    empty history is believed only after it has stayed empty for
+    _EMPTY_SETTLE_S, and a read that does not hold together yet (rows under
+    a "0 of 0" still being replaced) is read again until _SETTLE_S."""
+    deadline = time.monotonic() + _SETTLE_S
+    last = None
+    empty_since = None
+    while True:
+        if looks_signed_out(page):
+            raise SessionExpired()
+        try:
+            now, wrong = _parsed(page.evaluate(_TABLE_VIEW))
+        except BrowserError:
+            now, wrong = None, "The visible Monitoring Payments table did not load."
+        if now is not None and now == last:
+            if now.total:
+                return now
+            empty_since = empty_since or time.monotonic()
+            if time.monotonic() - empty_since >= _EMPTY_SETTLE_S:
+                return now
+        elif now is None or now.total:
+            empty_since = None
+        last = now
+        if time.monotonic() >= deadline:
+            raise ListStopped(wrong or "The Monitoring Payments table did not settle.")
+        page.wait_for_timeout(_SETTLE_EVERY_MS)
 
 
 _TURN_GUARD = r"""(el, label) => {
@@ -308,19 +349,18 @@ def _turn(page, shown: Shown, way: int) -> Shown:
     css, label = _TURNS[way]
     button = page.locator(f"{_MONITORING} {css}:visible")
     try:
-        if button.count() != 1 or button.get_attribute("aria-label", timeout=2000) != label \
-                or not is_safe_control(label) or not button.evaluate(_TURN_GUARD, label):
+        named = button.get_attribute("aria-label", timeout=2000) if button.count() == 1 else None
+        if named != label or not is_safe_control(named) or not button.evaluate(_TURN_GUARD, label):
             raise ListStopped("SimpliSafe's monitoring history page control changed.")
         if button.evaluate(_TURNED_OFF):
             raise ListStopped("SimpliSafe's monitoring history ended before its count.")
     except BrowserError:
         raise ListStopped("SimpliSafe's monitoring history page control changed.") from None
     page.wait_for_timeout(_TURN_PAUSE_MS)
-    try:
-        pressing.click(page, button, css=css, words=_words(), step=_LIST_STEP,
-                       what=f"the monitoring history's {label} button")
-    except pressing.TurnedOff:
-        raise ListStopped("SimpliSafe's monitoring history ended before its count.") from None
+    # Read as turned on just above, so a button the page turns off during
+    # the press stops the run (pressing.TurnedOff).
+    pressing.click(page, button, css=css, words=_words(), step=_LIST_STEP,
+                   what=f"the monitoring history's {label} button")
     deadline = time.monotonic() + _TURN_WAIT_S
     while True:
         if looks_signed_out(page):
@@ -395,12 +435,19 @@ def _show(page, bill: Bill) -> bool:
     buttons, and say whether that page shows it now."""
     target = _RUN["where"][bill.key] * _RUN["size"] + 1
     shown = _view(page)
+    went = 0
     for _ in range(_MAX_PAGES):
-        if shown.total != _RUN["total"]:
+        if shown.total != _RUN["total"] or target > shown.total:
             return False
         if shown.start == target:
             return shown.bills.get(bill.key) == bill
-        shown = _turn(page, shown, 1 if shown.start < target else -1)
+        way = 1 if shown.start < target else -1
+        if went and way != went:
+            # Passed over the page, so the pages are not the size they were
+            # listed at. The history is listed again.
+            return False
+        went = way
+        shown = _turn(page, shown, way)
     return False
 
 
@@ -460,7 +507,9 @@ def _invoice_html(page, bill):
             raise SessionExpired() from None
         raise ListStopped("SimpliSafe could not open this monitoring invoice.") from None
     finally:
-        if opened:
+        # A signed-out page has no Close to press, and the sign-in stop in
+        # flight is the one the run has to say.
+        if opened and not looks_signed_out(page):
             try:
                 _close_invoice(page, dialog.filter(has=page.locator(_INVOICE)))
             except BrowserError:

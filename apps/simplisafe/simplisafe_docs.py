@@ -717,7 +717,7 @@ class App:
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None) -> None:
+                      postmortem: dict = None, extra: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
         Written without anybody having to know to ask for it, because a
@@ -729,7 +729,13 @@ class App:
         is still sitting on the thing that broke."""
         if self.stats.get("failure_files"):
             return
-        extra = {"postmortem": postmortem} if postmortem else None
+        # `extra` holds only our own words, counts and yes or no, and words
+        # that went through the word list, such as what covered a control
+        # (pressing.stop_run).
+        extra = dict(extra or {})
+        if postmortem:
+            extra["postmortem"] = postmortem
+        extra = extra or None
         # A checkpoint at the moment it gave up. It is also what makes the
         # journal when nothing had written to it yet, and every tester file
         # sent in on 2026-09-25 came back without one for that reason.

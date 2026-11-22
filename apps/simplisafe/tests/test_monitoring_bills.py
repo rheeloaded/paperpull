@@ -97,7 +97,7 @@ PAGE = r"""
 </ss-monitoring-payments>
 <button id="incidental">Pay balance</button>
 <script>
-const all = INVOICES;
+let all = LOADLAG ? [] : INVOICES;
 const size = SIZE;
 let at = 0;
 window.presses = 0;
@@ -147,6 +147,7 @@ function openInvoice(id, date) {
 }
 rows();
 range();
+if (LOADLAG) setTimeout(() => { all = INVOICES; rows(); range(); }, LOADLAG);
 </script>
 """
 
@@ -166,10 +167,13 @@ def browser():
 def quick(monkeypatch):
     monkeypatch.setattr(site, "_TURN_PAUSE_MS", 0)
     monkeypatch.setattr(site, "_TURN_WAIT_S", 3.0)
+    monkeypatch.setattr(site, "_EMPTY_SETTLE_S", 3.0)
+    monkeypatch.setattr(site, "_SETTLE_S", 6.0)
 
 
-def open_history(browser, invoices, size, requests=None):
-    html = PAGE.replace("INVOICES", json.dumps(invoices)).replace("SIZE", str(size))
+def open_history(browser, invoices, size, requests=None, load_lag=0):
+    html = (PAGE.replace("INVOICES", json.dumps(invoices)).replace("SIZE", str(size))
+            .replace("LOADLAG", str(load_lag)))
     tab = browser.new_page()
 
     def answer(route):
@@ -351,3 +355,41 @@ def test_an_invoice_count_that_changes_while_paging_stops_the_list(browser):
     }""")
     with pytest.raises(site.ListStopped, match="count changed"):
         site.collect_download_docs(tab)
+
+
+def test_a_table_that_prints_0_of_0_while_loading_is_not_an_empty_history(browser):
+    tab = open_history(browser, FIVE, 2, load_lag=1500)
+    assert len(site.collect_download_docs(tab)) == 5
+
+
+def test_a_table_that_never_settles_stops_the_list(browser):
+    tab = open_history(browser, FIVE, 2)
+    # The count grows every tenth of a second, so no two reads agree.
+    tab.evaluate("""() => { let n = 5; setInterval(() => {
+        n += 1;
+        document.querySelector('.mat-mdc-paginator-range-label').textContent = '1 – 2 of ' + n;
+    }, 100); }""")
+    with pytest.raises(site.ListStopped):
+        site.collect_download_docs(tab)
+
+
+def test_a_bill_whose_page_moved_is_listed_again_not_hunted_for(browser, tmp_path):
+    tab = open_history(browser, FIVE, 2)
+    records = {r.document_id: r for r in site.collect_download_docs(tab)}
+    last = site.Bill(FIVE[4][0], site._date(FIVE[4][1]))
+    site._RUN["size"] = 3  # as if the pages had grown since the listing
+    presses = tab.evaluate("window.presses")
+    path = tmp_path / "last.pdf"
+    assert site.download_bill(tab, records[last.key].date_text, path, document_id=last.key)
+    assert site._pdf_matches(path.read_bytes(), last)
+    assert tab.evaluate("window.presses") - presses < 12
+
+
+def test_a_sign_in_while_an_invoice_is_open_is_said_as_a_sign_in(page, tmp_path, monkeypatch):
+    first = site.collect_download_docs(page)[0]
+    real = site._INVOICE_VIEW
+    monkeypatch.setattr(site, "_INVOICE_VIEW", "el => { const f = document.createElement('input');"
+                        " f.type = 'password'; document.body.append(f); throw new Error('gone'); }")
+    with pytest.raises(site.SessionExpired):
+        site.download_bill(page, first.date_text, tmp_path / "bill.pdf", document_id=first.document_id)
+    assert real
