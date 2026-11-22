@@ -350,3 +350,20 @@ def test_a_reader_that_fails_keeps_the_list_s_row_and_the_saved_receipt(tmp_path
     assert app._finish_pdf(PAGE, purchase, pdf)
     assert purchase.items == listed
     assert app.progress.get(purchase.key)["downloaded_ok"] is True
+
+
+def test_a_purchase_with_no_total_is_not_read_from_its_receipt(tmp_path, monkeypatch):
+    """The reader checks the total only when it is given one (review NIT)."""
+    from paperpull_core import meijer_items
+    read = []
+    monkeypatch.setattr(meijer_items, "read_items", lambda *a: read.append(a) or [])
+    # The receipt passes its check, so only the missing total keeps it unread.
+    monkeypatch.setattr(mr.receipt_pdf, "validate_pdf", lambda *a, **k: SimpleNamespace(
+        ok=True, reason="", size_bytes=5000, page_count=1))
+    purchase = _purchase()
+    purchase.total = ""
+    app = _app(tmp_path)
+    pdf = tmp_path / "receipt.pdf"
+    pdf.write_bytes(_text_pdf(["09/19/26 Fastlane1", "TOTAL 22.37"]))
+    app._finish_pdf(PAGE, purchase, pdf)
+    assert read == []

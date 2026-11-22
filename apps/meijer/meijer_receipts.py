@@ -1678,7 +1678,10 @@ class App:
         # page is matched by, from progress alone after a move (#236).
         try:
             from paperpull_core.meijer_items import read_items
-            extracted = read_items(out_path, purchase.purchase_date, purchase.total)
+            # The reader checks a date and a total only when it is given
+            # them, so a purchase missing either is not read.
+            extracted = (read_items(out_path, purchase.purchase_date, purchase.total)
+                         if purchase.purchase_date and purchase.total else [])
         except Exception:
             log.warning("The receipt's items could not be read, so the list's row is kept")
             extracted = []
