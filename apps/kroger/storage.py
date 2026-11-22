@@ -109,22 +109,37 @@ class PricingCsvFile(CsvFile):
     that place before the file is written over. A run stopped between the
     two then finds the earlier file and only the rows not in it.
 
-    When the upgrade cannot be made now, the file held by Excel say, the
-    rows are kept beside the file and the next run upgrades it. A header
-    this app never wrote is left as it is, and so is the file."""
+    When the upgrade cannot be made now, the file held by Excel say, it is
+    tried once in a run, waiting the minute any write waits, and after that
+    the rows are kept beside the file with no wait, as when Excel holds the
+    file, and the next run upgrades it. A header this app never wrote, or
+    a file it cannot read whole, is left as it is."""
 
     _said_unknown = False
+    # Why this run's one try at the upgrade failed, when it did.
+    _upgrade_error = None
 
     def _earlier_columns(self) -> list:
         return [c for c in self.columns if c not in PRICING_COLUMNS]
 
     def _decoded(self) -> str:
+        """The file as text, each line read as UTF-8, or in the code page of
+        Windows for a line Excel saved that way. Earlier versions appended
+        UTF-8 rows to such a file as it was, so one file can hold both, and
+        a write cut short can end in half a character."""
         data = shared_folder.read_plain(self.path)
-        try:
-            return data.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            # Saved again from Excel in the code page of Windows.
-            return data.decode("cp1252")
+        if data.startswith(b"\xef\xbb\xbf"):
+            data = data[3:]
+        out = []
+        for line in data.splitlines(keepends=True):
+            try:
+                out.append(line.decode("utf-8"))
+            except UnicodeDecodeError:
+                try:
+                    out.append(line.decode("cp1252"))
+                except UnicodeDecodeError:
+                    out.append(line.decode("utf-8", "replace"))
+        return "".join(out)
 
     def _header(self) -> Optional[list]:
         """The file's header, trailing empty names Excel adds left off, or
@@ -133,9 +148,10 @@ class PricingCsvFile(CsvFile):
             text = self._decoded()
         except FileNotFoundError:
             return None
-        except UnicodeDecodeError as e:
-            raise UnknownHeader("%s could not be read as text" % self.path.name) from e
-        first = next(csv.reader(io.StringIO(text, newline="")), None)
+        try:
+            first = next(csv.reader(io.StringIO(text, newline="")), None)
+        except csv.Error as e:
+            raise UnknownHeader("%s could not be read" % self.path.name) from e
         if first is None:
             return None
         while first and not first[-1].strip():
@@ -154,8 +170,13 @@ class PricingCsvFile(CsvFile):
         columns = self.columns
         self.columns = self._earlier_columns()
         try:
-            rows = [{k: v for k, v in read_stored_row(r).items() if isinstance(k, str)}
-                    for r in csv.DictReader(io.StringIO(self._decoded(), newline=""))]
+            try:
+                rows = [{k: v for k, v in read_stored_row(r).items() if isinstance(k, str)}
+                        for r in csv.DictReader(io.StringIO(self._decoded(), newline=""))]
+            except csv.Error as e:
+                # A field past the csv module's limit, a write cut inside
+                # quotes say, which appending never read (CsvFile._held).
+                raise UnknownHeader("%s could not be read whole" % self.path.name) from e
             kept = self._kept()
             left = self._not_written(kept) if kept and kept["rows"] else None
         finally:
@@ -178,25 +199,35 @@ class PricingCsvFile(CsvFile):
     def _say_unknown(self) -> None:
         if not self._said_unknown:
             self._said_unknown = True
-            print("  ! %s has columns this version of the Kroger app never wrote, so it is left "
-                  "as it is and new rows are kept beside it, in %s. Put back its header from "
-                  "a copy in Backups, or move the file away, and they go in on the next run."
-                  % (self.path.name, self.waiting_path.name), flush=True)
+            print("  ! %s has columns this version of the Kroger app never wrote, or a line it "
+                  "cannot read, so it is left as it is and new rows are kept beside it, in %s. "
+                  "Put back the file from a copy in Backups, or move it away, and they go in "
+                  "on the next run." % (self.path.name, self.waiting_path.name), flush=True)
 
     def _try_upgrade(self) -> None:
+        """The upgrade, tried once in a run. A failed try is not made again
+        in the run, so a file Excel holds costs one wait and one copy in
+        Backups, not one for every receipt."""
+        if self._upgrade_error is not None:
+            return
         try:
             self._upgrade()
-        except UnknownHeader:
+        except UnknownHeader as e:
+            self._upgrade_error = e
             self._say_unknown()
-        except OSError:
-            # Kept beside the file by _ensure_header below, and upgraded on
-            # the next run.
-            pass
+        except OSError as e:
+            self._upgrade_error = e
+            # The write that failed counted the file held, so the first row
+            # kept beside it says so in full, naming where it is kept.
+            _core._HELD.discard(_core._held_key(self.path))
 
     def _ensure_header(self) -> None:
         super()._ensure_header()
         header = self._header()
         if header is not None and header != self.columns:
+            if self._upgrade_error is not None and not isinstance(self._upgrade_error, UnknownHeader):
+                # Said as what it was, another program holding the file.
+                raise self._upgrade_error
             raise HeaderNotUpgraded("%s still has the earlier header" % self.path.name)
 
     def append_rows(self, rows) -> None:

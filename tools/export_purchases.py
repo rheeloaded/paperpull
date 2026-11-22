@@ -129,6 +129,8 @@ def providers(root: Path) -> List[dict]:
 def load_purchases(provider: str, path: Path) -> List[dict]:
     """One dict per line item, keyed by the output column names."""
     rows = []
+    # The rows whose purchase had a receipt link (Meijer's placeholder rule).
+    linked = set()
     # A plain file of its own, never a pipe, which held the panel, where this
     # export runs, for good, and on PaperPull Server never through a link.
     with io.StringIO(shared_folder.read_text(path, "utf-8-sig"), newline="") as fh:
@@ -148,7 +150,9 @@ def load_purchases(provider: str, path: Path) -> List[dict]:
             if not row["Date"] and not row["Item"] and not row["Order Number"]:
                 continue
             rows.append(row)
-    return recover_meijer_items(provider, path, without_unsaved_writes(rows))
+            if (read_stored(raw.get("Receipt URL")) or "").strip():
+                linked.add(id(row))
+    return recover_meijer_items(provider, path, without_unsaved_writes(rows), linked)
 
 
 # The names a Meijer list row gave its one item before 0.70.0, "In-Store:"
@@ -161,20 +165,22 @@ _RECOVERED = ("Recovered locally from the Meijer receipt PDF. Review weights and
 _UNRECOVERED = "Meijer product details unavailable. Review the original receipt PDF."
 
 
-def _meijer_placeholder(row: dict, order_rows: List[dict]) -> bool:
+def _meijer_placeholder(row: dict, linked: bool = False) -> bool:
     """Whether a Meijer history row is the order list's words priced at the
     receipt's whole total rather than a product. Before 0.70.0 that row was
     named "In-Store:" or "Meijer order". 0.70.0 names it after the store's
-    address line (#236), an in-store purchase's only row, quantity 1, no
-    unit price and the whole total as its line total, a shape the receipt
-    reader never gives a product, since it prices every counted item. A
-    row with no item, a canceled order's, is not one."""
+    address line (#236), an in-store purchase's row with no receipt link,
+    quantity 1, no unit price and the whole total as its line total. The
+    receipt reader prices every counted item, so it never writes that
+    shape, and a purchase with no receipt link was never read from a
+    receipt page (meijer_site.extract_items), whose one-product rows look
+    the same. A row with no item, a canceled order's, is not one."""
     name = (row.get("Item") or "").strip()
     if not name:
         return False
     if _MEIJER_PLACEHOLDER.fullmatch(name):
         return True
-    return (len(order_rows) == 1 and row.get("Type") == "In-Store"
+    return (not linked and row.get("Type") == "In-Store"
             and row.get("Quantity") == 1 and row.get("Unit Price") is None
             and row.get("Line Total") is not None
             and row.get("Line Total") == row.get("Order Total"))
@@ -211,39 +217,48 @@ def _noted(row: dict, note: str) -> str:
     return "; ".join(x for x in (row.get("Notes") or "", note) if x)
 
 
-def recover_meijer_items(provider: str, history: Path, rows: List[dict]) -> List[dict]:
+def recover_meijer_items(provider: str, history: Path, rows: List[dict],
+                         linked=frozenset()) -> List[dict]:
     """Meijer histories written before the app read its receipts hold the
     order list's words as the one item, priced at the receipt's total. Such
-    a row is read again from its saved receipt, when that receipt's date,
-    total, items, discounts and tax agree (paperpull_core.meijer_items),
-    and otherwise shows no product and no price and asks for review. The
-    history and the receipts are only read, never written.
+    a row is read again from its saved receipt, when that receipt's date and
+    total match the row's and its items, discounts and tax add up
+    (paperpull_core.meijer_items), and otherwise shows no product and no
+    price and asks for review. The history and the receipts are only read,
+    never written.
 
-    An order that has products written down as well, from a later download,
-    keeps those and its placeholder is not read again, and an order written
-    down twice is read once, so its items are not listed twice."""
+    An order has at most one such row in the export. When the order has
+    products written down as well, from a later Download again, those are
+    its rows and its placeholders are left out, and an order written down
+    twice is read once, so no item is listed twice and no total counted as
+    a product. `linked` holds the ids of the rows whose purchase had a
+    receipt link (load_purchases)."""
     if provider.lower() != "meijer":
         return rows
+
+    def key_of(row):
+        return (row.get("Account"), row.get("Order Number")) if row.get("Order Number") else id(row)
+
     from paperpull_core.meijer_items import read_items
-    orders: Dict[tuple, List[dict]] = {}
+    placeholder = {id(r) for r in rows if _meijer_placeholder(r, id(r) in linked)}
+    with_products = {key_of(r) for r in rows
+                     if id(r) not in placeholder and (r.get("Item") or "").strip()}
+    recovered, done = [], set()
     for row in rows:
-        key = (row.get("Account"), row.get("Order Number")) if row.get("Order Number") else id(row)
-        orders.setdefault(key, []).append(row)
-    recovered, read_once = [], set()
-    for row in rows:
-        key = (row.get("Account"), row.get("Order Number")) if row.get("Order Number") else id(row)
-        order_rows = orders[key]
-        if not _meijer_placeholder(row, order_rows):
+        if id(row) not in placeholder:
             recovered.append(row)
             continue
-        products = [r for r in order_rows if r is not row and (r.get("Item") or "").strip()
-                    and not _meijer_placeholder(r, order_rows)]
+        key = key_of(row)
+        if key in with_products or key in done:
+            continue
+        done.add(key)
         items = []
-        receipt = None if products or key in read_once else _saved_meijer_receipt(history, row)
+        receipt = None
+        if row.get("Date") and row.get("Order Total"):
+            receipt = _saved_meijer_receipt(history, row)
         if receipt is not None:
-            items = read_items(receipt, row.get("Date") or "", row.get("Order Total") or "")
+            items = read_items(receipt, row["Date"], row["Order Total"])
         if items:
-            read_once.add(key)
             for item in items:
                 recovered.append({**row, "Item": item.name, "Quantity": quantity(item.quantity),
                                   "Pricing Quantity": quantity(item.pricing_quantity),

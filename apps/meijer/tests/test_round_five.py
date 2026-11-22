@@ -319,9 +319,15 @@ def test_verified_direct_pdf_replaces_list_placeholder_before_history_write(tmp_
         "PAYMENTS", "Tx:1 Op:2 Tm:3 St:4 12:00:00",
     ]))
     assert app._finish_pdf(PAGE, purchase, pdf)
-    assert len(purchase.items) == 1
-    assert purchase.items[0].name == "MILK"
-    assert purchase.items[0].line_total == "$22.37"
+    app._write_csv_rows(purchase, receipt_status="Downloaded", processing_status="Completed")
+    rows = app.order_csv.read_all()
+    assert len(rows) == 1
+    assert rows[0]["Item Name"] == "MILK"
+    assert rows[0]["Line Item Total"] == "$22.37"
+    # The purchase and its record keep the list's words, which its row is
+    # pressed by and a record of the earlier page is matched by (#236).
+    assert purchase.items[0].name == "In-Store:"
+    assert app.progress.get(purchase.key)["items"][0]["name"] == "In-Store:"
 
 
 def test_a_reader_that_fails_keeps_the_list_s_row_and_the_saved_receipt(tmp_path, monkeypatch):

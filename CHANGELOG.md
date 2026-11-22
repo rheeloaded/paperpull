@@ -19,9 +19,11 @@ All notable changes to PaperPull are recorded here. Versioning follows
   an earlier version is copied into Backups and given the two new columns
   before the next row goes in, every row and value kept, and rows waiting
   beside it from a run while Excel had it open go in once. While Excel
-  holds it the upgrade waits for the next run, and a header the app never
-  wrote is left as it is, with the new rows kept beside it. Rows saved
-  before keep the two columns blank.
+  holds it the run waits the usual minute once, keeps the new rows beside
+  it and upgrades it on the next run, and a header the app never wrote is
+  left as it is, with the new rows kept beside it. Rows saved before keep
+  the two columns blank. A gallon line ("18.45 gal x $3.09 each") now
+  keeps its unit price too.
 
 ### Fixed
 - **Meijer's Purchases rows are the products on the receipt (#246, thanks

@@ -90,6 +90,7 @@ def test_excel_holding_the_file_keeps_the_row_and_the_next_run_upgrades(tmp_path
     assert ledger.read_all()[-1]["Pricing Quantity"] == "0.62"
     assert ledger.path.read_bytes() == original
     monkeypatch.undo()
+    ledger = _ledger(tmp_path)  # the next run
     ledger.append_rows([{"Order or Receipt Number": "k3", "Quantity": "1"}])
     rows = _rows(ledger.path)
     assert [(r["Order or Receipt Number"], r["Pricing Quantity"]) for r in rows] == [
@@ -138,3 +139,61 @@ def test_a_header_this_app_never_wrote_is_left_as_it_is(tmp_path, header, capsys
     assert ledger.path.read_bytes() == original
     assert ledger.waiting_path.exists()
     assert "never wrote" in capsys.readouterr().out
+
+
+def test_excel_holding_the_file_costs_one_try_and_one_copy_a_run(tmp_path, monkeypatch, capsys):
+    """Review M1. Every receipt of a run waited a minute and made a copy."""
+    ledger = _ledger(tmp_path)
+    _write_old(ledger.path, [_old_row(1)])
+    tries = []
+
+    def held(*args, **kwargs):
+        tries.append(1)
+        raise PermissionError(13, "held by another program")
+    monkeypatch.setattr(storage, "atomic_write_text", held)
+    for n in (2, 3, 4):
+        ledger.append_rows([{"Order or Receipt Number": "k%d" % n, "Quantity": "1"}])
+    assert len(tries) == 1
+    assert len(list((tmp_path / "Backups").iterdir())) == 1
+    said = capsys.readouterr().out
+    assert ledger.waiting_path.name in said.splitlines()[0]
+    assert [r["Order or Receipt Number"] for r in ledger.read_all()] == ["k1", "k2", "k3", "k4"]
+
+
+def test_a_file_of_both_encodings_keeps_every_letter(tmp_path):
+    """Review m3. A file Excel saved in the code page of Windows, then rows
+    0.70.0 appended in UTF-8, and a write cut short in half a character."""
+    ledger = _ledger(tmp_path)
+    _write_old(ledger.path, [_old_row(1, "Jalapeño Example")], encoding="cp1252")
+    with ledger.path.open("a", encoding="utf-8", newline="") as fh:
+        csv.writer(fh).writerow([_old_row(2, "Häagen Example").get(c, "") for c in OLD])
+    with ledger.path.open("ab") as fh:
+        fh.write(b"k3,\xc3")
+    ledger.append_rows([{"Order or Receipt Number": "k4", "Quantity": "1"}])
+    rows = _rows(ledger.path)
+    assert [r["Item Name"] for r in rows[:2]] == ["Jalapeño Example", "Häagen Example"]
+    assert rows[-1]["Order or Receipt Number"] == "k4"
+
+
+def test_a_utf8_file_cut_in_half_a_character_is_still_upgraded(tmp_path):
+    ledger = _ledger(tmp_path)
+    _write_old(ledger.path, [_old_row(1, "Häagen Example")])
+    with ledger.path.open("ab") as fh:
+        fh.write(b"k2,\xc3")
+    ledger.append_rows([{"Order or Receipt Number": "k3", "Quantity": "1"}])
+    rows = _rows(ledger.path)
+    assert rows[0]["Item Name"] == "Häagen Example" and rows[-1]["Order or Receipt Number"] == "k3"
+    assert len(list((tmp_path / "Backups").iterdir())) == 1
+
+
+def test_a_field_past_the_csv_limit_never_raises_into_the_download(tmp_path):
+    """Review m4. The upgrade reads every row, which appending never did."""
+    ledger = _ledger(tmp_path)
+    _write_old(ledger.path, [_old_row(1)])
+    original_size = ledger.path.stat().st_size
+    with ledger.path.open("a", encoding="utf-8", newline="") as fh:
+        fh.write('k2,"' + "x" * 200000 + "\r\n")
+    original = ledger.path.read_bytes()
+    ledger.append_rows([{"Order or Receipt Number": "k3", "Quantity": "1"}])
+    assert ledger.path.read_bytes() == original and original_size < len(original)
+    assert ledger.waiting_path.exists()

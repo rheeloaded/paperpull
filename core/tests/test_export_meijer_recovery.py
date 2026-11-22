@@ -28,9 +28,9 @@ HEADER = ["Account Holder", "Purchase Date", "Purchase Type", "Order or Receipt 
 
 
 def _row(order, item, qty="1", unit="", line="$12.34", total="$12.34", ptype="In-Store",
-         pdf="r.pdf", proc="Completed", notes="", date="2026-09-19"):
+         pdf="r.pdf", proc="Completed", notes="", date="2026-09-19", url=""):
     return ["", date, ptype, order, "Paid", item, qty, unit, line, total, "", "",
-            "Groceries", pdf, "", "", proc, notes]
+            "Groceries", pdf, "", url, proc, notes]
 
 
 def _history(folder, rows):
@@ -114,8 +114,52 @@ def test_an_order_with_products_does_not_list_them_twice(tmp_path, reads):
     assert reads == [(folder / "In-Store" / "r.pdf").resolve()], "p8 read once, p7 not at all"
     p7 = [r["Item"] for r in rows if r["Order Number"] == "p7"]
     p8 = [r["Item"] for r in rows if r["Order Number"] == "p8"]
-    assert p7 == ["", "EXAMPLE BREAD"]
-    assert p8 == ["EXAMPLE BREAD", "EXAMPLE APPLES (2.00 lb)", ""]
+    assert p7 == ["EXAMPLE BREAD"]
+    assert p8 == ["EXAMPLE BREAD", "EXAMPLE APPLES (2.00 lb)"]
+
+
+def test_a_0_70_0_address_row_beside_products_or_twice_is_no_product(tmp_path, reads):
+    """Download again on this version writes products after the address row,
+    and a redownload on 0.70.0 wrote the address row twice (review M2)."""
+    folder = tmp_path / "Meijer Receipts"
+    _receipt(folder)
+    history = _history(folder, [
+        _row("p20", "4400 Invented Avenue", total="$5.00", line="$5.00"),
+        _row("p20", "EXAMPLE BREAD", unit="$2.00", line="$2.00", total="$5.00"),
+        _row("p20", "EXAMPLE MILK", unit="$3.00", line="$3.00", total="$5.00"),
+        _row("p21", "4400 Invented Avenue"),
+        _row("p21", "4400 Invented Avenue"),
+    ])
+    rows = xp.load_purchases("Meijer", history)
+    p20 = [r["Item"] for r in rows if r["Order Number"] == "p20"]
+    p21 = [r["Item"] for r in rows if r["Order Number"] == "p21"]
+    assert p20 == ["EXAMPLE BREAD", "EXAMPLE MILK"]
+    assert p21 == ["EXAMPLE BREAD", "EXAMPLE APPLES (2.00 lb)"]
+    orders = {o["Order Number"]: o["Items"] for o in xp.orders_from(rows)}
+    assert orders == {"p20": 2, "p21": 2}
+
+
+def test_a_one_product_row_read_from_a_receipt_page_is_kept(tmp_path, reads):
+    """A purchase with a receipt link was read from its page, whose one
+    product looks like the address row (review m5)."""
+    folder = tmp_path / "Meijer Receipts"
+    _receipt(folder)
+    history = _history(folder, [_row("p22", "EXAMPLE WHOLE MILK GAL",
+                                     url="https://www.meijer.com/receipt/p22")])
+    rows = xp.load_purchases("Meijer", history)
+    assert [(r["Item"], r["Line Total"], r["Processing"]) for r in rows] == [
+        ("EXAMPLE WHOLE MILK GAL", 12.34, "Completed")]
+    assert reads == []
+
+
+def test_a_row_with_no_order_total_is_not_read(tmp_path, reads):
+    """The reader checks the total only when it is given one."""
+    folder = tmp_path / "Meijer Receipts"
+    _receipt(folder)
+    history = _history(folder, [_row("p23", "In-Store:", total="")])
+    rows = xp.load_purchases("Meijer", history)
+    assert reads == []
+    assert rows[0]["Item"] == ""
 
 
 @pytest.mark.parametrize("name", ["../r.pdf", "In-Store/r.pdf", "..", "C:r.pdf", "/r.pdf",
