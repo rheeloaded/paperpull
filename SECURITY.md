@@ -59,9 +59,11 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Bank, First Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo
     narrow the allowlist to the whole labels they press, and all of them but
     TreasuryDirect give each control a guard of its own built the same way.
-    SimpliSafe opens a verified Monitoring Payments invoice row and closes
-    its invoice dialog. It scopes the history request to the web app's
-    observed billing GET and renders the invoice in an isolated context.
+    SimpliSafe presses only the Monitoring Payments paginator's Next page
+    and Previous page buttons, a verified invoice row and its invoice
+    dialog's Close button, all through the shared press guards, changes
+    none of the site's requests and renders the invoice in an isolated
+    context.
     Best Buy presses only its year menu and a year in it. Discover Bank
     presses only the keep-alive button of Discover's inactivity dialog, a
     button whose whole name is I'm still here, Stay signed in, Continue

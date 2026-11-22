@@ -9,6 +9,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Added
+- **SimpliSafe monitoring bills (#243).** A new app saves the monitoring
+  invoices of Manage Account, Monitoring Payments, each opened by its own
+  row and printed from its invoice view after the invoice number and date
+  match the list, two bills of one day kept apart. A longer history is read
+  page by page through the table's own Next page button, and a page whose
+  rows do not change, repeat or disagree with the count stops the run. It
+  signs in on port 9321. Contributed by @solkennedy.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads

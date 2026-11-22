@@ -4,18 +4,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
-import json
 from pathlib import Path
 import re
-from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
+import sys
+import time
+from urllib.parse import urlsplit
 
 from playwright.sync_api import Error as BrowserError
-from paperpull_core import identity, intake, pdf_reader, receipt_pdf, shared_folder
+from paperpull_core import identity, pdf_reader, pressing, receipt_pdf, shared_folder
 from paperpull_core.controls import AUTH_CONTROL_RE, SETTINGS_CONTROL_RE
+from paperpull_core.words import words_for as _words_for
 
 HOST = "webapp.simplisafe.com"
 AUTH_HOST = "auth.simplisafe.com"
-API_HOST = "api.simplisafe.com"
 BASE = f"https://{HOST}"
 ACCOUNT_FRAGMENT = "/account"
 DOCUMENTS_URL = BASE + "/#" + ACCOUNT_FRAGMENT
@@ -25,21 +26,38 @@ LOGIN_URL_MARKERS = (AUTH_HOST,)
 RATE_LIMIT_MARKERS = re.compile(r"too many requests|rate limit", re.I)
 FORBIDDEN_CONTROL_RE = re.compile(r"\b(?:pay|payment|arm|disarm|cancel|delete|edit|save|change|submit)\b", re.I)
 SAFE_DOC_CONTROL_RE = re.compile(
-    r"^(?:[0-9a-f]{32}|Close|Download PDF|(?:(?:View|Download) )?Monitoring Bill)$", re.I
+    r"^(?:[0-9a-f]{32}|Close|Download PDF|(?:(?:View|Download) )?Monitoring Bill"
+    r"|Next page|Previous page)$", re.I
 )
-FALLBACK = {"doc_row": "ss-monitoring-payments table tbody tr"}
+FALLBACK = {"doc_row": "ss-monitoring-payments table tbody tr",
+            "next_page": "ss-monitoring-payments button.mat-mdc-paginator-navigation-next",
+            "previous_page": "ss-monitoring-payments button.mat-mdc-paginator-navigation-previous"}
 
-_HISTORY_PATH = re.compile(r"/v1/users/[0-9]{1,20}/paymentHistory")
-_HISTORY_ROUTE = re.compile(r"^https://api\.simplisafe\.com/v1/users/[0-9]{1,20}/paymentHistory(?:\?.*)?$")
 _INVOICE_ID = re.compile(r"[0-9a-f]{32}", re.I)
 _INVOICE_TITLE = re.compile(r"Invoice\s*:\s*(?:[A-Za-z0-9]{2})?([0-9a-f]{32})", re.I)
-_PAGER = re.compile(r"(?:[0-9]+\s*[–-]\s*[0-9]+\s+of\s+)?([0-9]+)")
-_MAX_INVOICES = 500
+_RANGE = re.compile(r"([0-9]{1,6})\s*[–-]\s*([0-9]{1,6})\s+of\s+([0-9]{1,6})")
+_MAX_PAGES = 100
 
 _MONITORING = "ss-monitoring-payments:visible"
+_INVOICE_CSS = "ss-monitoring-payments table tbody td:nth-child(2) a"
 _INVOICE_LINKS = _MONITORING + " table:visible tbody td:nth-child(2) a"
 _DIALOG = "mat-dialog-container:visible"
 _INVOICE = "ss-payment-details-display .invoice-container"
+_CLOSE_CSS = "mat-dialog-container button.close"
+
+# The paginator's own two buttons, each found by its Angular Material class
+# and pressed only when its whole label is the one named here.
+_TURNS = {1: ("button.mat-mdc-paginator-navigation-next", "Next page"),
+          -1: ("button.mat-mdc-paginator-navigation-previous", "Previous page")}
+_TURN_WAIT_S = 15.0
+_TURN_PAUSE_MS = 800
+_LIST_STEP = "read the monitoring history"
+_OPEN_STEP = "open a monitoring invoice"
+
+
+def _words():
+    """The app's own words for what a press says (paperpull_core.words)."""
+    return _words_for("SimpliSafe", sys.modules[__name__])
 
 # The web app contains a second, hidden table for narrow screens. Only
 # read the visible desktop table with the two explicitly named columns.
@@ -195,14 +213,41 @@ def _date(text: str | None) -> str:
     return ""
 
 
-def _parse_view(view):
-    range_label = view["range"] if view else ""
-    total = _PAGER.fullmatch("0" if range_label == "0 of 0" else range_label)
-    if not total:
+@dataclass(frozen=True)
+class Shown:
+    """One page of the Monitoring Payments table as it is drawn: the range
+    its paginator prints, first and last row numbers and the whole count,
+    and its bills in the order shown."""
+    start: int
+    end: int
+    total: int
+    bills: dict
+
+    @property
+    def keys(self) -> frozenset:
+        return frozenset(self.bills)
+
+
+def _parse_view(view) -> Shown:
+    """Read one drawn page. A page has to print its range, "1 – 10 of 37"
+    or "0 of 0", and show exactly the rows that range names, each with one
+    invoice number and a readable date, no number twice."""
+    range_label = " ".join(str(view.get("range") or "").split()) if isinstance(view, dict) else ""
+    rows = view.get("rows") if isinstance(view, dict) else None
+    if not isinstance(rows, list):
         raise ListStopped("The Monitoring Payments table or its bill count was unavailable.")
+    if range_label == "0 of 0":
+        start = end = total = 0
+    else:
+        shown = _RANGE.fullmatch(range_label)
+        if not shown:
+            raise ListStopped("The Monitoring Payments table or its bill count was unavailable.")
+        start, end, total = (int(part) for part in shown.groups())
+        if not 1 <= start <= end <= total:
+            raise ListStopped("The monitoring table prints a range it cannot hold.")
     bills = {}
-    for row in view["rows"]:
-        invoice_id = row.get("id") or ""
+    for row in rows:
+        invoice_id = (row.get("id") if isinstance(row, dict) else None) or ""
         if not _INVOICE_ID.fullmatch(invoice_id):
             raise ListStopped("A monitoring bill is missing its invoice number.")
         date = _date(row.get("date"))
@@ -212,13 +257,20 @@ def _parse_view(view):
         if bill.key in bills:
             raise ListStopped("SimpliSafe listed the same invoice more than once.")
         bills[bill.key] = bill
-    count = int(total[1])
-    if len(bills) > count:
+    if len(bills) != (end - start + 1 if total else 0):
         raise ListStopped("The monitoring table disagrees with the invoice count.")
-    return count, bills
+    return Shown(start, end, total, bills)
 
 
-def _view(page):
+def _read(page):
+    """The page as drawn right now, or None while it cannot be read."""
+    try:
+        return _parse_view(page.evaluate(_TABLE_VIEW))
+    except (BrowserError, ListStopped):
+        return None
+
+
+def _view(page) -> Shown:
     if looks_signed_out(page):
         raise SessionExpired()
     if not is_history_page_url(page.url):
@@ -232,99 +284,90 @@ def _view(page):
         raise ListStopped("The visible Monitoring Payments table did not load.") from None
 
 
-def _history_request(url):
-    if _origin(url) != ("https", API_HOST):
-        return None
-    address = urlsplit(url)
+_TURN_GUARD = r"""(el, label) => {
+    const root = el.closest('ss-monitoring-payments');
+    return el.tagName === 'BUTTON' && !el.closest('form') && !!root
+        && !!el.closest('mat-paginator, .mat-mdc-paginator')
+        && (el.getAttribute('aria-label') || '').trim() === label
+        && (el.getAttribute('type') || 'button').toLowerCase() === 'button'
+        && !el.hasAttribute('href') && !!el.getClientRects().length;
+}"""
+
+_TURNED_OFF = r"""el => el.disabled || el.getAttribute('aria-disabled') === 'true'"""
+
+
+def _turn(page, shown: Shown, way: int) -> Shown:
+    """Press the paginator's own Next page (way 1) or Previous page (way -1)
+    button once, the press a person makes, and answer the page it brings.
+
+    The page is answered only once its range is the one next to `shown`,
+    its count is the same, and its rows are bills `shown` did not hold. The
+    range label alone is not enough, since SimpliSafe can print the next
+    range while the rows of the page before still show. Anything else stops
+    the list, nothing is read as the next page."""
+    css, label = _TURNS[way]
+    button = page.locator(f"{_MONITORING} {css}:visible")
     try:
-        query = parse_qs(address.query, keep_blank_values=True, strict_parsing=True)
-    except ValueError:
-        return None
-    if not _HISTORY_PATH.fullmatch(address.path) or address.fragment:
-        return None
-    if set(query) != {"numInvoices", "fromInvoice"} or query["fromInvoice"] != ["0"]:
-        return None
-    size = query["numInvoices"]
-    return address if len(size) == 1 and re.fullmatch(r"[1-9][0-9]{0,2}", size[0]) else None
-
-
-def _reply_ids(data, expected):
-    if not isinstance(data, dict) or data.get("totalNumInvoices") != expected:
-        raise ListStopped("The monitoring invoice count changed. Run discovery again.")
-    rows = data.get("invoices")
-    if not isinstance(rows, list) or len(rows) != expected:
-        raise ListStopped("SimpliSafe returned only part of the requested monitoring history.")
-    ids = [item.get("invoiceId") for item in rows if isinstance(item, dict)]
-    if (len(ids) != expected
-            or not all(isinstance(value, str) and _INVOICE_ID.fullmatch(value) for value in ids)
-            or len({value.lower() for value in ids}) != expected):
-        raise ListStopped("The monitoring history has invalid or repeated invoice numbers.")
-    return {value.lower() for value in ids}
-
-
-def _load_full_history(page, expected):
-    """Widen the app's own one billing GET, without reading auth headers."""
-    if not 1 <= expected <= _MAX_INVOICES:
-        raise ListStopped("The monitoring history exceeds the supported invoice count.")
-    received = set()
-    errors = []
-    attempted = False
-
-    def intercept(route):
-        nonlocal attempted
-        request = route.request
-        address = _history_request(request.url)
-        if (attempted or request.method != "GET" or address is None
-                or request.frame != page.main_frame or request.resource_type not in ("xhr", "fetch")):
-            route.fallback()
-            return
-        attempted = True
-        response = None
-        try:
-            query = urlencode({"numInvoices": expected, "fromInvoice": 0})
-            url = urlunsplit((address.scheme, address.netloc, address.path, query, ""))
-            response = route.fetch(url=url, max_redirects=0, timeout=18000)
-            if response.status in (401, 403):
-                raise SessionExpired()
-            if response.status == 429:
-                raise ListStopped("SimpliSafe is limiting monitoring-history requests.")
-            mime = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-            if response.status != 200 or mime != "application/json":
-                raise ListStopped("The full monitoring-history request did not complete.")
-            received.update(_reply_ids(json.loads(intake.text_of(response, limit=3_000_000)), expected))
-            route.fulfill(response=response)
-        except (SessionExpired, ListStopped) as error:
-            errors.append(error)
-            route.abort()
-        except (BrowserError, intake.TooLarge, ValueError):
-            errors.append(ListStopped("The monitoring-history response could not be read."))
-            route.abort()
-        finally:
-            if response is not None:
-                response.dispose()
-
-    page.route(_HISTORY_ROUTE, intercept)
-    try:
-        page.reload(wait_until="domcontentloaded", timeout=22000)
-        page.wait_for_function(
-            "(n) => { const read = " + _TABLE_VIEW + "; return read()?.rows.length === n; }",
-            arg=expected, timeout=14000,
-        )
+        if button.count() != 1 or button.get_attribute("aria-label", timeout=2000) != label \
+                or not is_safe_control(label) or not button.evaluate(_TURN_GUARD, label):
+            raise ListStopped("SimpliSafe's monitoring history page control changed.")
+        if button.evaluate(_TURNED_OFF):
+            raise ListStopped("SimpliSafe's monitoring history ended before its count.")
     except BrowserError:
-        if errors:
-            raise errors[0] from None
+        raise ListStopped("SimpliSafe's monitoring history page control changed.") from None
+    page.wait_for_timeout(_TURN_PAUSE_MS)
+    try:
+        pressing.click(page, button, css=css, words=_words(), step=_LIST_STEP,
+                       what=f"the monitoring history's {label} button")
+    except pressing.TurnedOff:
+        raise ListStopped("SimpliSafe's monitoring history ended before its count.") from None
+    deadline = time.monotonic() + _TURN_WAIT_S
+    while True:
         if looks_signed_out(page):
-            raise SessionExpired() from None
-        raise ListStopped("SimpliSafe did not display the full monitoring history.") from None
-    finally:
-        page.unroute(_HISTORY_ROUTE, intercept)
+            raise SessionExpired()
+        now = _read(page)
+        if now is not None and now.total == shown.total and not (now.keys & shown.keys) and (
+                (way == 1 and now.start == shown.end + 1)
+                or (way == -1 and now.end == shown.start - 1)):
+            return now
+        if now is not None and now.total != shown.total:
+            raise ListStopped("The monitoring invoice count changed. Run discovery again.")
+        if time.monotonic() >= deadline:
+            raise ListStopped("SimpliSafe did not show the next page of the monitoring history.")
+        page.wait_for_timeout(250)
 
-    if errors:
-        raise errors[0]
-    total, bills = _view(page)
-    if total != expected or {bill.invoice_id.lower() for bill in bills.values()} != received:
-        raise ListStopped("The rendered invoices do not match the full monitoring history.")
-    return bills
+
+def _first_page(page, shown: Shown) -> Shown:
+    """Go back to the history's first page by Previous page, when it shows
+    a later one."""
+    for _ in range(_MAX_PAGES):
+        if shown.start <= 1:
+            return shown
+        shown = _turn(page, shown, -1)
+    raise ListStopped("The monitoring history is longer than PaperPull reads.")
+
+
+def _walk(page):
+    """Every bill of the history, read page by page from the first through
+    the paginator's own Next page button, with the page each was shown on.
+    A history of one page presses nothing."""
+    shown = _first_page(page, _view(page))
+    size = shown.end if shown.total else 0
+    bills, where = {}, {}
+    for number in range(_MAX_PAGES):
+        if shown.start != number * size + 1 and shown.total:
+            raise ListStopped("The monitoring history pages are not the same size.")
+        if shown.keys & set(bills):
+            raise ListStopped("SimpliSafe listed the same invoice more than once.")
+        for key, bill in shown.bills.items():
+            bills[key] = bill
+            where[key] = number
+        if len(bills) == shown.total:
+            return bills, where, size, shown.total
+        if shown.end >= shown.total:
+            raise ListStopped("The monitoring table disagrees with the invoice count.")
+        shown = _turn(page, shown, 1)
+    raise ListStopped("The monitoring history is longer than PaperPull reads.")
 
 
 _RUN: dict = {}
@@ -333,10 +376,8 @@ _RUN: dict = {}
 def collect_download_docs(page) -> list[RawDoc]:
     _RUN.clear()
     _open_account(page)
-    total, bills = _view(page)
-    if len(bills) != total:
-        bills = _load_full_history(page, total)
-    _RUN.update(page=page, bills=bills)
+    bills, where, size, total = _walk(page)
+    _RUN.update(page=page, bills=bills, where=where, size=size, total=total)
     return [bill.record for bill in bills.values()]
 
 
@@ -349,18 +390,34 @@ def bill_list_ready(page) -> bool:
     return True
 
 
+def _show(page, bill: Bill) -> bool:
+    """Bring up the page the bill was listed on, through the paginator's own
+    buttons, and say whether that page shows it now."""
+    target = _RUN["where"][bill.key] * _RUN["size"] + 1
+    shown = _view(page)
+    for _ in range(_MAX_PAGES):
+        if shown.total != _RUN["total"]:
+            return False
+        if shown.start == target:
+            return shown.bills.get(bill.key) == bill
+        shown = _turn(page, shown, 1 if shown.start < target else -1)
+    return False
+
+
 def _invoice_number(text):
     match = _INVOICE_TITLE.fullmatch(text or "")
     return match[1].lower() if match else ""
 
 
-def _close_invoice(dialog):
+def _close_invoice(page, dialog):
+    """Press the invoice dialog's own Close button, through the guards."""
     close = dialog.locator("button.close")
     if (close.count() != 1 or not is_safe_control(close.inner_text(timeout=2000)) or not close.evaluate(
         "e=>!e.form && e.innerText.trim().toLowerCase() === 'close'"
     )):
         raise ListStopped("SimpliSafe's invoice close control changed.")
-    close.click(timeout=4000)
+    pressing.click(page, close, css=_CLOSE_CSS, words=_words(), step=_OPEN_STEP,
+                   what="the monitoring invoice's Close button")
     dialog.wait_for(state="hidden", timeout=5000)
 
 
@@ -376,16 +433,19 @@ def _invoice_html(page, bill):
         raise ListStopped("The selected invoice's view control changed.")
     opened = False
     invoice = dialog.locator(_INVOICE)
-    link = None
+    link = links.nth(matching[0])
     try:
-        link = links.nth(matching[0]).element_handle(timeout=3000)
-        if (link is None or not is_safe_control(link.inner_text()) or not link.evaluate(
+        if (not is_safe_control(link.inner_text(timeout=3000)) or not link.evaluate(
             """(el, id) => el.innerText.trim() === id && !el.hasAttribute('href') &&
                           !el.hasAttribute('target') && !el.closest('form')""",
             bill.invoice_id,
         )):
             raise ListStopped("The selected invoice's view control changed.")
-        link.click(timeout=5000)
+        try:
+            pressing.click(page, link, css=_INVOICE_CSS, words=_words(), step=_OPEN_STEP,
+                           what=f"the monitoring invoice row of {bill.date}")
+        except pressing.TurnedOff:
+            return ""
         invoice.wait_for(state="visible", timeout=7000)
         if dialog.count() != 1 or invoice.count() != 1:
             raise ListStopped("SimpliSafe opened an unexpected invoice view.")
@@ -400,11 +460,9 @@ def _invoice_html(page, bill):
             raise SessionExpired() from None
         raise ListStopped("SimpliSafe could not open this monitoring invoice.") from None
     finally:
-        if link is not None:
-            link.dispose()
         if opened:
             try:
-                _close_invoice(dialog.filter(has=page.locator(_INVOICE)))
+                _close_invoice(page, dialog.filter(has=page.locator(_INVOICE)))
             except BrowserError:
                 raise ListStopped("SimpliSafe's invoice viewer did not close.") from None
 
@@ -433,10 +491,12 @@ def download_bill(page, date: str, out_path: Path, *, document_id: str) -> bool:
     bill = _RUN["bills"].get(document_id)
     if not bill or bill.date != date:
         raise ListStopped("The requested invoice no longer matches the monitoring history.")
-    _, visible = _view(page)
-    if visible.get(document_id) != bill:
+    # The bill's own page is brought up by the paginator's buttons. A
+    # history that moved since it was listed is listed again from its first
+    # page, and a bill that is not where that listing puts it stops the list.
+    if not _show(page, bill):
         collect_download_docs(page)
-        if _RUN["bills"].get(document_id) != bill:
+        if _RUN["bills"].get(document_id) != bill or not _show(page, bill):
             raise ListStopped("The requested invoice disappeared from the monitoring history.")
     html = _invoice_html(page, bill)
     if not html:

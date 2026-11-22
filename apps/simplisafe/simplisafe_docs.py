@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import pressing
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core import tabs
@@ -927,6 +928,10 @@ def main(argv=None):
         else:
             build_parser().print_help()
             return 0
+    except pressing.Stop as stop:
+        # A press it would not make stops the run here, with the reason said
+        # and the failure file written.
+        pressing.stop_run(app, stop)
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
         return 130

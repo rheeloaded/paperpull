@@ -10,6 +10,9 @@ PDF after matching the invoice number and date to the history.
    to archive the history.
 
 Bills are stored in the provider's **Bills** folder. The connector uses the
-signed-in browser's monitoring-history request to load older invoices.
+table's own Next page and Previous page buttons to reach older invoices,
+and changes none of SimpliSafe's requests. A page whose rows do not
+change after a press, or that disagrees with the invoice count, stops the
+run with nothing filed from it.
 An offline preview uses the saved discovery list and keeps the previous
 download's file list.
