@@ -284,3 +284,36 @@ def test_offline_preview_uses_saved_discovery_and_preserves_last_download(
     assert summary["NEW files this run"].strip() == "0"
     assert last_files.read_text() == "previous file"
     assert not list(tmp_path.rglob("*.pdf"))
+
+
+@pytest.mark.parametrize("account", ["Payroll ••5678", "Operations", "", "Brokerage ••1234"])
+def test_a_row_of_an_account_it_does_not_know_stops_the_list(account):
+    # A renamed or new kind of deposit account, or a row still loading,
+    # skipped here would leave its statements out of a list called whole.
+    with pytest.raises(site.ListStopped, match="does not recognize"):
+        site._parse_rows([row(), row(SAVINGS, account)])
+
+
+def test_a_table_with_no_rows_is_not_an_empty_list(page):
+    page.evaluate("() => document.querySelectorAll('tr').forEach((r, i) => i && r.remove())")
+    with pytest.raises(site.ListStopped, match="no statements"):
+        site.collect_download_docs(page)
+
+
+@pytest.mark.parametrize("control", [
+    "<button>Next</button>", "<a href='#'>Load more</a>",
+    "<button aria-label='Next page'>&gt;</button>",
+])
+def test_a_table_that_shows_only_part_of_its_list_stops(page, control):
+    page.evaluate("(html) => document.body.insertAdjacentHTML('beforeend', html)", control)
+    with pytest.raises(site.ListStopped, match="only part"):
+        site.collect_download_docs(page)
+
+
+@pytest.mark.parametrize("control", [
+    "<button disabled>Next</button>", "<button aria-disabled='true'>Next page</button>",
+    "<button hidden>Load more</button>",
+])
+def test_a_pager_with_nothing_more_to_show_reads_the_list(page, control):
+    page.evaluate("(html) => document.body.insertAdjacentHTML('beforeend', html)", control)
+    assert {d.account for d in site.collect_download_docs(page)} == {"Checking", "Savings"}

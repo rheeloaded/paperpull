@@ -1054,7 +1054,8 @@ found a bug and diagnosed it to the line.
   a student loan account back to 2019, and the Interactive Brokers app,
   run against five years of monthly statements.
 - [@solkennedy](https://github.com/solkennedy), the Marin Water app, built and run on their own account,
-  bills that share a date told apart by their PDFs.
+  bills that share a date told apart by their PDFs, the Cloudflare invoices
+  app and the Mercury statements app, each run on their own account.
 - [@JasperDale19](https://github.com/JasperDale19), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County

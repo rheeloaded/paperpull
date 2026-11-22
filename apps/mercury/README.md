@@ -15,5 +15,7 @@ inside each PDF before saving it in Statements.
 
 The connector processes monthly deposit PDFs for the organization and
 filters visible in the browser. It recognizes Checking and Savings rows
-with a displayed account suffix. For Mercury IO credit statements, sweep
+with a displayed account suffix. A row of another kind of account it
+does not know, an empty table, or a list shown a page at a time stops the
+run, so nothing is left out quietly. For Mercury IO credit statements, sweep
 summaries, tax documents, or custom date exports, use Mercury's portal.

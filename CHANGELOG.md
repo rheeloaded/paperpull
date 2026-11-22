@@ -15,7 +15,9 @@ All notable changes to PaperPull are recorded here. Versioning follows
   presses only the checkbox of a statement row it has verified, takes the
   PDF from the link Mercury makes for that row, and files it only once
   the PDF shows the row's account ending and month. Resume reads the
-  open organization's list again first. It signs in on port 9324.
+  open organization's list again first. A row of an account it does not
+  know, a table with no rows and a list shown a page at a time stop the
+  run rather than pass for the whole list. It signs in on port 9324.
   Contributed by @solkennedy.
 
 ## [0.70.0] - 2026-11-20

@@ -286,7 +286,7 @@ class App:
                 print("Keep the window open, then run: paperpull mercury pilot")
             else:
                 print("Could not read the Mercury statement list.")
-                print("Open Documents & Data → Statements in that window.")
+                print("Open Documents & Data, then Statements, in that window.")
         self.close()
 
     def _in_scope(self, doc: Document) -> bool:

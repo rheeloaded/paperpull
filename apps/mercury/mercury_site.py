@@ -30,6 +30,10 @@ MONTHS.update({name.lower(): n for n, name in enumerate(calendar.month_name) if 
 ROW_MONTH = re.compile(r"([A-Za-z]+) (\d{4})")
 MASKED_ACCOUNT = re.compile(r"(?:[•*xX][ \t]*){2,}(\d{4})$")
 DEPOSIT_LABEL = re.compile(r"(?:(?:mercury|business|personal) )?(checking|savings)", re.I)
+# Rows Mercury lists that are not deposit statements, by their account
+# label. Any other label stops the list, since a renamed or new kind of
+# deposit account skipped here would never be downloaded or said (#241).
+OTHER_LABEL = re.compile(r"(?:mercury )?(?:credit|treasury|io|sweep program)", re.I)
 PERIOD_DATE = r"[A-Za-z]+ \d{1,2}, \d{4}"
 PDF_PERIOD = re.compile(rf"({PERIOD_DATE})\s*[-–—]\s*({PERIOD_DATE})(?:\s*\(\d+ days?\))?", re.I)
 PDF_ACCOUNT = re.compile(r"Account Number\s*[: ]?\s*(\d{4,24})", re.I)
@@ -39,6 +43,8 @@ RATE_LIMIT_MARKERS = re.compile(r"too many requests|rate limit", re.I)
 
 # The first row names both columns, even when the table uses td for headings.
 # Read the account suffix only to verify the PDF. It never leaves the site layer.
+# A control that would show more rows, enabled and visible, means the table
+# holds only part of the list (#241).
 _SNAPSHOT = r"""() => {
     const tables = [...document.querySelectorAll('table')].filter(t => {
         const cells = t.rows[0]?.cells;
@@ -46,6 +52,12 @@ _SNAPSHOT = r"""() => {
             && cells?.[2]?.innerText.trim() === 'Account';
     });
     if (tables.length !== 1) return null;
+    const more = /^(?:next|next page|load more|show more|view more|see more)$/i;
+    const pager = [...document.querySelectorAll('button, a, [role=button]')].some(c =>
+        c.getClientRects().length && !c.disabled && c.getAttribute('aria-disabled') !== 'true'
+        && [c.innerText, c.getAttribute('aria-label'), c.title]
+            .some(text => more.test((text || '').trim())));
+    if (pager) return {more: true};
     return [...tables[0].rows].slice(1).filter(r => r.getClientRects().length).map(r => {
         const box = r.querySelector('input[type=checkbox]');
         return {
@@ -142,7 +154,7 @@ def _read_rows(page):
     if looks_signed_out(page):
         raise SessionExpired()
     if not is_statement_page_url(page.url):
-        raise ListStopped("Open Documents & Data → Statements in the Mercury window.")
+        raise ListStopped("Open Documents & Data, then Statements, in the Mercury window.")
     try:
         page.locator("table").filter(has_text="Statement period").first.wait_for(
             state="visible", timeout=8000
@@ -154,6 +166,11 @@ def _read_rows(page):
         raise ListStopped("The Mercury statement table did not appear.") from None
     if rows is None:
         raise ListStopped("The Mercury statement table could not be identified.")
+    if isinstance(rows, dict):
+        raise ListStopped("Mercury shows only part of the statement list. Show every "
+                          "statement on one page in the Mercury window, then try again.")
+    if not rows:
+        raise ListStopped("The Mercury statement table showed no statements yet.")
     return rows
 
 
@@ -164,7 +181,10 @@ def _parse_rows(rows) -> dict[str, Statement]:
         account_label = (row["account"][:account_match.start()] if account_match else row["account"]).strip()
         deposit = DEPOSIT_LABEL.fullmatch(account_label)
         if not deposit:
-            continue
+            if OTHER_LABEL.fullmatch(account_label):
+                continue
+            raise ListStopped("A Mercury statement row names an account this app does "
+                              "not recognize, so the list may not be whole.")
         if not account_match:
             raise ListStopped("A Mercury deposit row no longer shows its account suffix.")
         period = ROW_MONTH.fullmatch(row["period"])
