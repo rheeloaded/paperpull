@@ -40,8 +40,8 @@ matches wins.
 | anything else | `Sonstige Dokumente` | `Other Document` |
 
 The app never clicks, types or submits anything in the Postbox (an account
-tab is followed by its link, see below). Each time
-it lists, it opens the two list addresses itself, even when the Postbox is
+tab is followed by its link, see below). Each time it lists, it opens the
+two list addresses itself, even when the Postbox is
 already on screen, so a search or filter you left set in the window is not
 read as the whole list. It waits for the rows to settle, scrolls the list
 so rows that load on scrolling appear, and reads them. Each PDF is fetched
@@ -86,23 +86,34 @@ account. A run reads that one as it always did, then follows each other
 tab by the link the page shows for it right then, a plain page load as your
 click makes, and reads that account's list. Before it reads a list, and
 before each download, it checks that exactly one tab is shown selected and
-that it is the tab it followed, among the same tabs in the same order. It
-stops that list, saving nothing, when it is not, when which tab is selected
-cannot be told, when two tabs carry one name, when a tab offers to add or
-open an account, when a tab's link is not ING's own list page, or when
-there are more than 20 tabs. It also remembers which tab the Postbox opened
-on (as a fingerprint in `ing-accounts.json`, never the name), and stops if
-a later run finds it opening on another, so no account's documents are
-ever filed as yours. Discover says how many documents each account had, by
-its place, never its name.
+that it is the tab it followed, among the same tabs in the same order, and
+stops that list, saving nothing, when it is not or when a tab's link is not
+ING's own list page. An unread count such as "(2)" after a tab's name is
+not part of the name.
+
+When the tabs cannot be read as one row of accounts (which tab is selected
+cannot be told, two tabs carry one name, a tab offers to add or open an
+account, or there are more than 20), your own account is still read as it
+always was, since the list's own address opens it whatever the tabs show.
+Discover then says that only that account was read and why, and leaves a
+failure file for mapping the page. It also remembers which tab the Postbox
+opened on, as a salted fingerprint in `ing-accounts.json` rather than the
+name, and stops if a later run finds it opening on another, so no account's
+documents are ever filed as yours. Once it has, a run that finds no tabs at
+all says so. Discover says how many documents each account had, by its
+place, never its name.
 
 Your own account's documents are filed and named exactly as before. Each
 other account's go into a folder named after its tab inside the folder of
 their kind, such as `Kontoauszuege\Mia Muster\`, and the account is part of
 each record's key, so two accounts' documents are never taken for one.
 Rename and a documents folder keep them in that folder. When the folder
-would leave no room for the file under `max_path_length`, the document is
-marked failed rather than saved beside your own.
+would leave no room for the file under `max_path_length`, the download is
+marked failed rather than saved beside your own. Rename and the documents
+folder's Move do not check that, so a documents folder whose path is much
+longer than the output folder's can put such a file in the folder of its
+kind. A document set aside in `Manual Review` goes there whichever account
+it is from.
 
 Some rows are passed over, and Discover says how many and why. These are
 rows the Postbox marks unread when `include_unread` is `false`, rows with
@@ -164,8 +175,8 @@ to the others, and the next run tries it again.
 This is a bank account, and may hold a credit card and a securities account.
 The site can transfer money, set up standing orders, buy and sell
 securities, change limits and lock cards. This app activates no control at
-all. It reads the rows of the two Postbox lists, follows the link of each account tab (a plain page load), and fetches their download
-links. A link is fetched only when it is `https` on `banking.ing.de` under
+all. It reads the rows of the two Postbox lists, follows the link of each
+account tab as a plain page load, and fetches the rows' download links. A link is fetched only when it is `https` on `banking.ing.de` under
 `/app/`, and never when its address carries a word of an action, such as
 logout, delete, archive, move, mark read, unread, transfer, payment,
 setting, cancel or lock, in German or English, as written or decoded. The
@@ -186,8 +197,9 @@ The single-account test does not cover every case.
 - Account tabs (#169) were mapped from one account's recordings, which do
   not show how ING marks the selected tab. The app reads a mark in aria or
   a class word such as active or selected, or the one tab whose classes are
-  the others' and more, and stops when none of these tells. Diagnose counts
-  the tab bars, tabs and marked tabs it finds, numbers only.
+  the others' and more. When none of these tells, only your own account is
+  read. Diagnose counts the tab bars, tabs and marked tabs it finds, and
+  boxes of links it did not read as tabs, numbers only.
 - A tab renamed in ING is a new folder, and its documents are downloaded
   again into it. When the tab the Postbox opens on is renamed, the run
   stops. Take `ing-accounts.json` out of the output folder to go on.

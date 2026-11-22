@@ -19,9 +19,10 @@ All notable changes to PaperPull are recorded here. Versioning follows
   such as `Kontoauszuege\<tab>`, and Rename and the documents folder keep
   them there. Each tab is followed by the link the page shows for it right
   then, and before every list and every download the app checks that the
-  tab shown as selected is the one it followed. A tab it cannot tell,
-  two tabs with one name, a link it does not follow, or a Postbox that
-  opens on another account than before stop the list, saving nothing.
+  tab shown as selected is the one it followed, and a list that lands
+  elsewhere stops, saving nothing. Tabs it cannot read as accounts leave
+  your own account read as before, and Discover says so and why. A
+  Postbox that opens on another account than before stops the run.
   Discover says how many documents each account had, by number, and the
   support report counts the tabs. Thanks to @MelleD for the recordings.
 

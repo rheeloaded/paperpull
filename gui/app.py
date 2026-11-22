@@ -2700,7 +2700,9 @@ _TEMPLATE_SKIP = {".venv", "__pycache__", ".pytest_cache", "tests", "Backups",
 
 _PERSONAL_RUNTIME_FILES = ("config.json", "progress.json", "discovery.json",
                            "last-listing.json", "panel-runs.json", "plans.json",
-                           "new-this-run.txt", "run-summary.txt")
+                           "new-this-run.txt", "run-summary.txt",
+                           # ING's home account, remembered per install (#169).
+                           "ing-accounts.json")
 
 
 # The rows a ledger open in another program could not take, kept beside it

@@ -40,6 +40,7 @@ import argparse
 import json
 import logging
 import random
+import secrets
 import re
 import sys
 import time
@@ -229,7 +230,11 @@ class App:
         # one remembered here stops rather than file another account's
         # documents as the home account's.
         self.accounts_json = self.paths.root / ACCOUNTS_FILE
-        site.remember_home(self._home_remembered())
+        home, salt = self._home_remembered()
+        # A salt of this install's own, so the fingerprint is no lookup of a
+        # name. Written with the first home seen (_remember_home).
+        self._home_salt = salt or secrets.token_hex(16)
+        site.remember_home(home, self._home_salt)
 
         self._pw = None
         self._browser = None
@@ -246,15 +251,20 @@ class App:
 
     # -- infrastructure ----------------------------------------------------
 
-    def _home_remembered(self) -> str:
-        """The home account's tab digest an earlier run wrote, or "" when
-        there is none or the file cannot be read as one."""
+    def _home_remembered(self) -> tuple:
+        """The home account's tab digest an earlier run wrote and its salt,
+        or ("", "") when there is none or the file cannot be read as one."""
         try:
             data = json.loads(self.accounts_json.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return ""
-        home = data.get("home") if isinstance(data, dict) else None
-        return home if isinstance(home, str) and re.fullmatch(r"[0-9a-f]{32}", home) else ""
+            return "", ""
+        if not isinstance(data, dict):
+            return "", ""
+        home, salt = data.get("home"), data.get("salt")
+        if not (isinstance(home, str) and re.fullmatch(r"[0-9a-f]{32}", home)
+                and isinstance(salt, str) and re.fullmatch(r"[0-9a-f]{32}", salt)):
+            return "", ""
+        return home, salt
 
     def _remember_home(self) -> None:
         """Write down the home account's tab this listing saw, the first
@@ -262,9 +272,18 @@ class App:
         seen = site.home_seen()
         # One remembered already is kept. A listing that saw another home
         # stopped before it got here (ing_site._check_home).
-        if not seen or self._home_remembered():
+        if not seen or self._home_remembered()[0]:
             return
-        atomic_write_text(self.accounts_json, json.dumps({"home": seen}) + "\n")
+        atomic_write_text(self.accounts_json,
+                          json.dumps({"home": seen, "salt": self._home_salt}) + "\n")
+
+    @staticmethod
+    def _shown_key(doc) -> str:
+        """A record's key for a log line or the screen, with the account tab,
+        a person's name, left out (#169)."""
+        if not doc.tab:
+            return doc.key
+        return doc.key.replace("@%s:" % sanitize_component(doc.tab), "@(account tab):", 1)
 
     def _setup_logging(self):
         logfile = self.paths.logs / f"run-{datetime.now():%Y%m%d-%H%M%S}.log"
@@ -582,6 +601,14 @@ class App:
             for n, count in enumerate(per_account, 1):
                 which = "the one the Postbox opens on" if n == 1 else f"tab {n}"
                 print(f"  Account {n} ({which}): {count} document(s) listed")
+        # Tabs shown that this run could not read leave the other accounts
+        # unread, which is said, never passed over (#169).
+        for why in site.tabs_not_read():
+            print(f"\n!! Only the account the Postbox opens on was read, since {why}.")
+            print("   Any other account behind a tab was not read this run. Run Diagnose with")
+            print("   the Postbox open and attach its support report to the ING issue.")
+        if site.tabs_not_read():
+            self.write_failure("read the account tabs", "the account tabs could not be read")
 
         if not quiet:
             docs = [Document.from_dict(v) for v in self.discovery.data.values()]
@@ -688,7 +715,7 @@ class App:
                 # run stops here, with nothing recorded against this one.
                 self.list_changed(stop)
             except Exception as e:
-                log.exception("Failed on %s", doc.key)
+                log.exception("Failed on %s", self._shown_key(doc))
                 self._record(doc, State.FAILED, notes=str(e))
                 self.stats["failed"] += 1
             self._delay()
@@ -905,9 +932,9 @@ class App:
             # A Download again that saved nothing kept the saved copy's
             # record as it was, so it is said here (paperpull_core.saved_copy).
             if saved_copy.tried(self, d.key):
-                problems.append(f"{d.key}: {saved_copy.tried(self, d.key)}")
+                problems.append(f"{self._shown_key(d)}: {saved_copy.tried(self, d.key)}")
             if state != State.COMPLETED.value:
-                problems.append(f"{d.key}: {state} - {rec.get('notes', '')}")
+                problems.append(f"{self._shown_key(d)}: {state} - {rec.get('notes', '')}")
         print("\n" + "-" * 70)
         if problems:
             print("Needs attention:")

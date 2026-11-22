@@ -145,7 +145,7 @@ def test_runtime_data_from_a_checkout_never_reaches_an_install(templates, settin
         "new-this-run.txt", "run-summary.txt", "Bank Document Index.csv",
         "Bank Document Index.CSV.BAK", "statement.PDF", "statement.zip",
         "run.log", "progress.json.bak", "config.json.save", "plans.json",
-        "plans.json.bak", "other.json.orig",
+        "plans.json.bak", "other.json.orig", "ing-accounts.json",
     )
     for name in private:
         (source / name).write_text("source account data", encoding="utf-8")

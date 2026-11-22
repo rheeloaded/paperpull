@@ -609,22 +609,52 @@ _TAB_REFUSED = re.compile(r"hinzuf(ue|ü)g|er(oe|ö)ffn|\bneu(es|en)?\b|\bnew\b|
                           r"log\s*out|logout|sign\s*out|abmeld", re.I)
 
 
-def tab_digest(label: str) -> str:
+# What a tab may show beside its name that is not the name, an unread count
+# such as "(2)" or a word saying it is the selected one. Taken off, so a
+# count that changes never makes the account another key and folder.
+_TAB_NOISE = re.compile(r"(?:\s*[(\[]\s*\d+(?:\s*(?:neue?n?|ungelesene?n?|new|unread))?\s*[)\]]"
+                        r"|\s*[(\[,]?\s*(?:ausgew(?:ä|ae)hlt|aktiv|selected|current)\s*[)\]]?)\s*$",
+                        re.I)
+
+
+def tab_label(text: str) -> str:
+    """A tab's name as the page shows it, without an unread count or a word
+    saying it is selected after it (_TAB_NOISE)."""
+    label = _flat(text)
+    while True:
+        shorter = _TAB_NOISE.sub("", label).strip()
+        if shorter == label or not shorter:
+            return label
+        label = shorter
+
+
+def tab_digest(label: str, salt: str = "") -> str:
     """What the home account is remembered by, never its label, which is a
-    person's name."""
-    return _digest("ing-tab", _flat(label))[:32]
+    person's name. Salted with a value of the install's own (remember_home),
+    so the fingerprint is no lookup of a name."""
+    return _digest("ing-tab", salt or _home["salt"], _flat(label))[:32]
 
 
 # The home account's tab, as remembered from an earlier run ("stored") and
-# as first seen in this one ("seen"), by tab_digest.
-_home: dict = {"stored": "", "seen": ""}
+# as first seen in this one ("seen"), by tab_digest with "salt".
+_home: dict = {"stored": "", "seen": "", "salt": ""}
+# What kept this listing to the home account although tabs were shown.
+_tabs_note: List[str] = []
 
 
-def remember_home(digest: str) -> None:
+def remember_home(digest: str, salt: str = "") -> None:
     """The home account's tab a run starts from, as an earlier run saw it,
-    or "" when none has been seen."""
+    or "" when none has been seen, and the install's salt for it."""
     _home["stored"] = digest or ""
     _home["seen"] = ""
+    _home["salt"] = salt or ""
+    del _tabs_note[:]
+
+
+def tabs_not_read() -> List[str]:
+    """Why the account tabs were left unread this run, so only the account
+    the Postbox opens on was read. Names no tab."""
+    return list(dict.fromkeys(_tabs_note))
 
 
 def home_seen() -> str:
@@ -685,7 +715,7 @@ def account_tabs(page) -> dict:
                 or not isinstance(t.get("classes"), list)
                 or any(type(c) is not str for c in t["classes"])):
             raise ListStopped(_STRANGE)
-        tabs.append({"label": _flat(t["label"]), "href": t["href"], "marked": t["marked"],
+        tabs.append({"label": tab_label(t["label"]), "href": t["href"], "marked": t["marked"],
                      "classes": list(t["classes"])})
     labels = [t["label"] for t in tabs]
     if any(not label or len(label) > 120 for label in labels):
@@ -693,7 +723,9 @@ def account_tabs(page) -> dict:
     if any(_TAB_REFUSED.search(label) for label in labels):
         raise ListStopped("the account tabs hold a link that is not an account's")
     folders = [tab_folder(label) for label in labels]
-    if any(not f for f in folders):
+    # A folder the core takes as it stands, so a record keeps it for good
+    # (storage._account_folder_of reads it again by the same rule).
+    if any(not f or tab_folder(f) != f for f in folders):
         raise ListStopped("an account tab's name leaves no folder name")
     if (len({label.casefold() for label in labels}) != len(labels)
             or len({f.casefold() for f in folders}) != len(folders)):
@@ -726,23 +758,48 @@ def _safe_tab(href: str, source: str) -> bool:
     return (_list_area(href) == source and bool(parts.query) and _safe_download(href))
 
 
+def _home_bar(page) -> Optional[dict]:
+    """The tabs on a list just opened by its plain address, the home account
+    checked against the one remembered, or None when the tabs cannot be
+    read. The plain address opens the first account whatever the tab bar
+    shows (MelleD, #169), so tabs this app cannot read leave the home
+    account to be read as it always was, and why is noted for Discover to
+    say (tabs_not_read). Only a home account other than the remembered one
+    stops the list."""
+    try:
+        bar = account_tabs(page)
+    except ListStopped as e:
+        _tabs_note.append(str(e))
+        return None
+    if not bar["labels"]:
+        if _home["stored"]:
+            _tabs_note.append("the Postbox showed no account tabs this time")
+        return bar
+    if bar["selected"] is None:
+        _tabs_note.append("which account tab is selected cannot be told")
+        return None
+    _check_home(bar["labels"][bar["selected"]])
+    return bar
+
+
 def _enter_account(page, source: str, tab: str) -> list:
     """With `source`'s list opened by its plain address, have `tab`'s list
     on screen, "" for the home account, and answer the labels of the tabs
     shown (none when there is no tab bar). Every tab is checked on the way:
     the plain address opens the home account, and a tab followed lands with
     exactly that tab selected among the same tabs in the same order. Any
-    other answer raises ListStopped, and nothing of that list is read."""
+    other answer raises ListStopped, and nothing of that list is read.
+    For the home account, tabs that cannot be read leave it read as it
+    always was (_home_bar)."""
+    if not tab:
+        bar = _home_bar(page)
+        return bar["labels"] if bar else []
     bar = account_tabs(page)
     if not bar["labels"]:
-        if tab:
-            raise ListStopped("the Postbox no longer shows the account tabs")
-        return []
+        raise ListStopped("the Postbox no longer shows the account tabs")
     if bar["selected"] is None:
         raise ListStopped("which account tab is selected cannot be told")
     _check_home(bar["labels"][bar["selected"]])
-    if not tab:
-        return bar["labels"]
     mine = [i for i, label in enumerate(bar["labels"]) if label == tab]
     if len(mine) != 1 or mine[0] == bar["selected"]:
         raise ListStopped("the Postbox no longer shows that account's tab")
@@ -971,12 +1028,9 @@ def _accounts(page, source: str) -> List[str]:
     first, then every other tab in the order the page shows them. Opens the
     list by its plain address."""
     _open_area(page, source, again=True)
-    bar = account_tabs(page)
-    if not bar["labels"]:
+    bar = _home_bar(page)
+    if not bar or not bar["labels"]:
         return [""]
-    if bar["selected"] is None:
-        raise ListStopped("which account tab is selected cannot be told")
-    _check_home(bar["labels"][bar["selected"]])
     return [""] + [label for i, label in enumerate(bar["labels"]) if i != bar["selected"]]
 
 

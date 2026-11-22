@@ -102,8 +102,9 @@ class TabbedBank(Bank):
             labels = list(self.labels_shown)
         tabs = []
         for label in labels:
-            i = self.accounts.index(label) if label in self.accounts else 0
-            selected = label == self.current
+            name = site.tab_label(label)
+            i = self.accounts.index(name) if name in self.accounts else 0
+            selected = name == self.current
             href = self.hrefs.get(label, "%s?x=tab%d-%d" % (LISTS[area], self.version, i))
             marked = (self.mark in ("class", "aria-selected", "aria-current") and selected) \
                 or self.mark == "two" and labels.index(label) < 2
@@ -157,6 +158,17 @@ def home(tmp_path, monkeypatch, capsys):
     site.remember_home("")
     yield TabHome(tmp_path, monkeypatch, capsys)
     site.remember_home("")
+
+
+def home_only(home, said, why):
+    """The listing read the account the Postbox opens on alone, said why,
+    followed no tab and left a failure file for mapping the page."""
+    known = home.store("discovery.json")
+    assert known and all(not k.startswith("@") for k in known)
+    assert home.bank.tab_gotos == []
+    assert "Only the account the Postbox opens on was read, since %s" % why in said
+    assert list((home.out / "Diagnostics").glob("failure-*.json"))
+    assert names_said(said) == []
 
 
 def three_accounts(home):
@@ -279,13 +291,13 @@ def test_each_way_the_selected_tab_is_marked_is_read(home, mark):
 
 
 @pytest.mark.parametrize("mark", ["none", "two"])
-def test_a_selected_tab_that_cannot_be_told_stops_the_listing(home, mark):
+def test_a_selected_tab_that_cannot_be_told_reads_only_the_home_account_and_says_so(
+        home, mark):
     three_accounts(home)
     home.bank.mark = mark
     code, said = home.run("--discover")
-    assert code == 1 and home.store("discovery.json") == {}
-    assert "which account tab is selected cannot be told" in said
-    assert home.bank.tab_gotos == []
+    assert code == 0, said
+    home_only(home, said, "which account tab is selected cannot be told")
 
 
 def test_a_tab_that_opens_another_account_stops_the_listing(home):
@@ -331,6 +343,9 @@ def test_a_postbox_that_opens_on_another_account_than_before_stops(home):
     assert home.run("--discover")[0] == 0
     remembered = json.loads((home.out / docs.ACCOUNTS_FILE).read_text(encoding="utf-8"))
     assert re.fullmatch(r"[0-9a-f]{32}", remembered["home"])
+    assert re.fullmatch(r"[0-9a-f]{32}", remembered["salt"])
+    # Salted, so the fingerprint is no lookup of a name.
+    assert remembered["home"] != site.tab_digest(OWN, "0" * 32)
     assert names_said(json.dumps(remembered)) == []
     # ING now opens Mia's account on the plain address.
     b = home.bank
@@ -373,25 +388,72 @@ def test_a_postbox_of_one_account_writes_no_home_and_reads_as_always(home):
     ([OWN, ""], "carries no name"),
     ([OWN, "x" * 121], "carries no name"),
 ])
-def test_tabs_this_app_does_not_read_as_accounts_stop_the_listing(home, labels, why):
+def test_tabs_this_app_does_not_read_as_accounts_leave_only_the_home_account_read(
+        home, labels, why):
     home.bank.by_account[OWN]["postbox"] = [statement("O1", 1)]
     home.bank.labels_shown = labels
     code, said = home.run("--discover")
-    assert code == 1 and home.store("discovery.json") == {}
+    assert code == 0, said
     assert why in said
-    assert home.bank.tab_gotos == []
+    home_only(home, said, "")
 
 
-def test_more_tabs_than_this_app_reads_stop_the_listing(home):
+def test_more_tabs_than_this_app_reads_leave_only_the_home_account_read(home):
+    home.bank.by_account[OWN]["postbox"] = [statement("O1", 1)]
     home.bank.labels_shown = [OWN] + ["Kind %d" % n for n in range(20)]
     code, said = home.run("--discover")
-    assert code == 1 and "more account tabs than this app reads" in said
+    assert code == 0 and "more account tabs than this app reads" in said
+    home_only(home, said, "")
 
 
-def test_two_tab_bars_stop_the_listing(home):
+def test_two_tab_bars_leave_only_the_home_account_read(home):
+    home.bank.by_account[OWN]["postbox"] = [statement("O1", 1)]
     home.bank.bars = 2
     code, said = home.run("--discover")
-    assert code == 1 and "more than one row of account tabs" in said
+    assert code == 0 and "more than one row of account tabs" in said
+    home_only(home, said, "")
+
+
+def test_a_childs_tab_read_with_an_unread_count_keeps_its_key_and_folder(home):
+    home.bank.by_account[MIA]["postbox"] = [statement("M1", 1)]
+    assert home.run_all()[0] == 0
+    first = home.files()
+    home.bank.labels_shown = [OWN, MIA + " (3)", LEO + " (ausgewählt)"]
+    home.bank.by_account[MIA]["postbox"].append(statement("M2", 2))
+    code, said = home.run_all()
+    assert code == 0, said
+    assert home.bank.fetched == ["M2"]
+    assert all(p.startswith("Kontoauszuege/Mia Muster/") for p in home.files()), home.files()
+    assert set(first) <= set(home.files())
+
+
+def test_a_tab_name_the_folder_rule_would_change_again_is_not_an_account_folder(home):
+    home.bank.by_account[OWN]["postbox"] = [statement("O1", 1)]
+    home.bank.labels_shown = [OWN, "Con.x"]
+    code, said = home.run("--discover")
+    assert code == 0 and "leaves no folder name" in said
+    home_only(home, said, "")
+
+
+def test_tabs_gone_after_a_home_account_was_remembered_are_said(home):
+    three_accounts(home)
+    assert home.run("--discover")[0] == 0
+    home.bank.bars = 0
+    code, said = home.run("--discover")
+    assert code == 0
+    assert ("Only the account the Postbox opens on was read, since the Postbox showed no "
+            "account tabs this time") in said
+
+
+def test_a_childs_document_that_fails_leaves_no_name_in_the_log(home, caplog):
+    home.bank.by_account[MIA]["postbox"] = [statement("M1", 1)]
+    home.bank.answer_with["M1"] = "page"
+    with caplog.at_level("INFO"):
+        code, said = home.run_all()
+    assert home.failed()
+    logs = "\n".join(r.getMessage() for r in caplog.records)
+    assert "Failed on" in logs and "@(account tab):" in logs
+    assert names_said(logs) == [] and names_said(said) == []
 
 
 @pytest.mark.parametrize("href", [

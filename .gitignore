@@ -26,6 +26,8 @@ panel-runs.json
 # NetBenefits keeps the plans of a sign-in with several here, with the
 # site's own plan and employer numbers in their addresses.
 plans.json
+# ING remembers which Postbox tab is the account's own here (#169).
+ing-accounts.json
 new-this-run.txt
 run-summary.txt
 # ...and any hand-made copy of them. A file like "discovery.json.pre-fix" or

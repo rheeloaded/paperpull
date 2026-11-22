@@ -174,16 +174,17 @@ def test_a_childs_document_is_fetched_from_its_own_tab(bank, tmp_path):
     assert bank.tab_page.evaluate("window.clicked") is False
 
 
-def test_tabs_whose_selected_one_cannot_be_told_stop_the_listing(bank):
+def test_tabs_whose_selected_one_cannot_be_told_leave_only_the_home_account_read(bank):
     bank.mark = "none"
-    with pytest.raises(site.ListStopped, match="selected cannot be told"):
-        listing(bank)
+    assert {r["tab"] for r in listing(bank)} == {""}
+    assert site.tabs_not_read() == ["which account tab is selected cannot be told"]
+    assert not any("x=t" in url for _m, url in bank.requests)
 
 
-def test_two_tab_bars_stop_the_listing(bank):
+def test_two_tab_bars_leave_only_the_home_account_read(bank):
     bank.bar = "two"
-    with pytest.raises(site.ListStopped, match="more than one row of account tabs"):
-        listing(bank)
+    assert {r["tab"] for r in listing(bank)} == {""}
+    assert site.tabs_not_read() == ["the Postbox shows more than one row of account tabs"]
 
 
 def test_a_postbox_with_no_tab_bar_reads_as_it_always_did(bank):
