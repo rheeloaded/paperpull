@@ -185,7 +185,10 @@ def looks_signed_out(page) -> bool:
     if _origin(page.url) == ("https", AUTH_HOST):
         return True
     try:
-        return is_safe_url(page.url) and bool(page.locator("input[type=password]:visible").count())
+        # Every password field counts, a hidden one too, since a field kept
+        # out of sight may be the next step of a sign-in
+        # (core/tests/test_every_app_counts_every_password_field.py).
+        return is_safe_url(page.url) and bool(page.locator("input[type=password]").count())
     except BrowserError:
         # A page between two documents cannot be read. Nothing is taken
         # from it, and the read of the list that follows decides.

@@ -132,8 +132,11 @@ def is_statement_page_url(url: str) -> bool:
 def looks_signed_out(page) -> bool:
     if not is_safe_url(page.url):
         return False
+    # Every password field counts, a hidden one too, since a field kept out
+    # of sight may be the next step of a sign-in
+    # (core/tests/test_every_app_counts_every_password_field.py).
     return (urlsplit(page.url).path.rstrip("/") in LOGIN_URL_MARKERS
-            or bool(page.locator("input[type=password]:visible").count()))
+            or bool(page.locator("input[type=password]").count()))
 
 
 def detect_security_challenge(page):
