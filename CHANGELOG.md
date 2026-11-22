@@ -9,6 +9,23 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Record steps for support keeps three things a recording lost (#170,
+  #178).** A site that sends its calls in a batch, one list of several
+  GraphQL calls, now has each call's field names and operation name kept,
+  and each answer in the batch is described on its own rather than the
+  first alone. A download now keeps where it came from, its address shaped
+  like every other one, the names of its parameters and never their values,
+  and whether it was off the provider's site, even when the tab it came
+  from closes at once (a tab that started a download as it opened could
+  have the download pass unseen). A call the provider's own page makes to
+  a host the app does not list yet, where a provider keeps its API, is kept
+  and marked as another host, rather than dropped. Calls from anyone else's
+  frame stay counted only, and those calls may take at most half of a
+  recording's room. Every new field is built from the fixed word list as it
+  is made, and the query text, variables, data in an address and parameter
+  values are never read into it. `tools/read_recording.py` prints them.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
