@@ -128,7 +128,8 @@ def test_a_done_old_record_is_left_too_and_its_bill_still_saved(run):
     done = {"state": "completed", "downloaded_ok": True, "pdf_path": ""}
     (r.out / "progress.json").write_text(json.dumps({key: done}), encoding="utf-8")
     said, result, _ = r.main("--all", "--yes")
-    assert ("1 " + LEFT) in said and result["new_files"] == len(ENDS), said
+    # Saved already, so it is left without a word on every run.
+    assert LEFT not in said and result["new_files"] == len(ENDS), said
     assert r.progress()[key] == done
     # The id record of that day keeps the plain name, nothing is told apart.
     assert "id:bill-1111-00001-2026-10-11" in r.progress()
@@ -236,6 +237,7 @@ def test_a_refused_bill_says_it_was_refused(run):
     [{"note": "fetched", "host": site.HOST, "status": 403, "type": "text/html"},
      {"note": "refused, the history still reads"}],
     [{"note": "too large for a bill"}], [{"note": "fetch failed", "error": "TimeoutError"}],
+    [{"note": "no pdf address"}],
     [], None, ["x", 5, {"note": None}],
 ])
 def test_every_reason_and_fact_keeps_its_words(trace):
@@ -243,3 +245,21 @@ def test_every_reason_and_fact_keeps_its_words(trace):
     assert _step(reason) == reason and _kept(reason), reason
     assert _kept(facts), facts
     assert "text/html" not in json.dumps(facts) and site.HOST not in json.dumps(facts)
+
+
+def test_an_address_that_cannot_be_made_says_so():
+    trace = []
+    assert site._fetch(Page(), "", None, trace) is False
+    assert trace == [{"note": "no pdf address"}]
+    assert docs.why_not_saved(trace)[0] == "no pdf address could be made for the bill"
+
+
+def test_a_done_old_record_beside_an_unsaved_one_counts_only_the_unsaved(run):
+    page = Page()
+    r = run(page)
+    old = seed(r, [legacy("2026-10-11"), legacy("2026-09-11")])
+    first = sorted(old)[0]
+    (r.out / "progress.json").write_text(json.dumps(
+        {first: {"state": "completed", "downloaded_ok": True}}), encoding="utf-8")
+    said, result, _ = r.main("--pilot")
+    assert said.count(LEFT) == 1 and ("1 " + LEFT) in said, said

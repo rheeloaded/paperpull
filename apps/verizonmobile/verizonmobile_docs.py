@@ -160,6 +160,7 @@ _WHY = {
     "no single bill matches the record": "no bill in the history has its id",
     "too large for a bill": "the bill is too large",
     "fetch failed": "the bill could not be fetched",
+    "no pdf address": "no pdf address could be made for the bill",
     "refused, the history still reads": "the bill was refused while the history still reads",
 }
 
@@ -562,12 +563,15 @@ class App:
         # for, and was failed on every run as a document that would not
         # render (#249). It is left as it is, in discovery.json and
         # progress.json, and the same bill is listed again by its id.
+        # Only those not already saved are said, so an archive whose old
+        # records were all saved is not told of them on every run.
         old = [d for d in docs if not site.recorded_bill(d.document_id, d.date)]
-        if old:
-            docs = [d for d in docs if site.recorded_bill(d.document_id, d.date)]
-            print(f"\n{len(old)} bill record(s) from an earlier build name no account, so "
-                  "this run leaves them as they are. Each bill is listed again by its "
-                  "account and taken from that record.")
+        docs = [d for d in docs if site.recorded_bill(d.document_id, d.date)]
+        unsaved = [d for d in old if not self._already_done(d)]
+        if unsaved:
+            print(f"\n{len(unsaved)} bill record(s) from an earlier build name no account, so "
+                  "this run leaves them as they are. A bill the history still lists is "
+                  "taken from the record that names its account.")
         docs.sort(key=lambda d: d.date or "0000", reverse=True)
         limit = limit if limit is not None else self.args.max_docs
         return docs[:limit] if limit else docs

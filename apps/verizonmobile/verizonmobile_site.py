@@ -623,6 +623,8 @@ def _fetch(page, url: str, out_path: Path, trace: Optional[list]) -> bool:
     raises SessionExpired, for download_bill to tell a sign-out from this
     bill's refusal. Any other answer that is not a PDF is False."""
     if not is_pdf_url(url):
+        if trace is not None:
+            trace.append({"note": "no pdf address"})
         return False
     try:
         got = intake.evaluate(page, _PDF_JS, [url, MAX_PDF_BYTES], limit=MAX_PDF_BYTES) or {}
