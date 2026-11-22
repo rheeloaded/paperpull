@@ -26,9 +26,9 @@ ARGS = ["--disable-extensions", "--disable-sync", "--no-first-run",
         "--no-proxy-server", "--host-resolver-rules=MAP * ~NOTFOUND"]
 
 ACCOUNTS = ["Alex Muster", "Mia Muster", "Leo Muster"]
-DOCS = {0: [("Kontoauszug", "Kontoauszug 01/2026", "31.01.2026")],
-        1: [("Kontoauszug", "Kontoauszug 02/2026", "28.02.2026"),
-            ("Steuerbescheinigung", "Jahressteuerbescheinigung 2025", "15.02.2026")],
+DOCS = {0: [("Kontoauszug", "Kontoauszug 01/2031", "31.01.2031")],
+        1: [("Kontoauszug", "Kontoauszug 02/2031", "28.02.2031"),
+            ("Steuerbescheinigung", "Jahressteuerbescheinigung 2030", "15.02.2031")],
         2: []}
 
 
@@ -144,9 +144,9 @@ def test_each_accounts_rows_are_read_behind_its_own_tab(bank, mark):
     by_tab = {}
     for r in rows:
         by_tab.setdefault(r["tab"], []).append(r["title"])
-    assert by_tab == {"": ["Kontoauszug 01/2026"],
-                      "Mia Muster": ["Kontoauszug 02/2026",
-                                     "Jahressteuerbescheinigung 2025"]}
+    assert by_tab == {"": ["Kontoauszug 01/2031"],
+                      "Mia Muster": ["Kontoauszug 02/2031",
+                                     "Jahressteuerbescheinigung 2030"]}
     assert {r["account_folder"] for r in rows} == {"", "Mia Muster"}
     assert site.accounts_read() == [1, 2, 0]
     assert bank.tab_page.evaluate("window.clicked") is False
@@ -155,7 +155,7 @@ def test_each_accounts_rows_are_read_behind_its_own_tab(bank, mark):
 
 def test_a_childs_document_is_fetched_from_its_own_tab(bank, tmp_path):
     rows = listing(bank)
-    mia = [r for r in rows if r["tab"] == "Mia Muster" and r["title"] == "Kontoauszug 02/2026"]
+    mia = [r for r in rows if r["tab"] == "Mia Muster" and r["title"] == "Kontoauszug 02/2031"]
     assert len(mia) == 1
     out = tmp_path / "doc.pdf"
 
@@ -167,7 +167,7 @@ def test_a_childs_document_is_fetched_from_its_own_tab(bank, tmp_path):
             seen[k] = seen.get(k, 0) + 1
         return numbers
 
-    saved = site.download_document(bank.tab_page, "Kontoauszug 02/2026", "2026-02-28", out,
+    saved = site.download_document(bank.tab_page, "Kontoauszug 02/2031", "2031-02-28", out,
                                    category=site.ACCOUNT, number_rows=numbered,
                                    config={"read_archive": False}, tab="Mia Muster")
     assert saved and b"document acct1doc0" in out.read_bytes()
@@ -191,7 +191,7 @@ def test_a_postbox_with_no_tab_bar_reads_as_it_always_did(bank):
     bank.bar = "none"
     rows = listing(bank)
     assert [(r["title"], r["tab"], r["account_folder"]) for r in rows] == \
-        [("Kontoauszug 01/2026", "", "")]
+        [("Kontoauszug 01/2031", "", "")]
     assert site.accounts_read() == [1]
 
 

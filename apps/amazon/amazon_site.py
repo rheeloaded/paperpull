@@ -143,7 +143,7 @@ def order_details_url(order_id: str) -> str:
     return _with_language(f"{BASE}/gp/your-account/order-details?orderID={order_id}")
 
 
-# Amazon order ids: 111-2223333-4445555 (retail) or D01-... (digital).
+# Amazon order ids: 111-2223333-4445555 (retail) or D01-... (digital)
 # A page can print the hyphens as one of Unicode's own (a non-breaking
 # hyphen keeps the number on one line), so those are read too, and every id
 # the app keeps is written with ASCII hyphens and ASCII digits (order_id_of),

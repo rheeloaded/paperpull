@@ -108,12 +108,12 @@ def orders_page(blocks, count=2, before="", after="") -> str:
             "<section><div class='y'>"
             "<div><form action='/your-orders/orders'><label class='time-filter__label' "
             "for='t'><b>%d Bestellungen</b> aufgegeben in</label>"
-            "<select id='t'><option>2026</option></select></form></div>"
+            "<select id='t'><option>2031</option></select></form></div>"
             "%s<div id='orders'>%s</div>%s"
             "</div></section></body></html>" % (count, before, "".join(blocks), after))
 
 
-TWO = orders_page([order(A, "3. März 2026", "23,41 €"), order(B, "1. Februar 2026", "58,20 €")])
+TWO = orders_page([order(A, "3. März 2031", "23,41 €"), order(B, "1. Februar 2031", "58,20 €")])
 
 
 def read(page, html):
@@ -130,15 +130,15 @@ def test_the_testers_layout_is_a_list_and_each_order_is_read_with_its_own_date(p
     assert site.orders_listed(page, 0)
     a, b = (site.card_to_purchase(site.RawCard(href="", text=t, order_id=o), "Online")
             for o, t in found)
-    assert (a.purchase_date, a.total) == ("2026-03-03", "€23.41")
-    assert (b.purchase_date, b.total) == ("2026-02-01", "€58.20")
+    assert (a.purchase_date, a.total) == ("2031-03-03", "€23.41")
+    assert (b.purchase_date, b.total) == ("2031-02-01", "€58.20")
     assert "58,20" not in found[0][1] and "23,41" not in found[1][1]
 
 
 def test_a_list_with_only_the_invoice_menus_is_read(page):
     site.set_marketplace("amazon.de")
     blocks = [order(o, d, t, header=ship_to() + menu(o))
-              for o, d, t in ((A, "3. März 2026", "1,00 €"), (B, "1. März 2026", "2,00 €"))]
+              for o, d, t in ((A, "3. März 2031", "1,00 €"), (B, "1. März 2031", "2,00 €"))]
     assert [o for o, _ in read(page, orders_page(blocks))] == [A, B]
 
 
@@ -147,7 +147,7 @@ def test_a_list_with_only_the_invoice_menus_is_read(page):
                                   "/gp/your-account/order-details/ref=ppx_yo_dt"])
 def test_a_list_with_only_the_details_links_is_read_whatever_the_case(page, param, path):
     site.set_marketplace("amazon.de")
-    blocks = [order(o, "3. März 2026", "1,00 €", header=details(o, param, path)) for o in (A, B)]
+    blocks = [order(o, "3. März 2031", "1,00 €", header=details(o, param, path)) for o in (A, B)]
     assert [o for o, _ in read(page, orders_page(blocks))] == [A, B]
 
 
@@ -155,7 +155,7 @@ def test_the_testers_page_with_nothing_that_names_an_order_still_did_not_appear(
     """The page as the failure file counts it, the count, product links and
     pre-drawn popovers, and nothing naming an order. Still not a list."""
     site.set_marketplace("amazon.de")
-    blocks = [order(o, "3. März 2026", "1,00 €", header=ship_to(), items=3) for o in (A, B)]
+    blocks = [order(o, "3. März 2031", "1,00 €", header=ship_to(), items=3) for o in (A, B)]
     page.set_content(orders_page(blocks, count=16))
     assert not site.orders_listed(page, 0)
     assert site.collect_cards(page) == []
@@ -164,7 +164,7 @@ def test_the_testers_page_with_nothing_that_names_an_order_still_did_not_appear(
 def test_ship_to_cards_carrying_an_id_shaped_value_are_not_a_list(page):
     site.set_marketplace("amazon.de")
     data = popover("/your-orders/address/popover?orderId=%s" % ADDR)
-    blocks = [order(A, "3. März 2026", "1,00 €", header=ship_to(data))]
+    blocks = [order(A, "3. März 2031", "1,00 €", header=ship_to(data))]
     page.set_content(orders_page(blocks, count=16))
     assert not site.orders_listed(page, 0)
     assert site.collect_cards(page) == []
@@ -184,9 +184,9 @@ def test_the_ship_to_card_or_another_popover_never_names_an_order(page, data):
     is read, and its block keeps its own date and total."""
     site.set_marketplace("amazon.de")
     header = ship_to(data) + menu(A)
-    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €", header=header)], 1))
+    found = read(page, orders_page([order(A, "3. März 2031", "23,41 €", header=header)], 1))
     assert [o for o, _ in found] == [A]
-    assert "3. März 2026" in found[0][1] and "23,41" in found[0][1]
+    assert "3. März 2031" in found[0][1] and "23,41" in found[0][1]
 
 
 @pytest.mark.parametrize("url", [
@@ -212,8 +212,8 @@ def test_the_ship_to_card_or_another_popover_never_names_an_order(page, data):
 ])
 def test_a_menu_that_does_not_name_one_order_of_this_store_names_none(page, url):
     site.set_marketplace("amazon.de")
-    blocks = [order(A, "3. März 2026", "1,00 €"),
-              order(B, "1. März 2026", "2,00 €", header=menu(url=url))]
+    blocks = [order(A, "3. März 2031", "1,00 €"),
+              order(B, "1. März 2031", "2,00 €", header=menu(url=url))]
     assert [o for o, _ in read(page, orders_page(blocks))] == [A]
 
 
@@ -257,7 +257,7 @@ def test_two_orders_in_one_block_are_each_kept_without_the_blocks_date(page):
     kept with what names it alone and neither takes the block's date."""
     site.set_marketplace("amazon.de")
     header = menu(A) + menu(B)
-    found = read(page, orders_page([order(A, "3. März 2026", "9,99 €", header=header)]))
+    found = read(page, orders_page([order(A, "3. März 2031", "9,99 €", header=header)]))
     assert [o for o, _ in found] == [A, B]
     assert all("März" not in t and "9,99" not in t for _, t in found)
 
@@ -265,16 +265,16 @@ def test_two_orders_in_one_block_are_each_kept_without_the_blocks_date(page):
 def test_one_order_named_twice_in_its_block_is_one_order(page):
     site.set_marketplace("amazon.de")
     header = details(A) + menu(A) + menu(A)
-    found = read(page, orders_page([order(A, "3. März 2026", "9,99 €", header=header)], 1))
+    found = read(page, orders_page([order(A, "3. März 2031", "9,99 €", header=header)], 1))
     assert [o for o, _ in found] == [A]
-    assert "3. März 2026" in found[0][1]
+    assert "3. März 2031" in found[0][1]
 
 
 def test_a_menu_beside_the_period_menu_does_not_take_the_page_as_its_block(page):
     """A single order's block stops below anything holding the page's own
     controls, so the period menu's words are never read as its date."""
     site.set_marketplace("amazon.de")
-    found = read(page, orders_page([order(A, "3. März 2026", "9,99 €")], 1))
+    found = read(page, orders_page([order(A, "3. März 2031", "9,99 €")], 1))
     assert [o for o, _ in found] == [A]
     assert "aufgegeben in" not in found[0][1] and "Konto" not in found[0][1]
 
@@ -283,7 +283,7 @@ def test_a_list_drawn_with_cards_is_read_exactly_as_before(page):
     """The amazon.com layout, its order number in its text. The cards decide,
     a trigger inside a card adds nothing."""
     card = ("<div class='order-card js-order-card'><div>Order placed</div>"
-            "<div>January 2, 2026</div><div>Total</div><div>$23.41</div>"
+            "<div>January 2, 2031</div><div>Total</div><div>$23.41</div>"
             "<div>Order # %s</div>%s</div>")
     html = orders_page([card % (A, menu(A)), card % (B, menu(DECOY))])
     found = read(page, html)
@@ -306,14 +306,14 @@ def test_every_store_reads_only_the_invoice_menu_of_its_own_host(page, store):
     others = [s for s in STORES if s != store]
     header = (ship_to(popover("/your-orders/address/popover?orderId=%s" % ADDR))
               + menu(url="https://www.%s/your-orders/invoice/popover?orderId=%s" % (store, A)))
-    blocks = [order(A, "January 2, 2026", "23.41", header=header)]
+    blocks = [order(A, "January 2, 2031", "23.41", header=header)]
     for i, other in enumerate(others):
         oid = "302-0000000-%07d" % (200 + i)
-        blocks.append(order(oid, "January 3, 2026", "1.00", header=menu(
+        blocks.append(order(oid, "January 3, 2031", "1.00", header=menu(
             url="https://www.%s/your-orders/invoice/popover?orderId=%s" % (other, oid))))
     found = read(page, orders_page(blocks))
     assert [o for o, _ in found] == [A]
-    assert "January 2, 2026" in found[0][1]
+    assert "January 2, 2031" in found[0][1]
 
 
 @pytest.mark.parametrize("store", STORES)
@@ -323,7 +323,7 @@ def test_every_store_reads_an_order_drawn_without_a_card_as_one_drawn_with_one(p
     site.set_marketplace(store)
     money = ("%s23.41" % site.CURRENCY if site.CURRENCY in ("$", "£")
              else "23,41 %s" % site.CURRENCY)
-    found = read(page, orders_page([order(A, "January 2, 2026", money)], 1))
+    found = read(page, orders_page([order(A, "January 2, 2031", money)], 1))
     assert [o for o, _ in found] == [A]
     words = found[0][1]
     as_block = site.card_to_purchase(site.RawCard(href="", text=words, order_id=A), "Online")
@@ -331,7 +331,7 @@ def test_every_store_reads_an_order_drawn_without_a_card_as_one_drawn_with_one(p
                      % (words.replace("\n", "<br>"), A))
     (old,) = site.collect_cards(page)
     as_card = site.card_to_purchase(old, "Online")
-    assert as_block.purchase_date == as_card.purchase_date == "2026-01-02"
+    assert as_block.purchase_date == as_card.purchase_date == "2031-01-02"
     assert as_block.total == as_card.total and as_block.total
 
 
@@ -359,7 +359,7 @@ def test_mixed_hyphens_are_read():
     "302 – 0000000 – 0000101",
     "302–0000000",
     "302-00000000-0000101",
-    "2025–2026",
+    "2030–2031",
     "３０２-０００００００-００００１０１",
 ])
 def test_lookalikes_are_not_order_numbers(text):
@@ -376,13 +376,13 @@ def test_the_order_number_argument_is_kept_in_ascii():
 def test_the_text_fallback_takes_each_orders_words_from_where_it_is_printed(page):
     site.set_marketplace("amazon.de")
     filler = "<p>" + ("x " * 500) + "</p>"
-    html = ("<body><div>Bestellung aufgegeben 3. März 2026 Summe 1,00 € Nr. %s</div>%s"
-            "<div>Bestellung aufgegeben 1. Februar 2026 Summe 2,00 € Nr. %s</div></body>"
+    html = ("<body><div>Bestellung aufgegeben 3. März 2031 Summe 1,00 € Nr. %s</div>%s"
+            "<div>Bestellung aufgegeben 1. Februar 2031 Summe 2,00 € Nr. %s</div></body>"
             % (A.replace("-", "–"), filler, B.replace("-", "–")))
     found = read(page, html)
     assert [o for o, _ in found] == [A, B]
-    assert "3. März 2026" in found[0][1]
-    assert "1. Februar 2026" in found[1][1] and "3. März 2026" not in found[1][1]
+    assert "3. März 2031" in found[0][1]
+    assert "1. Februar 2031" in found[1][1] and "3. März 2031" not in found[1][1]
 
 
 def test_an_order_page_with_a_unicode_hyphen_is_not_a_robot_check(page):
@@ -431,15 +431,15 @@ class _Moving:
 
 def test_a_page_that_moved_between_the_two_looks_gives_no_order():
     site.set_marketplace("amazon.de")
-    a, b = ["Rechnung", "3. März 2026"], ["Rechnung", "1. März 2026"]
+    a, b = ["Rechnung", "3. März 2031"], ["Rechnung", "1. März 2031"]
     assert site.invoice_menu_orders(_Moving([a, b])) == [
-        (A, "3. März 2026"), (B, "1. März 2026")]
+        (A, "3. März 2031"), (B, "1. März 2031")]
     assert site.invoice_menu_orders(_Moving([a, None])) == []
     assert site.invoice_menu_orders(_Moving([a, ["Rechnung", None]])) == []
     assert site.invoice_menu_orders(_Moving([a])) == []
 
 
-BANNER = ("<div class='banner'><div>Lieferung am 9. Mai 2026</div><div>Summe 77,77 €</div>%s</div>")
+BANNER = ("<div class='banner'><div>Lieferung am 9. Mai 2031</div><div>Summe 77,77 €</div>%s</div>")
 
 
 def test_a_banner_outside_the_list_names_no_order_and_takes_no_date(page):
@@ -447,16 +447,16 @@ def test_a_banner_outside_the_list_names_no_order_and_takes_no_date(page):
     delivery, adds no order and lends no order its words."""
     site.set_marketplace("amazon.de")
     for named in (menu(DECOY), details(DECOY), menu(A), details(A)):
-        found = read(page, orders_page([order(A, "3. März 2026", "23,41 €"),
-                                        order(B, "1. Februar 2026", "58,20 €")],
+        found = read(page, orders_page([order(A, "3. März 2031", "23,41 €"),
+                                        order(B, "1. Februar 2031", "58,20 €")],
                                        before=BANNER % named))
         assert [o for o, _ in found] == [A, B], named
-        assert "3. März 2026" in found[0][1] and "Mai" not in found[0][1], named
+        assert "3. März 2031" in found[0][1] and "Mai" not in found[0][1], named
 
 
 def test_details_links_are_not_read_where_invoice_menus_name_the_orders(page):
     site.set_marketplace("amazon.de")
-    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €")], 1,
+    found = read(page, orders_page([order(A, "3. März 2031", "23,41 €")], 1,
                                    after=BANNER % details(DECOY)))
     assert [o for o, _ in found] == [A]
 
@@ -478,13 +478,13 @@ def test_an_unnamed_order_beside_the_only_named_one_lends_it_nothing(page):
     date and total, and the digital one is still read from the text where
     its number is printed."""
     site.set_marketplace("amazon.de")
-    digital = order(DIG, "7. April 2026", "4,99 €",
+    digital = order(DIG, "7. April 2031", "4,99 €",
                     header="<a href='/gp/digital/your-account/order-summary.html?orderID=%s'>"
                            "Bestellnr. %s</a>" % (DIG, DIG))
-    found = read(page, orders_page([digital, order(A, "3. März 2026", "23,41 €")]))
+    found = read(page, orders_page([digital, order(A, "3. März 2031", "23,41 €")]))
     assert [o for o, _ in found] == [A, DIG]
     a = site.card_to_purchase(site.RawCard(href="", text=found[0][1], order_id=A), "Online")
-    assert (a.purchase_date, a.total) == ("2026-03-03", "€23.41")
+    assert (a.purchase_date, a.total) == ("2031-03-03", "€23.41")
 
 
 def test_an_order_number_in_the_text_is_still_read_beside_the_menus(page):
@@ -492,9 +492,9 @@ def test_an_order_number_in_the_text_is_still_read_beside_the_menus(page):
     the menu names a retail one. Both are read, as the text alone was."""
     site.set_marketplace("amazon.com")
     digital = ("<div class='x1' data-a='1' data-b='2' data-c='3' data-d='4'><div>Order placed</div>"
-               "<div>April 7, 2026</div><div>Total</div><div>$4.99</div><div>Order # %s</div></div>"
+               "<div>April 7, 2031</div><div>Total</div><div>$4.99</div><div>Order # %s</div></div>"
                % DIG)
-    found = read(page, orders_page([digital, order(A, "March 3, 2026", "$23.41")]))
+    found = read(page, orders_page([digital, order(A, "March 3, 2031", "$23.41")]))
     assert sorted(o for o, _ in found) == sorted([A, DIG])
 
 
@@ -502,11 +502,11 @@ def test_an_order_named_only_by_its_details_link_is_read_in_the_list(page):
     """A canceled order has no invoice menu, only its order-details link. It
     sits in the list beside orders that have one, so it is read."""
     site.set_marketplace("amazon.de")
-    canceled = order(B, "1. Februar 2026", "0,00 €", header=ship_to() + details(B))
-    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €"), canceled,
-                                    order(DIG, "1. Januar 2026", "4,99 €")]))
+    canceled = order(B, "1. Februar 2031", "0,00 €", header=ship_to() + details(B))
+    found = read(page, orders_page([order(A, "3. März 2031", "23,41 €"), canceled,
+                                    order(DIG, "1. Januar 2031", "4,99 €")]))
     assert [o for o, _ in found] == [A, B, DIG]
-    assert "1. Februar 2026" in found[1][1]
+    assert "1. Februar 2031" in found[1][1]
 
 
 def test_a_buy_again_form_in_each_order_does_not_let_a_banner_in(page):
@@ -516,26 +516,26 @@ def test_a_buy_again_form_in_each_order_does_not_let_a_banner_in(page):
     site.set_marketplace("amazon.de")
     form = "<form action='/gp/buyagain'><input type='submit' value='Erneut kaufen'></form>"
     # Each order's block with the form put in just before it closes.
-    blocks = [order(A, "3. März 2026", "23,41 €")[:-len("</div>")] + form + "</div>",
-              order(B, "1. Februar 2026", "58,20 €")[:-len("</div>")] + form + "</div>"]
+    blocks = [order(A, "3. März 2031", "23,41 €")[:-len("</div>")] + form + "</div>",
+              order(B, "1. Februar 2031", "58,20 €")[:-len("</div>")] + form + "</div>"]
     found = read(page, orders_page(blocks, before=BANNER % menu(DECOY)))
     assert [o for o, _ in found] == [A, B]
     dates = [site.parse_date(t) for _, t in found]
-    assert dates == ["2026-03-03", "2026-02-01"]
+    assert dates == ["2031-03-03", "2031-02-01"]
 
 
 def test_a_page_that_showed_fewer_orders_than_its_count_says_so(page):
     """Three orders counted on the page and two named. The third is not made
     up, and the page says it showed fewer than its count."""
     site.set_marketplace("amazon.de")
-    unnamed = order(DECOY, "2. Januar 2026", "1,00 €", header=ship_to())
-    html = orders_page([order(A, "3. März 2026", "1,00 €"), unnamed,
-                        order(B, "1. März 2026", "2,00 €")], count=3)
+    unnamed = order(DECOY, "2. Januar 2031", "1,00 €", header=ship_to())
+    html = orders_page([order(A, "3. März 2031", "1,00 €"), unnamed,
+                        order(B, "1. März 2031", "2,00 €")], count=3)
     assert [o for o, _ in read(page, html)] == [A, B]
     assert site.fewer_than_counted(page, 0, 2)
     assert not site.fewer_than_counted(page, 0, 3)
     # The last page of a year counts only what is left after the pages before.
-    page.set_content(orders_page([order(A, "3. März 2026", "1,00 €")], count=11))
+    page.set_content(orders_page([order(A, "3. März 2031", "1,00 €")], count=11))
     assert not site.fewer_than_counted(page, 10, 1)
     assert site.fewer_than_counted(page, 0, 1)
 
@@ -554,10 +554,10 @@ def test_a_link_to_another_order_inside_an_order_takes_nothing_from_it(page):
     its block and date, and C, which is not in the list, is not read."""
     site.set_marketplace("amazon.de")
     header = details(A) + menu(A) + "<div>Ersatzbestellung " + details(DECOY) + "</div>"
-    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €", header=header),
-                                    order(B, "1. Februar 2026", "58,20 €")]))
+    found = read(page, orders_page([order(A, "3. März 2031", "23,41 €", header=header),
+                                    order(B, "1. Februar 2031", "58,20 €")]))
     assert [o for o, _ in found] == [A, B]
-    assert site.parse_date(found[0][1]) == "2026-03-03"
+    assert site.parse_date(found[0][1]) == "2031-03-03"
 
 
 def test_a_notice_in_the_list_drawn_unlike_an_order_names_none(page):
@@ -565,8 +565,8 @@ def test_a_notice_in_the_list_drawn_unlike_an_order_names_none(page):
     not drawn like an order block, so it names no order."""
     site.set_marketplace("amazon.de")
     notice = "<p class='notice'>Ihre Bestellung wurde aktualisiert %s</p>" % details(DECOY)
-    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €"), notice,
-                                    order(B, "1. Februar 2026", "58,20 €")]))
+    found = read(page, orders_page([order(A, "3. März 2031", "23,41 €"), notice,
+                                    order(B, "1. Februar 2031", "58,20 €")]))
     assert [o for o, _ in found] == [A, B]
 
 
@@ -576,8 +576,8 @@ def test_a_canceled_order_beside_the_only_invoiced_one_is_said_not_made_up(page)
     list, so the link alone names no order, and the page says it showed
     fewer orders than its count rather than drop the canceled one quietly."""
     site.set_marketplace("amazon.de")
-    canceled = order(B, "1. Februar 2026", "0,00 \u20ac", header=ship_to() + details(B))
-    found = read(page, orders_page([order(A, "3. M\u00e4rz 2026", "23,41 \u20ac"), canceled],
+    canceled = order(B, "1. Februar 2031", "0,00 \u20ac", header=ship_to() + details(B))
+    found = read(page, orders_page([order(A, "3. M\u00e4rz 2031", "23,41 \u20ac"), canceled],
                                    count=2))
     assert [o for o, _ in found] == [A]
     assert site.fewer_than_counted(page, 0, len(found))
@@ -593,17 +593,17 @@ def twin_order(order_id, when, total, header, ship=""):
             % (when, total, header, ship))
 
 
-def test_a_canceled_order_between_twin_boxed_orders_is_read_and_a_link_in_a_box_is_not(page):
+def test_a_canceled_order_between_two_twin_orders_is_read_and_a_link_in_a_box_is_not(page):
     """Two invoiced orders settle the list. The canceled order between them
     is read with its own date. A replacement order linked from inside an
     invoiced order's shipment box, drawn like its header box, names no
     order."""
     site.set_marketplace("amazon.de")
     ship = "<div>Ersatzbestellung %s</div>" % details(DECOY)
-    blocks = [twin_order(A, "3. M\u00e4rz 2026", "23,41 \u20ac", menu(A), ship),
-              twin_order(B, "1. Februar 2026", "0,00 \u20ac", details(B)),
-              twin_order(DIG, "1. Januar 2026", "4,99 \u20ac", menu(DIG))]
+    blocks = [twin_order(A, "3. M\u00e4rz 2031", "23,41 \u20ac", menu(A), ship),
+              twin_order(B, "1. Februar 2031", "0,00 \u20ac", details(B)),
+              twin_order(DIG, "1. Januar 2031", "4,99 \u20ac", menu(DIG))]
     found = read(page, orders_page(blocks, count=3))
     assert [o for o, _ in found] == [A, B, DIG]
-    assert site.parse_date(found[1][1]) == "2026-02-01"
+    assert site.parse_date(found[1][1]) == "2031-02-01"
     assert not site.fewer_than_counted(page, 0, len(found))
