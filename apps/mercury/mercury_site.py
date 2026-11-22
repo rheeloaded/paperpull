@@ -46,7 +46,7 @@ RATE_LIMIT_MARKERS = re.compile(r"too many requests|rate limit", re.I)
 # A control that would show more rows, enabled and visible near the table,
 # means the table holds only part of the list. Near is the table's own
 # section, so a tour's Next or a sidebar's See more elsewhere on the page
-# does not count (#241).
+# does not count, and a control in a row is that row's (#241).
 _SNAPSHOT = r"""() => {
     const tables = [...document.querySelectorAll('table')].filter(t => {
         const cells = t.rows[0]?.cells;
@@ -54,12 +54,13 @@ _SNAPSHOT = r"""() => {
             && cells?.[2]?.innerText.trim() === 'Account';
     });
     if (tables.length !== 1) return null;
-    const more = /\b(?:next|more|older)\b|^[›»>]+$/i;
+    const more = /\bnext\b|\b(?:load|show|view|see) (?:more|older|all)\b|\bolder\b|^[›»>]+$/i;
     const table = tables[0];
     const near = table.closest('section, [role=region], [role=tabpanel]')
         || table.parentElement?.parentElement || table.parentElement || table;
+    // A row's own menu (More options) is not a pager, so rows are left out.
     const pager = [...near.querySelectorAll('button, a, [role=button]')].some(c =>
-        c.getClientRects().length && !c.disabled && c.getAttribute('aria-disabled') !== 'true'
+        !c.closest('tbody') && c.getClientRects().length && !c.disabled && c.getAttribute('aria-disabled') !== 'true'
         && [c.innerText, c.getAttribute('aria-label'), c.title]
             .some(text => more.test((text || '').trim())));
     if (pager) return {more: true};

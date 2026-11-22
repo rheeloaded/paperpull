@@ -340,6 +340,21 @@ def test_a_pager_with_nothing_more_to_show_reads_the_list(page, control):
     assert {d.account for d in site.collect_download_docs(page)} == {"Checking", "Savings"}
 
 
+@pytest.mark.parametrize("control", [
+    "<a href='#'>Learn more</a>", "<button>More filters</button>",
+    "<button aria-label='More options'></button>",
+])
+def test_a_more_that_is_not_a_pager_reads_the_list(page, control):
+    beside_the_table(page, control)
+    assert {d.account for d in site.collect_download_docs(page)} == {"Checking", "Savings"}
+
+
+def test_a_row_s_own_next_or_more_menu_is_not_a_pager(page):
+    page.evaluate("""() => document.querySelector('tbody tr:nth-child(2) td:first-child')
+        .insertAdjacentHTML('beforeend', '<button aria-label="Next actions">...</button>')""")
+    assert {d.account for d in site.collect_download_docs(page)} == {"Checking", "Savings"}
+
+
 def test_a_next_elsewhere_on_the_page_is_not_the_table_s_pager(page):
     # A product tour's Next in a section of its own, away from the table.
     page.evaluate("""() => {
