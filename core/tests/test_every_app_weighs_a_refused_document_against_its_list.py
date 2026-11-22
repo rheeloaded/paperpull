@@ -117,6 +117,7 @@ MENDED = {
     ("firsthorizon", "download_statement"): "_catch_statement",
     ("ing", "download_document"): "_fetch",
     ("irs", "download_bill"): "_fetch",
+    ("mercury", "download_bill"): "_fetch_pdf",
     ("mypay", "download_document"): "_fetch",
     ("nwnatural", "download_bill"): "_fetch",
     ("portlandgeneral", "download_bill"): "_fetch",

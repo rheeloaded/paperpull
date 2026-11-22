@@ -1,0 +1,7 @@
+Mercury monthly deposit statements
+
+  paperpull mercury login       open the dedicated sign-in browser
+  paperpull mercury discover    list available statements
+  paperpull mercury pilot       download a few statements
+  paperpull mercury all         download statements in scope
+  paperpull mercury resume      continue from a stopped run

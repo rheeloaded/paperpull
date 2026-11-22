@@ -46,7 +46,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
   - **Apps that hold a control to an allowlist** (AAFMAA, ADP, Ally, Alpaca,
     American Family, Apple Card, AT&T, Bank of America, Best Buy, Bilt, Chase, Chase Business,
     Coinbase, Costco, Discover, Discover Bank, Dominion, eBay, E*TRADE, Fairfax Water, First
-    Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Nelnet, Newrez,
+    Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Mercury, Nelnet, Newrez,
     PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD,
     Sparkasse Pforzheim Calw, Spectrum,
     State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
@@ -59,6 +59,9 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Bank, First Horizon, Simmons Bank, Spectrum, TreasuryDirect and Venmo
     narrow the allowlist to the whole labels they press, and all of them but
     TreasuryDirect give each control a guard of its own built the same way.
+    Mercury only toggles the checkbox label bound to a validated statement
+    row and checks the generated link against the same statement ID before
+    fetching the PDF from Mercury's backend.
     Best Buy presses only its year menu and a year in it. Discover Bank
     presses only the keep-alive button of Discover's inactivity dialog, a
     button whose whole name is I'm still here, Stay signed in, Continue

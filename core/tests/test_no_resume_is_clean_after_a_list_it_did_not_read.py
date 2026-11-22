@@ -335,9 +335,11 @@ def test_resume_after_a_run_that_listed_nothing_is_not_clean(home):
     home.run_all_stopped()
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
-    if home.app.name == "cloudflare":
+    if home.app.name in ("cloudflare", "mercury"):
         # Cloudflare rechecks the account that is open before interpreting
         # listing state, since the previous run may have used another account.
+        # Mercury refreshes the visible organization on Resume. The prior
+        # list could have come from a different organization.
         assert home.listings == 2
         assert "Resume reads it before anything else" in said and stopped(result), said[-1500:]
         assert not told_to_list(said, result), said[-1500:]
@@ -358,7 +360,7 @@ def test_resume_after_a_run_that_stopped_listing_is_not_clean(home):
         "the Run All that stopped left the earlier listing noted as whole")
     said, result, _ended = home.run(*RESUME)
     assert COMPLETE not in said, said[-1500:]
-    if home.app.name == "cloudflare":
+    if home.app.name in ("cloudflare", "mercury"):
         assert home.listings == 2
         assert "Resume reads it before anything else" in said and stopped(result), said[-1500:]
         assert not told_to_list(said, result), said[-1500:]

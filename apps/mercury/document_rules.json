@@ -1,0 +1,19 @@
+{
+  "statement_rules": [
+    {
+      "pattern": "\\bchecking statement\\b",
+      "summary": "Checking Statement"
+    },
+    {
+      "pattern": "\\bsavings statement\\b",
+      "summary": "Savings Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Statement"
+    }
+  ],
+  "tax_rules": [],
+  "insurance_rules": [],
+  "skip_patterns": []
+}
