@@ -641,7 +641,7 @@ class App:
         reuse = isinstance(bill, site.NativeDocument) and not self.args.redownload
         saved = site.download_bill(page, bill, out_path,
                                    existing_pdfs=self._known_pdfs() if reuse else None,
-                                   download_dir=self._dl_dir)
+                                   dl_dir=self._dl_dir)
         # A capture that failed must not leave a convincing empty file behind.
         if out_path.exists() and (out_path.stat().st_size == 0
                                   or out_path.read_bytes()[:5] != b"%PDF-"):

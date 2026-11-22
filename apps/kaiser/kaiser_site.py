@@ -613,7 +613,7 @@ def bill_source_url(bill: Bill | NativeDocument | medical.MedicalBill) -> str:
     return medical.SOURCE_URL if isinstance(bill, medical.MedicalBill) else DOCUMENTS_URL
 
 
-def _native_pdf(page, frame, row: BillRow, download_dir: Path | None) -> bytes | None:
+def _native_pdf(page, frame, row: BillRow, dl_dir: Path | None) -> bytes | None:
     if _history_frame(page) is not frame or row not in _seek_page(frame, row.page_start, row.list_total).rows:
         raise ListStopped("The selected item is no longer on My Documents.")
     _dismiss_feedback(frame.page, frame)
@@ -633,7 +633,7 @@ def _native_pdf(page, frame, row: BillRow, download_dir: Path | None) -> bytes |
     key, date, title, native = observed
     if BillRow(key, _iso_date(date, "%b %d, %Y"), title, native, row.page_start, row.list_total) != row:
         return None
-    if download_dir is None or (shared_folder.on_server() and shared_folder.leads_out(download_dir)):
+    if dl_dir is None or (shared_folder.on_server() and shared_folder.leads_out(dl_dir)):
         return None
     # The browser's own copy goes to the app's download folder, outside the
     # kind folders. What is archived is the blob the page made for this
@@ -641,10 +641,10 @@ def _native_pdf(page, frame, row: BillRow, download_dir: Path | None) -> bytes |
     # exact copy of those bytes (_drop_browser_copy). A copy a stopped run
     # left there goes at the next start when the archive holds the same
     # bytes (capture.clear_archived_copies).
-    Path(download_dir).mkdir(parents=True, exist_ok=True)
-    if not capture.set_download_dir(page, download_dir):
+    Path(dl_dir).mkdir(parents=True, exist_ok=True)
+    if not capture.set_download_dir(page, dl_dir):
         raise ListStopped("The browser could not prepare a private Kaiser download folder.")
-    return _capture_native_pdf(page, frame, control, selector, download_dir)
+    return _capture_native_pdf(page, frame, control, selector, dl_dir)
 
 
 def _end_download(download):
@@ -654,14 +654,14 @@ def _end_download(download):
 _COPY_WAIT_SECONDS = 5
 
 
-def _drop_browser_copy(download_dir, data: bytes, wait_seconds: float = _COPY_WAIT_SECONDS) -> int:
+def _drop_browser_copy(dl_dir, data: bytes, wait_seconds: float = _COPY_WAIT_SECONDS) -> int:
     """Delete the file the browser itself wrote in the app's own download
     folder for this press, found as an exact copy of `data`, the bytes just
     taken from the page's Blob. A blob download is finished before anything
     can end it, so the browser's file is there in full. Nothing else in the
     folder is touched, a file still being written is waited for a moment,
     and how many were deleted is returned."""
-    folder = Path(download_dir)
+    folder = Path(dl_dir)
     started = monotonic()
     deadline = started + wait_seconds
     dropped = 0
@@ -687,7 +687,7 @@ def _drop_browser_copy(download_dir, data: bytes, wait_seconds: float = _COPY_WA
         sleep(0.1)
 
 
-def _capture_native_pdf(page, frame, control, selector: str, download_dir=None) -> bytes | None:
+def _capture_native_pdf(page, frame, control, selector: str, dl_dir=None) -> bytes | None:
     if not blob_capture.arm(frame):
         return None
     page.on("download", _end_download)
@@ -703,8 +703,8 @@ def _capture_native_pdf(page, frame, control, selector: str, download_dir=None) 
         if not payload:
             return None
         data, _ = payload
-        if download_dir is not None:
-            _drop_browser_copy(download_dir, data)
+        if dl_dir is not None:
+            _drop_browser_copy(dl_dir, data)
         pdf = pdf_reader.read(data)
         return data if pdf.opened and pdf.pages else None
     except BrowserError:
@@ -718,9 +718,9 @@ def _capture_native_pdf(page, frame, control, selector: str, download_dir=None) 
 
 def download_bill(page, bill: Bill | NativeDocument | medical.MedicalBill, out_path: Path,
                   *, existing_pdfs: dict[str, Path] | None = None,
-                  download_dir: Path | None = None) -> Path | None:
+                  dl_dir: Path | None = None) -> Path | None:
     """Save one listed document to out_path. A My Documents file needs
-    `download_dir`, the folder the browser's own copy is pointed at, and is
+    `dl_dir`, the folder the browser's own copy is pointed at, and is
     not pressed without one."""
     if isinstance(bill, medical.MedicalBill):
         try:
@@ -738,7 +738,7 @@ def download_bill(page, bill: Bill | NativeDocument | medical.MedicalBill, out_p
     frame = _require_history_frame(page)
     try:
         if isinstance(bill, NativeDocument):
-            data = _native_pdf(page, frame, bill.row, download_dir)
+            data = _native_pdf(page, frame, bill.row, dl_dir)
         else:
             selected, html = _read_bill(page, frame, bill.row)
             if selected != bill:
