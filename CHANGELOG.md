@@ -9,6 +9,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Tualatin Water's failure file says which check refused a bill (#250).**
+  Every bill the app would not keep wrote "the document would not render",
+  whether its print page did not read as a bill, gave another Billing Date,
+  lost a stylesheet, could not be drawn, or was drawn into a PDF that did
+  not read as the bill. The failure file now names the check, with yes or
+  no facts such as which of the bill's headings were found, and the run
+  prints it. Nothing from the page goes in.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads

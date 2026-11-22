@@ -476,6 +476,137 @@ class Download(unittest.TestCase):
             self.assertIn({"note": "left out", "kind": kind, "why": "timed out"}, trace)
 
 
+class WhyRefused(unittest.TestCase):
+    """Every way a bill is not kept names its check in the trace, with yes
+    or no facts and counts only, so the failure file says which (#250,
+    where every refusal read "the document would not render")."""
+
+    def setUp(self):
+        self.out = Path(tempfile.mkdtemp()) / "Statements" / "bill.pdf"
+
+    def why(self, page, render=drawn, number="10000002", date="2026-08-31", href=None):
+        trace = []
+        with mock.patch("paperpull_core.receipt_pdf.print_html_inert_to_pdf", side_effect=render):
+            ok = site.download_bill(page, None, date, self.out, href=href or f"/secure/MyBill/{number}",
+                                    document_id=number, trace=trace)
+        self.assertFalse(ok)
+        self.assertFalse(self.out.exists())
+        return site.refusal(trace), trace
+
+    def test_each_refusal_names_its_check(self):
+        cases = [
+            (Page(), {"number": "12/34"}, site.NO_RECORD),
+            (Page(), {"number": "10000099"}, site.NO_SINGLE_ROW),
+            (Page(print_status=500), {}, site.NOT_A_PAGE),
+            (Page(print_type="application/json"), {}, site.NOT_A_PAGE),
+            (Page(said="Something else"), {}, site.NOT_A_BILL),
+            (Page(said=SAID.replace("8/31", "7/31")), {}, site.OTHER_BILLING_DATE),
+            (Page(said=SAID.replace("Billing Date 8/31/2026", "Billing Date")), {}, site.NO_BILLING_DATE),
+            (Page(dropped=[{"kind": "stylesheet", "why": "answered 404"}]), {}, site.STYLESHEET_LEFT_OUT),
+            (Page(print_status=403), {}, site.REFUSED_WHILE_LISTED),
+        ]
+        for page, kw, want in cases:
+            got, _ = self.why(page, **kw)
+            self.assertIsNotNone(got, want)
+            self.assertEqual(got["why"], want)
+
+    def test_what_the_page_lacks_is_said_as_yes_or_no(self):
+        got, _ = self.why(Page(said=SAID.replace("Total Amount Due", "Amount")))
+        self.assertEqual(got["why"], site.NOT_A_BILL)
+        self.assertEqual((got["text read"], got["has bill details"], got["has billing date"],
+                          got["has total amount due"], got["billing date found"], got["same billing date"]),
+                         (True, True, True, False, True, True))
+        got, _ = self.why(Page(said=SAID.replace("8/31", "7/31")))
+        self.assertEqual((got["billing date found"], got["same billing date"]), (True, False))
+
+    def test_a_drawing_that_fails_or_does_not_read_as_the_bill_says_so(self):
+        def raises(*a, **k):
+            raise TimeoutError("drawing took too long at made-up-host 4417")
+        got, _ = self.why(Page(), render=raises)
+        self.assertEqual((got["why"], got["error"]), (site.DRAW_FAILED, "timeouterror"))
+
+        def blank(page, html, out_path, base=None):
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(out_path).write_bytes(b"not a pdf")
+        got, _ = self.why(Page(), render=blank)
+        self.assertEqual((got["why"], got["pdf written"]), (site.DRAW_FAILED, True))
+
+        def capitals_lost(page, html, out_path, base=None):
+            drawn(page, html.replace("Total Amount Due", "Total"), out_path, base)
+        got, trace = self.why(Page(dropped=[{"kind": "image", "why": "not fetched"}]), render=capitals_lost)
+        self.assertEqual(got["why"], site.DRAWN_NOT_THE_BILL)
+        self.assertEqual((got["text read"], got["has total amount due"], got["same billing date"],
+                          got["images left out"], got["stylesheets left out"]), (True, False, True, 1, 0))
+        self.assertIn({"note": "drawn pdf is not the bill"}, trace)
+
+    def test_a_drawn_pdf_whose_text_cannot_be_read_says_so(self):
+        with mock.patch.object(site.pdf_reader, "page_texts", side_effect=ValueError("unreadable")):
+            got, _ = self.why(Page())
+        self.assertEqual((got["why"], got["text read"], got["has bill details"]),
+                         (site.DRAWN_NOT_THE_BILL, False, False))
+
+    def test_a_stylesheet_left_out_says_how(self):
+        got, _ = self.why(Page(dropped=[{"kind": "stylesheet", "why": "answered 404"}]))
+        self.assertEqual((got["stylesheets left out"], got["stylesheet answered"]), (1, 404))
+        got, _ = self.why(Page(dropped=[{"kind": "stylesheet", "why": "timed out"}]))
+        self.assertEqual(got["stylesheet why"], "timed out")
+        got, _ = self.why(Page(dropped=[{"kind": "stylesheet", "why": "Jane Q Example"}]))
+        self.assertEqual(got["stylesheet why"], "other")
+
+    def test_a_kept_bill_leaves_no_refusal(self):
+        trace = []
+        with mock.patch("paperpull_core.receipt_pdf.print_html_inert_to_pdf", side_effect=drawn):
+            ok = site.download_bill(Page(), None, "2026-08-31", self.out, href="/secure/MyBill/10000002",
+                                    document_id="10000002", trace=trace)
+        self.assertTrue(ok)
+        self.assertIsNone(site.refusal(trace))
+
+    def test_every_why_is_words_a_failure_file_keeps(self):
+        from paperpull_core import failure
+        whys = [v for k, v in vars(site).items() if k.isupper() and isinstance(v, str)
+                and v in (site.NO_RECORD, site.NO_SINGLE_ROW, site.NOT_FETCHED, site.TOO_LARGE,
+                          site.NOT_A_PAGE, site.NOT_A_BILL, site.NO_BILLING_DATE,
+                          site.OTHER_BILLING_DATE, site.STYLESHEET_LEFT_OUT, site.DRAW_FAILED,
+                          site.DRAWN_NOT_THE_BILL, site.REFUSED_WHILE_LISTED)]
+        self.assertEqual(len(set(whys)), 12)
+        for why in whys:
+            self.assertRegex(why, failure._STEP_RE, why)
+
+    def test_the_failure_file_names_the_check_and_nothing_of_the_page(self):
+        """The run's failure file takes the refusal's words as its reason
+        and its facts as extra, and no word or number of the page."""
+        canary = "Zebulon Canary 4417"
+        page = Page(said=SAID.replace("Total Amount Due", canary),
+                    printed=PRINTED.replace("Total Amount Due", canary))
+        app = make_app(tempfile.mkdtemp(), "--all")
+        for r in site.bills_of(HEADS, ROWS):
+            app._record_rawdoc(r, site.BILLING_URL)
+        app.check_session = lambda p: None
+        app._on_its_site = lambda: page
+        app._delay = lambda *a, **k: None
+        with redirect_stdout(io.StringIO()) as said, \
+                mock.patch("paperpull_core.receipt_pdf.print_html_inert_to_pdf", side_effect=drawn):
+            app.process(app._select(limit=1))
+        files = list(app.paths.diagnostics.glob("failure-*.json"))
+        self.assertEqual(len(files), 1)
+        report = json.loads(files[0].read_text(encoding="utf-8"))
+        self.assertEqual((report["step"], report["reason"]), ("capture the document", site.NOT_A_BILL))
+        self.assertEqual(report["extra"]["refused"]["has_total_amount_due"], False)
+        self.assertEqual(report["extra"]["refused"]["has_bill_details"], True)
+        self.assertIn(f"Why: {site.NOT_A_BILL}.", said.getvalue())
+        # What a tester attaches, the diagnostics folder, holds none of it.
+        written = "".join(p.read_text(errors="ignore") for p in app.paths.diagnostics.rglob("*")
+                          if p.is_file())
+        self.assertTrue((app.paths.diagnostics / "download-attempt.json").is_file())
+        self.assertIn(site.NOT_A_BILL, written)
+        attempt = json.loads((app.paths.diagnostics / "download-attempt.json").read_text(encoding="utf-8"))
+        refusal = [r for r in attempt["responses"] if r.get("note") == "refused"]
+        self.assertEqual(refusal[0]["why"], site.NOT_A_BILL)
+        self.assertIs(refusal[0]["has total amount due"], False)
+        for word in ("Zebulon", "Canary", "4417", "10000003", "8/31/2026"):
+            self.assertNotIn(word, written + said.getvalue(), word)
+
+
 def make_app(tmp, *args):
     config = json.loads((HERE / "config.example.json").read_text())
     config.update({"owner": "Tester Example", "output_dir": str(Path(tmp) / "out")})
