@@ -243,7 +243,9 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # from the earlier page is saved again under its new
                         # key, never taken for another's
                         # (meijer_receipts.adopt_old_layout, #236).
-                        "Meijer": ("row_prints_time", "adopted_from", "held")}
+                        "Meijer": ("row_prints_time", "adopted_from", "held"),
+                        # SimpliSafe keys monitoring bills by an invoice ID digest.
+                        "SimpliSafe": ("document_id",)}
 
 
 def _optum_form(rec: dict) -> bool:
