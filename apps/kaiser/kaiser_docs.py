@@ -1,7 +1,8 @@
 """Archive Kaiser Permanente My Documents from a manually signed-in browser."""
 from __future__ import annotations
 
-from paperpull_core import capture, failure
+from paperpull_core import failure
+from paperpull_core import capture
 from paperpull_core import listing, pressing
 from paperpull_core import renaming
 from paperpull_core import saved_copy

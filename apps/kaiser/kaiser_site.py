@@ -667,7 +667,7 @@ def _drop_browser_copy(download_dir, data: bytes, wait_seconds: float = _COPY_WA
     dropped = 0
     while True:
         try:
-            here = [p for p in folder.iterdir() if p.is_file()]
+            here = [p for p in sorted(folder.iterdir()) if p.is_file()]
         except OSError:
             return dropped
         for path in here:
