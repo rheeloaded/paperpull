@@ -324,6 +324,13 @@ def test_a_table_that_shows_only_part_of_its_list_stops(page, control):
         site.collect_download_docs(page)
 
 
+def test_a_load_more_row_at_the_end_of_the_table_stops(page):
+    page.evaluate("""() => document.querySelector('tbody').insertAdjacentHTML('beforeend',
+        '<tr><td colspan=3><button>Load more</button></td></tr>')""")
+    with pytest.raises(site.ListStopped, match="only part"):
+        site.collect_download_docs(page)
+
+
 def test_a_pager_in_the_table_s_own_footer_stops(page):
     page.evaluate("""() => document.querySelector('table').insertAdjacentHTML('beforeend',
         '<tfoot><tr><td colspan=3><button>Next</button></td></tr></tfoot>')""")
@@ -342,7 +349,8 @@ def test_a_pager_with_nothing_more_to_show_reads_the_list(page, control):
 
 @pytest.mark.parametrize("control", [
     "<a href='#'>Learn more</a>", "<button>More filters</button>",
-    "<button aria-label='More options'></button>",
+    "<button aria-label='More options'></button>", "<a href='#'>View all documents</a>",
+    "<a href='#'>See all accounts</a>",
 ])
 def test_a_more_that_is_not_a_pager_reads_the_list(page, control):
     beside_the_table(page, control)
