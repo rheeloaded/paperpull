@@ -2174,6 +2174,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.order_number:
+        # Kept with ASCII hyphens, as every order id the app records is.
+        args.order_number = site.order_id_of(args.order_number.strip())
     for d in (args.start_date, args.end_date):
         if d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
             print(f"Bad date '{d}': use YYYY-MM-DD")

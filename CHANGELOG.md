@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Amazon reads an order list drawn without order cards (#207).** On an
+  amazon.de account the order list came with none of the order cards the
+  app knows and no order number it could read, so Discover stopped at "the
+  order list did not appear" with the orders on screen. Each order is now
+  found by its own Invoice (Rechnung) menu or its order-details link, in
+  every Amazon store, and never by the ship-to name beside it, which opens
+  a card of the same shape. Order numbers printed with a Unicode hyphen are
+  read too and kept with plain hyphens. The app still presses nothing on
+  Amazon's pages, and a new check fails on any press added to it.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
