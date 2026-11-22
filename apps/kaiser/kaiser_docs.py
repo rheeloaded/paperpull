@@ -8,6 +8,7 @@ from paperpull_core import saved_copy
 from paperpull_core import tabs
 from paperpull_core.journal import Journal
 from paperpull_core.api_census import Requests
+from paperpull_core.characters import whole_json
 from paperpull_core.run_reporting import (NEW_LIST_NOTE, NOTHING_OPENED, NOTHING_RECORDED,
                                           after_sign_in, lists_what_it_saved, not_signed_in, report_run_result)
 
@@ -300,7 +301,7 @@ class App:
 
     def _sign_in_checkpoint(self):
         try:
-            return json.loads(self._sign_in_resume.read_text(encoding="utf-8"))
+            return whole_json(json.loads(self._sign_in_resume.read_text(encoding="utf-8")))
         except FileNotFoundError:
             return None
 
@@ -367,9 +368,10 @@ class App:
     def _record_rawdoc(self, r, source_url: str) -> int:
         """Record one statement without storing its temporary download address."""
         title = r.title
+        # Only the classifier's fixed words name a file or reach the run's
+        # output. A My Documents title is the site's own text, and on a
+        # health account it can carry a name, a clinic or a condition.
         category, summary, confidence = doc_types.classify_document(title, self.rules)
-        if summary in {"Document", "Insurance Document", "Account Statement"} and title:
-            summary = title
         if not doc_types.wanted(category, self.config):
             self.stats["skipped_out_of_scope"] += 1
             return 0
@@ -731,7 +733,7 @@ class App:
             rec = self.progress.get(d.key) or {}
             state = rec.get("state", "?")
             print(f"\n  {rec.get('date', d.date)}  {rec.get('category', d.category)}")
-            print(f"    Title:  {rec.get('title', d.title)[:70]}")
+            print(f"    Kind:   {rec.get('summary', d.summary)}")
             print(f"    State:  {state}   [{rec.get('confidence', '')}]")
             print(f"    PDF:    {rec.get('pdf_filename', '(none)')}"
                   f"  ({rec.get('pdf_size', '?')} bytes, {rec.get('pdf_pages', '?')} pages)")
@@ -904,7 +906,7 @@ class App:
                 print("    - %s" % line)
         print("  PaperPull saved a local diagnostic report.")
 
-    def write_survey(self) -> None:
+    def write_survey(self, stopped=None) -> None:
         """The survey Diagnose is safe to send.
 
         Diagnose writes a detailed file for repairing this provider, and
@@ -922,22 +924,35 @@ class App:
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
             requests=self._requests,
-            provider='Kaiser Permanente')
+            provider='Kaiser Permanente',
+            stopped=stopped or getattr(self, "_diagnose_stopped", None))
 
     def cmd_diagnose(self):
         """Report only statement counts and page state, without recording a screenshot."""
         self.stats["mode"] = "diagnose"
         words = words_for("Kaiser Permanente", site)
         page = self.page()
-        info = {"timestamp": now_iso(), "signed_out": site.looks_signed_out(page),
-                "documents_page_found": site.is_history_tab(page) and not site.looks_signed_out(page)}
-        if info["documents_page_found"]:
-            try:
+        info = {"timestamp": now_iso()}
+        stopped = None
+        try:
+            info["signed_out"] = bool(site.looks_signed_out(page))
+            info["documents_page_found"] = bool(site.is_history_tab(page)) and not info["signed_out"]
+            if not info["signed_out"]:
+                # A tab that is not a document list stops here at once,
+                # with nothing pressed (ListStopped).
                 info["documents_total"] = len(site.collect_download_docs(page))
-            except (site.SessionExpired, site.ListStopped) as error:
-                info["error"] = type(error).__name__
+        except (site.SessionExpired, site.ListStopped) as error:
+            info["error"] = type(error).__name__
+        except pressing.Stop as stop:
+            # A press the look would not make ends it there, and the file
+            # still says what was seen and why it stopped.
+            stopped = stop
+            info["stopped"] = {"step": stop.step, "reason": stop.reason, "facts": stop.facts}
+        self._diagnose_stopped = stopped
         out = self.paths.diagnostics / "diagnose-documents.json"
         write_shaped(out, info, words)
+        if stopped is not None:
+            pressing.say(stopped)
         print(f"Wrote {out}")
         print("Text that is not on PaperPull's fixed list is shown as its shape.")
         print(f"Bills recognized: {shape_tree(info.get('documents_total', 'unavailable'), words)}")

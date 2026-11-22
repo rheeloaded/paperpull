@@ -73,11 +73,10 @@ def is_safe_control(label: str) -> bool:
     )
 
 
-def press_named(page, control, selector: str, *, frame=None, statement_date="") -> None:
+def _check_label(control, statement_date: str) -> None:
     labels = control.evaluate(
         "e => [e.innerText, e.getAttribute('aria-label'), e.getAttribute('title')]"
     )
-    words = words_for("Kaiser Permanente", sys.modules[__name__])
     visible, accessibility, title = labels
     # Kaiser can put "Go to next page" on the Previous results anchor.
     # Pagination binds the label to its direction before it calls this guard.
@@ -89,10 +88,38 @@ def press_named(page, control, selector: str, *, frame=None, statement_date="") 
                 and not medical.matches_accessible_label(accessibility, statement_date))):
         raise pressing.Changed("check the document control", "unexpected control label",
                                ["Kaiser Permanente changed a bill control."])
+
+
+def press_named(page, control, selector: str, *, frame=None, statement_date="") -> None:
+    """Press a control of the list itself, the pager or a Close button.
+
+    A turned off one stops the run (pressing.TurnedOff), since a pager left
+    unpressed would leave every document past it, and an open popup covers
+    every press after it."""
+    _check_label(control, statement_date)
+    words = words_for("Kaiser Permanente", sys.modules[__name__])
+    try:
+        pressing.click(page, control, css=selector, what="the Kaiser list control",
+                       words=words, frame=frame, step="press a list control")
+        return
+    except pressing.Stop:
+        if not looks_signed_out(page):
+            raise
+    raise SessionExpired()
+
+
+def press_document(page, control, selector: str, *, frame=None, statement_date="") -> None:
+    """Press one document's own control, Premium Bills, Download PDF or View
+    statement. A control Kaiser has turned off is not pressed, and only that
+    document is left (DocumentLeft), for review and the next run."""
+    _check_label(control, statement_date)
+    words = words_for("Kaiser Permanente", sys.modules[__name__])
     try:
         pressing.click(page, control, css=selector, what="the Kaiser document control",
-                       words=words, frame=frame)
+                       words=words, frame=frame, step="press a document's control")
         return
+    except pressing.TurnedOff:
+        raise DocumentLeft("Kaiser turned off this document's control.") from None
     except pressing.Stop:
         if not looks_signed_out(page):
             raise
@@ -174,6 +201,10 @@ class ListStopped(RuntimeError):
 
 class BillMismatch(RuntimeError):
     """A listed row did not reopen the expected bill."""
+
+
+class DocumentLeft(BillMismatch):
+    """A document's own control was turned off and was not pressed."""
 
 
 @dataclass(frozen=True)
@@ -357,9 +388,15 @@ def _parse_page(raw) -> DocumentsPage:
         raise ListStopped("A My Documents row has an unreadable list date.") from None
     if len({row.control_id for row in rows}) != len(rows):
         raise ListStopped("My Documents contains duplicate row identifiers.")
-    if any(not row.native_pdf and row.title != _TITLE for row in rows):
-        raise ListStopped("A My Documents item has an unrecognized viewer.")
     return DocumentsPage(first, last, total, rows)
+
+
+def offered(row: BillRow) -> bool:
+    """Whether a My Documents row is one PaperPull takes. A row with its own
+    Download PDF link is a file the site offers, and Premium Bills is the
+    bill its viewer shows. Any other row opens only in Kaiser's viewer, a
+    letter or a record the site does not offer as a file, and is left."""
+    return row.native_pdf or row.title == _TITLE
 
 
 def _visible_page(frame) -> DocumentsPage:
@@ -477,7 +514,7 @@ def _read_bill(page, frame, row: BillRow) -> tuple[Bill, str]:
 
     try:
         with page.expect_event("framenavigated", predicate=expected_viewer, timeout=12000):
-            press_named(page, control, f"a._document_name#{row.control_id}", frame=frame)
+            press_document(page, control, f"a._document_name#{row.control_id}", frame=frame)
         frame.wait_for_function(r"""selector => /\bStatement\s*Date\s*:?\s*\d{1,2}\/\d{1,2}\/\d{4}/i
                                .test(document.querySelector(selector)?.innerText || '')""",
                                 arg=_VIEWER_CONTENT, timeout=12000)
@@ -527,8 +564,12 @@ def collect_download_docs(page) -> list[Bill | NativeDocument | medical.MedicalB
             current = _turn_page(frame, current, "next")
         if len(seen) != total:
             raise ListStopped("The My Documents row count did not match the portal total.")
+        taken = [row for row in rows if offered(row)]
+        if len(taken) != len(rows):
+            print(f"Left {len(rows) - len(taken)} My Documents item(s) Kaiser shows only in its "
+                  "viewer, not as a file.", flush=True)
         bills = [NativeDocument(row) if row.native_pdf else _read_bill(page, frame, row)[0]
-                 for row in rows]
+                 for row in taken]
         _seek_page(frame, 1, total)
         return bills
     except (BrowserError, BillMismatch, ValueError) as error:
@@ -598,7 +639,7 @@ def _capture_native_pdf(page, frame, control, selector: str) -> bytes | None:
 
     page.on("download", record_download)
     try:
-        press_named(page, control, selector, frame=frame)
+        press_document(page, control, selector, frame=frame)
         observed = frame.wait_for_function(
             f"() => ({blob_capture.SAVED_JS})()?.length > 0", timeout=_DOWNLOAD_WAIT_MS)
         observed.dispose()
@@ -627,7 +668,10 @@ def download_bill(page, bill: Bill | NativeDocument | medical.MedicalBill, out_p
                   *, existing_pdfs: dict[str, Path] | None = None) -> Path | None:
     if isinstance(bill, medical.MedicalBill):
         try:
-            return out_path if medical.download_bill(page, bill, out_path, press=press_named) else None
+            return out_path if medical.download_bill(page, bill, out_path, press=press_named,
+                                                     press_own=press_document) else None
+        except BillMismatch:
+            return None
         except medical.MedicalListError as error:
             raise ListStopped(str(error)) from None
         except BrowserError:

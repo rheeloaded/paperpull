@@ -40,6 +40,12 @@ PRESSES = frozenset(("click", "dblclick", "tap", "check", "uncheck", "set_checke
 KNOWN = {
     ("apps/amex/amex_site.py", "list_cards"):
         "leaves the card switcher unpressed and re-raises a stop after a press",
+    ("apps/kaiser/kaiser_medical.py", "_capture_inline_pdf"):
+        "presses nothing again. A medical statement's link opens Kaiser's PDF viewer over "
+        "itself, so the cover after the press is accepted only when the link heard the "
+        "browser's own trusted click, exactly one PDF answer came for it, and that answer's "
+        "frame is the viewer dialog's iframe now at the point pressed. Anything else, and "
+        "a cover before any press, is raised",
 }
 
 

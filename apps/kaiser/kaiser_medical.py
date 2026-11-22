@@ -361,7 +361,9 @@ def _capture_inline_pdf(page, control, press, statement_date) -> bytes | None:
                 session.detach()
 
 
-def download_bill(page, bill: MedicalBill, out_path: Path, *, press) -> bool:
+def download_bill(page, bill: MedicalBill, out_path: Path, *, press, press_own=None) -> bool:
+    """`press` presses the viewer's Close, `press_own` the statement's own link
+    (the same as `press` when not given)."""
     if not _close_viewer(page, press):
         raise MedicalListError("Close the medical statement viewer and leave Statements open.")
     rows = _read_rows(page)
@@ -380,7 +382,7 @@ def download_bill(page, bill: MedicalBill, out_path: Path, *, press) -> bool:
             eligible.append(control)
     if len(eligible) != 1:
         return False
-    data = _capture_inline_pdf(page, eligible[0], press, bill.date_text)
+    data = _capture_inline_pdf(page, eligible[0], press_own or press, bill.date_text)
     if not _close_viewer(page, press):
         raise MedicalListError("Close the medical statement viewer and leave Statements open.")
     if not data or not _matches_pdf(data, bill):
