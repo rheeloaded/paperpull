@@ -286,12 +286,19 @@ def test_offline_preview_uses_saved_discovery_and_preserves_last_download(
     assert not list(tmp_path.rglob("*.pdf"))
 
 
-@pytest.mark.parametrize("account", ["Payroll ••5678", "Operations", "", "Brokerage ••1234"])
+@pytest.mark.parametrize("account", ["Payroll ••5678", "Operations", "Brokerage ••1234"])
 def test_a_row_of_an_account_it_does_not_know_stops_the_list(account):
     # A renamed or new kind of deposit account, or a row still loading,
     # skipped here would leave its statements out of a list called whole.
     with pytest.raises(site.ListStopped, match="does not recognize"):
         site._parse_rows([row(), row(SAVINGS, account)])
+
+
+@pytest.mark.parametrize("cells", [("No statements", ""), ("", "")])
+def test_a_row_with_no_account_is_said_as_empty_or_loading(cells):
+    period, account = cells
+    with pytest.raises(site.ListStopped, match="no account"):
+        site._parse_rows([row(period=period, account=account)])
 
 
 def test_a_table_with_no_rows_is_not_an_empty_list(page):
@@ -300,12 +307,26 @@ def test_a_table_with_no_rows_is_not_an_empty_list(page):
         site.collect_download_docs(page)
 
 
+def beside_the_table(page, html):
+    page.evaluate("(html) => document.querySelector('table').insertAdjacentHTML('afterend', html)",
+                  html)
+
+
 @pytest.mark.parametrize("control", [
     "<button>Next</button>", "<a href='#'>Load more</a>",
     "<button aria-label='Next page'>&gt;</button>",
+    "<button aria-label='Go to next page'></button>", "<button>›</button>",
+    "<a href='#'>Load older statements</a>",
 ])
 def test_a_table_that_shows_only_part_of_its_list_stops(page, control):
-    page.evaluate("(html) => document.body.insertAdjacentHTML('beforeend', html)", control)
+    beside_the_table(page, control)
+    with pytest.raises(site.ListStopped, match="only part"):
+        site.collect_download_docs(page)
+
+
+def test_a_pager_in_the_table_s_own_footer_stops(page):
+    page.evaluate("""() => document.querySelector('table').insertAdjacentHTML('beforeend',
+        '<tfoot><tr><td colspan=3><button>Next</button></td></tr></tfoot>')""")
     with pytest.raises(site.ListStopped, match="only part"):
         site.collect_download_docs(page)
 
@@ -315,5 +336,18 @@ def test_a_table_that_shows_only_part_of_its_list_stops(page, control):
     "<button hidden>Load more</button>",
 ])
 def test_a_pager_with_nothing_more_to_show_reads_the_list(page, control):
-    page.evaluate("(html) => document.body.insertAdjacentHTML('beforeend', html)", control)
+    beside_the_table(page, control)
+    assert {d.account for d in site.collect_download_docs(page)} == {"Checking", "Savings"}
+
+
+def test_a_next_elsewhere_on_the_page_is_not_the_table_s_pager(page):
+    # A product tour's Next in a section of its own, away from the table.
+    page.evaluate("""() => {
+        const table = document.querySelector('table');
+        const own = document.createElement('section');
+        table.replaceWith(own);
+        own.append(table);
+        document.body.insertAdjacentHTML('beforeend',
+            '<section><button>Next</button><a href="#">See more</a></section>');
+    }""")
     assert {d.account for d in site.collect_download_docs(page)} == {"Checking", "Savings"}

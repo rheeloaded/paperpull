@@ -43,8 +43,10 @@ RATE_LIMIT_MARKERS = re.compile(r"too many requests|rate limit", re.I)
 
 # The first row names both columns, even when the table uses td for headings.
 # Read the account suffix only to verify the PDF. It never leaves the site layer.
-# A control that would show more rows, enabled and visible, means the table
-# holds only part of the list (#241).
+# A control that would show more rows, enabled and visible near the table,
+# means the table holds only part of the list. Near is the table's own
+# section, so a tour's Next or a sidebar's See more elsewhere on the page
+# does not count (#241).
 _SNAPSHOT = r"""() => {
     const tables = [...document.querySelectorAll('table')].filter(t => {
         const cells = t.rows[0]?.cells;
@@ -52,8 +54,11 @@ _SNAPSHOT = r"""() => {
             && cells?.[2]?.innerText.trim() === 'Account';
     });
     if (tables.length !== 1) return null;
-    const more = /^(?:next|next page|load more|show more|view more|see more)$/i;
-    const pager = [...document.querySelectorAll('button, a, [role=button]')].some(c =>
+    const more = /\b(?:next|more|older)\b|^[›»>]+$/i;
+    const table = tables[0];
+    const near = table.closest('section, [role=region], [role=tabpanel]')
+        || table.parentElement?.parentElement || table.parentElement || table;
+    const pager = [...near.querySelectorAll('button, a, [role=button]')].some(c =>
         c.getClientRects().length && !c.disabled && c.getAttribute('aria-disabled') !== 'true'
         && [c.innerText, c.getAttribute('aria-label'), c.title]
             .some(text => more.test((text || '').trim())));
@@ -181,6 +186,9 @@ def _parse_rows(rows) -> dict[str, Statement]:
         account_label = (row["account"][:account_match.start()] if account_match else row["account"]).strip()
         deposit = DEPOSIT_LABEL.fullmatch(account_label)
         if not deposit:
+            if not account_label:
+                raise ListStopped("A Mercury statement row shows no account, so the list "
+                                  "is empty or has not finished loading.")
             if OTHER_LABEL.fullmatch(account_label):
                 continue
             raise ListStopped("A Mercury statement row names an account this app does "
