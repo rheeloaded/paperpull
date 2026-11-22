@@ -843,6 +843,8 @@ EXPORTS = {"tools/export_purchases.py::write_csv", "tools/export_transactions.py
 NOT_A_RECORD = {
     "core/paperpull_core/storage.py::_ensure_header":
         "writes the header row alone, the app's own column names",
+    "apps/kroger/storage.py::_header":
+        "reads the header row alone, to tell the order history's column names (#247)",
     "tools/make_sample.py::statements":
         "writes the sample archive's invented records, each value checked below "
         "to be held as an app would hold it",
