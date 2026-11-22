@@ -52,7 +52,8 @@ documents are downloaded and does not shorten that first reading.
 
 With several tabs open on the bank's site, the app works in a signed-in
 Postfach tab first, then any tab not on a sign-in address, and passes over
-a sign-in tab left open from before.
+a sign-in tab left open from before. Only the Postfach tabs are read for a
+sign-in form, the others are judged by their address.
 
 Check the Pilot's PDFs first. Resume carries on with a run that stopped,
 and Verify checks the saved PDFs on this computer. Progress and the

@@ -894,3 +894,24 @@ def test_with_no_postfach_tab_a_signed_in_page_comes_before_a_sign_in_tab(home, 
     home.run_all()
     assert used and all(tab is signed_in for tab in used)
     assert site.looks_signed_out(home.page)
+
+
+def test_a_folder_tab_that_draws_a_sign_in_comes_after_a_signed_in_page(home, monkeypatch):
+    overview = urlsplit(site.URLS["home"]).path
+    home.bank.plain[overview] = (
+        "<!doctype html><html><body><h1>Finanzuebersicht</h1></body></html>")
+    home.page.evaluate("html => document.body.insertAdjacentHTML('beforeend', html)",
+                       SIGN_IN_PART)
+    signed_in = home.context.new_page()
+    signed_in.goto(site.URLS["home"])
+    used = []
+    real = docs.App.page
+
+    def page(app):
+        tab = real(app)
+        used.append(tab)
+        return tab
+    monkeypatch.setattr(docs.App, "page", page)
+    # The page has no Postfach links, so the run stops at its first folder.
+    home.run_all()
+    assert used and all(tab is signed_in for tab in used)

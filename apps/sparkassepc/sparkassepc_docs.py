@@ -265,9 +265,10 @@ class App:
             # read for a drawn password field. Any other tab is ranked by its
             # address alone, so another page the browser has put to sleep is
             # not read, and the tab taken is still checked for a sign-in after.
-            postfach = [p for p in mine if urlsplit(p.url).path in site.FOLDERS.values()
-                        and not site.looks_signed_out(p)]
-            not_login = [p for p in mine if not any(
+            folders = [p for p in mine if urlsplit(p.url).path in site.FOLDERS.values()]
+            signed_out = [p for p in folders if site.looks_signed_out(p)]
+            postfach = [p for p in folders if p not in signed_out]
+            not_login = [p for p in mine if p not in signed_out and not any(
                 m in (p.url or "").lower() for m in site.LOGIN_URL_MARKERS)]
             self._work_page = (postfach or not_login or mine)[0] if mine else tabs.new_tab(ctx)
         else:
