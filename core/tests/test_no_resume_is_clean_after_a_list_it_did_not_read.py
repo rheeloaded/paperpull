@@ -258,8 +258,15 @@ class Home:
         """One document of a kind this app keeps, as its own Document class
         records it."""
         kinds = self.config.get("document_types") or ["Statement"]
-        return self.mod.Document(title="Monthly Statement", category=kinds[0],
-                                 summary="Monthly Statement", date="2026-01-15")
+        doc = self.mod.Document(title="Monthly Statement", category=kinds[0],
+                                summary="Monthly Statement", date="2026-01-15")
+        if self.app.name == "verizonmobile":
+            # Every bill its listing writes carries its id, and a record
+            # with none is one a build before 0.62.0 left, which a run
+            # leaves as it is (#249). So its document is one a listing
+            # writes, with an invented account.
+            doc.document_id = "bill-1111-00001-2026-01-15"
+        return doc
 
     def listed_before(self, done: bool, whole: bool = True):
         """What an earlier listing left, one document in discovery.json, done
