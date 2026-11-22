@@ -27,7 +27,13 @@ BILLING_URL = BASE + "/"
 URLS = {"home": BILLING_URL, "login": BILLING_URL, "documents": BILLING_URL}
 ALLOWED_HOSTS = {HOST}
 LOGIN_URL_MARKERS = ("/login",)
-INVOICES_PATH = re.compile(r"^/([0-9a-f]{32})/billing/invoices/?$", re.I)
+# The Dashboard has drawn Invoices and documents at two routes of the same
+# account, /<account>/billing/invoices and /<account>/settings/billing/invoices
+# (#238, seen on a contributor's Dashboard after 0.70.0).
+INVOICES_PATH = re.compile(r"^/([0-9a-f]{32})/(?:settings/)?billing/invoices/?$", re.I)
+# The Dashboard API's error code for a request with no signed-in session. A
+# signed-out browser's history request is answered 403 with it (#238).
+SIGNED_OUT_CODE = 10000
 INVOICE_ID = re.compile(r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$", re.I)
 RECEIPT_NUMBER = re.compile(r"^[A-Z0-9]{1,12}(?:[-_][A-Z0-9]{1,16}){1,4}$", re.I)
 PAGE_SIZE = 50
@@ -98,16 +104,25 @@ def account_tag(page) -> str:
     return _tag(account) if account else ""
 
 
-def invoice_list_ready(page) -> bool:
-    """Require a readable first page before reporting a ready session."""
+def invoice_list_look(page) -> tuple[bool, str]:
+    """(True, "ready") when the selected account's first history page is
+    readable, (False, "signed out") when the Dashboard says no one is signed
+    in, else (False, "stopped")."""
     account = _account(page.url)
     if not account:
-        return False
+        return False, "stopped"
     try:
         _history_page(page, account, 1)
-    except (ListStopped, SessionExpired):
-        return False
-    return True
+    except SessionExpired:
+        return False, "signed out"
+    except ListStopped:
+        return False, "stopped"
+    return True, "ready"
+
+
+def invoice_list_ready(page) -> bool:
+    """Require a readable first page before reporting a ready session."""
+    return invoice_list_look(page)[0]
 
 
 def looks_signed_out(page) -> bool:
@@ -136,6 +151,21 @@ def detect_security_challenge(page):
     return None
 
 
+def _answers_signed_out(response) -> bool:
+    """Whether a refused answer names the Dashboard's signed-out error, an
+    errors list holding the number 10000. Any other refusal, an unreadable
+    body or a code given as text keeps its own meaning."""
+    try:
+        data = json.loads(intake.text_of(response, limit=LIST_BYTES))
+    except Exception:
+        return False
+    errors = data.get("errors") if isinstance(data, dict) else None
+    if not isinstance(errors, list):
+        return False
+    return any(isinstance(e, dict) and type(e.get("code")) is int
+               and e["code"] == SIGNED_OUT_CODE for e in errors)
+
+
 def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
     if _account(page.url) != account:
         raise ListStopped("The selected Cloudflare account changed.")
@@ -149,6 +179,8 @@ def _history_page(page, account: str, page_number: int) -> tuple[list, bool]:
             raise SessionExpired()
         if response.status == 429:
             raise ListStopped("Cloudflare is limiting invoice requests. Try again later.")
+        if response.status == 403 and _answers_signed_out(response):
+            raise SessionExpired()
         if response.status == 403:
             raise ListStopped("Cloudflare refused the invoice history. The signed-in user may "
                               "not have billing access to this account")

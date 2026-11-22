@@ -9,6 +9,15 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **Cloudflare opens Invoices at the Dashboard's settings address (#238).**
+  A Dashboard that draws Invoices and documents at
+  `/<account>/settings/billing/invoices` was told the tab was open but not on
+  Invoices. That address is now read as the same account's Invoices page,
+  and the older one still is. A signed-out browser, which the Dashboard
+  answers 403 with its error code 10000, now reads as signed out rather than
+  as a user without billing access.
+
 ## [0.70.0] - 2026-11-20
 
 Two new apps, Marin Water and Cloudflare invoices, and Vanguard reads
