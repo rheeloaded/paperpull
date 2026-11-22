@@ -19,7 +19,7 @@ All notable changes to PaperPull are recorded here. Versioning follows
   inside your own signed-in dashboard with the page's own sign-in, which
   never leaves the page, and nothing is clicked. Each PDF must name Raisin
   and print its own date, day first, before it is filed, and one that does
-  not is refused rather than guessed about. It signs in on port 9321.
+  not is refused rather than guessed about. It signs in on port 9326.
 
 ## [0.70.0] - 2026-11-20
 
