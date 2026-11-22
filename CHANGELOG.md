@@ -9,6 +9,18 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+## [0.71.0] - 2026-11-22
+
+Seven new apps. Mercury, Sonic, SimpliSafe, Starlink and Kaiser
+Permanente come from @solkennedy, and Trade Republic and Raisin are built
+without an account and wait for a tester. Meijer is now supported,
+confirmed on a contributor's account. ING reads every account's Postbox
+tab, Kroger keeps a weighed item's weight and unit, and Meijer's Purchases
+rows list the products on the receipt. Sparkasse Pforzheim Calw turns slow
+Postfach pages, Amazon reads an amazon.de order list drawn without order
+cards, and Cloudflare, Chase, Bank of America, Verizon Mobile, Tualatin
+Water and Ziply Fiber each get a repair or a clearer failure file.
+
 ### Added
 - **Kroger keeps a weighed item's printed weight and unit (#247, thanks
   cmcculloh).** A receipt line such as "1.75 lbs x $2.29 each (approx.)"
