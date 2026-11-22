@@ -156,7 +156,7 @@ def _answers_signed_out(response) -> bool:
     errors list holding the number 10000. Any other refusal, an unreadable
     body or a code given as text keeps its own meaning."""
     try:
-        data = json.loads(intake.text_of(response, limit=LIST_BYTES))
+        data = whole_json(json.loads(intake.text_of(response, limit=LIST_BYTES)))
     except Exception:
         return False
     errors = data.get("errors") if isinstance(data, dict) else None

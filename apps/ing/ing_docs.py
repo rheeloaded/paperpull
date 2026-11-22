@@ -26,6 +26,7 @@ downloaded too unless include_unread is false in the config.
 from __future__ import annotations
 
 from paperpull_core import failure
+from paperpull_core.characters import whole_json
 from paperpull_core import listing
 from paperpull_core import renaming
 from paperpull_core import saved_copy
@@ -256,7 +257,7 @@ class App:
         """The home account's tab digest an earlier run wrote and its salt,
         or ("", "") when there is none or the file cannot be read as one."""
         try:
-            data = json.loads(self.accounts_json.read_text(encoding="utf-8"))
+            data = whole_json(json.loads(self.accounts_json.read_text(encoding="utf-8")))
         except (OSError, ValueError):
             return "", ""
         if not isinstance(data, dict):
