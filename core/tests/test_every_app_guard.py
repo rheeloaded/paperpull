@@ -418,7 +418,7 @@ CLICK_NOTHING = {
     "affirm", "amazonvisa", "amexbanking", "anthem", "apple", "cetera", "cibc", "citi", "cloudflare", "consorsbank",
     "direkt1822", "dkb", "ezpassva", "fedex", "fidelity", "gap", "github", "homedepot", "ing", "invest529",
     "irs", "kroger", "lowes", "marinwater", "mbna", "myecp", "mypay", "netbenefits", "nwnatural", "optum",
-    "paylocity", "portlandgeneral", "renaultbank", "scalable", "sdge", "stripe", "tsp", "tualatin", "uber",
+    "paylocity", "portlandgeneral", "renaultbank", "scalable", "sdge", "sonic", "stripe", "tsp", "tualatin", "uber",
     "ukg", "ups", "verizonmobile", "ziply",
 }
 # Apps that press only controls they find by a selector or by words written

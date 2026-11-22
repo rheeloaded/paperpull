@@ -192,6 +192,9 @@ ITS_OWN = {
         "or a list that stops shows there and reaches the run, and a list that still "
         "reads leaves the refusal that bill's alone, so one bill Ziply will not give "
         "never stops every later run at it",
+    ("sonic", "download_bill", ("_fetch_pdf",)):
+        "a PDF refusal checked against Sonic's refreshed bill history. A sign-out "
+        "or unreadable list still stops the run",
     ("mypay", "download_document", ("_fetch",)):
         "a refusal of one document's PDF, after which its type's list is read again "
         "with the call Discover reads it with. A page or a list holding nothing raises "

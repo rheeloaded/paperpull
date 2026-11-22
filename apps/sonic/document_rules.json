@@ -1,0 +1,11 @@
+{
+  "statement_rules": [
+    {
+      "pattern": "\\bbill\\b",
+      "summary": "Internet Bill"
+    }
+  ],
+  "tax_rules": [],
+  "insurance_rules": [],
+  "skip_patterns": []
+}
