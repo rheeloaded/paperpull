@@ -247,6 +247,8 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         # Mercury keys monthly statements by a hash of the
                         # listing ID and uses the generic deposit account kind.
                         "Mercury": ("account", "document_id"),
+                        # SimpliSafe keys monitoring bills by an invoice ID digest.
+                        "SimpliSafe": ("document_id",),
                         # Sonic's key uses a digest of the listed invoice ID.
                         "Sonic": ("document_id",)}
 

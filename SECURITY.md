@@ -47,7 +47,7 @@ The `.gitignore` already blocks all of the following. Do not override it.
     American Family, Apple Card, AT&T, Bank of America, Best Buy, Bilt, Chase, Chase Business,
     Coinbase, Costco, Discover, Discover Bank, Dominion, eBay, E*TRADE, Fairfax Water, First
     Horizon, Golden 1, Interactive Brokers, M&T, Meijer, Mercury, Nelnet, Newrez,
-    PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SMUD,
+    PayPal, PG&E, RedCard, SBA, Shelby County, Simmons Bank, SimpliSafe, SMUD,
     Sparkasse Pforzheim Calw, Spectrum,
     State Farm, T-Mobile, TreasuryDirect, U.S. Bank, Vanguard, Venmo and
     Wells Fargo) decide which of the page's controls may be
@@ -62,6 +62,11 @@ The `.gitignore` already blocks all of the following. Do not override it.
     Mercury only toggles the checkbox label bound to a validated statement
     row and checks the generated link against the same statement ID before
     fetching the PDF from Mercury's backend.
+    SimpliSafe presses only the Monitoring Payments paginator's Next page
+    and Previous page buttons, a verified invoice row and its invoice
+    dialog's Close button, all through the shared press guards, changes
+    none of the site's requests and renders the invoice in an isolated
+    context.
     Best Buy presses only its year menu and a year in it. Discover Bank
     presses only the keep-alive button of Discover's inactivity dialog, a
     button whose whole name is I'm still here, Stay signed in, Continue

@@ -1,0 +1,6 @@
+{
+  "statement_rules": [{"pattern": "\\bbill\\b", "summary": "Monitoring Bill"}],
+  "tax_rules": [],
+  "insurance_rules": [],
+  "skip_patterns": []
+}

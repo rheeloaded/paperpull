@@ -59,6 +59,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
   counts as a wrong document. A history that shows another page stops
   the run rather than being taken as whole. It signs in on port 9320.
   Contributed by @solkennedy.
+- **SimpliSafe monitoring bills (#243).** A new app saves the monitoring
+  invoices of Manage Account, Monitoring Payments, each opened by its own
+  row and printed from its invoice view after the invoice number and date
+  match the list, two bills of one day kept apart. A longer history is read
+  page by page through the table's own Next page button, and a page whose
+  rows do not change, repeat or disagree with the count stops the run. It
+  signs in on port 9321. Contributed by @solkennedy.
 
 ### Changed
 - **Meijer is confirmed on a contributor's account (#236).** A Pilot on

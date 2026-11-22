@@ -151,6 +151,13 @@ STOPS = {
     ("vanguard", "show_more", "click", "show more of the list"): (1,
         "a control of the whole list, read as turned on before it is pressed, and a "
         "list shown in full leaves only the statement not shown"),
+    ("simplisafe", "_turn", "click", ""): (1,
+        "the Monitoring Payments paginator's Next page or Previous page, read as turned on "
+        "just before it is pressed, a step to the page a bill is on, so one the page turns "
+        "off during the press would leave every bill past it unread"),
+    ("simplisafe", "_close_invoice", "click", ""): (1,
+        "closes an invoice's dialog once it has been read, and an open dialog covers every "
+        "press after it"),
     ("sparkassepc", "_turn", "click", ""): (1,
         "the Postfach's numbered page button, found only when it is turned on, a step "
         "to the page a document is on, so a turned off one where the pager offers that "
@@ -177,7 +184,7 @@ LEAVES = {
     ("coinbase", "_press_card_pdf"), ("firsthorizon", "_press"),
     ("etrade", "_catch_pdf"), ("golden1", "_catch_pdf"), ("nelnet", "_catch_pdf"),
     ("newrez", "_catch_pdf"), ("pge", "_press_once"), ("sba", "_catch_pdf"),
-    ("simmons", "_catch_document"), ("smud", "_catch_pdf"), ("sparkassepc", "_press_link"),
+    ("simmons", "_catch_document"), ("simplisafe", "_invoice_html"), ("smud", "_catch_pdf"), ("sparkassepc", "_press_link"),
     ("statefarm", "_catch_pdf"),
     ("vanguard", "download_document"),
     ("venmo", "show_all"), ("wellsfargo", "_catch_pdf")}
@@ -807,6 +814,33 @@ def _sparkassepc_link(off: bool) -> str:
             % (' aria-disabled="true"' if off else ""))
 
 
+SIMPLISAFE_ID = "b" * 31 + "1"
+
+
+def _simplisafe(monkeypatch):
+    """SimpliSafe's press of one monitoring invoice's own row link, the only
+    one on the page, found as the app finds it in its table's second column.
+    A turned off link leaves the bill, which its download records as failed
+    and goes on from."""
+    def call(site, page, out, staging, trace):
+        monkeypatch.setattr(site, "_INVOICE_LINKS", "table tbody td:nth-child(2) a")
+        monkeypatch.setattr(site, "_INVOICE_CSS", "table tbody td:nth-child(2) a")
+        return site._invoice_html(page, site.Bill(SIMPLISAFE_ID, "2026-06-30"))
+    return call
+
+
+def _simplisafe_link(off: bool) -> str:
+    # A link with no address, as SimpliSafe draws it, has no role of its own
+    # that can be turned off, so on SimpliSafe's own page this press is never
+    # left as turned off. The made-up one names its role so that the path
+    # that leaves the bill, kept for a page that ever turns one off, runs.
+    # The driver also reads the row outside SimpliSafe's own table, since
+    # the page here is the census's own.
+    return ('<a id="get" class="ctl" role="link"%s '
+            'onclick="window.presses++; fetch(\'/statement.pdf\');">%s</a>'
+            % (' aria-disabled="true"' if off else "", SIMPLISAFE_ID))
+
+
 def _how(app: str, function: str, monkeypatch):
     """The app's own press path, the page that shows its control, and the
     row it sits in, for each press that leaves its document."""
@@ -848,6 +882,8 @@ def _how(app: str, function: str, monkeypatch):
         return "spectrum_site", _spectrum_mobile(monkeypatch), _spectrum_row, "June 30, 2026"
     if (app, function) == ("venmo", "show_all"):
         return "venmo_site", _venmo, _venmo_list, VENMO_MONTH
+    if (app, function) == ("simplisafe", "_invoice_html"):
+        return "simplisafe_site", _simplisafe(monkeypatch), _simplisafe_link, "06/30/26"
     if (app, function) == ("sparkassepc", "_press_link"):
         return "sparkassepc_site", _sparkassepc, _sparkassepc_link, "30.06.2026"
     return None
