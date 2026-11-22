@@ -56,13 +56,13 @@ signed installer and automatic updates. Or download it free from the
 [Releases page](https://github.com/rheeloaded/paperpull/releases). Nothing
 is held back from the free build. See [Support](#support).
 
-Eighty-nine providers are supported today, all built on the same pattern.
+Ninety-four providers are supported today, all built on the same pattern.
 Six more, SBA, American Family, Stripe, FedEx, Trade Republic and Raisin, are built and
 waiting for someone with an account to
 test them ([#28](https://github.com/rheeloaded/paperpull/issues/28),
 [#45](https://github.com/rheeloaded/paperpull/issues/45),
 [#53](https://github.com/rheeloaded/paperpull/issues/53),
-[#54](https://github.com/rheeloaded/paperpull/issues/54), and for Raisin a new issue), and Scalable Capital, Consorsbank,
+[#54](https://github.com/rheeloaded/paperpull/issues/54), Trade Republic and Raisin have no issue yet), and Scalable Capital, Consorsbank,
 CIBC and MBNA are first shells waiting for a tester to Record a trip to a document
 ([#170](https://github.com/rheeloaded/paperpull/issues/170),
 [#178](https://github.com/rheeloaded/paperpull/issues/178),
@@ -976,8 +976,8 @@ Every contribution keeps the **read-only, local, no-credentials** design, see
 
 ## Status & roadmap
 
-- ✅ All **ninety-seven** apps pass their tests, the eighty-nine that are
-  supported, the four still waiting for a tester and the Scalable Capital,
+- ✅ All **one hundred four** apps pass their tests, the ninety-four that are
+  supported, the six still waiting for a tester and the Scalable Capital,
   Consorsbank, CIBC and MBNA shells, 47,569 of them
   across the repo. Most are in regular use by the author. The rest were built or
   confirmed by people who hold those accounts, named in the table above
@@ -1063,9 +1063,10 @@ found a bug and diagnosed it to the line.
   run against five years of monthly statements.
 - [@solkennedy](https://github.com/solkennedy), the Marin Water app, built and run on their own account,
   bills that share a date told apart by their PDFs, the Cloudflare invoices
-  app and the Mercury statements app, each run on their own account, the
-  Sonic app, run on their own internet bills, each PDF checked against its
-  listed invoice, and the Starlink app, run on their own account.
+  app, the Mercury statements app, the Starlink app and the Kaiser
+  Permanente app, each run on their own account, the Sonic app, run on
+  their own internet bills, each PDF checked against its listed invoice,
+  and the SimpliSafe app.
 - [@JasperDale19](https://github.com/JasperDale19), the Coinbase app,
   run against a retail account's monthly statements and tax documents,
   the Optum Bank app, built and run against an HSA, the Shelby County
