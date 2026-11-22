@@ -872,3 +872,25 @@ def test_listing_progress_names_folders_and_counts_never_a_row(home, caplog):
     lines = [r.getMessage() for r in caplog.records if r.name == "sparkassepc_docs.site"]
     assert "Postfach Posteingang page 2 read, 12 PDF(s) found so far" in lines
     assert not [line for line in lines if "Geheimer" in line or "ID-P" in line]
+
+
+def test_with_no_postfach_tab_a_signed_in_page_comes_before_a_sign_in_tab(home, monkeypatch):
+    overview = urlsplit(site.URLS["home"]).path
+    home.bank.plain[overview] = (
+        "<!doctype html><html><body><h1>Finanzuebersicht</h1></body></html>")
+    home.bank.folders["Posteingang"] = [message("P1")]
+    home.page.goto(site.URLS["login"])
+    signed_in = home.context.new_page()
+    signed_in.goto(site.URLS["home"])
+    used = []
+    real = docs.App.page
+
+    def page(app):
+        tab = real(app)
+        used.append(tab)
+        return tab
+    monkeypatch.setattr(docs.App, "page", page)
+    # The page has no Postfach links, so the run stops at its first folder.
+    home.run_all()
+    assert used and all(tab is signed_in for tab in used)
+    assert site.looks_signed_out(home.page)

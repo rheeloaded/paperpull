@@ -13,12 +13,13 @@ All notable changes to PaperPull are recorded here. Versioning follows
 - **Sparkasse Pforzheim Calw turns slow Postfach pages (#175, #244).** A
   page button's press now has 30 seconds, where every press had eight for
   the browser's wait for the button and the bank's navigation together, so
-  Run All no longer stops partway through the listing before downloading
-  anything. The button is still pressed once and never again. With several
-  tabs open on the bank's site the app works in a signed-in Postfach tab
-  rather than a sign-in tab left open from before, and Run All says it
-  reads every page before downloading and logs each page read. Thanks to
-  @MelleD, who found the cause, sent the fix and ran it on their account.
+  Run All no longer stops partway through the listing when a page takes
+  longer than eight seconds. The button is still pressed once and never
+  again. With several tabs open on the bank's site the app works in a
+  signed-in Postfach tab rather than a sign-in tab left open from before,
+  and Run All says it reads every page before downloading and logs each
+  page read. Thanks to @MelleD, who found the cause, sent the fix and ran
+  it on their account.
 
 ## [0.70.0] - 2026-11-20
 

@@ -18,9 +18,11 @@ any download ([#175](https://github.com/rheeloaded/paperpull/issues/175)).
 Its failure file says the page button's press did not go through in the
 eight seconds a press is given, which also has to cover the navigation the
 press starts. A page turn now has 30 seconds for both, fixed in
-[#244](https://github.com/rheeloaded/paperpull/pull/244). The tests turn a
-page whose button the browser holds back from the press for 11 seconds, as
-the failure file shows, and a page the bank answers after 8.5 seconds.
+[#244](https://github.com/rheeloaded/paperpull/pull/244). The failure file
+shows the press was never made, not why it waited. The tests turn a page
+whose button the browser holds back from the press for 11 seconds, one way
+that happens, and a page the bank answers after 8.5 seconds. A press held
+back for longer than 30 seconds still stops the run.
 
 ## Commands in a checkout
 
@@ -49,8 +51,8 @@ documents are downloaded and does not shorten that first reading.
 `discover` only lists documents and downloads nothing.
 
 With several tabs open on the bank's site, the app works in a signed-in
-Postfach tab first, then any other signed-in tab, and passes over a sign-in
-tab left open from before.
+Postfach tab first, then any tab not on a sign-in address, and passes over
+a sign-in tab left open from before.
 
 Check the Pilot's PDFs first. Resume carries on with a run that stopped,
 and Verify checks the saved PDFs on this computer. Progress and the

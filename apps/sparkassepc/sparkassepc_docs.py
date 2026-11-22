@@ -260,12 +260,16 @@ class App:
             # matches "provider.com.phish.example".
             live = [p for p in ctx.pages if not p.is_closed()]
             mine = [p for p in live if site.is_safe_url(p.url or "")]
-            # Prefer the signed-in Postfach over an older login tab left
-            # open by a previous browser launch.
-            signed_in = [p for p in mine if not site.looks_signed_out(p)]
-            postfach = [p for p in signed_in if
-                        urlsplit(p.url).path in site.FOLDERS.values()]
-            self._work_page = (postfach or signed_in or mine)[0] if mine else tabs.new_tab(ctx)
+            # Prefer a signed-in Postfach folder tab over a sign-in tab left
+            # open from before (#175). Only a tab on a folder's address is
+            # read for a drawn password field. Any other tab is ranked by its
+            # address alone, so another page the browser has put to sleep is
+            # not read, and the tab taken is still checked for a sign-in after.
+            postfach = [p for p in mine if urlsplit(p.url).path in site.FOLDERS.values()
+                        and not site.looks_signed_out(p)]
+            not_login = [p for p in mine if not any(
+                m in (p.url or "").lower() for m in site.LOGIN_URL_MARKERS)]
+            self._work_page = (postfach or not_login or mine)[0] if mine else tabs.new_tab(ctx)
         else:
             self._work_page = ctx.pages[0] if ctx.pages else ctx.new_page()
         self.requests
