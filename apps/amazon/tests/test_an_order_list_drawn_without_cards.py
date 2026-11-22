@@ -422,9 +422,9 @@ class _Moving:
     def evaluate(self, js, arg=None):
         self.looks += 1
         if self.looks == 1:
-            return [{"kind": "menu", "chain": [5, 4], "alike": [True, False], "top": 1,
+            return [{"kind": "menu", "chain": [5, 4], "alike": [True, False], "top": 1, "shape": ["DIV|a", "DIV|b"],
                      "raw": popover("/your-orders/invoice/popover?orderId=%s" % A)},
-                    {"kind": "menu", "chain": [9, 8], "alike": [True, False], "top": 1,
+                    {"kind": "menu", "chain": [9, 8], "alike": [True, False], "top": 1, "shape": ["DIV|a", "DIV|b"],
                      "raw": popover("/your-orders/invoice/popover?orderId=%s" % B)}]
         return self.second
 
@@ -547,3 +547,37 @@ def test_a_page_that_prints_its_order_numbers_is_never_called_short(page):
     assert not site.fewer_than_counted(page, 0, 1)
     page.set_content("<div class='order-card'>x</div>" + orders_page([], count=5))
     assert not site.fewer_than_counted(page, 0, 1)
+
+
+def test_a_link_to_another_order_inside_an_order_takes_nothing_from_it(page):
+    """Order A's block also links a replacement order C's details. A keeps
+    its block and date, and C, which is not in the list, is not read."""
+    site.set_marketplace("amazon.de")
+    header = details(A) + menu(A) + "<div>Ersatzbestellung " + details(DECOY) + "</div>"
+    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €", header=header),
+                                    order(B, "1. Februar 2026", "58,20 €")]))
+    assert [o for o, _ in found] == [A, B]
+    assert site.parse_date(found[0][1]) == "2026-03-03"
+
+
+def test_a_notice_in_the_list_drawn_unlike_an_order_names_none(page):
+    """A notice beside the orders names an order by its details link. It is
+    not drawn like an order block, so it names no order."""
+    site.set_marketplace("amazon.de")
+    notice = "<p class='notice'>Ihre Bestellung wurde aktualisiert %s</p>" % details(DECOY)
+    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €"), notice,
+                                    order(B, "1. Februar 2026", "58,20 €")]))
+    assert [o for o, _ in found] == [A, B]
+
+
+def test_a_canceled_order_beside_the_only_invoiced_one_is_read(page):
+    """One order with an invoice menu and one canceled order with only its
+    details link, drawn alike side by side. Both are read, so the page is
+    not short of its count."""
+    site.set_marketplace("amazon.de")
+    canceled = order(B, "1. Februar 2026", "0,00 €", header=ship_to() + details(B))
+    found = read(page, orders_page([order(A, "3. März 2026", "23,41 €"), canceled],
+                                   count=2))
+    assert [o for o, _ in found] == [A, B]
+    assert site.parse_date(found[1][1]) == "2026-02-01"
+    assert not site.fewer_than_counted(page, 0, len(found))

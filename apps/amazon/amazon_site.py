@@ -899,16 +899,17 @@ _INVOICE_MENUS_JS = r"""() => {
       kind = 'link';
     }
     if (raw.length > 4000) continue;
-    const chain = [], alike = [];
+    const chain = [], alike = [], shape = [];
     let top = null;
     for (let up = el; up && up !== document.body && up !== document.documentElement;
          up = up.parentElement) {
       if (isWide(up)) { top = place.get(up); break; }
       chain.push(place.get(up));
       alike.push(hasTwin(up));
+      shape.push(shapeOf(up));
     }
     if (top === null && chain.length) top = -1;
-    out.push({kind: kind, raw: raw, chain: chain, alike: alike, top: top});
+    out.push({kind: kind, raw: raw, chain: chain, alike: alike, shape: shape, top: top});
     if (out.length >= 2000) break;
   }
   return out;
@@ -1010,8 +1011,9 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
     The list is the place holding the most orders' blocks, counted by their
     invoice menus where any order has one, and an order whose block sits
     outside it (a banner naming an order) is not read. An order named only
-    by its order-details link is read when its block is in the list. Empty when nothing names an
-    order, or the page cannot be read."""
+    by its order-details link is read when a block around it is drawn like
+    an order block the menus found and sits beside it. Empty when nothing
+    names an order, or the page cannot be read."""
     try:
         found = page.evaluate(_INVOICE_MENUS_JS) or []
     except Exception:
@@ -1020,24 +1022,76 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
     for f in found:
         if not isinstance(f, dict) or not isinstance(f.get("chain"), list) or not f["chain"]:
             continue
-        alike = f.get("alike")
+        alike, shape = f.get("alike"), f.get("shape")
         if not isinstance(alike, list) or len(alike) != len(f["chain"]):
+            continue
+        if not isinstance(shape, list) or len(shape) != len(f["chain"]):
             continue
         oid = _order_of(f)
         if oid:
             named.append((oid, f))
     if not named:
         return []
-    # Each place to the orders named under it.
-    under: dict = {}
+    menus = [(oid, f) for oid, f in named if f["kind"] == "menu"]
+    by_menu = {oid for oid, _f in menus}
+    links = [(oid, f) for oid, f in named if f["kind"] == "link" and oid not in by_menu]
+    if not menus:
+        # No invoice menu on the page. The orders are named by their links
+        # alone and the list is the holder of the most of them.
+        placed = _placed(links, links)
+        kept = _the_list(placed)
+        return _read_blocks(page, kept)[0] if kept is not None else []
+    # The menus settle the list and each order's block, as though no link
+    # were there, so a link to another order inside an order's block takes
+    # nothing from it.
+    placed = _placed(menus, menus)
+    kept = _the_list(placed)
+    if kept is None:
+        return []
+    read, chosen = _read_blocks(page, kept)
+    if read is None:
+        return []
+    # An order named only by its order-details link (a canceled one, say)
+    # is read where a block around it is drawn like an order block the
+    # menus found, beside it in the same place. A notice or a banner drawn
+    # some other way names no order. An order missed this way is said, since
+    # the page then shows fewer orders than its count (fewer_than_counted).
+    cards = {c for c in chosen if c is not None}
+    extra = []
+    for oid, f, blocks, _holder in _placed(links, menus + links):
+        chain, shape = f["chain"], f["shape"]
+        for i in range(chain.index(blocks[-1]) + 1):
+            parent = chain[i + 1] if i + 1 < len(chain) else f.get("top")
+            if f["alike"][i] and (shape[i], parent) in cards:
+                extra.append((oid, f, [b for b in blocks if b in chain[:i + 1]], parent))
+                break
+    more, _ = _read_blocks(page, extra) if extra else ([], [])
+    if more is None:
+        return []
+    out, seen = [], set()
+    for oid, text in read + more:
+        if oid not in seen:
+            seen.add(oid)
+            out.append((oid, text))
+    # In the page's order.
+    first = {}
     for oid, f in named:
+        first.setdefault(oid, f["chain"][0])
+    out.sort(key=lambda pair: first.get(pair[0], 0))
+    log.info("orders read from their invoice menus: %d", len(out))
+    return out
+
+
+def _placed(these, all_named) -> list:
+    """(order id, found, its blocks lowest first, the place holding the
+    largest) for each of `these`, whose block grows up from what named it
+    while it names no other order of `all_named`."""
+    under: dict = {}
+    for oid, f in all_named:
         for p in f["chain"]:
             under.setdefault(p, set()).add(oid)
-    # Each naming's blocks to choose from, lowest first, the ones drawn like
-    # a sibling and the largest that names no other order, and the place
-    # that holds that largest one.
-    placed = []
-    for oid, f in named:
+    out = []
+    for oid, f in these:
         chain, at = f["chain"], 0
         for i, p in enumerate(chain):
             if under.get(p) != {oid}:
@@ -1045,52 +1099,61 @@ def invoice_menu_orders(page) -> List[Tuple[str, str]]:
             at = i
         blocks = [chain[i] for i in range(at) if f["alike"][i]] + [chain[at]]
         holder = chain[at + 1] if at + 1 < len(chain) else f.get("top")
-        placed.append((oid, f, blocks, holder))
-    # The list, the holder of the most orders' blocks, counted by their
-    # invoice menus where any order has one. An order whose block is
-    # elsewhere is not read from there, and an order named only by its
-    # order-details link (a canceled one, say) is read when its block sits
-    # in that list. Where nothing settles which holder is the list (one
-    # order on the page, say), the orders named by a menu are read and a
-    # link alone names none. An order missed that way is said, since the
-    # page then shows fewer orders than its count (fewer_than_counted).
-    menus = [x for x in placed if x[1]["kind"] == "menu"]
-    votes = menus or placed
+        out.append((oid, f, blocks, holder))
+    return out
+
+
+def _the_list(placed) -> Optional[list]:
+    """Those of `placed` in the list, the holder of the most orders' blocks.
+    All of them where each holds one (one order on the page, say), None
+    where two holders tie for the most."""
+    if not placed:
+        return []
     held: dict = {}
-    for oid, _f, _block, holder in votes:
+    for oid, _f, _blocks, holder in placed:
         held.setdefault(holder, set()).add(oid)
     most = max(len(v) for v in held.values())
     lists = [h for h, v in held.items() if len(v) == most]
-    if len(lists) == 1 and most >= 2:
-        placed = [x for x in placed if x[3] == lists[0]]
-    elif most >= 2:
-        return []
-    elif menus:
-        placed = menus
-    asks, order = [], []
-    for oid, f, blocks, _holder in placed:
-        if oid in order:
+    if most < 2:
+        return placed
+    if len(lists) != 1:
+        return None
+    return [x for x in placed if x[3] == lists[0]]
+
+
+def _read_blocks(page, placed) -> tuple:
+    """([(order id, text)], [its chosen block's (shape, holder) or None])
+    for `placed`, each order once, its text the lowest of its blocks that
+    gives a date, else the largest. (None, None) when the page moved
+    between the looks or cannot be read."""
+    asks, kept = [], []
+    for oid, f, blocks, holder in placed:
+        if any(k[0] == oid for k in kept):
             continue
-        order.append(oid)
+        kept.append((oid, f, blocks, holder))
         asks.append([blocks, f["chain"][0], f["raw"], f["kind"]])
     try:
         texts = page.evaluate(_BLOCK_TEXT_JS, asks) or []
     except Exception:
-        return []
-    if len(texts) != len(order):
-        return []
-    out = []
-    for oid, said in zip(order, texts):
-        if not isinstance(said, list) or not said or any(not isinstance(t, str) for t in said):
+        return None, None
+    if len(texts) != len(kept):
+        return None, None
+    out, chosen = [], []
+    for (oid, f, blocks, _holder), said in zip(kept, texts):
+        if not isinstance(said, list) or len(said) != len(blocks) or any(
+                not isinstance(t, str) for t in said):
             # The page moved between the two looks, so nothing it says now
             # is taken for this order.
-            return []
-        # The lowest block that gives a date is the order's own, else the
-        # largest that names it alone.
-        text = next((t for t in said if parse_date(t)), said[-1])
-        out.append((oid, text.strip()))
-    log.info("orders read from their invoice menus: %d", len(out))
-    return out
+            return None, None
+        k = next((n for n, t in enumerate(said) if parse_date(t)), len(said) - 1)
+        out.append((oid, said[k].strip()))
+        i = f["chain"].index(blocks[k])
+        if f["alike"][i]:
+            parent = f["chain"][i + 1] if i + 1 < len(f["chain"]) else f.get("top")
+            chosen.append((f["shape"][i], parent))
+        else:
+            chosen.append(None)
+    return out, chosen
 
 
 def card_to_purchase(card: RawCard, purchase_type: str,

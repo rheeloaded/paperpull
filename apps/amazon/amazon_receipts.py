@@ -866,7 +866,7 @@ class App:
                     print("   own count, so some were not read. What was read is kept,")
                     print("   and your list is not taken as read whole.")
                     self.write_failure("read the order list",
-                                       "the order list showed fewer orders than its count")
+                                       "the order list showed less than its count")
                 # How many of this page's orders are dated before the cutoff.
                 before_floor = 0
                 for card in cards:
@@ -958,7 +958,7 @@ class App:
         the panel offers a support report beside Continue or Check again."""
         if self._list_cut_short:
             try:
-                raise site.ListStopped("the order list ran past the page limit")
+                raise site.ListStopped("the order list was not read to its end")
             except site.ListStopped:
                 print("\n!! Not all of your order history was read.")
                 if self._years_cut_short:
