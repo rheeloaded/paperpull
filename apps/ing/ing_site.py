@@ -534,6 +534,239 @@ _ROWS_JS = r"""async (a) => {
 _STRANGE = "the Postbox answered in a shape this app does not read"
 
 
+# -- the account tabs (#169) --------------------------------------------------
+#
+# A sign-in that holds several accounts, a parent's own and a child's say,
+# shows one tab per account above the list, in the Postbox and in its
+# archive alike, in the same order every sign-in (MelleD, #169). Each tab
+# is a plain link to the list's own page, with an opaque value in its
+# query that changes on every page, and following it is the GET a click
+# makes. The list's plain address, with no query, always opens the first
+# account. So the tab selected there is the home account, read as this app
+# always read the Postbox, and every other tab is followed by the link the
+# page shows for it right then, never one kept from an earlier look.
+#
+# What a tab bar looks like was taken from MelleD's recordings: one box
+# above the list whose children are all links, each with its own words,
+# each to the list's own page with a query. How the selected tab is marked
+# was not recorded. A mark in aria or a class word (_TAB_MARK) is read
+# first, and with none, the one tab whose classes are the others' and more,
+# the others all alike. Anything else is not told, and stops the list.
+
+_MAX_TABS = 20
+_TAB_MARK = (r"(?:^|[-_])(?:is-?)?(?:active|selected|current|checked|aktiv)(?:$|[-_])|"
+             r"[a-z](?:Active|Selected|Current)$")
+_TABS_JS = r"""(a) => {
+  const flat = (s) => String(s || "").replace(/\s+/g, " ").trim();
+  const shown = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const list = document.querySelector(a.wrapper);
+  if (!list) return {bars: 0, loose: 0, tabs: []};
+  const pathOf = (p) => String(p || "").split(";")[0].replace(/\/+$/, "");
+  const here = pathOf(location.pathname);
+  const sameList = (link) => {
+    try {
+      const u = new URL(link.href);
+      return u.origin === location.origin && pathOf(u.pathname) === here && u.search.length > 1;
+    } catch (e) { return false; }
+  };
+  const above = (el) => !!(el.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const rowSel = a.rows.join(", ");
+  const outside = (el) => !el.closest(a.wrapper) && !el.closest(rowSel) && !el.closest(a.header);
+  const mark = new RegExp(a.mark);
+  const boxes = new Set();
+  for (const link of document.querySelectorAll("a[href]")) {
+    if (link.parentElement && outside(link) && above(link) && sameList(link)) {
+      boxes.add(link.parentElement);
+    }
+  }
+  const bars = [];
+  let loose = 0;
+  for (const box of boxes) {
+    const kids = Array.from(box.children);
+    const links = kids.filter(k => k.tagName === "A" && k.hasAttribute("href") && sameList(k));
+    if (links.length < 2) continue;
+    if (links.length === kids.length && kids.every(k => shown(k))) bars.push(box);
+    else loose += 1;
+  }
+  const tabs = bars.length !== 1 ? [] : Array.from(bars[0].children).slice(0, a.maxTabs + 1)
+    .map(k => {
+      const current = (k.getAttribute("aria-current") || "").toLowerCase();
+      return {
+        label: flat(k.innerText || k.textContent).slice(0, 300),
+        href: String(k.href || ""),
+        marked: (current !== "" && current !== "false") ||
+                k.getAttribute("aria-selected") === "true" ||
+                k.getAttribute("aria-pressed") === "true" ||
+                Array.from(k.classList).some(c => mark.test(c)),
+        classes: Array.from(k.classList).slice(0, 40).map(c => String(c).slice(0, 100)),
+      };
+    });
+  return {bars: bars.length, loose, count: bars.length === 1 ? bars[0].children.length : 0, tabs};
+}"""
+
+# Words of a tab that offers to add or open an account, which is not one.
+_TAB_REFUSED = re.compile(r"hinzuf(ue|ü)g|er(oe|ö)ffn|\bneu(es|en)?\b|\bnew\b|\badd\b|^\s*\+|"
+                          r"log\s*out|logout|sign\s*out|abmeld", re.I)
+
+
+def tab_digest(label: str) -> str:
+    """What the home account is remembered by, never its label, which is a
+    person's name."""
+    return _digest("ing-tab", _flat(label))[:32]
+
+
+# The home account's tab, as remembered from an earlier run ("stored") and
+# as first seen in this one ("seen"), by tab_digest.
+_home: dict = {"stored": "", "seen": ""}
+
+
+def remember_home(digest: str) -> None:
+    """The home account's tab a run starts from, as an earlier run saw it,
+    or "" when none has been seen."""
+    _home["stored"] = digest or ""
+    _home["seen"] = ""
+
+
+def home_seen() -> str:
+    """The home account's tab as this run saw it, or ""."""
+    return _home["seen"]
+
+
+def _selected_of(tabs: list) -> Optional[int]:
+    """Which tab is shown selected, or None when that cannot be told."""
+    marked = [i for i, t in enumerate(tabs) if t["marked"]]
+    if marked:
+        return marked[0] if len(marked) == 1 else None
+    sets = [frozenset(t["classes"]) for t in tabs]
+    found = []
+    for i, mine in enumerate(sets):
+        rest = [s for j, s in enumerate(sets) if j != i]
+        if rest and all(s == rest[0] for s in rest) and mine > rest[0]:
+            found.append(i)
+    return found[0] if len(found) == 1 else None
+
+
+def tab_folder(label: str) -> str:
+    """The folder a tab's documents are filed in, inside the folder of their
+    kind, made safe by the same rule as a naming pattern's folders."""
+    from paperpull_core.storage import account_folder_name
+    return account_folder_name(label)
+
+
+def account_tabs(page) -> dict:
+    """The account tabs above the list on screen, as {"labels", "hrefs",
+    "selected"}, with no labels when the list shows no tab bar. Raises
+    ListStopped for anything not read as one tab bar of accounts, and
+    for a selected tab that cannot be told. No message names a tab, since a
+    tab's label is a person's name."""
+    try:
+        seen = page.evaluate(_TABS_JS, dict(wrapper=_PARTS["wrapper"],
+                                            rows=_PARTS["rowSelectors"],
+                                            header=_PARTS["header"], mark=_TAB_MARK,
+                                            maxTabs=_MAX_TABS))
+    except Exception as e:
+        log.info("the account tabs could not be read: %s", type(e).__name__)
+        if looks_signed_out(page):
+            raise SessionExpired("ING shows its sign-in page") from None
+        raise ListStopped("the account tabs could not be read") from None
+    if (not isinstance(seen, dict) or type(seen.get("bars")) is not int
+            or type(seen.get("count")) is not int or not isinstance(seen.get("tabs"), list)):
+        raise ListStopped(_STRANGE)
+    if seen["bars"] == 0:
+        return {"labels": [], "hrefs": [], "selected": None}
+    if seen["bars"] > 1:
+        raise ListStopped("the Postbox shows more than one row of account tabs")
+    if seen["count"] > _MAX_TABS:
+        raise ListStopped("the Postbox shows more account tabs than this app reads")
+    tabs = []
+    for t in seen["tabs"]:
+        if (not isinstance(t, dict) or type(t.get("label")) is not str
+                or type(t.get("href")) is not str or type(t.get("marked")) is not bool
+                or not isinstance(t.get("classes"), list)
+                or any(type(c) is not str for c in t["classes"])):
+            raise ListStopped(_STRANGE)
+        tabs.append({"label": _flat(t["label"]), "href": t["href"], "marked": t["marked"],
+                     "classes": list(t["classes"])})
+    labels = [t["label"] for t in tabs]
+    if any(not label or len(label) > 120 for label in labels):
+        raise ListStopped("an account tab carries no name this app reads")
+    if any(_TAB_REFUSED.search(label) for label in labels):
+        raise ListStopped("the account tabs hold a link that is not an account's")
+    folders = [tab_folder(label) for label in labels]
+    if any(not f for f in folders):
+        raise ListStopped("an account tab's name leaves no folder name")
+    if (len({label.casefold() for label in labels}) != len(labels)
+            or len({f.casefold() for f in folders}) != len(folders)):
+        raise ListStopped("two account tabs carry the same name")
+    return {"labels": labels, "hrefs": [t["href"] for t in tabs],
+            "selected": _selected_of(tabs)}
+
+
+def _check_home(label: str) -> None:
+    """The tab the list's plain address opens on is the one it opened on
+    before, in this run and the last. Another would have its documents
+    filed as the home account's."""
+    mine = tab_digest(label)
+    expected = _home["stored"] or _home["seen"]
+    if expected and mine != expected:
+        raise ListStopped("the Postbox opens on another account than it did before, so no "
+                          "account is read as the first. If you renamed that account in ING, "
+                          "take ing-accounts.json out of the output folder and run this again")
+    _home["seen"] = _home["seen"] or mine
+
+
+def _safe_tab(href: str, source: str) -> bool:
+    """Whether a tab's link is one to follow: https on the banking host, to
+    the list's own page with a query, and with no word of an address that
+    changes something (_safe_download)."""
+    try:
+        parts = urlsplit(href or "")
+    except ValueError:
+        return False
+    return (_list_area(href) == source and bool(parts.query) and _safe_download(href))
+
+
+def _enter_account(page, source: str, tab: str) -> list:
+    """With `source`'s list opened by its plain address, have `tab`'s list
+    on screen, "" for the home account, and answer the labels of the tabs
+    shown (none when there is no tab bar). Every tab is checked on the way:
+    the plain address opens the home account, and a tab followed lands with
+    exactly that tab selected among the same tabs in the same order. Any
+    other answer raises ListStopped, and nothing of that list is read."""
+    bar = account_tabs(page)
+    if not bar["labels"]:
+        if tab:
+            raise ListStopped("the Postbox no longer shows the account tabs")
+        return []
+    if bar["selected"] is None:
+        raise ListStopped("which account tab is selected cannot be told")
+    _check_home(bar["labels"][bar["selected"]])
+    if not tab:
+        return bar["labels"]
+    mine = [i for i, label in enumerate(bar["labels"]) if label == tab]
+    if len(mine) != 1 or mine[0] == bar["selected"]:
+        raise ListStopped("the Postbox no longer shows that account's tab")
+    href = bar["hrefs"][mine[0]]
+    if not _safe_tab(href, source):
+        raise ListStopped("an account tab links to an address this app does not follow")
+    try:
+        page.goto(href, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_timeout(1500)
+    except Exception as e:
+        log.info("an account tab did not open: %s", type(e).__name__)
+        if looks_signed_out(page):
+            raise SessionExpired("ING shows its sign-in page") from None
+        raise ListStopped("an account tab did not open") from None
+    if looks_signed_out(page):
+        raise SessionExpired("ING shows its sign-in page")
+    if _list_area(page.url or "") != source:
+        raise ListStopped("an account tab opened another page")
+    now = account_tabs(page)
+    if now["labels"] != bar["labels"] or now["selected"] != mine[0]:
+        raise ListStopped("the account shown is not the one whose tab was followed")
+    return bar["labels"]
+
+
 def _flat(text) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 
@@ -610,15 +843,16 @@ def _safe_download(href: str) -> bool:
 SKIPS = ("unread", "no_link", "unclear", "refused")
 
 
-def _rows_again(page, source: str, settings: Optional[dict]) -> list:
+def _rows_again(page, source: str, settings: Optional[dict], tab: str = "") -> list:
     """The rows of one list, opened by its own address and read whole
     again after one of its documents was refused (refused.list_again)."""
-    area = _read_area(page, source, settings, again=True)
+    area = _read_area(page, source, settings, again=True, tab=tab)
     return area["rows"]
 
 
 def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool = True,
-               scroll: bool = True, again: bool = False) -> dict:
+               scroll: bool = True, again: bool = False, tab: str = "",
+               just_opened: bool = False) -> dict:
     """One list, "postbox" or "archive", read whole or not at all.
 
     Every row that might be a document comes back among the candidates,
@@ -633,10 +867,26 @@ def _read_area(page, source: str, config: Optional[dict] = None, navigate: bool 
     A list with no rows that shows ING's notice that nothing matches is
     read as empty only when this read opened it by its own address, which
     clears any search or filter (_open_area). Read as it stood, the notice
-    may be a filter that finds nothing, and raises NotShownEmpty."""
+    may be a filter that finds nothing, and raises NotShownEmpty.
+
+    `tab` names the account tab whose list is read, "" for the home
+    account, the one the plain address opens (_enter_account). With tabs
+    shown, every read opens the plain address first and checks the tabs,
+    so a list is never read as another account's."""
     opened = False
-    if navigate:
-        opened = _open_area(page, source, again=again)
+    if navigate and just_opened and not tab:
+        # The home account's list, which the listing opened by its plain
+        # address a moment ago and read the tabs of (_accounts).
+        opened = True
+        if _list_area(page.url or "") != source:
+            raise ListStopped("the Postbox address opened another page")
+    elif navigate:
+        opened = _open_area(page, source, again=again or bool(tab))
+        if not opened and account_tabs(page)["labels"]:
+            # The list on screen was not opened by this read, so the
+            # account it shows may be any tab's. Its plain address is.
+            opened = _open_area(page, source, again=True)
+        _enter_account(page, source, tab)
     elif looks_signed_out(page):
         raise SessionExpired("ING shows its sign-in page")
     elif _list_area(page.url or "") != source:
@@ -716,25 +966,45 @@ def _account(text: str) -> str:
     return m.group(1)[-4:] if m else ""
 
 
-def _row_of(c: dict, source: str, serial: str) -> dict:
+def _accounts(page, source: str) -> List[str]:
+    """The accounts `source`'s list is read for, "" for the home account
+    first, then every other tab in the order the page shows them. Opens the
+    list by its plain address."""
+    _open_area(page, source, again=True)
+    bar = account_tabs(page)
+    if not bar["labels"]:
+        return [""]
+    if bar["selected"] is None:
+        raise ListStopped("which account tab is selected cannot be told")
+    _check_home(bar["labels"][bar["selected"]])
+    return [""] + [label for i, label in enumerate(bar["labels"]) if i != bar["selected"]]
+
+
+def _row_of(c: dict, source: str, serial: str, tab: str = "") -> dict:
     """A document row as Discover records it. Its title is its subject, with
     its document type ahead of it where the subject does not say it.
 
     Its id names it within this one listing only. ING's links carry the
     page they were read from, so an id kept from one listing says nothing
-    in the next (paperpull_core.keys.told_apart reads ids that way)."""
+    in the next (paperpull_core.keys.told_apart reads ids that way).
+
+    `tab` is the account tab it was listed under, "" for the home account,
+    whose rows are what they always were."""
     kind, subject = c["kind"], c["subject"]
     if kind and subject and kind.lower() not in subject.lower():
         title = f"{kind} - {subject}"
     else:
         title = subject or kind or "Dokument"
+    said = (serial, source, kind, subject, c["date_text"], c["hrefs"][0])
     return {
         "title": title,
         "date": c["date"],
         "account": _account(f"{kind} {subject}"),
         "category": classify(kind, subject),
-        "item_id": _digest(serial, source, kind, subject, c["date_text"], c["hrefs"][0])[:32],
+        "item_id": _digest(*(said + ((tab,) if tab else ())))[:32],
         "client_id": source,
+        "tab": tab,
+        "account_folder": tab_folder(tab) if tab else "",
         "href": _AREAS[source],
         "period_start": "",
         "created": "",
@@ -769,7 +1039,7 @@ def _all_rows(page, config: Optional[dict] = None, fresh: bool = False,
     if (navigate and not fresh and _listing.get("rows") is not None
             and _listing.get("key") == key and now - _listing.get("at", 0) < LISTING_SECONDS):
         return _listing["rows"]
-    _listing.update(undated=0, skipped=dict.fromkeys(SKIPS, 0))
+    _listing.update(undated=0, skipped=dict.fromkeys(SKIPS, 0), accounts=[])
     if navigate:
         _listing.pop("rows", None)
         sources = ["postbox", "archive"] if key[1] else ["postbox"]
@@ -784,23 +1054,28 @@ def _all_rows(page, config: Optional[dict] = None, fresh: bool = False,
     rows: List[dict] = []
     undated_rows = 0
     passed = dict.fromkeys(SKIPS, 0)
+    counts: Dict[str, int] = {}
     for source in sources:
         # A listing opens each list by its own address, never the view the
         # person left on screen, which may hold a search or a filter of
         # their own (ING's empty notice asks to check "Ihre Suche oder die
         # Filterkriterien"), so a filtered list is never read as the whole.
-        area = _read_area(page, source, config, navigate=navigate, scroll=navigate,
-                          again=navigate)
-        rows += [_row_of(c, source, serial) for c in area["rows"]]
-        undated_rows += area["undated"]
-        for k, n in area["skipped"].items():
-            passed[k] += n
+        # With account tabs, each account's list is read in turn (#169).
+        for tab in (_accounts(page, source) if navigate else [""]):
+            area = _read_area(page, source, config, navigate=navigate, scroll=navigate,
+                              again=navigate, tab=tab, just_opened=navigate and not tab)
+            rows += [_row_of(c, source, serial, tab) for c in area["rows"]]
+            undated_rows += area["undated"]
+            for k, n_passed in area["skipped"].items():
+                passed[k] += n_passed
+            counts[tab] = counts.get(tab, 0) + len(area["rows"])
     if undated_rows and not rows:
         raise ListStopped("no document in the list carries a date this app can read")
     if undated_rows:
         log.warning("%d document(s) carry no date this app can read, so they are left out",
                     undated_rows)
-    _listing.update(undated=undated_rows, skipped=passed)
+    # Per account, by its place, never its name (accounts_read).
+    _listing.update(undated=undated_rows, skipped=passed, accounts=list(counts.values()))
     if navigate:
         _listing.update(rows=rows, at=now, key=key)
     return rows
@@ -810,6 +1085,13 @@ def undated() -> int:
     """How many documents the last listing left out for carrying no date
     this app can read."""
     return int(_listing.get("undated") or 0)
+
+
+def accounts_read() -> List[int]:
+    """How many documents the last listing read for each account, the home
+    account first and then each tab in the order the page shows them. One
+    number for a Postbox with no account tabs."""
+    return [int(n) for n in (_listing.get("accounts") or [])]
 
 
 def skipped() -> dict:
@@ -862,7 +1144,7 @@ def answers_its_list(page) -> bool:
 
 def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0,
                  item_id: str = "", *, category: str, number_rows, twins: int = 1,
-                 config: Optional[dict] = None) -> Optional[dict]:
+                 config: Optional[dict] = None, tab: str = "") -> Optional[dict]:
     """The document's own row of a recent listing, or None when the listing
     no longer shows it.
 
@@ -874,12 +1156,14 @@ def resolve_item(page, title: str, date: str, account: str, occurrence: int = 0,
     among the rows alike says nothing once the list comes back in another
     order. A row found by its number and not by `item_id` is taken only
     when the listing shows as many documents alike as the app knows
-    (`twins`). Anything less raises NotToldApart rather than guess."""
+    (`twins`). Anything less raises NotToldApart rather than guess. A row
+    is its document's only under the same account tab (`tab`, "" for the
+    home account)."""
     rows = listed_rows(page, config)
     numbers = number_rows(rows)
     alike = [i for i, r in enumerate(rows)
              if r["title"] == title and r["date"] == date and r["account"] == account
-             and filed_category(r) == category]
+             and filed_category(r) == category and (r.get("tab") or "") == (tab or "")]
     mine = [i for i in alike if numbers[i][0] == occurrence]
     if not mine:
         # The stored id is left as the way to it, unless another document
@@ -920,7 +1204,7 @@ def _fresh_href(page, row: dict, config: Optional[dict]) -> str:
     a link read from a page minutes old, with a document come or gone since,
     can lead to its neighbor's PDF."""
     source = row["source"]
-    area = _read_area(page, source, config, again=True)
+    area = _read_area(page, source, config, again=True, tab=row.get("tab") or "")
     alike = [c for c in area["candidates"] if c["sig"] == row["sig"]]
     if not alike:
         raise RuntimeError("the Postbox no longer lists this document")
@@ -1034,7 +1318,7 @@ def _fetch(page, href: str) -> Optional[bytes]:
 def download_document(page, title: str, date: str, out_path: Path, occurrence: int = 0,
                       item_hint: str = "", client_hint: str = "", account: str = "", *,
                       category: str, number_rows, twins: int = 1,
-                      config: Optional[dict] = None) -> str:
+                      config: Optional[dict] = None, tab: str = "") -> str:
     """Save one document, and answer the id of the row it came from, or ""
     when nothing was saved for it, since it was over the size limit or was
     refused while the list still reads.
@@ -1058,7 +1342,7 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
     after the list is read again."""
     row = resolve_item(page, title, date, account, occurrence, item_id=item_hint,
                        category=category, number_rows=number_rows, twins=twins,
-                       config=config)
+                       config=config, tab=tab)
     if row is None:
         raise RuntimeError("the Postbox no longer lists this document")
     for _attempt in range(2):
@@ -1078,7 +1362,8 @@ def download_document(page, title: str, date: str, out_path: Path, occurrence: i
             # nothing, stops it with the list unread. One that still reads
             # leaves this document failed, so it never stops every later run
             # at the same document.
-            refused.list_again(lambda: _rows_again(page, row["source"], config),
+            refused.list_again(lambda: _rows_again(page, row["source"], config,
+                                                   row.get("tab") or ""),
                                SessionExpired, ListStopped)
             log.info("the document dated %s was refused while the list still reads", date)
             return ""
@@ -1251,8 +1536,44 @@ def postbox_census(page) -> dict:
         raise RuntimeError("The Postbox structure returned inconsistent row counts.")
 
     area = _list_area(address) or "other"
-    return {Fixed("inspected"): True, Fixed("area"): Fixed(area),
-            **{Fixed(key): result[key] for key in flags + counts}}
+    out = {Fixed("inspected"): True, Fixed("area"): Fixed(area),
+           **{Fixed(key): result[key] for key in flags + counts}}
+    out.update(_tab_census(page))
+    return out
+
+
+def _tab_census(page) -> dict:
+    """How many account tab bars, tabs and tabs marked selected the page
+    shows, and whether the selected one can be told, numbers only (#169).
+    A box of links that looks like a tab bar but is not read as one is
+    counted too (account_tab_boxes_not_read), so a page whose tabs this
+    app misses can be mapped."""
+    try:
+        seen = page.evaluate(_TABS_JS, dict(wrapper=_PARTS["wrapper"],
+                                            rows=_PARTS["rowSelectors"],
+                                            header=_PARTS["header"], mark=_TAB_MARK,
+                                            maxTabs=_MAX_TABS))
+    except Exception:
+        return {Fixed("account_tabs_read"): False}
+    if (not isinstance(seen, dict) or any(type(seen.get(k)) is not int
+                                          for k in ("bars", "loose", "count"))
+            or not isinstance(seen.get("tabs"), list)):
+        return {Fixed("account_tabs_read"): False}
+    tabs = [t for t in seen["tabs"] if isinstance(t, dict)]
+    told = None
+    if seen["bars"] == 1 and len(tabs) == seen["count"]:
+        try:
+            told = _selected_of([{"marked": t.get("marked") is True,
+                                  "classes": [c for c in (t.get("classes") or [])
+                                              if type(c) is str]} for t in tabs]) is not None
+        except Exception:
+            told = None
+    return {Fixed("account_tabs_read"): True,
+            Fixed("account_tab_bars"): min(seen["bars"], _CENSUS_LIMIT),
+            Fixed("account_tab_boxes_not_read"): min(seen["loose"], _CENSUS_LIMIT),
+            Fixed("account_tabs"): min(seen["count"], _CENSUS_LIMIT),
+            Fixed("account_tabs_marked"): sum(1 for t in tabs if t.get("marked") is True),
+            Fixed("account_tab_selected_told"): told}
 
 
 def survey(page, dwell_ms: int = 4000) -> dict:

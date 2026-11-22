@@ -75,6 +75,10 @@ def tax(document, year=2025):
                   "15.02.%d" % (year + 1))
 
 
+# What the account tabs read answers on a Postbox of one account (#169).
+NO_TABS = {"bars": 0, "loose": 0, "count": 0, "tabs": []}
+
+
 class _Locator:
     def __init__(self, bank, selector):
         self.bank, self.selector = bank, selector
@@ -133,6 +137,8 @@ class Bank:
     def evaluate(self, js, arg=None):
         if isinstance(arg, dict) and "rowSelectors" in arg:
             return self._rows()
+        if isinstance(arg, dict) and "mark" in arg and js == site._TABS_JS:
+            return NO_TABS           # a Postbox of one account, no tab bar (#169)
         if isinstance(arg, dict) and "url" in arg and "const ppLimit" in js \
                 and arg.get("host") == "banking.ing.de":
             return self._fetch(arg["url"])

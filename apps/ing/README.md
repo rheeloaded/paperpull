@@ -39,7 +39,8 @@ matches wins.
 | Mitteilung, Information, Schreiben, Brief | `Mitteilungen` | `Message` |
 | anything else | `Sonstige Dokumente` | `Other Document` |
 
-The app never clicks, types or submits anything in the Postbox. Each time
+The app never clicks, types or submits anything in the Postbox (an account
+tab is followed by its link, see below). Each time
 it lists, it opens the two list addresses itself, even when the Postbox is
 already on screen, so a search or filter you left set in the window is not
 read as the whole list. It waits for the rows to settle, scrolls the list
@@ -76,6 +77,32 @@ empty, and the list is read whole with nothing in it. Read as it stands, as
 Diagnose reads it, the notice is not taken for an empty list. The same words
 anywhere else on the page, a count, or "keine neuen Nachrichten" (no new
 messages, which is not no messages) are not taken for the notice.
+
+**Several accounts (#169).** When one sign-in holds several accounts, your
+own and a child's say, ING shows one tab per account above the list, in the
+Postbox and in its archive alike, and a child's documents show only on the
+child's tab. The list's own address always opens the first tab, your own
+account. A run reads that one as it always did, then follows each other
+tab by the link the page shows for it right then, a plain page load as your
+click makes, and reads that account's list. Before it reads a list, and
+before each download, it checks that exactly one tab is shown selected and
+that it is the tab it followed, among the same tabs in the same order. It
+stops that list, saving nothing, when it is not, when which tab is selected
+cannot be told, when two tabs carry one name, when a tab offers to add or
+open an account, when a tab's link is not ING's own list page, or when
+there are more than 20 tabs. It also remembers which tab the Postbox opened
+on (as a fingerprint in `ing-accounts.json`, never the name), and stops if
+a later run finds it opening on another, so no account's documents are
+ever filed as yours. Discover says how many documents each account had, by
+its place, never its name.
+
+Your own account's documents are filed and named exactly as before. Each
+other account's go into a folder named after its tab inside the folder of
+their kind, such as `Kontoauszuege\Mia Muster\`, and the account is part of
+each record's key, so two accounts' documents are never taken for one.
+Rename and a documents folder keep them in that folder. When the folder
+would leave no room for the file under `max_path_length`, the document is
+marked failed rather than saved beside your own.
 
 Some rows are passed over, and Discover says how many and why. These are
 rows the Postbox marks unread when `include_unread` is `false`, rows with
@@ -137,7 +164,7 @@ to the others, and the next run tries it again.
 This is a bank account, and may hold a credit card and a securities account.
 The site can transfer money, set up standing orders, buy and sell
 securities, change limits and lock cards. This app activates no control at
-all. It reads the rows of the two Postbox lists and fetches their download
+all. It reads the rows of the two Postbox lists, follows the link of each account tab (a plain page load), and fetches their download
 links. A link is fetched only when it is `https` on `banking.ing.de` under
 `/app/`, and never when its address carries a word of an action, such as
 logout, delete, archive, move, mark read, unread, transfer, payment,
@@ -156,8 +183,14 @@ The single-account test does not cover every case.
   `include_unread`).
 - A populated archive. An empty archive has been seen, and when its layout
   differs, the run stops there. `read_archive: false` leaves it out.
-- Sub-accounts that ING's newer web banking shows behind a tab in the root
-  account are not read. A run reads the Postbox and archive it opens.
+- Account tabs (#169) were mapped from one account's recordings, which do
+  not show how ING marks the selected tab. The app reads a mark in aria or
+  a class word such as active or selected, or the one tab whose classes are
+  the others' and more, and stops when none of these tells. Diagnose counts
+  the tab bars, tabs and marked tabs it finds, numbers only.
+- A tab renamed in ING is a new folder, and its documents are downloaded
+  again into it. When the tab the Postbox opens on is renamed, the run
+  stops. Take `ing-accounts.json` out of the output folder to go on.
 - ING's default filter reaches back ten years, its longest period. A
   document older than that is not shown, so it is not read.
 - A list with paging or a "show more" button stops the run, since nothing is

@@ -110,6 +110,9 @@ def test_postbox_census_counts_shapes_without_clicking_or_returning_values(page)
         "rows_with_parseable_date": 1, "rows_with_download": 1,
         "statement_candidates": 0, "tax_candidates": 0,
         "unread_rows": 1, "pagination_controls": 1,
+        # A Postbox of one account shows no account tabs (#169).
+        "account_tabs_read": True, "account_tab_bars": 0, "account_tab_boxes_not_read": 0,
+        "account_tabs": 0, "account_tabs_marked": 0, "account_tab_selected_told": None,
     }
     assert page.url == before and page.evaluate("window.clicked") is False
     assert "May Price" not in str(census) and "private-account-id" not in str(census)
