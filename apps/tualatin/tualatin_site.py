@@ -63,6 +63,7 @@ from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
+from paperpull_core.words import Fixed
 from paperpull_core.words import shape as _shape
 from paperpull_core.words import words_for as _words_for
 
@@ -312,6 +313,26 @@ _TYPE_WORD_RE = re.compile(r"[A-Za-z][A-Za-z /]{0,29}")
 MAX_PAGE_BYTES = 5 * 1024 * 1024
 # How long one fetch of a print page, a stylesheet or an image may take.
 FETCH_MS = 30000
+
+# Why a bill was not kept, in this app's own words, so the failure file
+# names the check that refused it (#250). Each is lowercase letters and
+# spaces, the only reason a failure file keeps (failure._STEP_RE).
+NO_RECORD = "no bill was recorded for this document"
+NO_SINGLE_ROW = "no single activity row matches the bill"
+NOT_FETCHED = "the print page could not be fetched"
+TOO_LARGE = "the print page is too large"
+NOT_A_PAGE = "the print page answered something other than a page"
+NOT_A_BILL = "the print page does not read as a bill"
+NO_BILLING_DATE = "the print page shows no billing date"
+OTHER_BILLING_DATE = "the print page is of another billing date"
+STYLESHEET_LEFT_OUT = "a stylesheet of the bill was left out"
+DRAW_FAILED = "the bill could not be drawn as a pdf"
+DRAWN_NOT_THE_BILL = "the drawn pdf does not read as the bill"
+REFUSED_WHILE_LISTED = "the bill was refused while activity still reads"
+# The words the print script gives for a stylesheet or image left out,
+# besides "answered" and a status.
+_LEFT_OUT_WHYS = frozenset({"timed out", "after a time out", "not fetched", "not read",
+                            "over the budget"})
 
 
 def is_safe_url(url: str) -> bool:
@@ -830,6 +851,62 @@ def billing_date(said: str) -> Optional[str]:
         return None
 
 
+def text_facts(said: str, iso_date: str) -> dict:
+    """What a print page's or a drawn PDF's text holds of a bill, as yes or
+    no only, never the text. Whether any text was read, which of
+    PRINT_MARKERS are in it, and whether it gives a Billing Date and that
+    it is the Activity row's."""
+    text = re.sub(r"\s+", " ", said or "").strip()
+    low = text.lower()
+    facts = {"text read": bool(text)}
+    for marker in PRINT_MARKERS:
+        facts["has " + marker.lower()] = marker.lower() in low
+    day = billing_date(text)
+    facts["billing date found"] = day is not None
+    facts["same billing date"] = bool(day) and day == iso_date
+    return facts
+
+
+def left_out_facts(dropped: list) -> dict:
+    """How many stylesheets and images the print script left out, and why
+    the first stylesheet was, in the script's own words or as the status it
+    was answered with. The keys are words a failure file keeps (css for
+    stylesheet, which it would write as its shape)."""
+    sheets = [d for d in dropped if d.get("kind") == "stylesheet"]
+    facts = {"css left out": len(sheets),
+             "images left out": sum(1 for d in dropped if d.get("kind") == "image")}
+    if sheets:
+        why = str(sheets[0].get("why") or "")
+        m = re.fullmatch(r"answered ([0-9]{1,3})", why)
+        if m:
+            facts["css answered"] = int(m.group(1))
+        else:
+            facts["css why"] = why if why in _LEFT_OUT_WHYS else "other"
+    return facts
+
+
+def _refuse(trace: Optional[list], why: str, facts: Optional[dict] = None) -> bool:
+    """Note in the trace why a bill was not kept, with facts that are yes or
+    no and counts only, and answer False. The run's failure file takes its
+    reason from the last such note (tualatin_docs.download_one)."""
+    if trace is not None:
+        # Every key and word here is this module's own, so a file shaped
+        # from the trace keeps them as written (words.Fixed).
+        entry = {"note": "refused", "why": Fixed(why)}
+        for key, value in (facts or {}).items():
+            entry[Fixed(key)] = Fixed(value) if isinstance(value, str) else value
+        trace.append(entry)
+    return False
+
+
+def refusal(trace: Optional[list]) -> Optional[dict]:
+    """The last note of why a bill was not kept, or None."""
+    for entry in reversed(trace or []):
+        if isinstance(entry, dict) and entry.get("note") == "refused" and entry.get("why"):
+            return entry
+    return None
+
+
 def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[list]) -> bool:
     """Fetch the bill's print page from inside the signed-in page, with its
     own stylesheets and images from the portal host written into it, and
@@ -842,21 +919,22 @@ def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[lis
     own text does not read as that bill, a stylesheet having hidden part of
     it say, or a bill one of whose stylesheets was left out, so the next
     run asks again. An image left out is noted in the trace and the bill
-    is kept."""
+    is kept. Every refusal notes in the trace which check refused the bill
+    (_refuse), and the run's failure file gives that as its reason."""
     from paperpull_core import receipt_pdf
     url = print_url(number)
     if not url:
-        return False
+        return _refuse(trace, NO_RECORD)
     try:
         got = intake.evaluate(page, _PRINT_JS, [url, BASE, MAX_PAGE_BYTES, FETCH_MS],
                               limit=MAX_PAGE_BYTES) or {}
     except intake.TooLarge:
-        return False
+        return _refuse(trace, TOO_LARGE)
     except Exception as e:
         log.info("fetching the bill failed (%s)", type(e).__name__)
         if trace is not None:
             trace.append({"note": "fetch failed", "error": type(e).__name__})
-        return False
+        return _refuse(trace, NOT_FETCHED, {"error": type(e).__name__.lower()})
     dropped = [d for d in got.get("dropped") or [] if isinstance(d, dict)]
     written = got.get("inlined")
     if trace is not None:
@@ -869,31 +947,35 @@ def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[lis
     if got.get("too_big"):
         log.warning("the print page of the bill dated %s is larger than the %d MB MAX_PAGE_BYTES "
                     "in tualatin_site.py, so it was not read", iso_date, MAX_PAGE_BYTES // (1024 * 1024))
-        return False
+        return _refuse(trace, TOO_LARGE)
     html = got.get("html") or ""
     if got.get("status") != 200 or "html" not in str(got.get("type") or "").lower():
-        return False
+        status = got.get("status")
+        return _refuse(trace, NOT_A_PAGE, {
+            "status": status if isinstance(status, int) and not isinstance(status, bool) else 0,
+            "html type": "html" in str(got.get("type") or "").lower()})
     # The page as written out again can be larger than as read, "&" coming
     # back as "&amp;", so what is drawn is measured too.
     if len(html.encode("utf-8", "replace")) > MAX_PAGE_BYTES:
         log.warning("the bill dated %s written out is larger than the %d MB MAX_PAGE_BYTES "
                     "in tualatin_site.py, so it was not drawn", iso_date, MAX_PAGE_BYTES // (1024 * 1024))
-        return False
+        return _refuse(trace, TOO_LARGE)
     if got.get("password"):
         raise SessionExpired("the payment portal answered a bill with its sign-in page")
     said = str(got.get("said") or "")
     if not is_printed_bill(said):
         log.info("the print page did not read as a bill")
-        return False
+        return _refuse(trace, NOT_A_BILL, text_facts(said, iso_date))
     if billing_date(said) != iso_date:
         log.info("the print page is of another Billing Date than its Activity row")
         if trace is not None:
             trace.append({"note": "another billing date"})
-        return False
+        return _refuse(trace, OTHER_BILLING_DATE if billing_date(said) else NO_BILLING_DATE,
+                       text_facts(said, iso_date))
     if any(d.get("kind") == "stylesheet" for d in dropped):
         log.warning("a stylesheet of the bill dated %s was left out, so the bill is not kept "
                     "and the next run asks for it again", iso_date)
-        return False
+        return _refuse(trace, STYLESHEET_LEFT_OUT, left_out_facts(dropped))
     if dropped:
         log.warning("the PDF of the bill dated %s is drawn without %d of its images",
                     iso_date, len(dropped))
@@ -903,9 +985,9 @@ def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[lis
             receipt_pdf.print_html_inert_to_pdf(page, html, tmp, base=f"{BASE}/")
         except Exception as e:
             log.info("drawing the bill as a PDF failed (%s)", type(e).__name__)
-            return False
+            return _refuse(trace, DRAW_FAILED, {"error": type(e).__name__.lower()})
         if not (tmp.is_file() and tmp.read_bytes()[:5] == b"%PDF-"):
-            return False
+            return _refuse(trace, DRAW_FAILED, {"pdf written": tmp.is_file()})
         # The stylesheets went in after the page's text was read, so the
         # PDF they shaped is read too, for the same words and Billing Date.
         drawn = drawn_text(tmp)
@@ -913,7 +995,9 @@ def _fetch(page, number: str, iso_date: str, out_path: Path, trace: Optional[lis
             log.info("the PDF drawn for the bill dated %s does not read as that bill", iso_date)
             if trace is not None:
                 trace.append({"note": "drawn pdf is not the bill"})
-            return False
+            facts = text_facts(drawn, iso_date)
+            facts.update(left_out_facts(dropped))
+            return _refuse(trace, DRAWN_NOT_THE_BILL, facts)
         tmp.replace(out_path)
         return True
     finally:
@@ -959,7 +1043,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         log.info("no bill was recorded for this document")
         if trace is not None:
             trace.append({"note": "no recorded bill"})
-        return False
+        return _refuse(trace, NO_RECORD)
     try:
         found = [d for d in _bills(_open(page))
                  if d.document_id == number and d.date_text == (iso_date or "")]
@@ -970,10 +1054,10 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         log.info("%d rows match the recorded bill and date %s, none taken", len(found), iso_date)
         if trace is not None:
             trace.append({"note": "no single row matches the record", "matches": len(found)})
-        return False
+        return _refuse(trace, NO_SINGLE_ROW, {"matches": len(found)})
     try:
         return _fetch(page, number, iso_date, out_path, trace)
-    except SessionExpired:
+    except SessionExpired as e:
         # A refusal may be the session ending or this one bill. Activity is
         # read again, and a session that ended shows the sign-in page there
         # and stops the run. One that does not read stops it with the list
@@ -983,7 +1067,7 @@ def download_bill(page, dl_dir, iso_date: str, out_path, title: str = "",
         log.info("the bill dated %s was refused while the list still reads", iso_date)
         if trace is not None:
             trace.append({"note": "refused, the list still reads"})
-        return False
+        return _refuse(trace, REFUSED_WHILE_LISTED, {"sign in page": "sign-in page" in str(e)})
 
 
 # ---------------------------------------------------------------------------

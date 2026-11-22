@@ -662,7 +662,16 @@ class App:
             self._record(doc, State.FAILED,
                          notes="Could not capture the document PDF")
             self._write_row(doc, "Capture failed", State.FAILED.value)
-            self.write_failure('capture the document', 'the document would not render')
+            # Which check refused the bill, in the site layer's own words,
+            # with yes or no facts and counts only, so the failure file
+            # says why without anything from the page (#250).
+            why = site.refusal(trace)
+            if why:
+                print(f"  Why: {why['why']}.")
+                self.write_failure('capture the document', why["why"], extra={
+                    "refused": {k: v for k, v in why.items() if k not in ("note", "why")}})
+            else:
+                self.write_failure('capture the document', 'the document would not render')
             self.stats["failed"] += 1
             print("  Could not capture this document. Nothing was saved, and the next run tries it again.")
             return

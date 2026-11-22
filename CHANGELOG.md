@@ -107,6 +107,20 @@ All notable changes to PaperPull are recorded here. Versioning follows
   says in its failure file which way, with no recorded bill, no bill in
   the history with its id, no PDF address, the status the PDF answered
   with, or a refusal.
+- **Tualatin Water's failure file says which check refused a bill (#250).**
+  Every bill the app would not keep wrote "the document would not render",
+  whether its print page did not read as a bill, gave another Billing Date,
+  lost a stylesheet, could not be drawn, or was drawn into a PDF that did
+  not read as the bill. The failure file now names the check, with yes or
+  no facts such as which of the bill's headings were found, and the run
+  prints it. Nothing from the page goes in.
+- **Ziply Fiber's failure file says why its bill list stopped (#251).** A
+  list that stopped partway wrote only that it did. The failure file and
+  Diagnose's file now name the check that stopped it, the statement's
+  place in the list, and yes or no facts about the part it stopped on
+  (whether its address is on ziplyfiber.com, its invoice path, and names
+  its own id, whether its date is a calendar day or carries a time).
+  Nothing from the list goes in.
 
 ## [0.70.0] - 2026-11-20
 

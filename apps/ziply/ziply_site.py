@@ -84,6 +84,7 @@ from paperpull_core.urls import is_safe_url as _host_allows
 from paperpull_core.dates import last_day as _last_day
 from paperpull_core.dates import checked as _checked_date
 from paperpull_core.dates import full_year as _full_year
+from paperpull_core.words import Fixed
 from paperpull_core.words import words_for as _words_for
 
 log = logging.getLogger("ziply_docs.site")
@@ -372,20 +373,35 @@ class RawDoc:
     document_id: str = ""
 
 
+# Words a failure file keeps as they are, lowercase letters and spaces
+# (paperpull_core.failure._STEP_RE).
+_PLAIN_WORDS_RE = re.compile(r"[a-z][a-z ]{2,60}")
+
+
 class ListStopped(Exception):
     """The list has a part this could not read, so what was read is not all
-    of it. `docs` holds what was read before it stopped."""
+    of it. `docs` holds what was read before it stopped. `facts` says which
+    check stopped it, in this app's own words, with yes or no facts and
+    counts only and nothing from the page, for the failure file (#251).
+    A stop whose words are plain names its check by them."""
 
-    def __init__(self, why: str, docs=None):
+    def __init__(self, why: str, docs=None, facts=None):
         super().__init__(why)
         self.docs = list(docs or [])
+        # Every key and word here is this module's own, so a file shaped
+        # from them keeps them as written (words.Fixed).
+        self.facts = {Fixed(k): Fixed(v) if isinstance(v, str) else v for k, v in (facts or {}).items()}
+        plain = str(why).lower()
+        if "check" not in self.facts and _PLAIN_WORDS_RE.fullmatch(plain):
+            self.facts[Fixed("check")] = Fixed(plain)
 
 
 class SeveralAccounts(ListStopped):
     """Billing asked about more than one account, and this app reads one."""
 
     def __init__(self, count: int):
-        super().__init__(f"Billing asked about {count} accounts, and this app reads one")
+        super().__init__(f"Billing asked about {count} accounts, and this app reads one", None,
+                         {"check": "more than one account", "accounts": count})
         self.count = count
 
 
@@ -467,7 +483,8 @@ def _open(page, timeout_ms: int = 45000) -> _Session:
     if looks_signed_out(page):
         raise SessionExpired("ziplyfiber.com showed its sign-in page")
     if not got:
-        raise ListStopped("Billing did not ask for its account")
+        raise ListStopped("Billing did not ask for its account", None,
+                          {"check": "billing named no account"})
     if not _settled_here(page):
         raise ListStopped("Billing settled off its own address")
     accounts = sorted({_account_request(r.method, r.url, r.post_data) for r in got})
@@ -478,9 +495,12 @@ def _open(page, timeout_ms: int = 45000) -> _Session:
     try:
         headers = {k: v for k, v in req.all_headers().items() if k.lower() in _CARRIED_HEADERS and v}
     except Exception as e:
-        raise ListStopped(f"the page's own request could not be read ({type(e).__name__})")
+        raise ListStopped(f"the page's own request could not be read ({type(e).__name__})", None,
+                          {"check": "the page account request could not be read",
+                           "error": type(e).__name__.lower()})
     if not headers.get("authorization"):
-        raise ListStopped("the page's own account request carried no authorization")
+        raise ListStopped("the page's own account request carried no authorization", None,
+                          {"check": "the page account request carried no authorization"})
     return _Session(account=accounts[0], headers=headers)
 
 
@@ -511,16 +531,21 @@ def _ask_statements(page, session: _Session) -> dict:
     try:
         got = intake.evaluate(page, _ASK_JS, [API_URL, session.headers, body], limit=MAX_LIST_BYTES) or {}
     except intake.TooLarge:
-        raise ListStopped("the bill list is larger than any history")
+        raise ListStopped("the bill list is larger than any history", None,
+                          {"check": "the bill list is over the size limit"})
     except Exception as e:
         # The page went away under the script, a sign-out among the ways.
         if looks_signed_out(page):
             raise SessionExpired("ziplyfiber.com showed its sign-in page")
-        raise ListStopped(f"the bill list could not be asked ({type(e).__name__})")
+        raise ListStopped(f"the bill list could not be asked ({type(e).__name__})", None,
+                          {"check": "the bill list could not be asked", "error": type(e).__name__.lower()})
     if got.get("redirected") or got.get("status") in (401, 403):
         raise SessionExpired("the account API refused the session")
     if got.get("status") != 200 or not isinstance(got.get("data"), dict):
-        raise ListStopped(f"the bill list was answered with {got.get('status')}")
+        status = got.get("status")
+        raise ListStopped(f"the bill list was answered with {status}", None, {
+            "check": "the bill list was not answered with a list",
+            "status": status if isinstance(status, int) and not isinstance(status, bool) else 0})
     return got["data"]
 
 
@@ -537,6 +562,67 @@ def bill_day(text) -> Optional[str]:
 def _says_signed_out(value) -> bool:
     text = (value if isinstance(value, str) else json.dumps(value, default=str)).lower()
     return any(w in text for w in _SIGNED_OUT_WORDS)
+
+
+# The checks one statement of the list is held to, in words a failure file
+# keeps.
+NOT_AN_OBJECT = "a statement that is not an object"
+UNREADABLE_ID = "a statement id this cannot read"
+NOT_ITS_PDF = "a statement address that is not its own pdf"
+NOT_A_DAY = "a statement date that is not a calendar date"
+ONE_ID_TWICE = "two statements with one id"
+_YEAR_FIRST_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+_WITH_TIME_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]")
+_MONTH_FIRST_RE = re.compile(r"[0-9]{1,2}/[0-9]{1,2}/[0-9]{2,4}")
+
+
+def statement_facts(row, check: str, at: int, of: int) -> dict:
+    """What one statement the list stopped on looks like, as yes or no and
+    counts only, never its id, address, date or amount. `at` is its place
+    in the list from 1, `of` the list's length. "address written otherwise"
+    is an address whose parts are all right that still is not written as
+    the bill's own PDF address, a fragment or an escape say. Every key is
+    words a failure file keeps as they are (test_every_fact_and_check_comes_back_whole)."""
+    facts = {"check": check, "statement": at, "statements": of}
+    if not isinstance(row, dict):
+        return facts
+    inv = str(row.get("id") if row.get("id") is not None else "")
+    digits = inv.isascii() and inv.isdigit()
+    url = str(row.get("url") or "")
+    try:
+        parts = urlsplit(url)
+        q = parse_qs(parts.query, keep_blank_values=True)
+    except ValueError:
+        parts, q = None, {}
+    day = str(row.get("date") or "")
+    facts.update({
+        "has id": bool(inv), "id is a number": digits, "id length": len(inv),
+        "has address": bool(url),
+        "address is relative": url.startswith("/") and not url.startswith("//"),
+        "address is https": bool(parts) and parts.scheme == "https",
+        "address on this host": bool(parts) and parts.netloc == "ziplyfiber.com",
+        "address is the invoice path": bool(parts) and parts.path == DOWNLOAD_PATH,
+        "address query is only the invoice": set(q) == {"invoiceId"},
+        "address names this id": bool(inv) and q.get("invoiceId") == [inv],
+        "has date": bool(day), "date is year first": bool(_YEAR_FIRST_RE.match(day)),
+        "date has a time": bool(_WITH_TIME_RE.match(day)),
+        "date is month first": bool(_MONTH_FIRST_RE.match(day)),
+    })
+    facts["address written otherwise"] = bool(
+        parts and parts.scheme == "https" and parts.netloc == "ziplyfiber.com"
+        and parts.path == DOWNLOAD_PATH and facts["address names this id"]
+        and set(q) == {"invoiceId"} and url != invoice_url(inv))
+    return facts
+
+
+def _row_stop(why: str, check: str, row, at: int, of: int, docs) -> ListStopped:
+    """The stop for one statement, with its facts. Facts that cannot be
+    taken leave the check alone, never another error in the stop's place."""
+    try:
+        facts = statement_facts(row, check, at, of)
+    except Exception:
+        facts = {"check": check, "statement": at, "statements": of}
+    return ListStopped(why, docs, facts)
 
 
 def bills_of(answer, account: str) -> List[RawDoc]:
@@ -569,36 +655,40 @@ def bills_of(answer, account: str) -> List[RawDoc]:
         raise ListStopped("the account API answered the bill list with an error")
     if str(status) != "200":
         shown = status if isinstance(status, int) and not isinstance(status, bool) else "that is not one"
-        raise ListStopped(f"the account API answered the bill list with status {shown}")
+        raise ListStopped(f"the account API answered the bill list with status {shown}", None, {
+            "check": "the account api answered another status",
+            "status": shown if isinstance(shown, int) else 0})
     if said not in (None, "") and not (isinstance(said, str) and _SUCCESS_RE.fullmatch(said.strip())):
         raise ListStopped("the account API answered the bill list with a message")
     rows = block.get("billStatements")
     if not isinstance(rows, list):
         raise ListStopped("the bill list holds no statements")
     if not rows:
-        raise ListStopped("the bill list holds no bills, and a history with none has not been seen")
+        raise ListStopped("the bill list holds no bills, and a history with none has not been seen", None,
+                          {"check": "a list with no bills"})
     docs: List[RawDoc] = []
     ids = set()
-    for r in rows:
+    for at, r in enumerate(rows, 1):
         if not isinstance(r, dict):
-            raise ListStopped("a statement is not an object", docs)
+            raise _row_stop("a statement is not an object", NOT_AN_OBJECT, r, at, len(rows), docs)
         inv = str(r.get("id") or "")
         if not INVOICE_ID_RE.fullmatch(inv):
-            raise ListStopped("a statement's id is not one this can read", docs)
+            raise _row_stop("a statement's id is not one this can read", UNREADABLE_ID, r, at, len(rows), docs)
         if str(r.get("url") or "") != invoice_url(inv):
-            raise ListStopped("a statement's address is not its own PDF", docs)
+            raise _row_stop("a statement's address is not its own PDF", NOT_ITS_PDF, r, at, len(rows), docs)
         iso = bill_day(r.get("date"))
         if not iso:
-            raise ListStopped("a statement's date is not a calendar date", docs)
+            raise _row_stop("a statement's date is not a calendar date", NOT_A_DAY, r, at, len(rows), docs)
         if inv in ids:
-            raise ListStopped("two statements carry one id", docs)
+            raise _row_stop("two statements carry one id", ONE_ID_TWICE, r, at, len(rows), docs)
         ids.add(inv)
         title = f"Ziply Fiber Bill {iso}"
         docs.append(RawDoc(title=title, account=f"XXXX-{last4}", date_text=iso, href=DOWNLOAD_PATH,
                            text=title, row_index=len(docs), kind="statement",
                            document_id=f"bill-{last4}-{inv}"))
     if len(rows) >= BILLS_ASKED:
-        raise ListStopped(f"the bill list holds all {BILLS_ASKED} asked for, so there may be more", docs)
+        raise ListStopped(f"the bill list holds all {BILLS_ASKED} asked for, so there may be more", docs,
+                          {"check": "the list holds as many as were asked for", "statements": len(rows)})
     return docs
 
 
