@@ -268,3 +268,86 @@ def test_a_content_type_and_a_method_are_words_of_ours():
     assert entry["type"] == "json"
     assert entry["method"] == "other"
     assert_none_came_out(rec)
+
+
+# -- a batch of calls, where a download came from, another host's answer ----------
+# Each channel the recorder reads since it learned batches (#170), the source
+# of a download (#178) and a provider's own API on a host the app does not
+# list. Every invented value goes into one channel at a time.
+
+class _Frame:
+    def __init__(self, url):
+        self.url = url
+
+
+class _PageCall(FakeResponse):
+    """An answer to a script's call made by the provider's own page."""
+
+    def __init__(self, url, body=None, post=None, frame="https://bank.example/accounts"):
+        FakeResponse.__init__(self, url, body=body, method="POST", post=post)
+        self.request.resource_type = "fetch"
+        self.request.frame = _Frame(frame)
+
+
+def _batch(item, answer=None):
+    return _PageCall("https://bank.example/graphql", body=answer or [{"data": {}}],
+                     post=json.dumps([item, {"operationName": "documents"}]))
+
+
+_CHANNELS = {
+    "a call's key": lambda: _batch({MERCHANT: 1, LETTERS + SURNAME: 2}),
+    "an operation's name": lambda: _batch({"operationName": MERCHANT + SURNAME + LETTERS}),
+    "a variable's value": lambda: _batch({"variables": {"id": MERCHANT, "who": SURNAME,
+                                                       "acct": LETTERS}}),
+    "the query's text": lambda: _batch({"query": "{ %s(%s: %s) }" % (MERCHANT, SURNAME, LETTERS)}),
+    "a call that is a string": lambda: _batch("%s %s %s" % (MERCHANT, SURNAME, LETTERS)),
+    "an answer's key and value, first call": lambda: _batch(
+        {"operationName": "documents"}, [{MERCHANT: SURNAME, "a": LETTERS}]),
+    "an answer's key and value, last call": lambda: _batch(
+        {"operationName": "documents"}, [{}] * 9 + [{MERCHANT: SURNAME, "a": LETTERS}]),
+    "another host's name": lambda: _PageCall(
+        "https://%s.%s.bank.%s/docs" % (MERCHANT, SURNAME, LETTERS), body={"a": 1}),
+    "another host's path": lambda: _PageCall(
+        "https://api.bank.test/%s/%s/%s" % (MERCHANT, SURNAME, LETTERS), body={"a": 1}),
+    "another host's query": lambda: _PageCall(
+        "https://api.bank.test/docs?%s=%s&acct=%s" % (SURNAME, MERCHANT, LETTERS),
+        body={"a": 1}),
+    "another host's answer": lambda: _PageCall(
+        "https://api.bank.test/docs", body={MERCHANT: {SURNAME: LETTERS}}),
+}
+
+
+@pytest.mark.parametrize("channel", sorted(_CHANNELS))
+def test_every_new_channel_of_a_request_keeps_no_word_off_the_list(channel):
+    rec, page = recording()
+    click(page)
+    page.emit("response", _CHANNELS[channel]())
+    assert len(rec.requests) == 1, "the request was not kept, so this proves nothing"
+    assert_none_came_out(rec)
+
+
+_SOURCES = {
+    "a path": "https://bank.example/dl/%s/%s/%s.pdf" % (MERCHANT, SURNAME, LETTERS),
+    "a parameter's value": "https://bank.example/dl?doc=%s&who=%s&acct=%s"
+                           % (MERCHANT, SURNAME, LETTERS),
+    "a parameter's name": "https://bank.example/dl?%s=1&%s=2&%s=3" % (MERCHANT, SURNAME, LETTERS),
+    "a fragment": "https://bank.example/dl#%s/%s/%s" % (MERCHANT, SURNAME, LETTERS),
+    "another host": "https://%s.%s.%s.test/dl" % (MERCHANT, SURNAME, LETTERS),
+    "a data payload": "data:application/pdf;base64,%s%s%s" % (MERCHANT, SURNAME, LETTERS),
+    "a data media type": "data:application/%s-%s-%s;base64,AA" % (MERCHANT, SURNAME, LETTERS),
+    "a blob's path": "blob:https://bank.example/%s-%s-%s" % (MERCHANT, SURNAME, LETTERS),
+    "a user before the host": "https://%s:%s@bank.example/dl/%s" % (MERCHANT, SURNAME, LETTERS),
+}
+
+
+@pytest.mark.parametrize("channel", sorted(_SOURCES))
+def test_where_a_download_came_from_keeps_no_word_off_the_list(channel):
+    rec, page = recording()
+    click(page, "Download")
+    page.emit("download", type("D", (), {"suggested_filename": "statement.pdf",
+                                         "url": _SOURCES[channel]})())
+    report = rec.stop()
+    assert report["steps"][0]["effect"].get("download_from"), "nothing was kept to test"
+    text = json.dumps(report).lower()
+    for canary in CANARIES:
+        assert canary.lower() not in text, "%s came out" % canary

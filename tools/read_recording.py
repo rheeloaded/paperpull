@@ -146,6 +146,14 @@ def effects(step: dict) -> list:
             out.append('a file downloaded, its name shaped "%s"' % got)
         else:
             out.append("a file downloaded%s" % (', called "%s"' % got if got else ""))
+        source = eff.get("download_from")
+        if isinstance(source, str) and source:
+            names = eff.get("download_query_keys")
+            names = [str(n) for n in names] if isinstance(names, list) else []
+            out.append("it came from %s%s%s" % (
+                source,
+                " with the parameters %s" % ", ".join(names) if names else "",
+                ", NOT on the provider's site" if eff.get("download_off_host") is True else ""))
     if eff.get("printed"):
         out.append("the page asked the browser to print")
     try:
@@ -428,14 +436,34 @@ def render(report: dict) -> str:
         L.append("")
         for i in sorted(by_step, key=lambda k: -1 if not isinstance(k, int) else k):
             for r in by_step[i]:
-                L.append("  step %s  %s %s  ->  %s" % (
+                L.append("  step %s  %s %s  ->  %s%s" % (
                     "?" if not isinstance(i, int) else i,
                     r.get("method") or "GET", r.get("url") or "",
-                    r.get("status")))
+                    r.get("status"),
+                    "  (another host, asked by the provider's page)"
+                    if r.get("on_the_providers_own_site") is False else ""))
                 if r.get("query"):
                     L.append("          query  %s" % r["query"])
+                if isinstance(r.get("query_keys"), list) and r["query_keys"]:
+                    L.append("          parameters  %s"
+                             % ", ".join(str(k) for k in r["query_keys"]))
                 if r.get("post_keys"):
                     L.append("          sent   %s" % ", ".join(r["post_keys"]))
+                if isinstance(r.get("operation"), str) and r["operation"]:
+                    L.append("          operation  %s" % r["operation"])
+                if isinstance(r.get("batch"), int) and not isinstance(r.get("batch"), bool):
+                    L.append("          a batch of %d call(s)" % r["batch"])
+                    items = r.get("post_items")
+                    for n, item in enumerate(items if isinstance(items, list) else []):
+                        if not isinstance(item, dict):
+                            continue
+                        keys = item.get("keys")
+                        keys = ", ".join(str(k) for k in keys) if isinstance(keys, list) else ""
+                        L.append("            call %d  %s%s" % (
+                            n, ("operation %s, " % item["operation"])
+                            if isinstance(item.get("operation"), str) else "",
+                            ("sent %s" % keys) if keys else
+                            ("a %s" % item.get("kind") if item.get("kind") else "nothing named")))
                 if r.get("shape"):
                     L.append("          shape  %s" % json.dumps(r["shape"]))
         L.append("")

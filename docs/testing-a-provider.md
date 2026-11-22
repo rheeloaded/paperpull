@@ -339,10 +339,20 @@ the list below. "The link called Statement for Zorvex 0400" is recorded as
   word list.
 - That a new tab opened, and whether it was still on the provider's site.
 - That a file downloaded, and the shape of its name, its kind (`.pdf`) kept as
-  it is. Not the name itself, which can carry an account's id.
+  it is. Not the name itself, which can carry an account's id. Also the
+  address it came from, through the word list, with the names of its
+  parameters and never their values, and whether it was on the provider's
+  site. A file written into the address itself keeps only its type.
 - The addresses of the provider's own data requests and the **shape** of what
   came back, meaning the names of the fields, through the word list, and
-  whether each one held a number or some text. Never the contents.
+  whether each one held a number or some text. Never the contents. When the
+  page sends several calls in one request, each call's field names and the
+  name of what it asks for, never what it asks with.
+- A data request the provider's page sends to another host named by the
+  provider's own name (a bank whose site is web.bank.de and whose data comes
+  from data.bank.com), the same way, marked as another host,
+  with the names of its parameters only. A request to any other host is
+  counted and not described.
 - The **structure** of the page around each control you used. What kind of
   element it sat in, what was next to it, how many rows a list had, which
   parts were hidden. It reads like `ul 12 children` or

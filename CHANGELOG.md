@@ -17,6 +17,25 @@ All notable changes to PaperPull are recorded here. Versioning follows
   naming repairs released with it in 0.70.0, and no real account has yet
   shown those repairs, an online order, or a receipt saved from the old
   orders page kept under its new record rather than saved again.
+### Fixed
+- **Record steps for support keeps three things a recording lost (#170,
+  #178).** A site that sends its calls in a batch, one list of several
+  GraphQL calls, now has each call's field names and operation name kept,
+  and each answer in the batch is described on its own rather than the
+  first alone. A download now keeps where it came from, its address shaped
+  like every other one, the names of its parameters and never their values,
+  and whether it was off the provider's site, even when the tab it came
+  from closes at once (a tab that started a download as it opened could
+  have the download pass unseen). A call the provider's own page makes to
+  another host named by the provider's own name, where a bank can keep its API
+  apart from its site, is kept and marked as another host, with the names
+  of its parameters only, rather than dropped. A call to any other host, or
+  from anyone else's frame, stays counted only, and the kept calls to
+  another host may take at most half of a recording's room. Every new field
+  is built from the fixed word list as it is made, and the query text,
+  variables, data in an address and the values of a download's or another
+  host's parameters are never read into it. `tools/read_recording.py` prints
+  them.
 
 ## [0.70.0] - 2026-11-20
 

@@ -26,9 +26,13 @@ WHAT IS RECORDED
     a checkbox         and whether it ended up checked
     a navigation       when the address changed
     a new tab          and whether it was still on the provider's site
-    a download         that a step set off
+    a download         that a step set off, and the shape of the address it
+                       came from, never the values of its parameters
     a print            when a step made the page ask to print
-    the requests       each step caused, as names and shapes
+    the requests       each step caused, as names and shapes, each call of
+                       a batch on its own, and a call the provider's page
+                       made to another host named by the provider's name,
+                       marked as off the site, its parameters named only
 
 WHAT IS NOT, AND CANNOT BE
 
@@ -116,6 +120,24 @@ _MAX_REQUESTS = 300
 # and its shape is the same as a small one's, so anything over this is
 # recorded as having been too large to read rather than fetched.
 _MAX_BODY_BYTES = 2_000_000
+
+# How many calls of a batch are described one by one. Scalable Capital
+# sends its GraphQL calls as a JSON array, two or four at a time, and a
+# recording that read only an object kept no keys for any of them (#170).
+# A page can send any array, so the rest are counted, not described.
+_BATCH_MOST = 10
+
+# What a call in a batch is when it is not an object, in words of ours.
+_KINDS = {list: "list", dict: "dict", str: "str", int: "int", float: "float",
+          bool: "bool", type(None): "NoneType"}
+
+# The request kinds a page's own script makes. An answer from a host the app
+# does not list is kept only for one of these, asked by the provider's own
+# page from a host named by the provider's own name, since that is where a
+# provider's API lives when it has a host of its own (BBVA's list, messages
+# and PDFs). A navigation, a script or an image from another host is not the
+# provider's API, and stays counted.
+_PAGE_CALLS = frozenset(("xhr", "fetch"))
 
 # ---------------------------------------------------------------------------
 # The shape of the page around a step
@@ -1050,6 +1072,17 @@ class Recorder:
         if page is None or page in self._watched:
             return
         self._watched.append(page)
+        # The listeners first. Each call below waits on the browser, and
+        # what the tab does meanwhile is handed out while it waits, so a
+        # tab that starts a download as it loads and closes (Consorsbank,
+        # #178) had its download handed out before anything listened.
+        for event, handler in (("framenavigated", self._on_navigated),
+                               ("response", self._on_response),
+                               ("download", self._on_download)):
+            try:
+                page.on(event, handler)
+            except Exception:
+                pass
         import json as _json
         try:
             page.expose_binding(self._binding, self._on_event)
@@ -1064,13 +1097,6 @@ class Recorder:
             page.evaluate(_CAPTURE_JS, self._binding)
         except Exception:
             pass
-        for event, handler in (("framenavigated", self._on_navigated),
-                               ("response", self._on_response),
-                               ("download", self._on_download)):
-            try:
-                page.on(event, handler)
-            except Exception:
-                pass
 
     def _on_download(self, download) -> None:
         """That a step set off a download, and the shape of the file's name.
@@ -1089,17 +1115,82 @@ class Recorder:
                 download.suggested_filename or "", self.words)
         except Exception:
             pass
+        # Where it came from. A tab that downloads closes blank, so nothing
+        # else in a recording said which address served the PDF (#178).
+        try:
+            url = download.url
+        except Exception:
+            url = None
+        if isinstance(url, str) and url:
+            try:
+                step["effect"].update(self._download_source(url))
+            except Exception:
+                pass
+
+    def _download_source(self, url: str) -> dict:
+        """A download's address as the words of ours and shapes it may leave
+        as. Its scheme, host and path, the names of its parameters and never
+        their values, and whether it is off the provider's site. A data:
+        address is the file itself, so only its media type is kept. A blob:
+        address is judged by the origin inside it."""
+        scheme = url.split(":", 1)[0].lower() if ":" in url[:20] else ""
+        if scheme == "data":
+            # Never more than the head is read, the rest is the file.
+            head = url[5:300].split(",", 1)[0].split(";", 1)[0].strip()
+            return {"download_from": "data:" + (shape(head, self.words)[:60] if head else "")}
+        # An address can be as long as a page likes, and shaping it is done
+        # word by word, so only a head long enough for any real one is read.
+        whole = url[5:] if scheme == "blob" else url
+        inner = whole[:4096]
+        out = {"download_from": ((scheme + ":" if scheme == "blob" else "")
+                                 + shape_url(inner, self.words, query=False))[:200]}
+        if len(whole) > len(inner):
+            out["download_from_truncated"] = True
+        keys = self._param_names(inner)
+        if keys:
+            out["download_query_keys"] = keys
+        try:
+            # Only http and https can be the provider's. Anything else, or a
+            # check that fails, reads as off the site, never as on it.
+            # Judged on the whole address, never the head kept for its
+            # shape, which a long one could cut before its real host.
+            web = whole.split(":", 1)[0].lower() in ("http", "https")
+            out["download_off_host"] = not (web and len(whole) == len(inner)
+                                            and bool(self._is_safe_url(whole)))
+        except Exception:
+            out["download_off_host"] = True
+        return out
+
+    def _param_names(self, url: str) -> list:
+        """The names of an address's parameters, each shaped, never a value."""
+        from urllib.parse import parse_qsl, urlsplit
+        try:
+            pairs = parse_qsl(urlsplit(url).query, keep_blank_values=True)
+        except ValueError:
+            return []
+        return sorted({shape(k, self.words)[:40] for k, _ in pairs[:100]})[:20]
 
     def _on_response(self, response) -> None:
         """Record response metadata and JSON shapes, never HTML bodies. A
-        request to anywhere but the provider is counted and not described."""
+        request to anywhere but the provider is counted and not described,
+        unless the provider's own page asked for it (_asked_by_the_provider).
+        A provider whose API has a host of its own that the app does not list
+        yet had every call of that API left out, the list, the messages and
+        the PDFs, and kept only the page's own text tables (BBVA)."""
         try:
             url = response.url or ""
-            if not self._is_safe_url(url):
-                self.dropped["off_host_request"] += 1
-                return
+            off_host = not self._is_safe_url(url)
             kind = (response.headers.get("content-type") or "").lower()
             response_type = _kind_of(kind)
+            if off_host:
+                # Kept only when the provider's own page asked for it, and
+                # never past half the budget, so a page's other calls cannot
+                # crowd out the provider's own.
+                if response_type not in ("json", "pdf") \
+                        or not self._asked_by_the_provider(response) \
+                        or self._off_host_kept() >= _MAX_REQUESTS // 2:
+                    self.dropped["off_host_request"] += 1
+                    return
             html = self._include_html and response_type == "html"
             if html and response.request.resource_type not in ("document", "xhr", "fetch"):
                 return
@@ -1116,25 +1207,26 @@ class Recorder:
                 "status": _count(response.status),
                 "type": response_type,
             }
-            if html:
-                keys = _query_keys(url)
+            if off_host:
+                entry["on_the_providers_own_site"] = False
+            if html or off_host:
+                # Another host's parameters are named, never their values,
+                # since the host is the provider's only by its name.
+                keys = self._param_names(url) if off_host else _query_keys(url)
                 if keys:
                     entry["query_keys"] = keys
             else:
                 query = shape_query(url, self.words)
                 if query:
                     entry["query"] = query[:240]
+            batched = False
             try:
                 method = str(response.request.method or "").upper()
                 entry["method"] = method if method in _METHODS else "other"
                 if not html:
                     body = response.request.post_data or ""
-                    if body.lstrip().startswith("{"):
-                        import json as _json
-                        parsed = whole_json(_json.loads(body))
-                        if isinstance(parsed, dict):
-                            entry["post_keys"] = sorted(
-                                shape(str(k), self.words)[:40] for k in parsed)[:30]
+                    if len(body) <= _MAX_BODY_BYTES:
+                        batched = self._describe_body(body, entry)
             except Exception:
                 if html:
                     raise
@@ -1148,7 +1240,14 @@ class Recorder:
                     entry["shape"] = "not read, too large"
                 else:
                     try:
-                        entry["shape"] = self._json_shape(whole_json(response.json()))
+                        answer = whole_json(response.json())
+                        if batched and isinstance(answer, list):
+                            # One answer for each call of the batch, each
+                            # its own shape rather than the first alone.
+                            entry["shape"] = [Fixed("batch of %d" % len(answer))] + [
+                                self._json_shape(a, 1) for a in answer[:_BATCH_MOST]]
+                        else:
+                            entry["shape"] = self._json_shape(answer)
                     except Exception:
                         entry["shape"] = "unreadable"
             self.requests.append(entry)
@@ -1157,6 +1256,84 @@ class Recorder:
         except Exception:
             key = Fixed("unreadable_response")
             self.dropped[key] = self.dropped.get(key, 0) + 1
+
+    def _describe_body(self, body: str, entry: dict) -> bool:
+        """The names in a JSON request body, never a value, written into
+        `entry`. Says whether the body was a batch, an array of calls.
+
+        An object keeps its keys, and a GraphQL call its operation's name.
+        An array keeps how many calls it held and, for the first few, each
+        call's keys and operation's name, or what kind of thing it was when
+        it is not an object. Every name goes through the word list, and the
+        query's text and its variables are never read. Anything that will
+        not parse costs these fields and nothing else."""
+        start = body.lstrip()[:1]
+        if start not in ("{", "["):
+            return False
+        import json as _json
+        try:
+            parsed = whole_json(_json.loads(body))
+        except (ValueError, RecursionError):
+            return False
+        found: dict = {}
+        if isinstance(parsed, dict):
+            found["post_keys"] = self._keys_of(parsed)
+            operation = self._operation_of(parsed)
+            if operation:
+                found["operation"] = operation
+        elif isinstance(parsed, list):
+            items = []
+            for item in parsed[:_BATCH_MOST]:
+                if isinstance(item, dict):
+                    one = {"keys": self._keys_of(item)}
+                    operation = self._operation_of(item)
+                    if operation:
+                        one["operation"] = operation
+                else:
+                    one = {"kind": Fixed(_KINDS.get(type(item), "other"))}
+                items.append(one)
+            found["batch"] = len(parsed)
+            found["post_items"] = items
+        else:
+            return False
+        entry.update(found)
+        return "batch" in found
+
+    def _keys_of(self, obj: dict) -> list:
+        return sorted(shape(str(k), self.words)[:40] for k in obj)[:30]
+
+    def _operation_of(self, obj: dict) -> str:
+        """A GraphQL call's operation name, shaped, when it is a string."""
+        name = obj.get("operationName")
+        return shape(name[:200], self.words)[:60] if isinstance(name, str) else ""
+
+    def _asked_by_the_provider(self, response) -> bool:
+        """Whether an answer from a host the app does not list was asked for
+        by the provider's own page, a script's call from a frame whose own
+        address is the provider's. A frame on another host, an answer with
+        no frame (a service worker's), a navigation, or anything that cannot
+        be read is not."""
+        try:
+            request = response.request
+            if str(request.resource_type or "") not in _PAGE_CALLS:
+                return False
+            frame = request.frame
+            where = frame.url if frame is not None else ""
+            if not where or not self._is_safe_url(where):
+                return False
+            # A vendor's tag runs in the provider's own frame too, analytics,
+            # a chat window, and its calls look like the page's. The host
+            # has to be named by the provider's own name, the label its site
+            # sits under, as BBVA's data host de-net.bbva.com is beside
+            # web.bbva.de. A vendor that names a customer's host after the
+            # customer, bbva.tt.vendor.net, is still named by the vendor.
+            brand = _brand(_host_of(where))
+            return bool(brand) and _brand(_host_of(response.url or "")) == brand
+        except Exception:
+            return False
+
+    def _off_host_kept(self) -> int:
+        return sum(1 for r in self.requests if r.get("on_the_providers_own_site") is False)
 
     def _json_shape(self, obj, depth: int = 0):
         """The shape of a JSON answer, never its values. Keys are the
@@ -1227,6 +1404,9 @@ class Recorder:
         parts = ", ".join("%d %s" % (n, k) for k, n in sorted(kinds.items()))
         summary = "%d step(s)%s, %d provider request(s)" % (
             len(self.steps), " (" + parts + ")" if parts else "", len(self.requests))
+        elsewhere = self._off_host_kept()
+        if elsewhere:
+            summary += ", %d of them to another host the provider's page called" % elsewhere
         if self.dropped.get("request_limit"):
             summary += ". The request limit was reached, so some answers were not recorded"
         if self.dropped.get("unreadable_response"):
@@ -1396,12 +1576,32 @@ def _host_of(url: str) -> str:
         return ""
 
 
+# Second-level labels a country's registry puts its names under, co.uk and
+# com.au, so the name in bank.co.uk is bank and not co.
+_UNDER = frozenset(("co", "com", "net", "org", "gov", "ac", "edu", "or", "ne", "go"))
+
+
+def _brand(host: str) -> str:
+    """The label a site's host is named by, bbva in web.bbva.de and bank in
+    online.bank.co.uk, or "" when there is none to tell."""
+    labels = [p for p in (host or "").lower().split(".") if p]
+    # An address of numbers names nothing.
+    if len(labels) < 2 or labels[-1].isdigit():
+        return ""
+    name = labels[-2]
+    if name in _UNDER and len(labels) >= 3:
+        name = labels[-3]
+    return name if len(name) >= 3 else ""
+
+
 _CONSENT = """\
 RECORDING - what this does and does not capture
 
   It records   the controls you click, by the name you read on them, the
-               option you pick in a dropdown, a box you tick, and the
-               addresses and shapes of the provider's own answers.
+               option you pick in a dropdown, a box you tick, the
+               addresses and shapes of the provider's own answers, those
+               from another host named by the provider's name included,
+               and where a downloaded file came from.
   It keeps     a word off the page only when it is on PaperPull's fixed
                list of words. Any other word, a name, an address, an
                account number, is written as its shape, a for a letter

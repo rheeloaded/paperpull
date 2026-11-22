@@ -518,3 +518,89 @@ def test_an_outline_of_a_hand_edited_file_does_not_raise():
                       "children": [{"tag": "div", "more": "x"}]}}
     lines = rr.outline(shape)
     assert lines and lines[0].startswith("-> body")
+
+
+# -- a batch, where a download came from, another host --------------------------
+
+def test_a_batch_reads_as_its_calls_and_their_operations():
+    r = report(requests=[{"step": 0, "url": "https://x.test/graphql", "status": 200,
+                          "type": "json", "method": "POST", "batch": 2,
+                          "post_items": [{"keys": ["operationName", "query"],
+                                          "operation": "documentList"},
+                                         {"kind": "str"}],
+                          "shape": ["batch of 2", {"data": {}}, {"data": {}}]}])
+    out = rr.render(r)
+    assert "a batch of 2 call(s)" in out
+    assert "call 0  operation documentList, sent operationName, query" in out
+    assert "call 1  a str" in out
+    assert '"batch of 2"' in out
+
+
+def test_a_single_calls_operation_is_printed():
+    r = report(requests=[{"step": 0, "url": "https://x.test/graphql", "status": 200,
+                          "method": "POST", "post_keys": ["operationName"],
+                          "operation": "documentList"}])
+    assert "operation  documentList" in rr.render(r)
+
+
+def test_a_download_says_where_it_came_from():
+    eff = {"navigated": False, "new_tab": True, "download": True, "requests": 0,
+           "download_name": "statement.pdf", "download_from": "https://files.x.test/dl",
+           "download_query_keys": ["token"], "download_off_host": True}
+    lines = rr.effects(step(effect=eff))
+    assert ("it came from https://files.x.test/dl with the parameters token, "
+            "NOT on the provider's site") in lines
+
+
+def test_a_download_from_the_provider_is_not_called_off_the_site():
+    eff = {"download": True, "download_from": "https://x.test/dl", "download_off_host": False}
+    assert "it came from https://x.test/dl" in rr.effects(step(effect=eff))
+
+
+def test_another_hosts_answer_is_marked_and_the_providers_is_not():
+    r = report(requests=[
+        {"step": 0, "url": "https://api.x.test/docs", "status": 200, "method": "GET",
+         "on_the_providers_own_site": False},
+        {"step": 0, "url": "https://x.test/docs", "status": 200, "method": "GET"}])
+    lines = rr.render(r).splitlines()
+    api = next(line for line in lines if "https://api.x.test/docs" in line)
+    own = next(line for line in lines if "https://x.test/docs" in line)
+    assert "another host, asked by the provider's page" in api
+    assert "another host" not in own
+
+
+def test_a_recording_without_the_new_fields_reads_as_before():
+    r = report(requests=[{"step": 0, "url": "https://x.test/api", "status": 200,
+                          "method": "POST", "post_keys": ["a"], "shape": ["list of 1", {}]}],
+               steps=[step(effect={"navigated": False, "new_tab": False, "download": True,
+                                   "download_name": "a.pdf", "requests": 1})])
+    out = rr.render(r)
+    for absent in ("batch of", "operation", "it came from", "another host"):
+        assert absent not in out
+
+
+@pytest.mark.parametrize("junk", [
+    {"batch": "x", "post_items": "x"},
+    {"batch": True, "post_items": [1, None, {"keys": "x"}, {"operation": 5}, {"kind": None}]},
+    {"batch": 3, "post_items": [1, None, {"keys": "x"}, {"operation": 5}]},
+    {"operation": 7, "on_the_providers_own_site": "no"}])
+def test_junk_in_the_new_request_fields_does_not_raise(junk):
+    req = {"step": 0, "url": "https://x.test/a", "status": 200}
+    req.update(junk)
+    assert "WHAT THE SITE ANSWERED" in rr.render(report(requests=[req]))
+
+
+@pytest.mark.parametrize("eff", [
+    {"download": True, "download_from": 7, "download_query_keys": {"a": 1},
+     "download_off_host": "yes"},
+    {"download": True, "download_from": "https://x.test/a", "download_query_keys": "token"}])
+def test_junk_in_the_new_download_fields_does_not_raise(eff):
+    assert isinstance(rr.effects(step(effect=eff)), list)
+    assert "WHAT THE PERSON DID" in rr.render(report(steps=[step(effect=eff)]))
+
+
+def test_another_hosts_parameter_names_are_printed():
+    r = report(requests=[{"step": 0, "url": "https://api.x.test/docs", "status": 200,
+                          "method": "GET", "on_the_providers_own_site": False,
+                          "query_keys": ["acct", "page"]}])
+    assert "parameters  acct, page" in rr.render(r)
