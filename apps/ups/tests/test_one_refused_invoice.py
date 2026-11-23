@@ -19,6 +19,7 @@ import base64
 import io
 import json
 import sys
+import time
 from contextlib import redirect_stdout
 from pathlib import Path
 
@@ -275,7 +276,7 @@ def test_a_tab_moved_off_the_billing_center_stops_the_run_and_fails_nothing(tmp_
     def moved_off():
         # The list kept is old, so the first invoice reads it again, and
         # that read leaves the tab off the Billing Center.
-        site._captured["at"] = 0.0
+        site._captured["at"] = time.monotonic() - site._FRESH_SECONDS - 1
         page.lands_off = OFF_THE_BILLING_CENTER
     app, ended, said = run_with(tmp_path, page, then=moved_off)
     assert isinstance(ended, SystemExit), said

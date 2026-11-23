@@ -9,6 +9,7 @@ says why in counts. paperpull_core.pressing.click is the stand-in's own
 here (standin_bank.press). Every value is invented."""
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -122,7 +123,7 @@ def test_a_later_reload_presses_nothing_again_and_takes_the_headers_fresh():
     page = script_page()
     site.learn(page)
     page.headers = dict(page.headers, **{"x-standin-csrf": "TOKEN-U"})
-    site._learned["at"] = 0.0
+    site._learned["at"] = time.monotonic() - site.FRESH_SECONDS - 1
     call = site.learned(page, form=True)
     assert page.reloads == 2 and pressed(page) == [("click", LINK)]
     assert call.facts["pdf_link"] == "kept"
@@ -144,7 +145,7 @@ def test_a_kept_form_call_still_sends_a_form_and_takes_a_pdf_after_fresh_headers
     assert site.learn(page).facts["pdf_url_kind"] == "form"
     page.headers = dict(page.headers, **{"x-standin-csrf": "TOKEN-U",
                                          "accept": "application/json, text/plain, */*"})
-    site._learned["at"] = 0.0
+    site._learned["at"] = time.monotonic() - site.FRESH_SECONDS - 1
     assert site.learned(page, form=True).facts["pdf_link"] == "kept"
     site.document_bytes(page, account_ref="K-ALPHA-0001", date="2026-02-15",
                         document_id="DOC000000000102", year="2026")
@@ -400,7 +401,7 @@ def test_the_link_is_pressed_once_a_run_even_when_nothing_was_learned():
     page = script_page()
     page.press_calls = lambda row: []
     site.learn(page)
-    site._learned["at"] = 0.0
+    site._learned["at"] = time.monotonic() - site.FRESH_SECONDS - 1
     call = site.learned(page, form=True)
     assert pressed(page) == [("click", LINK)] and page.reloads == 2
     assert call.facts["pdf_link"] == "pressed" and call.facts["pdf_urls"] == 0
