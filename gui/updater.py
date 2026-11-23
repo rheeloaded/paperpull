@@ -47,7 +47,10 @@ put back if anything fails. The staged app's signature and publisher are
 checked again just before the swap, so nothing changed while it waited is
 put in place. The script outlives this process (it is started in
 a session of its own) and writes what it did to
-~/Library/Logs/PaperPull/update.log.
+~/Library/Logs/PaperPull/update.log, naming the version it found
+installed, the version it put in place and whether macOS took the request
+to open it, so a
+log someone sends says all of that on its own.
 
 THE INSTALL ON WINDOWS
 
@@ -506,6 +509,11 @@ PID="$1"; OLD="$2"; NEW="$3"; BAK="$4"; LOG="$5"
 mkdir -p "$(dirname "$LOG")"
 exec >>"$LOG" 2>&1
 echo "== $(date) update starting"
+version_of() {  # a bundle's CFBundleShortVersionString (build_macos writes XML), or unknown
+  v="$(sed -n '/<key>CFBundleShortVersionString<\/key>/{n;s/.*<string>\(.*\)<\/string>.*/\1/p;q;}' "$1/Contents/Info.plist" 2>/dev/null)"
+  echo "${v:-unknown}"
+}
+echo "from $(version_of "$OLD") to $(version_of "$NEW")"
 alive() {  # PID may name several processes, the panel and the window around it
   for p in $PID; do kill -0 "$p" 2>/dev/null && return 0; done
   return 1
@@ -525,7 +533,7 @@ rm -rf "$BAK"
 if mv "$OLD" "$BAK"; then
   if mv "$NEW" "$OLD"; then
     rm -rf "$BAK"
-    echo "replaced"
+    echo "replaced, $OLD is now $(version_of "$OLD")"
   else
     rm -rf "$NEW"
     if mv "$BAK" "$OLD"; then
@@ -538,7 +546,13 @@ else
   rm -rf "$NEW"
   echo "could not move the installed app aside, nothing changed"
 fi
-[ -d "$OLD" ] && open "$OLD"
+if [ -d "$OLD" ]; then
+  if open "$OLD"; then  # macOS took the request, which is all open can say
+    echo "asked macOS to open $(version_of "$OLD")"
+  else
+    echo "macOS would not open $OLD, open it from Applications"
+  fi
+fi
 [ -n "$HERE" ] && rm -rf "$HERE"
 """
 

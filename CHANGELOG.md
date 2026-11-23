@@ -9,6 +9,14 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Changed
+- **The Mac update log names the versions and the reopen (#206, thanks
+  @JasperDale19).** update.log in ~/Library/Logs/PaperPull said only that
+  an update started and that the app was replaced. It now names the
+  version that was installed and the version put in its place, the version
+  in Applications once the swap is done, and whether macOS took the request
+  to open it, so a log someone sends says all of that on its own.
+
 ## [0.71.0] - 2026-11-22
 
 Seven new apps. Mercury, Sonic, SimpliSafe, Starlink and Kaiser

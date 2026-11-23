@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import io
 import json
+import plistlib
 import re
 import subprocess
 import sys
@@ -232,24 +233,36 @@ def test_a_bad_signature_or_gatekeeper_refusal_stops_it(tmp_path, monkeypatch):
 
 # -- the swap, for real -----------------------------------------------------
 
-def _swap(tmp_path, pid, *, old_exists=True, staged=True):
+def _bundle(path, marker, version, fmt=plistlib.FMT_XML):
+    """A stand-in app bundle with an Info.plist written the way
+    packaging/build_macos.py writes it (plistlib, XML unless fmt says)."""
+    path.mkdir()
+    (path / "v").write_text(marker)
+    if version:
+        (path / "Contents").mkdir()
+        with open(path / "Contents" / "Info.plist", "wb") as f:
+            plistlib.dump({"CFBundleName": "PaperPull", "CFBundleVersion": version,
+                           "CFBundleShortVersionString": version}, f, fmt=fmt)
+
+
+def _swap(tmp_path, pid, *, old_exists=True, staged=True, old_version="0.64.0",
+          new_version="0.66.0", open_fails=False, old_fmt=plistlib.FMT_XML):
     parent = tmp_path / "Applications"
     parent.mkdir(exist_ok=True)
     old = parent / "PaperPull.app"
     if old_exists:
-        old.mkdir()
-        (old / "v").write_text("old")
+        _bundle(old, "old", old_version, old_fmt)
     new = parent / ".PaperPull.new.app"
     if staged:
-        new.mkdir()
-        (new / "v").write_text("new")
+        _bundle(new, "new", new_version)
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
     script = work / "swap.sh"
     # `open` is stubbed so the test opens nothing.
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
-    (bindir / "open").write_text('#!/bin/bash\necho "$@" >> "%s"\n' % (tmp_path / "opened"))
+    (bindir / "open").write_text('#!/bin/bash\necho "$@" >> "%s"\n%s' % (
+        tmp_path / "opened", "exit 1\n" if open_fails else ""))
     (bindir / "open").chmod(0o755)
     script.write_text(updater.SWAP_SCRIPT)
     script.chmod(0o700)
@@ -277,11 +290,45 @@ def test_the_swap_puts_the_new_app_in_place_and_opens_it(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the swap script is for the Mac")
+def test_the_log_names_both_versions_and_that_the_new_app_opened(tmp_path):
+    # JasperDale19 on #206, a log that says only "replaced" cannot tell which
+    # versions it moved between or whether the new app came up.
+    parent, old, new, work, log = _swap(tmp_path, _gone_pid())
+    lines = log.read_text().splitlines()
+    assert "from 0.64.0 to 0.66.0" in lines
+    assert "replaced, %s is now 0.66.0" % old in lines
+    assert "asked macOS to open 0.66.0" in lines
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the swap script is for the Mac")
+def test_the_log_says_when_macos_will_not_open_the_new_app(tmp_path):
+    parent, old, new, work, log = _swap(tmp_path, _gone_pid(), open_fails=True)
+    lines = log.read_text().splitlines()
+    assert "replaced, %s is now 0.66.0" % old in lines
+    assert "macOS would not open %s, open it from Applications" % old in lines
+    assert not any(line.startswith("asked macOS to open") for line in lines)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the swap script is for the Mac")
+@pytest.mark.parametrize("why", ["no Info.plist", "a binary Info.plist"])
+def test_a_bundle_with_no_readable_version_is_logged_as_unknown(tmp_path, why):
+    if why == "no Info.plist":
+        parent, old, new, work, log = _swap(tmp_path, _gone_pid(), old_version=None)
+    else:
+        parent, old, new, work, log = _swap(tmp_path, _gone_pid(), old_fmt=plistlib.FMT_BINARY)
+    assert "from unknown to 0.66.0" in log.read_text().splitlines()
+    assert (old / "v").read_text() == "new"   # an unreadable version never stops the swap
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the swap script is for the Mac")
 def test_if_the_new_app_cannot_be_placed_the_old_one_comes_back(tmp_path):
     parent, old, new, work, log = _swap(tmp_path, _gone_pid(), staged=False)
     assert (old / "v").read_text() == "old"
     assert not (parent / ".PaperPull.old.app").exists()
-    assert "old one is back" in log.read_text()
+    text = log.read_text()
+    assert "old one is back" in text
+    assert "from 0.64.0 to unknown" in text.splitlines()
+    assert "asked macOS to open 0.64.0" in text.splitlines()   # the old app, put back, is what opens
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the swap script is for the Mac")
