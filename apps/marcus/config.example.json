@@ -1,0 +1,21 @@
+{
+  "owner": "",
+  "owner_in_filename": false,
+  "output_dir": ".",
+  "profile_dir": "./browser-profile",
+  "browser": "auto",
+  "cdp_url": "http://127.0.0.1:9327",
+  "document_types": [
+    "Statement"
+  ],
+  "default_start_date": "",
+  "min_pdf_bytes": 2000,
+  "max_path_length": 240,
+  "delay_min_seconds": 2.5,
+  "delay_max_seconds": 5.0,
+  "pilot_count": 5,
+  "//refuse": "Off. A row is dated the day after the period its statement",
+  "//refuse2": "prints, so no statement names its own row's date (0 of 9",
+  "//refuse3": "measured with tools/identity_fit.py). Leave it off.",
+  "refuse_wrong_documents": false
+}
