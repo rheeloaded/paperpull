@@ -324,11 +324,14 @@ def test_a_table_that_stays_empty_is_never_a_whole_list(browser):
 
 def test_rows_that_move_under_a_range_that_stays_stop_the_list(browser):
     tab = open_history(browser, FIVE, 2)
+    # In the press's own listener, so it lands right after the page's turn
+    # and before the app can read the page. A setTimeout here raced the
+    # app's first read and lost most of the time.
     tab.evaluate("""() => {
         const next = document.querySelector('.mat-mdc-paginator-navigation-next');
-        next.addEventListener('click', () => setTimeout(() => {
+        next.addEventListener('click', () => {
             document.querySelector('.mat-mdc-paginator-range-label').textContent = '1 – 2 of 5';
-        }, 0));
+        });
     }""")
     with pytest.raises(site.ListStopped, match="next page"):
         site.collect_download_docs(tab)
@@ -352,10 +355,10 @@ def test_an_invoice_count_that_changes_while_paging_stops_the_list(browser):
     tab = open_history(browser, FIVE, 2)
     tab.evaluate("""() => {
         const next = document.querySelector('.mat-mdc-paginator-navigation-next');
-        next.addEventListener('click', () => setTimeout(() => {
+        next.addEventListener('click', () => {   // in the press, as above
             const label = document.querySelector('.mat-mdc-paginator-range-label');
             label.textContent = label.textContent.replace(/of 5$/, 'of 6');
-        }, 0));
+        });
     }""")
     with pytest.raises(site.ListStopped, match="count changed"):
         site.collect_download_docs(tab)
