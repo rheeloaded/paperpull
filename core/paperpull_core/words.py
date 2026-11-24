@@ -614,8 +614,12 @@ _HEX_CHAIN_RE = re.compile(r"(?<![^\W_])[0-9A-Fa-f]+(?:[-_][0-9A-Fa-f]+){2,}(?![
 
 
 def _hex_chains(text: str) -> list:
+    """Where the chains with a digit and a hex letter stand. A chain of
+    digits alone, a date, is all 9s anyway and is left out. Shaping again
+    can shape a little more (add-fee-x2 is a chain once its x is an a),
+    never less."""
     return [m.span() for m in _HEX_CHAIN_RE.finditer(text)
-            if any(c.isdigit() for c in m.group())]
+            if any(c.isdigit() for c in m.group()) and any(c.isalpha() for c in m.group())]
 
 
 def _is_hex_id(tok: str) -> bool:
@@ -683,7 +687,11 @@ def _shape(text: str, words: frozenset, collapse: bool, private: tuple,
     text = _MONEY_RE.sub(AMOUNT, text)
     vocab = _vocabulary(words, private, base)
     # A greeting's name and a GUID are shaped whole, whatever their words.
-    greeted = _greeted(text) + _hex_chains(text)
+    # Marked once by position, so a page of a thousand dates costs one pass
+    # rather than every token against every span.
+    whole = bytearray(len(text))
+    for a, b in _greeted(text) + _hex_chains(text):
+        whole[a:b] = b"\x01" * (b - a)
     out = []
     before = ""        # the token before this one, as the page wrote it
     word_kept = False  # whether the last run of letters and digits was kept
@@ -692,7 +700,7 @@ def _shape(text: str, words: frozenset, collapse: bool, private: tuple,
         if tok[0].isspace():
             out.append(" " if collapse else " " * len(tok))
         elif tok[0].isalnum():
-            if any(a < m.end() and m.start() < b for a, b in greeted):
+            if any(whole[m.start():m.end()]):
                 out.append("".join("9" if c.isdigit() else "a" for c in tok))
                 word_kept = False
                 before = tok
