@@ -604,14 +604,39 @@ def _known(piece: str, vocab: frozenset) -> bool:
 _ALONE = 4
 
 
+_HEX = frozenset("0123456789abcdefABCDEF")
+
+# Three or more groups of hex characters joined by - or _, a GUID whole,
+# cut short or with something glued to one end. When a group holds a digit
+# every group is shaped whole, since a group with none ("cafe", "dead",
+# "feed") can be words of the list too.
+_HEX_CHAIN_RE = re.compile(r"(?<![^\W_])[0-9A-Fa-f]+(?:[-_][0-9A-Fa-f]+){2,}(?![^\W_])")
+
+
+def _hex_chains(text: str) -> list:
+    return [m.span() for m in _HEX_CHAIN_RE.finditer(text)
+            if any(c.isdigit() for c in m.group())]
+
+
+def _is_hex_id(tok: str) -> bool:
+    """Letters and digits mixed, every one a hex digit, 3f2a or be99. An
+    identifier, never a word, so none of its letters may be read as one
+    (#254, "be" of a GUID kept as a word of the list)."""
+    return (set(tok) <= _HEX and any(c.isdigit() for c in tok)
+            and any(c.isalpha() for c in tok))
+
+
 def _token(tok: str, vocab: frozenset) -> str:
     """One run of letters and digits. Kept whole when it is a word of the
     list, or its letters are all words of the list (statementDate,
     page2, acct123Summary), with every digit a 9 either way. Otherwise each
     letter part is shaped unless it is a word of the list long enough not
-    to turn up inside an id by chance."""
+    to turn up inside an id by chance. A hex identifier (_is_hex_id) is
+    always shaped whole."""
     if tok.lower() in vocab:
         return tok
+    if _is_hex_id(tok):
+        return "".join("9" if c.isdigit() else "a" for c in tok)
     pieces = []
     for run in re.findall(r"[^\W\d_]+|\d+", tok):
         if run[0].isdigit():
@@ -620,6 +645,12 @@ def _token(tok: str, vocab: frozenset) -> str:
             pieces.append((run, True))
         else:
             pieces.extend((p, _known(p, vocab)) for p in _camel(run))
+    # Hex letters right against a digit are part of an id glued to a word,
+    # be12Payment or statementBE99, so they are never read as a word.
+    for i, (piece, known) in enumerate(pieces):
+        if known and set(piece) <= _HEX and any(
+                0 <= j < len(pieces) and pieces[j][1] is None for j in (i - 1, i + 1)):
+            pieces[i] = (piece, False)
     whole = all(known for _, known in pieces if known is not None)
     out = []
     for piece, known in pieces:
@@ -651,7 +682,8 @@ def _shape(text: str, words: frozenset, collapse: bool, private: tuple,
     text = _EMAIL_RE.sub(EMAIL, text)
     text = _MONEY_RE.sub(AMOUNT, text)
     vocab = _vocabulary(words, private, base)
-    greeted = _greeted(text)
+    # A greeting's name and a GUID are shaped whole, whatever their words.
+    greeted = _greeted(text) + _hex_chains(text)
     out = []
     before = ""        # the token before this one, as the page wrote it
     word_kept = False  # whether the last run of letters and digits was kept

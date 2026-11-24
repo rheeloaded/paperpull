@@ -131,6 +131,69 @@ def test_a_random_id_almost_never_keeps_a_letter():
     assert kept <= 10, "%d of 20000 random ids kept some letters" % kept
 
 
+# -- an identifier is shaped whole ------------------------------------------------
+# dertbv on #254. A recording's accountId came out as ...-be99-..., two real
+# characters kept, since "be" is a word of the list and the group was shaped
+# word by word.
+
+def _whole(text):
+    return "".join("9" if c.isdigit() else "a" if c.isalpha() else c for c in text)
+
+
+HEX_WORDS = sorted(w for w in W.KNOWN if len(w) >= 2 and set(w) <= set("abcdef"))
+
+
+def test_a_guid_is_shaped_whole_wherever_it_stands():
+    guid = "3f2a9c1e-7b4d-be99-a1c3-0d5e8f7a6b21"
+    assert W.shape(guid) == _whole(guid)
+    assert W.shape(guid.upper()) == _whole(guid)
+    # Every group is words of the list, or no digit at all.
+    spelled = "deadbeef-cafe-face-bead-addedbeef123"
+    assert W.shape(spelled) == _whole(spelled)
+    assert W.shape("account " + guid + " statement") == "account " + _whole(guid) + " statement"
+    url = "https://x.example/accounts/%s/documents?accountId=%s" % (guid, guid)
+    assert guid[19:23] not in W.shape(url)
+    tree = W.shape_tree({"url": url, "accountId": guid, "steps": [{"text": guid}]})
+    assert "be99" not in json.dumps(tree)
+
+
+def test_a_guid_cut_short_or_glued_to_a_letter_is_shaped_whole():
+    for text, keep in (("x12345678-feed-4d2e-a1f0-0123456789ab", "x"),
+                       ("12345678-feed-cafe-dead-0123456789abc", ""),
+                       ("ref_9a8b-feed-cafe", ""),
+                       ("{3F2A9C1E-7B4D-BE99-A1C3-0D5E8F7A6B21}", "")):
+        got = W.shape(text)
+        for word in ("feed", "cafe", "dead", "BE"):
+            assert word not in got, (text, got)
+
+
+def test_a_hex_id_glued_to_a_word_keeps_no_hex_letter():
+    assert W.shape("be12Payment") == "aa99Payment"
+    assert W.shape("statementBE99") == "statementaa99"
+    assert W.shape("2031-04-15") == "9999-99-99"            # a date is only digits
+
+
+def test_a_hex_token_with_a_digit_keeps_no_letter():
+    assert HEX_WORDS, "no word of the list is made of hex letters"
+    for w in HEX_WORDS:
+        for tok in (w + "99", "9" + w, w[:1] + "9" + w[1:]):
+            assert W.shape(tok) == _whole(tok), tok
+
+
+def test_random_hex_ids_keep_no_letter():
+    rng = random.Random(254)
+    for _ in range(20000):
+        tok = "".join(rng.choice("0123456789abcdef") for _ in range(rng.randint(4, 32)))
+        if any(c.isdigit() for c in tok) and any(c.isalpha() for c in tok):
+            assert set(W.shape(tok)) <= {"a", "9"}, tok
+
+
+def test_words_with_a_number_are_still_kept():
+    assert W.shape("page2") == "page9"
+    assert W.shape("acct123Summary") == "acct999Summary"
+    assert W.shape("Statement 2031-04") == "Statement 9999-99"
+
+
 def test_shaping_twice_changes_nothing():
     for text in ("Statement for %s" % SURNAME, MERCHANT + "-MSR-10000000000000.PDF",
                  "Welcome back, June Price", "Pay $1,204.55", "acct123Summary",

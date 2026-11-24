@@ -9,6 +9,17 @@ All notable changes to PaperPull are recorded here. Versioning follows
 
 ## [Unreleased]
 
+### Fixed
+- **A shared file shapes an identifier whole (#254, thanks @dertbv).** A
+  recording kept two real characters of an account id, the "be" of a
+  GUID's group "be99", since "be" is a word of the list and the group was
+  shaped word by word. A token of hex characters that mixes letters and
+  digits, a chain of three or more hex groups joined by - or _ (a GUID
+  whole, cut short or glued to a letter), and hex letters right against a
+  digit inside a longer token (be12Payment) are now shaped whole in every
+  recording, Diagnose file and failure file. A month written against its
+  year, Dec2031, now reads aaa9999 in those files.
+
 ### Changed
 - **The Mac update log names the versions and the reopen (#206, thanks
   @JasperDale19).** update.log in ~/Library/Logs/PaperPull said only that
