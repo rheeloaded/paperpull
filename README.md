@@ -32,6 +32,24 @@ new documents can go straight into Paperless. Both are free.
 
 **Watch it:** a [77-second demo](https://youtu.be/TfeOMngCgLM) on the real panel with made-up accounts. **Website:** [paperpull.net](https://paperpull.net), with the [getting-started guide](https://paperpull.net/guide.html), the [provider directory](https://paperpull.net/providers.html), the [Paperless-ngx tutorial](https://paperpull.net/paperless.html) and the [FAQ](https://paperpull.net/faq.html) (the most asked questions are also [below](#faq)). **Download:** the [latest release](https://github.com/rheeloaded/paperpull/releases/latest), Windows 10 or 11 and macOS on Apple Silicon or Intel, Linux from source. **Self-hosting** takes the Docker image `ghcr.io/rheeloaded/paperpull-server` and [three steps](#paperpull-server).
 
+## Get started
+
+1. Download PaperPull from the
+   [newest release](https://github.com/rheeloaded/paperpull/releases/latest),
+   `PaperPull-<version>-setup.exe` for Windows, or the `.dmg` for your Mac
+   (`arm64` for Apple Silicon, `x86_64` for Intel). For a NAS or home
+   server it is [PaperPull Server](#paperpull-server), and on Linux it runs
+   from a checkout ([Quick start](#quick-start)).
+2. Open it. The control panel opens on a welcome screen, where
+   **Open the sample** shows what PaperPull makes from invented accounts
+   before you sign in to anything.
+3. Choose your providers, press **Open sign-in window** on one and sign in
+   yourself, then press **Get new documents**. The PDFs land in a folder on
+   your own computer.
+
+The [getting-started guide](https://paperpull.net/guide.html) walks through
+each screen, and [Quick start](#quick-start) below has the details.
+
 **It also turns those PDFs into spreadsheets.** Your receipts become one
 long table of every item you have ever bought, across every store and every
 account, with what it cost and when. The transactions inside your bank and
@@ -68,6 +86,9 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 [#178](https://github.com/rheeloaded/paperpull/issues/178),
 [#204](https://github.com/rheeloaded/paperpull/issues/204),
 [#205](https://github.com/rheeloaded/paperpull/issues/205)):
+
+<details>
+<summary>Every provider, with what it saves and how</summary>
 
 | App | Provider | Country | Documents | Notes |
 |-----|----------|---------|-----------|-------|
@@ -175,6 +196,8 @@ CIBC and MBNA are first shells waiting for a tester to Record a trip to a docume
 | [`wellsfargo`](apps/wellsfargo) | Wells Fargo | United States | Account statements, tax documents | **Confirmed by [@appchamp](https://github.com/appchamp)** on a real account's credit card statements ([#27](https://github.com/rheeloaded/paperpull/issues/27)). Checking, savings, mortgage and tax documents are untested. Have one? [Help test it](apps/wellsfargo/README.md#help-test-it-no-programming-needed) |
 | [`wealthfront`](apps/wealthfront) | Wealthfront | United States | Statements, tax docs | |
 | [`ziply`](apps/ziply) | Ziply Fiber | United States | Monthly internet bills, the whole history My Account lists | **Built and run on a contributor's own account, 17 bills listed and the newest saved by a Pilot.** The page's own bill-list query asked for every bill, each PDF fetched from inside the signed-in page, nothing clicked. One account at a time |
+
+</details>
 
 > ⚠️ **Read this first:** these tools drive real, signed-in financial accounts.
 > See [SECURITY.md](SECURITY.md) before you run *or* publish anything. In short:
