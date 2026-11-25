@@ -471,7 +471,7 @@ def _in_a_kept_folder(docs: str, out: str) -> bool:
     return bool(parts) and (parts[0].lower() in kept or parts[0].startswith("."))
 
 
-def _check_documents_dir(raw, cfg: dict, name: str, setting_name: str = "documents_dir") -> Tuple[str, str]:
+def _check_candidate_folder(raw, profiles: list, out: str) -> Tuple[str, str]:
     """Validate a candidate documents folder path. Returns (normalized_path, why_refused)."""
     why = ""
     if not isinstance(raw, str) or not raw.strip():
@@ -482,13 +482,6 @@ def _check_documents_dir(raw, cfg: dict, name: str, setting_name: str = "documen
                "home folder, starting with ~/")
         return "", why
     docs = os.path.normpath(raw.strip())
-    profile = str(cfg.get("profile_dir") or "")
-    out = str(cfg["output_dir"])
-    from .browser import profile_folders
-    try:
-        profiles = profile_folders(profile) if profile else []
-    except (OSError, RuntimeError, ValueError):
-        profiles = [profile]
     if any(_inside(docs, held) or _inside(held, docs) for held in profiles):
         why = ("it is the browser profile, inside it or around it, and documents are "
                "never kept with a signed-in profile")
@@ -517,7 +510,14 @@ def set_documents_dir(cfg: dict, path) -> str:
         _DOCUMENTS[_folder_key(cfg["output_dir"])] = ""
         return ""
     name = Path(path).name if path else "config.json"
-    docs, why = _check_documents_dir(raw, cfg, name, "documents_dir")
+    profile = str(cfg.get("profile_dir") or "")
+    out = str(cfg["output_dir"])
+    from .browser import profile_folders
+    try:
+        profiles = profile_folders(profile) if profile else []
+    except (OSError, RuntimeError, ValueError):
+        profiles = [profile]
+    docs, why = _check_candidate_folder(raw, profiles, out)
     if why:
         print("The documents folder in %s is not used, since %s, so documents go to the "
               "output folder as before." % (name, why), flush=True)
@@ -546,13 +546,20 @@ def set_account_documents_dirs(cfg: dict, path) -> Dict[str, str]:
         _ACCOUNT_DOCUMENTS[key] = {}
         return {}
     name = Path(path).name if path else "config.json"
+    profile = str(cfg.get("profile_dir") or "")
+    out = str(cfg["output_dir"])
+    from .browser import profile_folders
+    try:
+        profiles = profile_folders(profile) if profile else []
+    except (OSError, RuntimeError, ValueError):
+        profiles = [profile]
     cleaned: Dict[str, str] = {}
     for acc, folder in raw.items():
         if not isinstance(acc, str) or not acc.strip():
             continue
         acc_key = acc.strip()
         folder_expanded = with_home(folder) if isinstance(folder, str) else folder
-        docs, why = _check_documents_dir(folder_expanded, cfg, name, f"account_documents_dirs[{acc_key!r}]")
+        docs, why = _check_candidate_folder(folder_expanded, profiles, out)
         if why:
             print("The documents folder for '%s' in %s is not used, since %s, so documents "
                   "for this account fall back as before." % (acc_key, name, why), flush=True)
