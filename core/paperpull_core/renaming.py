@@ -353,7 +353,7 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
          name_key: str = "PDF Filename",
          max_path_length: int = 240,
          flat: Iterable[Path] = (),
-         moved_to: Optional[Callable[[Path], Optional[Path]]] = None) -> List[Change]:
+         moved_to: Optional[Callable[..., Optional[Path]]] = None) -> List[Change]:
     """What every file would be called, without touching anything.
 
     `build_name` is handed a ledger row and returns the name that row
@@ -439,7 +439,11 @@ def plan(rows: Iterable[dict], build_name: Callable[[dict], str], *,
         # in there, a pattern's folders or that folder itself.
         home, whole = homes.placed(old_path, new_name)
         if moved_to is not None:
-            home = moved_to(home) or home
+            try:
+                moved_home = moved_to(home, row)
+            except TypeError:
+                moved_home = moved_to(home)
+            home = moved_home or home
         # The name cut to fit max_path_length in the file's folder, as a
         # download cuts it. Taken whole, a file whose download had cut its
         # name was offered the whole name back, a path longer than the
@@ -1574,7 +1578,22 @@ def run_for(app, apply_changes: bool = False, say=print,
         except (OSError, RuntimeError, ValueError):
             return False
 
-    def moved_to(home) -> Optional[Path]:
+    def _doc_dir_for_row(row):
+        acc = row.get("Account") or (current.record_for(row, saved=True) or {}).get("account")
+        if hasattr(app.paths, "documents_for"):
+            return app.paths.documents_for(acc)
+        return app.paths.documents
+
+    def moved_to(home, row=None) -> Optional[Path]:
+        if row is not None:
+            dest = _doc_dir_for_row(row)
+            # Find which kind folder home is inside
+            for f in app.paths._routed():
+                if home.name == f.name:
+                    return dest / f.name if getattr(app.paths, "kind_folders", True) else dest
+                # If home is a root (e.g. flat root), map to dest
+                if _one_folder_of(home, app.paths.root) or any(_one_folder_of(home, r) for r in app.paths.documents_roots()):
+                    return dest
         try:
             return earlier.get(Path(home).resolve())
         except (OSError, RuntimeError, ValueError):
@@ -1610,7 +1629,8 @@ def run_for(app, apply_changes: bool = False, say=print,
             inside = Path(raw).resolve().relative_to(Path(home).resolve())
         except (OSError, RuntimeError, ValueError):
             return ""
-        if flat_here and _one_folder_of(moved_to(home), app.paths.documents):
+        row_doc_dir = _doc_dir_for_row(row)
+        if flat_here and _one_folder_of(moved_to(home, row), row_doc_dir):
             # Without kind folders (#201) a folder of the documents folder
             # named like a kind folder may be one a pattern made, {type}
             # Online or an {account} of any name. A document already where
@@ -1618,7 +1638,7 @@ def run_for(app, apply_changes: bool = False, say=print,
             # and every Rename put it back.
             planned = build_name(row)
             if planned and _one_folder_of(
-                    filing_folder(Path(app.paths.documents), planned, limit), Path(raw).parent):
+                    filing_folder(Path(row_doc_dir), planned, limit), Path(raw).parent):
                 return ""
         return FileName(Path(raw).name, "/".join(inside.parts[:-1]))
 
@@ -1699,8 +1719,9 @@ def run_for(app, apply_changes: bool = False, say=print,
         # Written down before anything moves, so each document filed in the
         # documents folder without kind folders is held there afterwards,
         # and nothing else in it ever is (storage.Paths.filed_here).
+        doc_roots = [app.paths.documents] + list(getattr(app.paths, "account_documents", {}).values())
         into = [c.old_path for c in changes if c.renaming and c.new_path
-                and _inside(c.new_path, app.paths.documents)]
+                and any(_inside(c.new_path, d) for d in doc_roots)]
         remember = getattr(app.paths, "remember_filed", None)
         if into and remember is not None:
             try:

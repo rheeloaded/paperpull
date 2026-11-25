@@ -46,6 +46,9 @@ _KEPT_WITH_RECORDS = {folder.attr for folder in INFRASTRUCTURE_FOLDERS}
 # _folder_key of that folder (#102). Paths reads it, so every app gets it
 # from the Paths it builds from its config's output_dir.
 _DOCUMENTS = {}
+# The account documents folders load_config read for each output folder, by
+# _folder_key of that folder (#201). A dict of {account_name: documents_dir}.
+_ACCOUNT_DOCUMENTS = {}
 # The output folders whose account files documents straight into its
 # documents folder, with no folder of their kind (#201), by _folder_key, as
 # load_config read "kind_folders": false in each one's config.
@@ -100,6 +103,12 @@ def documents_dir_for(output_dir) -> str:
     return _DOCUMENTS.get(_folder_key(output_dir), "")
 
 
+def account_documents_dirs_for(output_dir) -> Dict[str, str]:
+    """The account documents folders load_config read for this output folder,
+    or {} when none are set (#201)."""
+    return dict(_ACCOUNT_DOCUMENTS.get(_folder_key(output_dir), {}))
+
+
 def kind_folders_for(output_dir) -> bool:
     """Whether documents of this output folder's account are filed in a
     folder of their kind inside its documents folder, as they always were,
@@ -114,6 +123,7 @@ def bind(spec) -> None:
     # A documents folder belongs to the config load_config reads next, and
     # so does the file a sign-in asks about.
     _DOCUMENTS.clear()
+    _ACCOUNT_DOCUMENTS.clear()
     _FLAT.clear()
     _CONFIG_READ = _CONFIG_GIVEN = None
     from . import receipt_pdf
@@ -339,6 +349,10 @@ def load_config(path: Optional[Path] = None) -> dict:
         if cfg.get("documents_dir"):
             refuse_links_out(cfg["documents_dir"], path,
                              every_folder=cfg.get("kind_folders", True) is False)
+        for acc_dir in (cfg.get("account_documents_dirs") or {}).values():
+            if isinstance(acc_dir, str) and acc_dir:
+                refuse_links_out(acc_dir, path,
+                                 every_folder=cfg.get("kind_folders", True) is False)
     cfg.setdefault("output_dir", str(Path.home() / "Downloads" / sp.provider))
     cfg.setdefault("min_pdf_bytes", 3000)
     cfg.setdefault("max_path_length", 240)
@@ -366,6 +380,7 @@ def load_config(path: Optional[Path] = None) -> dict:
     set_filename_patterns(cfg)
     # Where documents go (#102), read here for the same reason.
     set_documents_dir(cfg, path)
+    set_account_documents_dirs(cfg, path)
     # Whether they go into a folder of their kind there (#201), which
     # depends on both of the above.
     set_kind_folders(cfg, path)
@@ -415,6 +430,12 @@ def _not_on_one_line(cfg, path) -> str:
             if not (on_one_line(key) and (not isinstance(value, str) or on_one_line(value))):
                 said = "%s: %s" % (key, value)
                 return "account_labels in %s %s, in %s" % (name, _held(said), one_line(said))
+    acc_dirs = cfg.get("account_documents_dirs")
+    if isinstance(acc_dirs, dict):
+        for key, value in acc_dirs.items():
+            if not (on_one_line(key) and (not isinstance(value, str) or on_one_line(value))):
+                said = "%s: %s" % (key, value)
+                return "account_documents_dirs in %s %s, in %s" % (name, _held(said), one_line(said))
     return ""
 
 
@@ -445,6 +466,36 @@ def _in_a_kept_folder(docs: str, out: str) -> bool:
     return bool(parts) and (parts[0].lower() in kept or parts[0].startswith("."))
 
 
+def _check_documents_dir(raw, cfg: dict, name: str, setting_name: str = "documents_dir") -> Tuple[str, str]:
+    """Validate a candidate documents folder path. Returns (normalized_path, why_refused)."""
+    why = ""
+    if not isinstance(raw, str) or not raw.strip():
+        why = "it is not a folder's path"
+        return "", why
+    if not Path(raw.strip()).is_absolute():
+        why = ("it is not a full path, starting with a drive or a /, or a folder in your "
+               "home folder, starting with ~/")
+        return "", why
+    docs = os.path.normpath(raw.strip())
+    profile = str(cfg.get("profile_dir") or "")
+    out = str(cfg["output_dir"])
+    from .browser import profile_folders
+    try:
+        profiles = profile_folders(profile) if profile else []
+    except (OSError, RuntimeError, ValueError):
+        profiles = [profile]
+    if any(_inside(docs, held) or _inside(held, docs) for held in profiles):
+        why = ("it is the browser profile, inside it or around it, and documents are "
+               "never kept with a signed-in profile")
+    elif _inside(out, docs) and not _inside(docs, out):
+        why = ("it holds the output folder, whose records and Manual Review would then "
+               "sit in it")
+    elif _in_a_kept_folder(docs, out):
+        why = ("it is inside the output folder's Manual Review, Logs, Diagnostics, "
+               "Backups or a hidden folder, which hold no document that passed its check")
+    return (docs if not why else ""), why
+
+
 def set_documents_dir(cfg: dict, path) -> str:
     """Take the documents folder a config names, for the Paths built from
     its output_dir, and return it, "" for the output folder itself (#102).
@@ -461,32 +512,7 @@ def set_documents_dir(cfg: dict, path) -> str:
         _DOCUMENTS[_folder_key(cfg["output_dir"])] = ""
         return ""
     name = Path(path).name if path else "config.json"
-    why = ""
-    if not isinstance(raw, str) or not raw.strip():
-        why = "it is not a folder's path"
-    elif not Path(raw.strip()).is_absolute():
-        why = ("it is not a full path, starting with a drive or a /, or a folder in your "
-               "home folder, starting with ~/")
-    else:
-        docs = os.path.normpath(raw.strip())
-        profile = str(cfg.get("profile_dir") or "")
-        out = str(cfg["output_dir"])
-        # The profile and each folder beside it a fallback browser or a
-        # brand named in "browser" opens on, all of them signed in (#222).
-        from .browser import profile_folders
-        try:
-            profiles = profile_folders(profile) if profile else []
-        except (OSError, RuntimeError, ValueError):
-            profiles = [profile]
-        if any(_inside(docs, held) or _inside(held, docs) for held in profiles):
-            why = ("it is the browser profile, inside it or around it, and documents are "
-                   "never kept with a signed-in profile")
-        elif _inside(out, docs) and not _inside(docs, out):
-            why = ("it holds the output folder, whose records and Manual Review would then "
-                   "sit in it")
-        elif _in_a_kept_folder(docs, out):
-            why = ("it is inside the output folder's Manual Review, Logs, Diagnostics, "
-                   "Backups or a hidden folder, which hold no document that passed its check")
+    docs, why = _check_documents_dir(raw, cfg, name, "documents_dir")
     if why:
         print("The documents folder in %s is not used, since %s, so documents go to the "
               "output folder as before." % (name, why), flush=True)
@@ -494,6 +520,58 @@ def set_documents_dir(cfg: dict, path) -> str:
     cfg["documents_dir"] = docs
     _DOCUMENTS[_folder_key(cfg["output_dir"])] = docs
     return docs
+
+
+def set_account_documents_dirs(cfg: dict, path) -> Dict[str, str]:
+    """Take the account documents folders a config names (#201), for the
+    Paths built from its output_dir, and return them as a dict.
+
+    Each folder is held to the same rules as documents_dir (an absolute
+    path, not the browser profile, not around the output folder, not in
+    kept folders). An entry that fails validation is reported and dropped,
+    so documents of that account fall back to documents_dir as before."""
+    raw = cfg.get("account_documents_dirs")
+    key = _folder_key(cfg["output_dir"])
+    if not isinstance(raw, dict):
+        if raw is not None:
+            name = Path(path).name if path else "config.json"
+            print("The account documents folders in %s are not used, since they are not a "
+                  "mapping of account names to folders." % name, flush=True)
+            cfg.pop("account_documents_dirs", None)
+        _ACCOUNT_DOCUMENTS[key] = {}
+        return {}
+    name = Path(path).name if path else "config.json"
+    cleaned: Dict[str, str] = {}
+    for acc, folder in raw.items():
+        if not isinstance(acc, str) or not acc.strip():
+            continue
+        acc_key = acc.strip()
+        docs, why = _check_documents_dir(folder, cfg, name, f"account_documents_dirs[{acc_key!r}]")
+        if why:
+            print("The documents folder for '%s' in %s is not used, since %s, so documents "
+                  "for this account fall back as before." % (acc_key, name, why), flush=True)
+            continue
+        cleaned[acc_key] = docs
+    cfg["account_documents_dirs"] = cleaned
+    _ACCOUNT_DOCUMENTS[key] = cleaned
+    return cleaned
+
+
+def check_account_documents_dirs_matched(cfg_or_paths, listed_accounts: Iterable[str], say=print) -> None:
+    """Warn when a map entry in account_documents_dirs matched none of the
+    accounts listed (#201), indicating the provider site renamed an account."""
+    if hasattr(cfg_or_paths, "account_documents"):
+        configured = getattr(cfg_or_paths, "account_documents", {})
+    elif isinstance(cfg_or_paths, dict):
+        configured = cfg_or_paths.get("account_documents_dirs") or {}
+    else:
+        return
+    if not configured:
+        return
+    known = set(listed_accounts or ())
+    for acc in configured:
+        if acc not in known:
+            say("The account documents folder setting for '%s' matched no listed account." % acc)
 
 
 def _kinds_filed() -> List[str]:
@@ -773,19 +851,38 @@ def hold_to_the_server(cfg: dict, path: Path) -> None:
     if isinstance(docs, str):
         # Judged as the run will use it (set_documents_dir).
         docs = cfg["documents_dir"] = docs.strip()
-    if docs is None or docs == "":
-        return
-    if not (isinstance(docs, str) and Path(docs).is_absolute()):
-        raise SystemExit("documents_dir in %s is not a full path, so this run stopped before "
-                         "saving anything. Set it to a folder inside %s, or take it out."
-                         % (name, data))
-    where = os.path.realpath(docs)
-    if not _in_data(where, data):
-        raise SystemExit(
-            "%s sends this run's documents to %s, which is outside %s, the data folder, "
-            "once its links are followed. On PaperPull Server documents are kept only "
-            "inside it, so this run stopped before saving anything. Set documents_dir to a "
-            "folder inside %s, or take it out." % (name, where, data, data))
+    if docs:
+        if not (isinstance(docs, str) and Path(docs).is_absolute()):
+            raise SystemExit("documents_dir in %s is not a full path, so this run stopped before "
+                             "saving anything. Set it to a folder inside %s, or take it out."
+                             % (name, data))
+        where = os.path.realpath(docs)
+        if not _in_data(where, data):
+            raise SystemExit(
+                "%s sends this run's documents to %s, which is outside %s, the data folder, "
+                "once its links are followed. On PaperPull Server documents are kept only "
+                "inside it, so this run stopped before saving anything. Set documents_dir to a "
+                "folder inside %s, or take it out." % (name, where, data, data))
+
+    # Each account documents folder (#201) is held to the same rules.
+    acc_dirs = cfg.get("account_documents_dirs")
+    if isinstance(acc_dirs, dict):
+        for acc, acc_docs in acc_dirs.items():
+            if isinstance(acc_docs, str):
+                acc_docs = acc_docs.strip()
+            if not acc_docs:
+                continue
+            if not (isinstance(acc_docs, str) and Path(acc_docs).is_absolute()):
+                raise SystemExit("account_documents_dirs for '%s' in %s is not a full path, so this run stopped before "
+                                 "saving anything. Set it to a folder inside %s, or take it out."
+                                 % (acc, name, data))
+            where = os.path.realpath(acc_docs)
+            if not _in_data(where, data):
+                raise SystemExit(
+                    "%s sends '%s' documents to %s, which is outside %s, the data folder, "
+                    "once its links are followed. On PaperPull Server documents are kept only "
+                    "inside it, so this run stopped before saving anything. Set its documents folder to a "
+                    "folder inside %s, or take it out." % (name, acc, where, data, data))
 
 
 def _in_data(where: str, data: str) -> bool:
@@ -958,12 +1055,18 @@ class Paths:
     path here is what it always was, documents_dir or not.
     """
 
-    def __init__(self, output_dir, app_spec=None, documents_dir=None, kind_folders=None):
+    def __init__(self, output_dir, app_spec=None, documents_dir=None, kind_folders=None,
+                 account_documents_dirs=None):
         self._spec = app_spec or spec()
         self.root = Path(output_dir)
         if documents_dir is None:
             documents_dir = documents_dir_for(output_dir)
         self.documents = Path(documents_dir) if documents_dir else self.root
+        if account_documents_dirs is None:
+            account_documents_dirs = account_documents_dirs_for(output_dir)
+        self.account_documents = {
+            acc: Path(p) for acc, p in (account_documents_dirs or {}).items() if p
+        }
         # Whether a document goes into the folder of its kind in the
         # documents folder, or straight into it (#201). Always into the
         # folder of its kind when the documents folder is the output
@@ -991,6 +1094,13 @@ class Paths:
         # Whether the last listing was read to its end (listing.py).
         self.last_listing = self.root / "last-listing.json"
         self.run_summary = self.root / "run-summary.txt"
+
+    def documents_for(self, account: Optional[str] = None) -> Path:
+        """The documents folder for `account` (#201), or the general
+        documents folder when the account is not mapped or None."""
+        if account and account in self.account_documents:
+            return self.account_documents[account]
+        return self.documents
 
     def columns_for(self, csv_attr: str):
         for csv_spec in self._spec.csv_files:
@@ -1073,7 +1183,8 @@ class Paths:
                 if folder.attr not in _RECORD_FOLDERS]
         seen = {_folder_key(f) for f in held}
         used = self.documents_roots()
-        for root in [self.documents] + used:
+        roots_to_check = [self.documents] + list(self.account_documents.values()) + used
+        for root in roots_to_check:
             for folder in self._routed():
                 path = Path(root) / folder.name
                 if _folder_key(path) not in seen:
@@ -1088,7 +1199,8 @@ class Paths:
         flat = self.flat_documents_roots(used)
         # Such a folder may be a broad one, Documents say, so a file in it is
         # held only when the Move filed it there (filed_here).
-        for root in ([] if self.kind_folders else [self.documents]) + flat:
+        active_roots = ([] if self.kind_folders else [self.documents] + list(self.account_documents.values()))
+        for root in active_roots + flat:
             if _folder_key(root) not in seen:
                 seen.add(_folder_key(root))
                 held.append(flat_root(root, self.filed_here))
@@ -1184,14 +1296,16 @@ class Paths:
         files would be gone."""
         if self.kind_folders:
             return
-        for folder in self._routed():
-            path = self.documents / folder.name
-            if shared_folder._a_link_at(path):
-                continue
-            try:
-                path.rmdir()
-            except OSError:
-                pass
+        destinations = [self.documents] + list(self.account_documents.values())
+        for dest in destinations:
+            for folder in self._routed():
+                path = dest / folder.name
+                if shared_folder._a_link_at(path):
+                    continue
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
 
     def _read_filed(self):
         """(the (size, digest) pairs FILED_FLAT holds, whether the account's
@@ -1371,23 +1485,24 @@ class Paths:
             self._filed = filed | more
 
     def remember_documents(self) -> None:
-        """Write down the documents folder in documents-folders.json, once
+        """Write down the documents folder(s) in documents-folders.json, once
         documents are moved into it, so they are still found after the
         setting changes or is cleared."""
-        if _folder_key(self.documents) == _folder_key(self.root):
-            return
-        if not self.kind_folders:
-            # Filed without kind folders (#201), so it is looked in as a
-            # whole from now on.
-            flat = self._listed(self.flat_documents_json)
-            if not any(_folder_key(p) == _folder_key(self.documents) for p in flat):
-                atomic_write_text(self.flat_documents_json,
-                                  json.dumps(flat + [str(self.documents)], indent=1))
-        known = [str(p) for p in self.documents_roots()]
-        if any(_folder_key(p) == _folder_key(self.documents) for p in known):
-            return
-        atomic_write_text(self.documents_folders_json,
-                          json.dumps(known + [str(self.documents)], indent=1))
+        destinations = [self.documents] + list(self.account_documents.values())
+        for dest in destinations:
+            if _folder_key(dest) == _folder_key(self.root):
+                continue
+            if not self.kind_folders:
+                # Filed without kind folders (#201), so it is looked in as a
+                # whole from now on.
+                flat = self._listed(self.flat_documents_json)
+                if not any(_folder_key(p) == _folder_key(dest) for p in flat):
+                    atomic_write_text(self.flat_documents_json,
+                                      json.dumps(flat + [str(dest)], indent=1))
+            known = [str(p) for p in self.documents_roots()]
+            if not any(_folder_key(p) == _folder_key(dest) for p in known):
+                atomic_write_text(self.documents_folders_json,
+                                  json.dumps(known + [str(dest)], indent=1))
 
 
 # ---------------------------------------------------------------------------
