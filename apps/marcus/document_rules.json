@@ -1,0 +1,41 @@
+{
+  "_comment": "Editable rules mapping Marcus document titles to filename summaries. Checked in order: tax, then year-end, then insurance (both unused for Marcus), then statement. A statement's title is its product and the word Statement, such as Online Savings Statement.",
+  "tax_rules": [
+    {
+      "pattern": "1099-?INT\\b",
+      "summary": "1099-INT Tax Form"
+    },
+    {
+      "pattern": "\\b1099\\b",
+      "summary": "1099 Tax Form"
+    },
+    {
+      "pattern": "tax\\s+(document|form|statement|package|information)",
+      "summary": "Tax Document"
+    }
+  ],
+  "year_end_rules": [],
+  "insurance_rules": [],
+  "statement_rules": [
+    {
+      "pattern": "online\\s+savings\\s+statement",
+      "summary": "Online Savings Statement"
+    },
+    {
+      "pattern": "\\bCD\\s+statement",
+      "summary": "CD Statement"
+    },
+    {
+      "pattern": "\\bstatement\\b",
+      "summary": "Statement"
+    }
+  ],
+  "skip_patterns": [
+    "\\bagreement\\b",
+    "disclosure",
+    "privacy\\s+(notice|policy|statement)",
+    "terms\\s+(of\\s+service|and\\s+conditions)",
+    "marketing",
+    "change\\s+in\\s+terms"
+  ]
+}
