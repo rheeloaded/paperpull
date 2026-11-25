@@ -304,3 +304,128 @@ def test_unmatched_account_warning(tmp_path):
     storage.check_account_documents_dirs_matched(paths, listed_accounts, say=lines.append)
     assert len(lines) == 1
     assert lines[0] == "The account documents folder setting for 'Old Loan ...9999' matched no listed account."
+
+
+# ---------------------------------------------------------------------------
+# Additional Edge Cases: Tilde expansion, partial mapping, shared dirs, non-dict
+# ---------------------------------------------------------------------------
+
+def test_account_documents_dirs_expands_tilde_home_folder(tmp_path):
+    out = tmp_path / "out"
+    cfg = storage.load_config(write_cfg(tmp_path / "app", {
+        "output_dir": str(out),
+        "documents_dir": str(tmp_path / "Default"),
+        "account_documents_dirs": {
+            "Card": "~/CardDocsTestFolder",
+        }
+    }))
+    expected = Path.home() / "CardDocsTestFolder"
+    assert cfg["account_documents_dirs"]["Card"] == str(expected)
+    paths = Paths(out)
+    assert paths.documents_for("Card") == expected
+
+
+def test_account_documents_dirs_not_a_dict_falls_back(tmp_path, capsys):
+    out = tmp_path / "out"
+    docs_default = tmp_path / "Default"
+    cfg = storage.load_config(write_cfg(tmp_path / "app", {
+        "output_dir": str(out),
+        "documents_dir": str(docs_default),
+        "account_documents_dirs": ["not", "a", "dict"],
+    }))
+    err = capsys.readouterr().out
+    assert "The account documents folders in config.json are not used, since they are not a mapping" in err
+    assert "account_documents_dirs" not in cfg
+    paths = Paths(out)
+    assert paths.documents_for("Checking 1111") == docs_default
+
+
+def test_move_with_partial_mapping_falls_back_to_default_documents_dir(tmp_path, monkeypatch):
+    """When only some accounts are mapped in account_documents_dirs, unmapped accounts
+    move to documents_dir."""
+    office = Office(tmp_path)
+    docs_checking = tmp_path / "Checking"
+
+    # Only ACCOUNTS[0] is mapped, ACCOUNTS[1] falls back to office.docs
+    office.paths = Paths(
+        office.out,
+        documents_dir=str(office.docs),
+        account_documents_dirs={
+            ACCOUNTS[0]: str(docs_checking),
+        }
+    )
+    office.paths.ensure()
+
+    first_file = office.saved(ACCOUNTS[0])
+    second_file = office.saved(ACCOUNTS[1])
+
+    moving(monkeypatch)
+    code, said = office.rename()
+    assert code == 0, said
+    assert "Moved 2 file(s)" in said
+
+    target_first = docs_checking / "Statements" / FIRST
+    target_second = office.docs / "Statements" / SECOND
+
+    assert target_first.is_file()
+    assert target_second.is_file()
+    assert not first_file.exists()
+    assert not second_file.exists()
+
+    rec0 = office.progress.data[ACCOUNTS[0]]
+    rec1 = office.progress.data[ACCOUNTS[1]]
+    assert rec0["pdf_path"] == str(target_first)
+    assert rec1["pdf_path"] == str(target_second)
+
+
+def test_multiple_accounts_share_same_account_documents_dir(tmp_path, monkeypatch):
+    """Multiple accounts can map to the same custom folder without duplicate tracking."""
+    office = Office(tmp_path)
+    shared_docs = tmp_path / "SharedCards"
+
+    office.paths = Paths(
+        office.out,
+        documents_dir=str(office.docs),
+        account_documents_dirs={
+            ACCOUNTS[0]: str(shared_docs),
+            ACCOUNTS[1]: str(shared_docs),
+        }
+    )
+    office.paths.ensure()
+
+    first_file = office.saved(ACCOUNTS[0])
+    second_file = office.saved(ACCOUNTS[1])
+
+    moving(monkeypatch)
+    code, said = office.rename()
+    assert code == 0, said
+    assert "Moved 2 file(s)" in said
+
+    target_first = shared_docs / "Statements" / FIRST
+    target_second = shared_docs / "Statements" / SECOND
+
+    assert target_first.is_file()
+    assert target_second.is_file()
+
+    # Verify no duplicates in documents-folders.json
+    office.paths.remember_documents()
+    remembered = json.loads(office.paths.documents_folders_json.read_text(encoding="utf-8"))
+    assert remembered.count(str(shared_docs)) == 1
+
+
+def test_account_documents_dirs_whitespace_trimmed(tmp_path):
+    """Account keys and folder paths with extra whitespace are cleaned."""
+    out = tmp_path / "out"
+    docs_card = tmp_path / "Card"
+    cfg = storage.load_config(write_cfg(tmp_path / "app", {
+        "output_dir": str(out),
+        "documents_dir": str(tmp_path / "Default"),
+        "account_documents_dirs": {
+            "  Card 1234  ": f"  {docs_card}  ",
+        }
+    }))
+    assert "Card 1234" in cfg["account_documents_dirs"]
+    assert cfg["account_documents_dirs"]["Card 1234"] == str(docs_card)
+    paths = Paths(out)
+    assert paths.documents_for("Card 1234") == docs_card
+

@@ -331,6 +331,11 @@ def load_config(path: Optional[Path] = None) -> dict:
                 if key == "output_dir" and isinstance(cfg[key], str) and read != cfg[key]:
                     home_written = cfg[key]
                 cfg[key] = read
+        if isinstance(cfg.get("account_documents_dirs"), dict):
+            cfg["account_documents_dirs"] = {
+                k: with_home(v) if isinstance(v, str) else v
+                for k, v in cfg["account_documents_dirs"].items()
+            }
     held = _not_on_one_line(cfg, path)
     if held:
         raise SystemExit(
@@ -546,7 +551,8 @@ def set_account_documents_dirs(cfg: dict, path) -> Dict[str, str]:
         if not isinstance(acc, str) or not acc.strip():
             continue
         acc_key = acc.strip()
-        docs, why = _check_documents_dir(folder, cfg, name, f"account_documents_dirs[{acc_key!r}]")
+        folder_expanded = with_home(folder) if isinstance(folder, str) else folder
+        docs, why = _check_documents_dir(folder_expanded, cfg, name, f"account_documents_dirs[{acc_key!r}]")
         if why:
             print("The documents folder for '%s' in %s is not used, since %s, so documents "
                   "for this account fall back as before." % (acc_key, name, why), flush=True)
