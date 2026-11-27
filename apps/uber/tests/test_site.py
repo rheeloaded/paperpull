@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import storage  # noqa: F401  binds this provider's AppSpec
 import uber_site as site
 from paperpull_core import intake  # noqa: E402
+from paperpull_core.models import Purchase  # noqa: E402
 
 TRIP_A = "0a1b2c3d-1111-4222-8333-444455556666"
 TRIP_B = "0a1b2c3d-7777-4888-9999-aaaabbbbcccc"
@@ -173,6 +174,41 @@ def test_the_identity_is_the_receipt_id_when_there_is_one():
     assert by_id.number == ORDER_B and not by_id.date and not by_id.total
     by_facts = site.identity_for(p, "")
     assert not by_facts.number and by_facts.date == p.purchase_date and by_facts.total == "$27.35"
+
+
+def test_a_ride_receipt_that_prints_no_id_is_filed_by_its_date_or_total():
+    """A ride PDF printed no Receipt ID, RECORDED 2026-11-26, and every ride
+    of fourteen was refused and destroyed for it. Laid out as that one was,
+    with every value invented. Another trip's receipt is still refused."""
+    from paperpull_core.identity import verify
+    p = Purchase(purchase_type=site.RIDES, order_number=TRIP_A, purchase_date="2026-06-15",
+                 total="$15.97", store_info="Uber", fulfillment="Ride")
+    text = ("Jun 15, 2026\n10:22 PM\nThanks for riding, Dana\nTotal $15.97\n"
+            "Trip fare $13.07\nBooking Fee \n $2.90\nPayments\n"
+            "Visa ••••1234 $15.97\n6/16/26 9:22 AM\nTrip details\nUberX\n"
+            "1.83 miles, 7 minutes\n1 Example St\n2 Example Ave\n")
+    assert verify(None, site.identity_for(p, TRIP_A, prints_an_id=False), text=text).ok
+    assert verify(None, site.identity_for(p, "", prints_an_id=False), text=text).ok
+    other = text.replace("Jun 15", "Jun 3").replace("15.97", "41.20")
+    assert not verify(None, site.identity_for(p, TRIP_A, prints_an_id=False), text=other).ok
+
+
+def test_a_ride_pdf_that_prints_another_trips_id_is_held_to_this_ones():
+    from paperpull_core.identity import verify
+    other_trip = "9f8e7d6c-5555-4666-8777-888899990000"
+    p = Purchase(purchase_type=site.RIDES, order_number=TRIP_A, purchase_date="2026-06-15",
+                 total="$15.97", store_info="Uber", fulfillment="Ride")
+    text = "Jun 15, 2026\nThanks for riding, Dana\nTotal $15.97\nReceipt ID # %s\n" % other_trip
+    expect = site.identity_for(p, TRIP_A, prints_an_id=True)
+    assert expect.number == TRIP_A and not expect.date and not expect.total
+    assert not verify(None, expect, text=text).ok
+
+
+def test_whether_a_ride_pdf_prints_an_id_is_read_from_the_pdf():
+    from paperpull_core.testkit import text_pdf
+    assert site.ride_pdf_prints_an_id(text_pdf(["Total $15.97", "Receipt ID # %s" % TRIP_A]))
+    assert not site.ride_pdf_prints_an_id(text_pdf(["Jun 15, 2026", "Total $15.97"]))
+    assert not site.ride_pdf_prints_an_id(b"not a pdf")
 
 
 # -- what is refused before it is sent ----------------------------------------------
