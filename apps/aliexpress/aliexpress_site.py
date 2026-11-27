@@ -43,7 +43,6 @@ control pressed is "View orders", which loads more of the list.
 """
 from __future__ import annotations
 
-import base64
 import binascii
 import hashlib
 import json
@@ -53,7 +52,8 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from paperpull_core import identity, pdf_reader, receipt_pdf, refused, shared_folder
+from paperpull_core import identity, intake, pdf_reader, receipt_pdf, refused, shared_folder
+from paperpull_core.characters import whole_json
 from paperpull_core.controls import AUTH_CONTROL_RE, SETTINGS_CONTROL_RE
 from paperpull_core.urls import is_safe_url as _host_allows
 
@@ -197,7 +197,7 @@ def invoice_list_look(page) -> tuple[bool, str]:
                 return False, "signed out"
             for answer in answers:
                 try:
-                    _list_page(answer)
+                    _list_page(intake.text_of(answer))
                     return True, "ready"
                 except SessionExpired:
                     return False, "signed out"
@@ -325,13 +325,14 @@ def _open_tax_page(page, order_id: str) -> None:
 def _jsonp(text: str):
     text = (text or "").strip()
     match = re.match(r"^[\w$.]+\((.*)\)\s*;?$", text, re.S)
-    return json.loads(match[1] if match else text)
+    return whole_json(json.loads(match[1] if match else text))
 
 
-def _list_page(response) -> tuple[list, dict]:
-    """(orders, body fields) of one answer of the order list."""
+def _list_page(text: str) -> tuple[list, dict]:
+    """(orders, body fields) of one answer of the order list, its text read
+    through intake.text_of."""
     try:
-        answer = _jsonp(response.text())
+        answer = _jsonp(text)
     except Exception:
         raise ListStopped("AliExpress did not return a readable order list") from None
     _ret_problem(answer.get("ret"))
@@ -389,13 +390,15 @@ def _list_orders(page) -> list:
             answer = answers[read]
             read += 1
             try:
-                answer.text()
+                text = intake.text_of(answer)
+            except intake.TooLarge:
+                raise ListStopped("AliExpress sent an order list larger than PaperPull reads") from None
             except Exception:
                 # An answer to a load of the list the page has since left
                 # (the tab was on the list already), whose body the
                 # browser no longer holds. The current load's answer follows.
                 continue
-            rows, body = _list_page(answer)
+            rows, body = _list_page(text)
             # Each answer names its page. One that is not the page asked
             # for next is an answer to some other load, and is passed over.
             index = body.get("pageIndex")
@@ -553,8 +556,8 @@ def _invoice_pdf(page, paper: Paper, out_path: Path) -> bool:
     if not isinstance(content, str) or not content:
         return _refuse("refused")
     try:
-        pdf = base64.b64decode(content, validate=True)
-    except (binascii.Error, ValueError):
+        pdf = intake.decode(content, validate=True)
+    except (binascii.Error, ValueError, intake.TooLarge):
         return _refuse("unreadable")
     if not pdf.startswith(b"%PDF-"):
         return _refuse("unreadable")

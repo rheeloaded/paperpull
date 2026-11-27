@@ -63,6 +63,11 @@ class Response:
             raise RuntimeError("No resource with given identifier found")
         return self._text
 
+    headers = {}
+
+    def body(self):
+        return self.text().encode()
+
 
 class Button:
     def __init__(self, page):
