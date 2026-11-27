@@ -127,6 +127,7 @@ MENDED = {
     ("starlink", "download_bill"): "_fetch_pdf",
     ("stripe", "download_bill"): "_fetch_file",
     ("tualatin", "download_bill"): "_fetch",
+    ("ubiquiti", "download_bill"): "_fetch_invoice",
     ("ups", "download_bill"): "_post",
     ("verizonmobile", "download_bill"): "_fetch",
     ("ziply", "download_bill"): "_fetch",

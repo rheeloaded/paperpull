@@ -101,6 +101,7 @@
     "tsp": {"gets": "Participant statements, 1099-R", "group": "investing"},
     "tualatin": {"gets": "Monthly water and sewer bills, about two years online", "group": "bills"},
     "uber": {"gets": "Ride and Uber Eats receipts", "group": "shopping"},
+    "ubiquiti": {"gets": "Receipts for Ubiquiti Store (UniFi) equipment orders", "group": "shopping", "note": "Run on one account so far"},
     "ukg": {"gets": "Pay statements", "group": "pay"},
     "ups": {"gets": "Shipping invoices from the Billing Center", "group": "bills"},
     "usaa": {"gets": "Statements", "group": "banks"},
