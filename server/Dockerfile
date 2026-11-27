@@ -16,7 +16,7 @@
 # digest each week (.github/dependabot.yml), and the Server image workflow
 # builds, starts and scans the image on that proposal before it can merge.
 # By hand, `python server/lock.py --base` writes the tag's current digest.
-FROM python:3.12-slim-bookworm@sha256:935c3c5b12357a7e10caa9c1e6ca5692344d97cf229832ef584be2cec9fc03df
+FROM python:3.12-slim-bookworm@sha256:44cf1793efa7c7a476bb0f2cff81443f4a072c90c1cb127e2924933daa3e8c64
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Etc/UTC \
