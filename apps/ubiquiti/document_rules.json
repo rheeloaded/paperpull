@@ -1,0 +1,11 @@
+{
+  "statement_rules": [
+    {
+      "pattern": "\\breceipt\\b",
+      "summary": "Receipt"
+    }
+  ],
+  "tax_rules": [],
+  "insurance_rules": [],
+  "skip_patterns": []
+}

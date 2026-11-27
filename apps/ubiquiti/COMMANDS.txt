@@ -1,0 +1,8 @@
+Ubiquiti Store receipt commands from the PaperPull checkout
+
+paperpull ubiquiti login      Open the sign-in window
+paperpull ubiquiti discover   List the account's paid orders
+paperpull ubiquiti pilot      Save a sample of the newest receipts
+paperpull ubiquiti all        Save every order's receipt
+paperpull ubiquiti resume     Continue an interrupted download
+paperpull ubiquiti verify     Recheck saved PDFs
