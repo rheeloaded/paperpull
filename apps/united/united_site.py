@@ -52,7 +52,6 @@ change, a cancellation, a refund or a payment.
 """
 from __future__ import annotations
 
-import io
 import json
 import re
 import time
@@ -240,7 +239,7 @@ class _Heard:
 def _asked_by(response) -> dict:
     """The JSON the page sent with a request, {} when it cannot be read."""
     try:
-        sent = json.loads(response.request.post_data or "")
+        sent = whole_json(json.loads(response.request.post_data or ""))
     except Exception:
         return {}
     return sent if isinstance(sent, dict) else {}
@@ -718,17 +717,26 @@ class _PrintTab:
         return False
 
 
-def _joined(parts: list[bytes]) -> bytes:
-    if len(parts) == 1:
-        return parts[0]
-    from pypdf import PdfReader, PdfWriter
-    writer = PdfWriter()
-    for part in parts:
-        for p in PdfReader(io.BytesIO(part)).pages:
-            writer.add_page(p)
-    out = io.BytesIO()
-    writer.write(out)
-    return out.getvalue()
+# Between two travelers' receipts printed as one document.
+PAGE_BREAK = '<div style="break-after: page; page-break-after: always"></div>'
+
+
+def _part(html: str, tag: str) -> str | None:
+    found = re.search(rf"<{tag}\b[^>]*>(.*)</{tag}\s*>", html or "", re.I | re.S)
+    return found.group(1) if found else None
+
+
+def _together(pages: list[str]) -> str:
+    """Every traveler's receipt HTML as one document, each from a new page,
+    so one print holds them all. The receipts share United's template, so
+    the first one's head styles them all."""
+    if len(pages) == 1:
+        return pages[0]
+    head = _part(pages[0], "head") or ""
+    bodies = [_part(html, "body") if _part(html, "body") is not None else html for html in pages]
+    return ("<!DOCTYPE html><html><head>" + head + "</head><body>"
+            + PAGE_BREAK.join("<div>" + body + "</div>" for body in bodies)
+            + "</body></html>")
 
 
 _LIGATURES = str.maketrans({"ﬁ": "fi", "ﬂ": "fl", "ﬀ": "ff", "ﬃ": "ffi", "ﬄ": "ffl"})
@@ -796,7 +804,6 @@ def download_bill(page, date: str, out_path: Path, *, account: str, document_id:
     except _Refused:
         refused.list_again(lambda: collect_download_docs(page), SessionExpired, ListStopped)
         return _refuse("refused")
-    parts = []
     with _PrintTab(page.context) as printer:
         for html in pages:
             data = printer.print(html)
@@ -806,8 +813,13 @@ def download_bill(page, date: str, out_path: Path, *, account: str, document_id:
                 return _refuse("unreadable")
             if not checks_out(text, receipt):
                 return _refuse("wrong")
-            parts.append((data, text))
-    if not names_every_ticket(" ".join(t for _d, t in parts), receipt):
+        if len(pages) > 1:
+            data = printer.print(_together(pages))
+            try:
+                text = " ".join(pdf_reader.page_texts(data))
+            except Exception:
+                return _refuse("unreadable")
+    if not names_every_ticket(text, receipt):
         return _refuse("wrong")
-    shared_folder.write_bytes(out_path, _joined([d for d, _t in parts]))
+    shared_folder.write_bytes(out_path, data)
     return True

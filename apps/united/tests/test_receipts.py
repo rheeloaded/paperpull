@@ -501,10 +501,24 @@ def test_every_travelers_receipt_is_filed_together(tmp_path):
     page = Page()
     _docs, saved = save_all(page, tmp_path)
     from paperpull_core import pdf_reader
-    pages = pdf_reader.page_texts(saved["QXA1B2"].read_bytes())
-    assert len(pages) == 2
-    assert "0169990000011" in pages[0] and "0169990000012" in pages[1]
-    assert len(pdf_reader.page_texts(saved["QXE5F6"].read_bytes())) == 1
+    text = " ".join(pdf_reader.page_texts(saved["QXA1B2"].read_bytes()))
+    assert "0169990000011" in text and "0169990000012" in text
+    together = [h for h in Printer.printed if site.PAGE_BREAK in h]
+    assert len(together) == 1 and together[0].count(site.PAGE_BREAK) == 1
+    assert together[0].index("0169990000011") < together[0].index(site.PAGE_BREAK) \
+        < together[0].index("0169990000012")
+    # One receipt for all three travelers is saved as printed, with no break.
+    assert "0169990000033" in " ".join(pdf_reader.page_texts(saved["QXE5F6"].read_bytes()))
+
+
+def test_travelers_receipts_print_as_one_document_under_the_first_ones_head():
+    first = "<html><head><style>p{color:red}</style></head><body class='x'><p>ONE</p></body></html>"
+    second = "<html><head><style>ignored</style></head><BODY><p>TWO</p></BODY></html>"
+    html = site._together([first, second])
+    assert html.count("<body>") == 1 and "p{color:red}" in html and "ignored" not in html
+    assert html.index("ONE") < html.index(site.PAGE_BREAK) < html.index("TWO")
+    assert site._together([first]) == first
+    assert "<p>THREE</p>" in site._together([first, "<p>THREE</p>"])
 
 
 def test_a_receipt_missing_a_travelers_ticket_is_wrong(tmp_path):
