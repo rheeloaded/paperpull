@@ -363,3 +363,28 @@ def test_another_customers_records_are_not_resumed(tmp_path, monkeypatch):
     app._billing_account = ""
     app.cmd_discover(quiet=True)
     assert app._select() == []
+
+
+@pytest.mark.parametrize("created, local", [
+    ("2032-12-12T00:04:00.000Z", "2032-12-11"),   # standard time, 19:04 the evening before
+    ("2032-12-12T05:30:00.000Z", "2032-12-12"),
+    ("2032-07-01T03:30:00.000Z", "2032-06-30"),   # daylight time, 23:30 the evening before
+    ("2032-07-01T04:30:00.000Z", "2032-07-01"),
+    ("2032-03-14T06:30:00.000Z", "2032-03-14"),   # 01:30 EST, just before the change
+    ("2032-11-07T05:30:00.000Z", "2032-11-07"),   # 01:30 EDT, just before the change back
+    ("2032-11-07T06:30:00.000Z", "2032-11-07"),   # 01:30 EST, just after
+])
+def test_an_orders_day_is_the_us_eastern_day(created, local):
+    assert site._dates(created, "us") == (local, created[:10])
+
+
+def test_the_date_needs_no_zone_database():
+    """Windows' Python has no zone database without tzdata, and an app that
+    asks it for America/New_York cannot read a single order there."""
+    source = Path(site.__file__).read_text(encoding="utf-8")
+    assert "zoneinfo" not in source and "ZoneInfo" not in source
+
+
+def test_a_sign_in_address_on_the_store_reads_as_signed_out():
+    assert site.looks_signed_out(SimpleNamespace(url="https://store.ui.com/login"))
+    assert site.looks_signed_out(SimpleNamespace(url="https://account.ui.com/"))

@@ -44,11 +44,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 from pathlib import Path
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
 
 from paperpull_core import identity, intake, pdf_reader, refused, shared_folder
 from paperpull_core.characters import whole_json
@@ -73,11 +72,10 @@ STORE_ID = re.compile(r"^[a-z]{2}$")
 # The store's own words for a paid order. Anything else (Cancelled, a
 # payment still pending, a failed one) has no receipt to save.
 PAID = "Completed"
-# Where each store prints its invoice date. A store not named here is
-# read in US Eastern time too, and the check of the PDF also takes the
-# UTC day, so a guess wrong by a few hours never refuses a receipt.
-STORE_ZONES = {"us": "America/New_York", "ca": "America/Toronto"}
-DEFAULT_ZONE = "America/New_York"
+# The store prints its invoice date in US Eastern time (Toronto keeps the
+# same clock for the Canadian store). Worked out here rather than from the
+# zone database, which Windows' Python does not carry. The check of the
+# PDF also takes the UTC day, so an hour wrong never refuses a receipt.
 PAGE_SIZE = 50
 MAX_PAGES = 100
 LIST_BYTES = 2_000_000
@@ -237,11 +235,11 @@ def invoice_list_ready(page) -> bool:
 
 def looks_signed_out(page) -> bool:
     u = urlsplit(page.url or "")
-    if u.scheme != "https":
+    if u.scheme != "https" or u.hostname not in (HOST, SIGN_IN_HOST):
         return False
-    if u.hostname == SIGN_IN_HOST:
-        return any(u.path.startswith(m) for m in LOGIN_URL_MARKERS) or u.path in ("", "/")
-    return False
+    if any(u.path.startswith(m) for m in LOGIN_URL_MARKERS):
+        return True
+    return u.hostname == SIGN_IN_HOST and u.path in ("", "/")
 
 
 def detect_security_challenge(page):
@@ -276,15 +274,29 @@ def _orders_page(page, offset: int) -> tuple[list, int]:
 
 def _historical_total(page) -> int:
     """How many orders of the store's earlier system the account has. Not
-    saved (see the module's notes), only counted. Nought when the store
-    does not answer, since this is a note and not the list."""
-    try:
-        data = _post(page, "GetCustomerHistoricalOrders", HISTORICAL_QUERY,
-                     {"input": {"limit": 1, "offset": 0}})
-        block = data["data"]["storefrontHistoricalOrders"]["pagination"]["total"]
-        return block if type(block) is int and block > 0 else 0
-    except Exception:
-        return 0
+    saved (see the module's notes), only counted. A refusal of this read
+    stops the list like any other; an answer of another shape counts none."""
+    data = _post(page, "GetCustomerHistoricalOrders", HISTORICAL_QUERY,
+                 {"input": {"limit": 1, "offset": 0}})
+    block = data.get("data")
+    for key in ("storefrontHistoricalOrders", "pagination", "total"):
+        block = block.get(key) if isinstance(block, dict) else None
+    return block if type(block) is int and block > 0 else 0
+
+
+def _sunday(year: int, month: int, nth: int) -> datetime:
+    first = datetime(year, month, 1, tzinfo=timezone.utc)
+    return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (nth - 1))
+
+
+def _eastern(moment: datetime) -> datetime:
+    """A UTC moment on the US Eastern clock: daylight time from 2:00 on the
+    second Sunday of March (07:00 UTC) to 2:00 on the first Sunday of
+    November (06:00 UTC), the rule since 2007."""
+    year = moment.year
+    starts = _sunday(year, 3, 2) + timedelta(hours=7)
+    ends = _sunday(year, 11, 1) + timedelta(hours=6)
+    return moment + timedelta(hours=-4 if starts <= moment < ends else -5)
 
 
 def _dates(created: str, store: str) -> tuple[str, str]:
@@ -292,8 +304,8 @@ def _dates(created: str, store: str) -> tuple[str, str]:
     moment = datetime.fromisoformat(created.replace("Z", "+00:00"))
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
-    local = moment.astimezone(ZoneInfo(STORE_ZONES.get(store, DEFAULT_ZONE)))
-    return local.date().isoformat(), moment.astimezone(timezone.utc).date().isoformat()
+    moment = moment.astimezone(timezone.utc)
+    return _eastern(moment).date().isoformat(), moment.date().isoformat()
 
 
 def _summary_of(items) -> str:
@@ -434,10 +446,12 @@ def _refuse(why: str) -> bool:
 
 def download_bill(page, date: str, out_path: Path, *, account: str, document_id: str) -> bool:
     _REFUSAL["why"] = ""
-    if not account or account_tag(page) != account:
+    if not account:
         raise ListStopped("Sign in to the Ubiquiti account that owns this order.")
     if _RUN.get("page") is not page or _RUN.get("account") != account:
         _orders(page)
+    if _RUN.get("account") != account:
+        raise ListStopped("Sign in to the Ubiquiti account that owns this order.")
     order = _RUN["orders"].get(document_id)
     if order is None or order.date != date:
         return _refuse("gone")
