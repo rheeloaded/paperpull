@@ -178,6 +178,9 @@ ITS_OWN = {
     ("marinwater", "_resolve_bill_ids", ("_pdf_bytes",)):
         "a separate PDF viewer refusing a link immediately after Bill History answered. "
         "The unresolved date group is held and its partial list stops the run",
+    ("aliexpress", "download_bill", ("_invoice_pdf", "_receipt_pdf")):
+        "a receipt or invoice refusal, which reads the order list again. A sign-out, "
+        "a check or an unreadable list reaches the run",
     ("cloudflare", "download_bill", ("_fetch_invoice",)):
         "an invoice PDF refusal, which reads the selected account's history again. "
         "A sign-out or unreadable list reaches the run",

@@ -13,6 +13,7 @@
     "adp": {"gets": "Pay statements and W-2s", "group": "pay"},
     "affirm": {"gets": "Loan agreements, one per loan", "group": "loans"},
     "alpaca": {"gets": "Statements and trade confirmations", "group": "investing"},
+    "aliexpress": {"gets": "Order receipts, and sellers' sales-tax invoices and credit notes", "group": "shopping", "note": "Run on one account so far"},
     "ally": {"gets": "Account statements and tax forms", "group": "banks"},
     "amazon": {"gets": "Order invoices, your full history", "group": "shopping", "note": "Opens at most 200 orders a day, so a long history takes days or weeks of daily runs"},
     "amazonvisa": {"gets": "Card statements, contracts and other PDFs", "group": "banks", "note": "Tested on one account so far. For the US Amazon Prime Visa, choose Chase"},

@@ -1,0 +1,20 @@
+{
+  "statement_rules": [
+    {
+      "pattern": "^aliexpress receipt\\b",
+      "summary": "Receipt"
+    }
+  ],
+  "tax_rules": [
+    {
+      "pattern": "^aliexpress seller tax credit note\\b",
+      "summary": "Credit Note"
+    },
+    {
+      "pattern": "^aliexpress seller tax invoice\\b",
+      "summary": "Seller Tax Invoice"
+    }
+  ],
+  "insurance_rules": [],
+  "skip_patterns": []
+}
