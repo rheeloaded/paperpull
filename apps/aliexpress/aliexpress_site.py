@@ -59,6 +59,7 @@ from paperpull_core.urls import is_safe_url as _host_allows
 
 
 HOSTS = {"www.aliexpress.com", "www.aliexpress.us"}
+ALLOWED_HOSTS = HOSTS
 SIGN_IN_HOSTS = {"login.aliexpress.com", "login.aliexpress.us"}
 BASE = "https://www.aliexpress.com"
 ORDERS_URL = f"{BASE}/p/order/index.html"
@@ -83,7 +84,8 @@ LIST_WAIT_MS = 20000
 RECEIPT = "receipt"
 SIGNED_OUT_RET = re.compile(r"SESSION_EXPIRED|TOKEN_EMPTY|TOKEN_EXOIRED|TOKEN_EXPIRED|NOT_LOGIN|LOGIN", re.I)
 CHALLENGE_RET = re.compile(r"USER_VALIDATE|RGV587|ANTI|DENIED|PUNISH", re.I)
-LIMITED_RET = re.compile(r"FLOW_LIMIT|TOO_MANY|SERVICE_BUSY|LIMIT", re.I)
+# Throttling, in an mtop answer's ret or a page's title.
+RATE_LIMIT_MARKERS = re.compile(r"FLOW_LIMIT|TOO_MANY|SERVICE_BUSY|LIMIT|too many requests|rate limit", re.I)
 
 FORBIDDEN_CONTROL_RE = re.compile(
     r"\b(?:pay(?:\s+now)?|buy|add\s+to\s+cart|cart|confirm(?:\s+received)?|delete|remove|"
@@ -221,7 +223,11 @@ def invoice_list_ready(page) -> bool:
 
 def looks_signed_out(page) -> bool:
     u = urlsplit(page.url or "")
-    return u.scheme == "https" and u.hostname in SIGN_IN_HOSTS
+    if u.scheme != "https":
+        return False
+    if u.hostname in SIGN_IN_HOSTS:
+        return True
+    return u.hostname in HOSTS and any(u.path.startswith(m) for m in LOGIN_URL_MARKERS)
 
 
 def detect_security_challenge(page):
@@ -229,6 +235,8 @@ def detect_security_challenge(page):
         return None
     try:
         title = page.title()
+        if RATE_LIMIT_MARKERS.search(title):
+            return "AliExpress is limiting requests. Try again later."
         if re.search(r"captcha|verify|slide to|security check|access denied|unusual traffic", title, re.I):
             return "AliExpress is asking for a check in the browser."
     except Exception:
@@ -245,7 +253,7 @@ def _ret_problem(ret) -> None:
         raise SessionExpired()
     if CHALLENGE_RET.search(words):
         raise SecurityCheck("AliExpress asked for a check. Clear it in the browser, then Resume.")
-    if LIMITED_RET.search(words):
+    if RATE_LIMIT_MARKERS.search(words):
         raise ListStopped("AliExpress is limiting requests. Wait a few minutes, then Resume.")
     raise ListStopped("AliExpress did not answer a request for an order's papers")
 
@@ -357,6 +365,9 @@ def _list_orders(page) -> list:
         if LIST_API in response.url:
             answers.append(response)
 
+    # From a blank page, so no answer of an earlier load of the list (the
+    # run's tab may have been on it already) arrives while this one is read.
+    page.goto("about:blank")
     page.on("response", keep)
     try:
         page.goto(ORDERS_URL, wait_until="domcontentloaded", timeout=60000)
@@ -364,6 +375,7 @@ def _list_orders(page) -> list:
             raise SessionExpired()
         orders: dict = {}
         read = 0
+        expected = 1
         for _ in range(MAX_LIST_PAGES):
             waited = 0
             while read >= len(answers) and waited < LIST_WAIT_MS:
@@ -384,6 +396,12 @@ def _list_orders(page) -> list:
                 # browser no longer holds. The current load's answer follows.
                 continue
             rows, body = _list_page(answer)
+            # Each answer names its page. One that is not the page asked
+            # for next is an answer to some other load, and is passed over.
+            index = body.get("pageIndex")
+            if type(index) is int and index != expected:
+                continue
+            expected += 1
             for row in rows:
                 order_id = str(row.get("orderId") or "")
                 if not ORDER_ID.fullmatch(order_id):
@@ -392,8 +410,11 @@ def _list_orders(page) -> list:
             if not body["hasMore"]:
                 return list(orders.values())
             more = page.get_by_role("button", name="View orders", exact=True)
-            if not more.count() or not is_safe_control("View orders"):
+            if not more.count():
                 raise ListStopped("The order list says it has more, but shows no View orders button")
+            label = re.sub(r"\s+", " ", more.first.inner_text() or "").strip()
+            if not is_safe_control(label):
+                raise ListStopped("The order list's more button is not one PaperPull may press")
             more.first.click()
         raise ListStopped("The AliExpress order list exceeded the page limit")
     finally:

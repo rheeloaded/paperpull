@@ -36,9 +36,9 @@ def order_row(order_id, **changes):
     return row
 
 
-def list_answer(rows, has_more, jsonp=True):
+def list_answer(rows, has_more, jsonp=True, index=1):
     comps = {f"pc_om_list_order_{r['orderId']}": {"fields": r} for r in rows}
-    comps["pc_om_list_body_1"] = {"fields": {"hasMore": has_more, "pageIndex": 1, "pageSize": 2}}
+    comps["pc_om_list_body_1"] = {"fields": {"hasMore": has_more, "pageIndex": index, "pageSize": 2}}
     body = json.dumps({"api": site.LIST_API, "ret": ["SUCCESS::ok"], "data": {"data": comps}})
     return f" mtopjsonp1({body})" if jsonp else body
 
@@ -75,6 +75,9 @@ class Button:
     def first(self):
         return self
 
+    def inner_text(self):
+        return self.page.more_label
+
     def click(self):
         self.page.clicks += 1
         self.page._send_list_page()
@@ -91,6 +94,7 @@ class Page:
         self.list_pages = [[order_row(PAID), order_row(CANCELLED)], [order_row(OLD), order_row(SAME_DAY)]]
         self.list_index = 0
         self.more = True
+        self.more_label = "View orders"
         self.listeners = []
         self.clicks = 0
         self.signed_out = False
@@ -126,11 +130,14 @@ class Page:
         self.list_index += 1
         self.more = self.list_index < len(self.list_pages)
         response = Response(f"https://acs.aliexpress.us/h5/{site.LIST_API}/1.0/?jsv=2.5.1",
-                            list_answer(rows, self.more, jsonp=self.list_index == 1))
+                            list_answer(rows, self.more, jsonp=self.list_index == 1, index=self.list_index))
         for fn in list(self.listeners):
             fn(response)
 
     def goto(self, url, wait_until=None, timeout=None):
+        if url == "about:blank":
+            self.url = url
+            return
         parsed = urlsplit(url)
         assert parsed.scheme == "https" and parsed.hostname in site.HOSTS, url
         if self.signed_out:
@@ -426,3 +433,37 @@ def test_login_needs_a_member_and_an_answering_list():
     quiet._send_list_page = lambda: None
     quiet.wait_for_timeout = lambda ms: None
     assert site.invoice_list_look(quiet) == (False, "stopped")
+
+
+def test_a_sign_in_address_on_aliexpress_reads_as_signed_out():
+    assert site.looks_signed_out(SimpleNamespace(url="https://www.aliexpress.com/login"))
+    assert site.looks_signed_out(SimpleNamespace(url="https://login.aliexpress.us/"))
+    assert not site.looks_signed_out(SimpleNamespace(url="https://example.test/login"))
+
+
+def test_a_more_button_whose_words_are_not_view_orders_is_not_pressed():
+    page = Page()
+    page.more_label = "View orders and pay now"
+    with pytest.raises(site.ListStopped, match="may press"):
+        site.collect_download_docs(page)
+    assert page.clicks == 0
+
+
+def test_an_answer_for_another_page_of_the_list_is_passed_over():
+    """A late answer of page 1, from a load the tab has left, arriving after
+    the press for page 2 is not read as page 2, and no page is lost."""
+    page = Page()
+    real_click = Button.click
+
+    def click_then_echo(self):
+        late = Response(f"https://acs.aliexpress.us/h5/{site.LIST_API}/1.0/",
+                        list_answer([order_row(PAID)], True, index=1))
+        for fn in list(self.page.listeners):
+            fn(late)
+        real_click(self)
+    Button.click = click_then_echo
+    try:
+        docs = site.collect_download_docs(page)
+    finally:
+        Button.click = real_click
+    assert set(by_number(docs)) == {PAID, CANCELLED, SAME_DAY}
