@@ -1,0 +1,8 @@
+AliExpress receipt and seller invoice commands from the PaperPull checkout
+
+paperpull aliexpress login      Open the sign-in window
+paperpull aliexpress discover   List every order's receipt and seller invoices
+paperpull aliexpress pilot      Save a sample of the newest
+paperpull aliexpress all        Save every order's receipt and invoices
+paperpull aliexpress resume     Continue an interrupted download
+paperpull aliexpress verify     Recheck saved PDFs
