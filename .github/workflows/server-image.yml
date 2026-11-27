@@ -73,7 +73,7 @@ jobs:
       # listed in SPDX by Syft. Kept with every run, and a release signs it
       # and attaches it to the image it publishes.
       - name: List everything in the image
-        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
         with:
           image: paperpull-server:dev
           format: spdx-json
@@ -96,7 +96,7 @@ jobs:
       # python server/lock.py --base) or a raised pin in
       # server/requirements.in brings the fix in.
       - name: Check the list for known vulnerabilities
-        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+        uses: anchore/scan-action@11983a512817154c80a9db660c1a184be7513ed6 # v7.4.3
         with:
           sbom: paperpull-server.spdx.json
           output-format: table
