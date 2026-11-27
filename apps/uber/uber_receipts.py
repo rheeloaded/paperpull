@@ -898,14 +898,15 @@ class App:
                         pdf["status"] or "no answer")
             return None
         self.journal.checkpoint("the receipt is in hand")
-        # A ride receipt prints the trip's own uuid as its Receipt ID,
-        # RECORDED, and an Eats one prints the id the receipt call named, or,
-        # before December 2025, none.
+        # A ride receipt prints the trip's own uuid as its Receipt ID, or no
+        # id at all, RECORDED, and an Eats one prints the id the receipt call
+        # named, or, before December 2025, none.
         receipt_id = info["receipt_id"] or (uuid if side == RIDES else "")
-        # An older Eats receipt, with no ID, is held to its own date and
-        # total and never counted against its neighbors, which refused a
-        # correct one in a review (see site.identity_for).
-        expect = site.identity_for(purchase, receipt_id)
+        # An older Eats receipt, and a ride PDF with no ID, are held to their
+        # own date and total and never counted against their neighbors,
+        # which refused a correct one in a review (see site.identity_for).
+        prints = side != RIDES or site.ride_pdf_prints_an_id(pdf["data"])
+        expect = site.identity_for(purchase, receipt_id, prints_an_id=prints)
         return delivery.place(pdf["data"], out_path, expect=expect,
                               journal=self.journal, strict=self._strict())
 

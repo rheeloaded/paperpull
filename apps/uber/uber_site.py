@@ -28,7 +28,10 @@ RIDES, riders.uber.com
   nothing charged answers no receipt at all.
 * The receipt's Download PDF is a GET of
   /trips/<uuid>/receipt?contentType=PDF&timestamp=<the newest receipt's>,
-  Uber's own PDF, which prints "Receipt ID # <the trip's uuid>".
+  Uber's own PDF. One downloaded 2026-11-26 printed no Receipt ID at
+  all, only the trip's date written out, its total, the fare lines, the
+  card and the two addresses, so a ride is not held to its id alone
+  (see identity_for).
 
 UBER EATS, www.ubereats.com
 
@@ -1088,6 +1091,16 @@ def receipt_id_in(receipt_html: str) -> str:
     return m.group(1).lower() if m else ""
 
 
+def ride_pdf_prints_an_id(data: bytes) -> bool:
+    """Whether a ride receipt's PDF prints a Receipt ID of any trip. Not
+    every one does, RECORDED (see identity_for). A PDF that cannot be read
+    answers False, and the check that follows then finds no text and
+    concludes nothing."""
+    from paperpull_core import pdf_reader
+    got = pdf_reader.read(data or b"", text_pages=5)
+    return bool(got.opened and receipt_id_in("\n".join(got.texts)))
+
+
 def fetch_pdf(page, path: str, side: str = RIDES) -> dict:
     """The receipt PDF at a path this app built, fetched from inside the
     page, so it carries the page's own session. The bytes, or why not."""
@@ -1146,7 +1159,7 @@ def receipt_tokens(purchase) -> list:
     return [t for t in out if t]
 
 
-def identity_for(purchase, receipt_id: str = "") -> Identity:
+def identity_for(purchase, receipt_id: str = "", prints_an_id: bool = True) -> Identity:
     """What a receipt must carry to be filed under this purchase.
 
     Its own Receipt ID when the receipt prints one, and nothing else, since
@@ -1158,12 +1171,27 @@ def identity_for(purchase, receipt_id: str = "") -> Identity:
     one neighbor shared its day, another its total, and the first
     neighbor's total was printed on it as an item's price. The receipt is
     fetched by the order's own id, so what is left to catch is a receipt
-    for another day and amount altogether."""
+    for another day and amount altogether.
+
+    A ride PDF that prints no Receipt ID at all is held to its trip's id,
+    its date and its total, and filed when it carries any of them. One
+    printed none, RECORDED 2026-11-26 on a second account, where every
+    ride of fourteen was refused and destroyed for it, each the right
+    receipt. It is fetched by the trip's own uuid, so the date and the
+    total are what catch a receipt for another trip, as they are for an
+    older Eats one. A ride PDF that does print an id is held to that id
+    alone, so one printing another trip's is still refused, whatever day
+    and amount the two share. `prints_an_id` is what ride_pdf_prints_an_id
+    found in the PDF itself."""
+    kind = getattr(purchase, "document_type", "") or ""
+    if getattr(purchase, "purchase_type", "") == RIDES and not prints_an_id:
+        return Identity(number=receipt_id,
+                        date=getattr(purchase, "purchase_date", "") or "",
+                        total=getattr(purchase, "total", "") or "", kind=kind)
     if receipt_id:
-        return Identity(number=receipt_id, kind=getattr(purchase, "document_type", "") or "")
+        return Identity(number=receipt_id, kind=kind)
     return Identity(date=getattr(purchase, "purchase_date", "") or "",
-                    total=getattr(purchase, "total", "") or "",
-                    kind=getattr(purchase, "document_type", "") or "")
+                    total=getattr(purchase, "total", "") or "", kind=kind)
 
 
 # ---------------------------------------------------------------------------

@@ -188,11 +188,13 @@ def test_each_kind_files_into_its_own_folder_under_the_name_uber_gave_it(tmp_pat
 
 
 def test_a_ride_receipt_that_names_no_id_is_held_to_the_trips_own(tmp_path, monkeypatch):
-    """Every ride receipt prints the trip's uuid as its Receipt ID, RECORDED,
-    so a receipt answer that did not show it still expects that one."""
+    """A receipt answer that did not show an id still expects the trip's,
+    and the trip's date and total beside it, since a ride PDF can print no
+    Receipt ID at all, RECORDED."""
     receipts = {TRIP_A: answered("1781563527104", receipt_id="")}
     app, spy, _f, _a, _p = _run(tmp_path, monkeypatch, [ride()], receipts=receipts)
-    assert spy.calls[0].arguments["expect"].number == TRIP_A
+    expect = spy.calls[0].arguments["expect"]
+    assert expect.number == TRIP_A and expect.date and expect.total
     assert spy.calls[0].arguments["rivals"] == ()
 
 
