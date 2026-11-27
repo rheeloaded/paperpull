@@ -111,7 +111,8 @@ FORBIDDEN_CONTROL_RE = re.compile(
     r"add(?:\s+bags?)?|redeem|transfer|delete|remove|submit|confirm|continue|"
     r"select\s+seats?|seat\s+map|request|claim|dispute|"
     r"find\s+receipt|search\s+another)\b", re.I)
-SAFE_DOC_CONTROL_RE = re.compile(r"\b(?:view\s+receipt|load\s+more\s+results)\b", re.I)
+SAFE_DOC_CONTROL_RE = re.compile(
+    r"\b(?:view\s+(?:(?:flight|purchase)\s+)?receipt|load\s+more\s+results)\b", re.I)
 RATE_LIMIT_MARKERS = re.compile(r"too many requests|rate limit|access denied", re.I)
 FALLBACK = {"doc_row": "main table tbody tr"}
 
@@ -538,6 +539,17 @@ def _view_button(row):
     return button if is_safe_control(label) else None
 
 
+def press_view(page, button, css: str, what: str) -> None:
+    """Press one receipt row's own View receipt. A button United has turned
+    off is not pressed, and only that receipt is left (ReceiptLeft), for
+    review and the next run."""
+    try:
+        pressing.click(page, button, css=css, words=words(), what=what,
+                       step="view the receipt")
+    except pressing.TurnedOff:
+        raise ReceiptLeft("United turned off this receipt's View receipt button.") from None
+
+
 def _take_receipt(page, receipt: Receipt, what: str) -> list[str]:
     """Press the row's View receipt and read the receipt the page gets.
     Every traveler's HTML, in United's order. Closes the tab it opened."""
@@ -557,8 +569,7 @@ def _take_receipt(page, receipt: Receipt, what: str) -> list[str]:
     page.on("popup", opened)
     try:
         with _Heard(page, RECEIPT_PATH) as heard:
-            pressing.click(page, button, css=VIEW_CSS, words=words(), what=what,
-                           step="view the receipt")
+            press_view(page, button, VIEW_CSS, what)
             waited = 0
             while not heard.got and waited < RECEIPT_WAIT_MS:
                 page.wait_for_timeout(POLL_MS)
@@ -620,6 +631,10 @@ def _take_receipt(page, receipt: Receipt, what: str) -> list[str]:
 
 class _Gone(Exception):
     pass
+
+
+class ReceiptLeft(Exception):
+    """A receipt's own View receipt button was turned off and was not pressed."""
 
 
 class _Refused(Exception):
@@ -685,36 +700,10 @@ def _target_of(tab) -> str:
                 pass
 
 
-class _PrintTab:
-    """One background tab, with page scripts turned off, that prints every
-    receipt of one document and is closed after it."""
-
-    def __init__(self, context):
-        self.context, self.tab, self.session = context, None, None
-
-    def __enter__(self):
-        self.tab = background_tab(self.context)
-        self.session = self.context.new_cdp_session(self.tab)
-        self.session.send("Emulation.setScriptExecutionDisabled", {"value": True})
-        self.tab.emulate_media(media="print")
-        return self
-
-    def print(self, html: str) -> bytes:
-        """United's HTML receipt as a PDF."""
-        self.tab.set_content(html, wait_until="load", timeout=30000)
-        data = receipt_pdf.printed_pdf(self.session, receipt_pdf.PRINT_TO_PDF_OPTIONS)
-        if not data.startswith(b"%PDF-"):
-            raise RuntimeError("printToPDF returned non-PDF data")
-        return data
-
-    def __exit__(self, *exc):
-        for done in (lambda: self.session and self.session.detach(),
-                     lambda: self.tab and self.tab.close()):
-            try:
-                done()
-            except Exception:
-                pass
-        return False
+def _printed(page, html: str) -> bytes:
+    """United's HTML receipt as a PDF, drawn by the core with its scripts,
+    frames and requests taken out (receipt_pdf.inert_pdf_bytes)."""
+    return receipt_pdf.inert_pdf_bytes(page, html)
 
 
 # Between two travelers' receipts printed as one document.
@@ -768,7 +757,7 @@ def names_every_ticket(text: str, receipt: Receipt) -> bool:
 
 
 # Why the last download_bill saved nothing, one of REFUSALS.
-REFUSALS = ("gone", "refused", "unavailable", "unreadable", "wrong")
+REFUSALS = ("gone", "refused", "turned off", "unavailable", "unreadable", "wrong")
 _REFUSAL = {"why": ""}
 
 
@@ -801,24 +790,25 @@ def download_bill(page, date: str, out_path: Path, *, account: str, document_id:
         return _refuse("gone")
     except _Unavailable:
         return _refuse("unavailable")
+    except ReceiptLeft:
+        return _refuse("turned off")
     except _Refused:
         refused.list_again(lambda: collect_download_docs(page), SessionExpired, ListStopped)
         return _refuse("refused")
-    with _PrintTab(page.context) as printer:
-        for html in pages:
-            data = printer.print(html)
-            try:
-                text = " ".join(pdf_reader.page_texts(data))
-            except Exception:
-                return _refuse("unreadable")
-            if not checks_out(text, receipt):
-                return _refuse("wrong")
-        if len(pages) > 1:
-            data = printer.print(_together(pages))
-            try:
-                text = " ".join(pdf_reader.page_texts(data))
-            except Exception:
-                return _refuse("unreadable")
+    for html in pages:
+        data = _printed(page, html)
+        try:
+            text = " ".join(pdf_reader.page_texts(data))
+        except Exception:
+            return _refuse("unreadable")
+        if not checks_out(text, receipt):
+            return _refuse("wrong")
+    if len(pages) > 1:
+        data = _printed(page, _together(pages))
+        try:
+            text = " ".join(pdf_reader.page_texts(data))
+        except Exception:
+            return _refuse("unreadable")
     if not names_every_ticket(text, receipt):
         return _refuse("wrong")
     shared_folder.write_bytes(out_path, data)

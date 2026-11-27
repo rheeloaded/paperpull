@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from paperpull_core import failure
 from paperpull_core import listing
+from paperpull_core import pressing
 from paperpull_core import renaming
 from paperpull_core import saved_copy
 from paperpull_core import tabs
@@ -502,6 +503,8 @@ class App:
                  "find the receipt in the list", "the receipt is no longer listed"),
         "refused": ("United refused this receipt",
                     "fetch the receipt", "the receipt was refused"),
+        "turned off": ("United turned off this receipt's View receipt button, so nothing was pressed",
+                       "view the receipt", "the View receipt button was turned off"),
         "unavailable": ("united.com could not show this receipt, and its own page says to try again later",
                         "view the receipt", "united.com sent an empty receipt"),
         "unreadable": ("The PDF's text could not be read",
@@ -775,7 +778,7 @@ class App:
         return self._journal
 
     def write_failure(self, step: str, reason: str, text: str = "",
-                      postmortem: dict = None) -> None:
+                      postmortem: dict = None, extra: dict = None) -> None:
         """What the page looked like when this went wrong, to a file.
 
         Written without anybody having to know to ask for it, because a
@@ -787,7 +790,9 @@ class App:
         is still sitting on the thing that broke."""
         if self.stats.get("failure_files"):
             return
-        extra = {"postmortem": postmortem} if postmortem else None
+        extra = dict(extra or {})
+        if postmortem:
+            extra["postmortem"] = postmortem
         # A checkpoint at the moment it gave up. It is also what makes the
         # journal when nothing had written to it yet, and every tester file
         # sent in on 2026-09-25 came back without one for that reason.
@@ -986,6 +991,8 @@ def main(argv=None):
         else:
             build_parser().print_help()
             return 0
+    except pressing.Stop as stop:
+        pressing.stop_run(app, stop)
     except KeyboardInterrupt:
         print("\nStopped by user. Progress saved.")
         return 130

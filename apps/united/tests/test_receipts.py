@@ -328,20 +328,16 @@ class Page:
         self._fire("popup", popup)
 
 
+_REAL_PRINTED = site._printed
+
+
 class Printer:
-    """Prints each HTML receipt as a PDF of its text."""
+    """Prints each HTML receipt as a PDF of its text, in place of the core's
+    inert drawing."""
     printed = []
 
-    def __init__(self, context):
-        pass
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def print(self, html):
+    @staticmethod
+    def print(page, html):
         Printer.printed.append(html)
         lines = [re.sub(r"<[^>]+>", "", p) for p in re.findall(r"<p>.*?</p>", html)]
         return text_pdf(lines)
@@ -353,7 +349,7 @@ def stand_ins(monkeypatch):
         assert what and words
         page.press(locator, css)
     monkeypatch.setattr(site.pressing, "click", click)
-    monkeypatch.setattr(site, "_PrintTab", Printer)
+    monkeypatch.setattr(site, "_printed", Printer.print)
     Printer.printed = []
     site._RUN.clear()
     yield
@@ -470,7 +466,9 @@ def test_opening_the_receipts_page_reads_the_list_once_for_the_run():
 
 @pytest.mark.parametrize("label", [
     "View receipt, opens in a new tab View receipt", "Load more results",
-    "View receipt for a credit card purchase"])
+    "View receipt for a credit card purchase",
+    # Its own documents, as its rules name them (test_no_app_refuses_its_own_documents).
+    "View Flight Receipt", "View Purchase Receipt"])
 def test_the_guard_lets_the_receipt_controls_through(label):
     assert site.is_safe_control(label)
 
@@ -479,7 +477,7 @@ def test_the_guard_lets_the_receipt_controls_through(label):
     "Email receipt", "View receipt and email it", "Find receipt",
     "Search another Confirmation, eTicket or Credit card", "Change flight", "Cancel trip",
     "Check-in", "Upgrade", "Request a refund", "Pay now", "Select seats", "Edit profile",
-    "Add bags", "View trip", "Sign out"])
+    "Add bags", "View trip", "Sign out", "Email Flight Receipt", "Receipt"])
 def test_the_guard_refuses_everything_else(label):
     assert not site.is_safe_control(label)
 
@@ -697,3 +695,29 @@ def test_another_members_records_are_not_resumed(tmp_path, monkeypatch):
     app._billing_account = ""
     app.cmd_discover(quiet=True)
     assert app._select() == []
+
+
+def test_receipts_are_drawn_by_the_cores_inert_drawing(monkeypatch):
+    drawn = []
+    monkeypatch.setattr(site.receipt_pdf, "inert_pdf_bytes",
+                        lambda page, html: drawn.append((page, html)) or b"%PDF-1.4 x")
+    page = object()
+    assert _REAL_PRINTED(page, "<p>Thank you</p>") == b"%PDF-1.4 x"
+    assert drawn == [(page, "<p>Thank you</p>")]
+
+
+def test_a_turned_off_view_receipt_leaves_only_that_receipt(tmp_path, monkeypatch):
+    page = Page()
+    doc = site.collect_download_docs(page)[0]
+
+    def turned_off(page_, locator, *, css, what, words, step="press a control", **kw):
+        if step == "view the receipt":
+            raise site.pressing.TurnedOff(step, "the control is turned off", ["Nothing was pressed."],
+                                          {"verdict": "turned off"})
+        page_.press(locator, css)
+    monkeypatch.setattr(site.pressing, "click", turned_off)
+    target = tmp_path / "r.pdf"
+    assert not site.download_bill(page, doc.date_text, target,
+                                  account=doc.account, document_id=doc.document_id)
+    assert site.last_refusal() == "turned off" and not target.exists()
+    assert "turned off" in app_mod.App._REFUSED
