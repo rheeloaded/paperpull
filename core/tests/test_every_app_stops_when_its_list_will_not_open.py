@@ -735,7 +735,7 @@ def test_a_discover_bank_page_on_capital_one_stops_and_writes_no_file(home, monk
 REFUSERS = (
     "aafmaa", "affirm", "ally", "amazonvisa", "amex", "amexbanking", "anthem", "capitalone",
     "chase", "direkt1822", "discoverbank", "discovercard", "dkb", "fairfaxwater", "fidelity",
-    "ibkr", "ing", "invest529", "mtb", "mypay", "navyfederal", "netbenefits", "pge",
+    "ibkr", "ing", "invest529", "mtb", "mypay", "navyfederal", "netbenefits", "pge", "poppins",
     "renaultbank", "schwab", "sparkassepc", "tsp", "usaa", "usbank", "vanguard", "wealthfront",
 )
 
