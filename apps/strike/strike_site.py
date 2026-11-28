@@ -394,6 +394,15 @@ def list_tax_documents(page) -> List[dict]:
     return tax_documents_from(res.get("json"))
 
 
+def list_documents(page) -> List[dict]:
+    """Every entry Diagnose counts: the statements, then the tax forms. A
+    tab that is not a signed-in dashboard page is refused before anything
+    is asked, so a sign-in page counts nothing."""
+    if not on_dashboard(page):
+        raise SessionExpired("not a signed-in dashboard.strike.me page")
+    return list_statements(page) + list_tax_documents(page)
+
+
 def statement_path(year: int, month: Optional[int]) -> str:
     if month:
         return "%s/%d/%d/download" % (STATEMENTS_API, int(year), int(month))

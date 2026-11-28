@@ -941,9 +941,10 @@ class App:
             info["survey"] = site.survey(page)
             info["samples"] = []
             if site.on_dashboard(page):
-                statements = site.list_statements(page)
-                taxes = site.list_tax_documents(page)
-                info["collected"] = len(statements + taxes)
+                docs = site.list_documents(page)
+                info["collected"] = len(docs)
+                statements = [e for e in docs if "type" in e]
+                taxes = [e for e in docs if "type" not in e]
                 for d in [self.statement_doc(s) for s in statements[:10]] + \
                          [self.tax_doc(t) for t in taxes[:4]]:
                     cat, summ, _ = doc_types.classify_document(d.title, self.rules)
