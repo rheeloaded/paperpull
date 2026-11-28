@@ -826,7 +826,7 @@ class App:
         print("  Read it through, then attach it to this provider's issue on")
         print("  GitHub. It is the one thing that saves a round of guessing.")
 
-    def write_survey(self) -> None:
+    def write_survey(self, stopped=None) -> None:
         """The survey Diagnose is safe to send.
 
         Diagnose writes a detailed file for repairing this provider, and
@@ -844,22 +844,35 @@ class App:
             selectors=getattr(site, "FALLBACK", None),
             journal=self._journal,
             requests=self._requests,
-            provider='United')
+            provider='United',
+            stopped=stopped or getattr(self, "_diagnose_stopped", None))
 
     def cmd_diagnose(self):
         """Report only receipt counts and page state, without recording a screenshot."""
         self.stats["mode"] = "diagnose"
         words = words_for("United", site)
         page = self.page()
-        info = {"timestamp": now_iso(), "signed_out": site.looks_signed_out(page),
-                "documents_page_found": bool(site.account_tag(page))}
-        if info["documents_page_found"]:
-            try:
+        info = {"timestamp": now_iso()}
+        stopped = None
+        try:
+            info["signed_out"] = site.looks_signed_out(page)
+            info["documents_page_found"] = bool(site.account_tag(page))
+            if not info["signed_out"]:
+                # With no account read, the list is read once more here, and
+                # a page that is not the receipts list stops it (ListStopped).
                 info["documents_total"] = len(site.collect_download_docs(page))
-            except (site.SessionExpired, site.ListStopped) as error:
-                info["error"] = type(error).__name__
+        except (site.SessionExpired, site.ListStopped) as error:
+            info["error"] = type(error).__name__
+        except pressing.Stop as stop:
+            # A press the look would not make ends it there, and the file
+            # still says what was seen and why it stopped.
+            stopped = stop
+            info["stopped"] = {"step": stop.step, "reason": stop.reason, "facts": stop.facts}
+        self._diagnose_stopped = stopped
         out = self.paths.diagnostics / "diagnose-documents.json"
         write_shaped(out, info, words)
+        if stopped is not None:
+            pressing.say(stopped)
         print(f"Wrote {out}")
         print("Text that is not on PaperPull's fixed list is shown as its shape.")
         print(f"Receipts recognized: {shape_tree(info.get('documents_total', 'unavailable'), words)}")
