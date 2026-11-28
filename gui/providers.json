@@ -75,6 +75,7 @@
     "paylocity": {"gets": "Pay statements", "group": "pay"},
     "paypal": {"gets": "Monthly statements, about three years online", "group": "banks", "note": "Business accounts not tested yet"},
     "pge": {"gets": "Monthly bills", "group": "bills"},
+    "poppins": {"gets": "Household pay stubs, W-2, W-3, Schedule H and a record of the quarterly tax payments", "group": "pay"},
     "portlandgeneral": {"gets": "Monthly bills, about three years online", "group": "bills", "note": "Reads one account"},
     "raisin": {"gets": "Deposit documents, statements, confirmations, contracts and tax certificates", "group": "banks", "tested": false},
     "redcard": {"gets": "Target RedCard and Circle Card statements", "group": "banks"},

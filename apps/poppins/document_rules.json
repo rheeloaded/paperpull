@@ -1,0 +1,28 @@
+{
+  "_comment": "Editable rules mapping Poppins Payroll document titles to filename summaries. Checked in order: tax, year-end, insurance, statement. At Poppins a 'statement' is a pay stub, and a 'year-end summary' is this app's record of the quarterly tax withdrawals. Titles are the Documents tab's own names with the year after them.",
+  "tax_rules": [
+    {"pattern": "\\bW-?2c\\b", "summary": "W-2c Corrected Tax Form"},
+    {"pattern": "\\bW-?2\\b", "summary": "W-2 Tax Form"},
+    {"pattern": "\\bW-?3\\b", "summary": "W-3 Transmittal"},
+    {"pattern": "\\bschedule\\s+h\\b", "summary": "Schedule H Household Employment Taxes"},
+    {"pattern": "overtime\\s+premium", "summary": "Overtime Premium Report"},
+    {"pattern": "\\bIL-?2848\\b", "summary": "IL-2848 Power of Attorney"},
+    {"pattern": "\\b2848\\b", "summary": "Form 2848 Power of Attorney"},
+    {"pattern": "\\bSS-?4\\b", "summary": "Form SS-4 Employer ID Number"},
+    {"pattern": "power\\s+of\\s+attorney.*unemployment", "summary": "Illinois Unemployment Insurance Power of Attorney"},
+    {"pattern": "\\b(940|941|942|1099|1096)\\b", "summary": "Tax Form"}
+  ],
+  "year_end_rules": [
+    {"pattern": "federal\\s+tax\\s+payment\\s+history", "summary": "Federal Tax Payment History"},
+    {"pattern": "state\\s+tax\\s+payment\\s+history", "summary": "State Tax Payment History"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "pay\\s*stub|paystub", "summary": "Pay Stub"}
+  ],
+  "skip_patterns": [
+    "marketing",
+    "newsletter",
+    "referral"
+  ]
+}

@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (94, plus six built and waiting for a tester, and four first shells)
+## Supported (95, plus six built and waiting for a tester, and four first shells)
 
 | App | Provider | Country | Documents | Category |
 |-----|----------|---------|-----------|----------|
@@ -80,6 +80,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`nwnatural`](apps/nwnatural) | NW Natural (natural gas, Oregon and Washington) | United States | Monthly bills from its Paymentus payment portal, the whole history it keeps, read and fetched from inside the tab the account holder signed in with, nothing clicked. One account at a time. Built and run on a contributor's own account, 84 bills | Utility |
 | [`paylocity`](apps/paylocity) | Paylocity | United States | Pay statements | Payroll |
 | [`pge`](apps/pge) | PG&E (Pacific Gas and Electric) | United States | Billing statements. Contributed by @appchamp. Repaired in 0.37.1 and confirmed on a real account by @watling777 (#33) | Utility |
+| [`poppins`](apps/poppins) | Poppins Payroll (household employers) | United States | Pay stubs, W-2, W-3, Schedule H and setup forms, every year the account holds, each a GET of its own address with nothing clicked, and a PDF of the federal and state tax Payment History tables, the only record Poppins keeps of the quarterly withdrawals. Built and run on the maintainer's own employer account | Payroll |
 | [`portlandgeneral`](apps/portlandgeneral) | Portland General Electric (PGE, Oregon) | United States | Monthly bills, the Detailed Bill PDF, read from Billing & Payment History's own API answers and asked for from inside the signed-in page, nothing clicked. One account at a time. Built and run on a contributor's own account, 36 bills | Utility |
 | [`raisin`](apps/raisin) | Raisin (Weltsparen, savings marketplace) | Germany | Deposit documents for every term deposit and overnight savings account, statements, confirmations, contracts and tax certificates. UNTESTED, built without an account. Its routes were first seen in Habeas sources (CC0). Each PDF is checked for Raisin and its own date before it is filed. Have an account? Run Login, Diagnose and a Pilot and attach the files to a new issue | Savings |
 | [`redcard`](apps/redcard) | Target RedCard / Circle Card (TD Bank) | United States | Billing statements | Card |
