@@ -57,6 +57,9 @@ HELPERS = {"press_once", "click", "check", "click_when_clear"}
 # many presses there are of that, so another press added beside one is not
 # taken for it.
 STOPS = {
+    ("united", "_row", "click", "show more receipts"): (1,
+        "a table of the receipts page shows eight rows until Load more results is pressed, "
+        "so a turned off Load more would leave every receipt after them"),
     ("adp", "open_tax_statement_check", "press_once", "open the identity check"): (1,
         "the Tax Statements card's View statement opens ADP's identity check for every "
         "tax form, and left as turned off the run would have the person answer a "
@@ -191,7 +194,7 @@ LEAVES = {
     ("newrez", "_catch_pdf"), ("pge", "_press_once"), ("sba", "_catch_pdf"),
     ("simmons", "_catch_document"), ("simplisafe", "_invoice_html"), ("smud", "_catch_pdf"), ("sparkassepc", "_press_link"),
     ("statefarm", "_catch_pdf"),
-    ("vanguard", "download_document"),
+    ("united", "press_view"), ("vanguard", "download_document"),
     ("venmo", "show_all"), ("wellsfargo", "_catch_pdf"), ("kaiser", "press_document")}
 
 
@@ -824,6 +827,24 @@ def _kaiser(site, page, out, staging, trace):
     return True
 
 
+def _united(site, page, out, staging, trace):
+    """United's press of one receipts row's own View receipt button. A
+    turned off button leaves the receipt (ReceiptLeft), which its download
+    records as failed and goes on from."""
+    try:
+        site.press_view(page, page.locator("#get"), "#get",
+                        "the View receipt button of the flight reservation of 2026-06-30")
+    except site.ReceiptLeft:
+        return False
+    return True
+
+
+def _united_button(off: bool) -> str:
+    return ('<button id="get" type="button" class="ctl" '
+            'aria-label="View receipt, opens in a new tab"%s '
+            'onclick="window.presses++">View receipt</button>' % (" disabled" if off else ""))
+
+
 def _kaiser_link(off: bool) -> str:
     return ('<a id="get" class="ctl download-pdf-link" href="#"%s '
             'onclick="window.presses++; return false;">Download PDF</a>'
@@ -910,6 +931,8 @@ def _how(app: str, function: str, monkeypatch):
         return "sparkassepc_site", _sparkassepc, _sparkassepc_link, "30.06.2026"
     if (app, function) == ("kaiser", "press_document"):
         return "kaiser_site", _kaiser, _kaiser_link, "Jun 30, 2026"
+    if (app, function) == ("united", "press_view"):
+        return "united_site", _united, _united_button, "QXA1B2"
     return None
 
 

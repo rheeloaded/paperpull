@@ -102,6 +102,7 @@
     "tualatin": {"gets": "Monthly water and sewer bills, about two years online", "group": "bills"},
     "uber": {"gets": "Ride and Uber Eats receipts", "group": "shopping"},
     "ukg": {"gets": "Pay statements", "group": "pay"},
+    "united": {"gets": "Flight and seat or bag purchase receipts, printed from united.com", "group": "shopping"},
     "ups": {"gets": "Shipping invoices from the Billing Center", "group": "bills"},
     "usaa": {"gets": "Statements", "group": "banks"},
     "usbank": {"gets": "Credit card statements", "group": "banks"},

@@ -1,0 +1,19 @@
+{
+  "statement_rules": [
+    {
+      "pattern": "\\bflight receipt\\b",
+      "summary": "Flight Receipt"
+    },
+    {
+      "pattern": "\\bpurchase receipt\\b",
+      "summary": "Purchase Receipt"
+    },
+    {
+      "pattern": "\\breceipt\\b",
+      "summary": "Receipt"
+    }
+  ],
+  "tax_rules": [],
+  "insurance_rules": [],
+  "skip_patterns": []
+}

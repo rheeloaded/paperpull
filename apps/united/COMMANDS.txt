@@ -1,0 +1,8 @@
+United Airlines receipt commands from the PaperPull checkout
+
+paperpull united login      Open the sign-in window
+paperpull united discover   List the account's flight and purchase receipts
+paperpull united pilot      Save a sample of the newest receipts
+paperpull united all        Save every receipt
+paperpull united resume     Continue an interrupted download
+paperpull united verify     Recheck saved PDFs
