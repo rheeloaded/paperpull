@@ -460,7 +460,8 @@ class App:
         # terminal / already-completed (incl. records from before the
         # downloaded_ok marker existed): done, do not re-download.
         if state in (State.COMPLETED.value, State.PDF_VERIFIED.value,
-                     State.NO_RECEIPT_AVAILABLE.value, State.CANCELED.value):
+                     State.NO_RECEIPT_AVAILABLE.value, State.NO_LONGER_LISTED.value,
+                     State.CANCELED.value):
             return True
         # a review copy counts only if its PDF is still present and valid;
         # a quarantined / failed one should be retried.
@@ -569,7 +570,7 @@ class App:
             # A newer payment came in after this history was listed, so it
             # will never be drawn as listed. The newer history is a document
             # of its own and is taken once a Discover lists it.
-            self._record(doc, State.CANCELED,
+            self._record(doc, State.NO_LONGER_LISTED,
                          notes="Superseded by a newer payment history")
             print("  A newer payment has come in since this was listed; the newer "
                   "history is taken instead on the next run.")
