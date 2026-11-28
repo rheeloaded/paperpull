@@ -82,7 +82,7 @@ def document_class(app: Path):
 def test_two_accounts_of_the_same_product_are_different_documents(app):
     _mod, Document = document_class(app)
     if app.name in ("affirm", "fairfaxwater", "fidelity", "invest529",
-                    "netbenefits", "tsp", "wealthfront"):
+                    "netbenefits", "strike", "tsp", "wealthfront"):
         pytest.skip("its key carries no account at all, which is its own question")
     for one, two in PAIRS:
         a = Document(category="Statement", date="2026-03-31",

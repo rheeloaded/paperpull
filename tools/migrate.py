@@ -202,6 +202,10 @@ PROVIDER_SKIP_FIELDS = {"Robinhood": ("undated_key", "source_url", "category", "
                         "ETRADE": ("pdf_sha256", "date"),
                         "AT&T": ("category", "date", "account", "pdf_size", "pdf_pages"),
                         "Target": ("invoices",),
+                        # A monthly statement whose PDF came and whose CSV did
+                        # not is asked for again as the CSV alone, read off
+                        # these (strike_docs._already_done).
+                        "Strike": ("kind", "pdf_ok", "csv_ok"),
                         # A requested statement of a card's month already
                         # saved, as a regular statement the list has since
                         # dropped, is the same statement and is not taken

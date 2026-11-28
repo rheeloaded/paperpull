@@ -853,6 +853,9 @@ NOT_A_RECORD = {
         "to be held as an app would hold it",
     "tools/snapshot_traffic.py::merge":
         "reads and writes the repository's daily view and clone counts, dates and numbers",
+    "apps/strike/strike_site.py::csv_problem":
+        "reads Strike's statement CSV as its Export as CSV hands it over, a file no app "
+        "wrote, to check its header and the month of each row",
     "apps/anthem/anthem_site.py::_csv_table":
         "reads Anthem's claims list as its export hands it over, a file no app wrote, "
         "so no value in it carries a quote store_value put in front",

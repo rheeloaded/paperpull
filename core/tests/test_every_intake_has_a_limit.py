@@ -672,6 +672,7 @@ ANSWERS = {
     ("apps/spectrum/spectrum_site.py", "_fault"): PAGE_ANSWER,
     ("apps/statefarm/statefarm_site.py", "on_response"): PAGE_ANSWER,
     ("apps/stripe/stripe_site.py", "on_response"): PAGE_ANSWER,
+    ("apps/strike/strike_site.py", "on_response"): PAGE_ANSWER,
     ("apps/tsp/tsp_site.py", "on_response"): PAGE_ANSWER,
     ("apps/ups/ups_site.py", "on_response"): PAGE_ANSWER,
     ("apps/usaa/usaa_site.py", "on_resp"): PAGE_ANSWER,
