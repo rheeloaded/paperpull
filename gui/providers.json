@@ -94,6 +94,7 @@
     "starlink": {"gets": "PDF invoices from Starlink Billing", "group": "bills"},
     "statefarm": {"gets": "Bills, renewal notices, ID cards, receipts, policy documents", "group": "insurance"},
     "stripe": {"gets": "Fee invoices and tax forms such as the 1099-K", "group": "banks", "tested": false},
+    "strike": {"gets": "Monthly statements as PDF and CSV, annual transactions and tax forms", "group": "investing", "note": "Tax forms untested"},
     "target": {"gets": "Online and in-store receipts", "group": "shopping"},
     "tmobile": {"gets": "Monthly bills", "group": "bills"},
     "traderepublic": {"gets": "Monthly account statements, about three years online", "group": "investing", "tested": false, "note": "One account at a time"},

@@ -736,7 +736,7 @@ REFUSERS = (
     "aafmaa", "affirm", "ally", "amazonvisa", "amex", "amexbanking", "anthem", "capitalone",
     "chase", "direkt1822", "discoverbank", "discovercard", "dkb", "fairfaxwater", "fidelity",
     "ibkr", "ing", "invest529", "mtb", "mypay", "navyfederal", "netbenefits", "pge",
-    "renaultbank", "schwab", "sparkassepc", "tsp", "usaa", "usbank", "vanguard", "wealthfront",
+    "renaultbank", "schwab", "sparkassepc", "strike", "tsp", "usaa", "usbank", "vanguard", "wealthfront",
 )
 
 # A Discover account moved to Capital One is no failure, so the way through

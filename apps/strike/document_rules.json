@@ -1,0 +1,19 @@
+{
+  "_comment": "Editable rules mapping Strike document titles to filename summaries. Case-insensitive regexes matched against the title this app gives each document, checked in order: tax, then statement. A monthly statement is titled 'Account Statement <Month YYYY>', the yearly CSV '<YYYY> Annual Transactions', and a tax form takes the file name Strike gives it.",
+  "tax_rules": [
+    {"pattern": "1099-?B\\b", "summary": "1099-B Tax Form"},
+    {"pattern": "1099-?DA\\b", "summary": "1099-DA Tax Form"},
+    {"pattern": "1099-?MISC\\b", "summary": "1099-MISC Tax Form"},
+    {"pattern": "1099-?INT\\b", "summary": "1099-INT Tax Form"},
+    {"pattern": "1099-?K\\b", "summary": "1099-K Tax Form"},
+    {"pattern": "\\b1099\\b", "summary": "1099 Tax Form"},
+    {"pattern": "\\b1042-?S\\b", "summary": "1042-S Tax Form"},
+    {"pattern": "tax\\s+(statement|document|form|report)", "summary": "Tax Document"}
+  ],
+  "insurance_rules": [],
+  "statement_rules": [
+    {"pattern": "annual\\s+transactions", "summary": "Annual Transactions"},
+    {"pattern": "account\\s+statement", "summary": "Account Statement"}
+  ],
+  "skip_patterns": []
+}

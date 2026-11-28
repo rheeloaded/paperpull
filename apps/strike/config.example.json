@@ -1,0 +1,22 @@
+{
+  "owner": "",
+  "owner_in_filename": false,
+  "output_dir": ".",
+  "profile_dir": "./browser-profile",
+  "cdp_url": "http://127.0.0.1:9327",
+  "document_types": [
+    "Statement",
+    "Tax Document"
+  ],
+  "default_start_date": "",
+  "min_pdf_bytes": 2000,
+  "max_path_length": 240,
+  "delay_min_seconds": 2.0,
+  "delay_max_seconds": 4.0,
+  "pilot_count": 5,
+  "browser": "auto",
+  "//csv": "Each monthly statement is saved as a PDF with Strike's CSV of the",
+  "//csv2": "same month beside it. Set false to save the PDFs alone.",
+  "save_statement_csv": true,
+  "refuse_wrong_documents": true
+}

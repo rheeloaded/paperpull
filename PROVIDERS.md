@@ -10,7 +10,7 @@ telecoms, payroll systems, and retailers real people actually use.
   [provider request](https://github.com/rheeloaded/paperpull/issues/new/choose)
   so someone with that account can pick it up.
 
-## Supported (94, plus six built and waiting for a tester, and four first shells)
+## Supported (95, plus six built and waiting for a tester, and four first shells)
 
 | App | Provider | Country | Documents | Category |
 |-----|----------|---------|-----------|----------|
@@ -98,6 +98,7 @@ telecoms, payroll systems, and retailers real people actually use.
 | [`spectrum`](apps/spectrum) | Spectrum (Charter) | United States | Internet statements, about a year online. An older statement is chosen by pressing its own row, then one "View Printable Statement" is pressed and the PDF the page makes is kept only when its text prints the statement's date, never a tab. Two statements of one date are left for a manual save. Mobile statements, which the site has no PDF of, are opened by their own row, expanded with Expand All and printed from the page. Internet run on the contributor's own account, 11 statements saved. A whole Mobile run is still to come | Telecom |
 | [`starlink`](apps/starlink) | Starlink | United States, may work elsewhere | Billing invoice PDFs, read from the Invoices table of the Billing page page by page, pressing only that table's own page buttons. Each PDF is filed only when it prints the listed invoice number and an issue date of the Billing date or the day after. Contributed by @solkennedy. Run on the contributor's own account, a Pilot saving one invoice and a second Pilot skipping it (#245) | Telecom |
 | [`stripe`](apps/stripe) | Stripe (merchant Dashboard) | United States, may work elsewhere | Fee invoices and tax forms such as the 1099-K. UNTESTED, built on an account with no documents yet. Have some? Run Diagnose and attach the file to issue #53 | Payments |
+| [`strike`](apps/strike) | Strike (strike.me) | United States | Monthly account statements, each as a PDF with Strike's CSV of the same month beside it, each year's transactions as a CSV, and tax forms, all from the Documents page's own API asked from inside the signed-in dashboard, nothing clicked. Each PDF is checked to print its month's closing day and each CSV to hold only that month's transactions. Built on a contributor's own personal account, where Discover listed all 13 statements. Tax forms are read from the page's own code, as that account had none. Closes #258 | Crypto exchange |
 | [`statefarm`](apps/statefarm) | State Farm | United States | Bills, renewal notices, ID cards, receipts, policy documents. Confirmed by @watling777, whose full run saved every document State Farm lists for his policies (#37) | Insurance |
 | [`target`](apps/target) | Target | United States | Receipts (online + in-store) | Retail |
 | [`tsp`](apps/tsp) | Thrift Savings Plan (tsp.gov) | United States | Participant statements, 1099-R | Federal retirement (government system) |
